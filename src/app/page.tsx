@@ -4,7 +4,9 @@ import * as repo from "@/lib/repo";
 import { bundle } from "@/lib/services";
 import { sortByPriority } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
-import { fmtDate, taskTile } from "@/lib/canvas/vm";
+import { dueOf, fmtDate, taskStateOf, taskTile } from "@/lib/canvas/vm";
+import { remainEst, taskSpent } from "@/lib/time";
+import type { ProjTask } from "@/components/canvas/ui";
 import { Board, type ArchRow } from "@/components/canvas/Board";
 
 export const dynamic = "force-dynamic";
@@ -28,12 +30,15 @@ export default async function Home() {
   const providers = availableProviders();
   const lastAgent = [...chatLog].reverse().find((m) => m.role === "agent");
   const row = (s: (typeof live)[number], when: string): ArchRow => ({ id: s.task.id, title: s.task.title, when, summary: s.task.noteSummary ?? (s.task.summary || null), base: s.score.base, eff: s.score.eff, project: s.project?.name ?? null });
+  // widok „Projekty”: wszystkie żywe zadania (także ukończone) z pozostałym szacunkiem i zmierzonym czasem
+  const projTasks: ProjTask[] = live.map((s) => ({ id: s.task.id, title: s.task.title, state: taskStateOf(s.task, all), base: s.score.base, eff: s.score.eff, due: dueOf(s.task.due), remain: remainEst(s.task), spent: taskSpent(s.task), projectId: s.task.projectId }));
 
   return (
     <Board
       tasks={onBoard.map((s) => taskTile(s, all, qCount.get(s.task.id) ?? 0))}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
-      projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color }))}
+      projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color, weight: p.weight, language: p.language }))}
+      projTasks={projTasks}
       aiOn={providers.length > 0}
       agent={providers.length ? (providers[0] === "anthropic" ? "Claude" : "GPT") : "Claude · konektor"}
       lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text } : null}

@@ -2,12 +2,12 @@
 // Silnik kanwy (port z prototypu): kafelki, strzałki zależności, grupy, zaznaczanie ramką, przeciąganie, zoom kółkiem, przesuwanie środkowym przyciskiem.
 // Rysuje tylko to, co dostanie; co znaczy kafelek i co robią akcje, decyduje rodzic (Board / TaskCanvas).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { bounds, centerOf, computePositions, groupAt, membership, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
+import { bounds, centerOf, computePositions, groupAt, reassign, type DropChange, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
 import { GCOL } from "./ui";
 
 export type CanvasItem = LItem & { cls: string; done?: boolean; aria: string };
 export type CanvasGroup = LGroup & { name: string; color: number };
-export type CanvasApi = { positions: () => Record<string, Pos>; viewCenter: () => Pos };
+export type CanvasApi = { positions: () => Record<string, Pos>; groupRects: () => Record<string, Rect>; viewCenter: () => Pos; centerOn: (id: string) => void };
 type Rect = { x: number; y: number; w: number; h: number };
 type Held = { k: string; ox: number; oy: number; base: Pos };   // ox/oy: skąd ciągniemy; base: położenie wg serwera w chwili chwycenia
 const DBL_MS = 400;                                              // dwa kliknięcia w ten sam kafelek w tym czasie = dwuklik
@@ -176,6 +176,15 @@ export function Canvas(p: CanvasProps) {
       setDrag({ ...d });
     }
   };
+  // Po upuszczeniu zmienia się skład tylko tam, gdzie coś przeciągnięto (patrz reassign); zapisujemy każdą grupę, której skład się zmienił,
+  // oraz przesuniętą/rozciągniętą. Z prostokątem, bo grupa automatyczna ma zostać tam, gdzie jest narysowana.
+  const syncMembers = (change: DropChange) => {
+    const mem = reassign(lg, P, p.size, change);
+    lg.forEach((g) => {
+      const next = mem[g.id], cur = g.members;
+      if ((change.kind === "group" && g.id === change.id) || next.length !== cur.length || next.some((k) => !cur.includes(k))) p.onGroupChange(g.id, { x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), members: next, auto: false });
+    });
+  };
   const endDrag = () => {
     const d = dragRef.current; dragRef.current = null; setDrag(null);
     if (!d) return;
@@ -189,17 +198,13 @@ export function Canvas(p: CanvasProps) {
       d.group.forEach((g) => { dropped.current[g.k] = g.base; });
       const moved = d.group.map((g) => ({ id: g.k, x: P[g.k].x, y: P[g.k].y }));
       p.onMove(moved);
-      // przynależność do grup po upuszczeniu
-      const mem = membership(lg, P, p.size);
-      // grupa automatyczna zostaje tam, gdzie jest narysowana (zapisujemy jej prostokąt), inaczej po zmianie składu wróciłaby do starego prostokąta z bazy
-      lg.forEach((g) => { const next = mem[g.id], cur = g.members; if (next.length !== cur.length || next.some((k) => !cur.includes(k))) p.onGroupChange(g.id, { x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), members: next, auto: false }); });
+      syncMembers({ kind: "tiles", ids: d.group.map((g) => g.k) });
     } else if (d.kind === "gmove" || d.kind === "gresize") {
       if (!d.moved) { if (d.kind === "gmove" && isDouble("g:" + d.g.id)) p.onRename(d.g.id, d.g.name); return; }
       const g = lg.find((x) => x.id === d.g.id); if (!g) return;
-      const mem = membership(lg, P, p.size);
       gDropped.current[g.id] = d.base;
       if (d.kind === "gmove") d.mem.forEach((m) => { dropped.current[m.k] = m.base; });
-      p.onGroupChange(g.id, { x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), members: mem[g.id], auto: false });
+      syncMembers({ kind: "group", id: g.id, resized: d.kind === "gresize" });
       if (d.kind === "gmove") p.onMove(d.mem.map((m) => ({ id: m.k, x: P[m.k].x, y: P[m.k].y })));
     } else if (d.kind === "link") {
       if (d.to && p.onLink) p.onLink(d.from, d.to);
@@ -219,7 +224,13 @@ export function Canvas(p: CanvasProps) {
   }, [sLayout]);
   useEffect(() => {
     if (!p.apiRef) return;
-    p.apiRef.current = { positions: () => P, viewCenter: () => { const c = canvasRef.current, pd = padRef.current; return c ? { x: (c.scrollLeft + c.clientWidth / 2 - pd.x) / zoom, y: (c.scrollTop + c.clientHeight / 2 - pd.y) / zoom } : { x: 300, y: 300 }; } };
+    p.apiRef.current = {
+      positions: () => P,
+      groupRects: () => Object.fromEntries(lg.map((g) => [g.id, { x: g.x, y: g.y, w: g.w, h: g.h }])),
+      viewCenter: () => { const c = canvasRef.current, pd = padRef.current; return c ? { x: (c.scrollLeft + c.clientWidth / 2 - pd.x) / zoom, y: (c.scrollTop + c.clientHeight / 2 - pd.y) / zoom } : { x: 300, y: 300 }; },
+      // środek widoku na kafelku (margines wokół świata pozwala wyśrodkować każdy, także skrajny)
+      centerOn: (id) => { const c = canvasRef.current, q = P[id], pd = padRef.current; if (!c || !q) return; c.scrollTo({ left: (q.x + p.size.w / 2) * zoom + pd.x - c.clientWidth / 2, top: (q.y + p.size.h / 2) * zoom + pd.y - c.clientHeight / 2, behavior: "smooth" }); },
+    };
   });
 
   // ---------- kanwa: ramka zaznaczenia, przesuwanie, strzałki ----------

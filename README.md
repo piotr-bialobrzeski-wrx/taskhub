@@ -36,7 +36,7 @@ Koszt: Supabase Free (500 MB) i Vercel Hobby wystarczą na długo; płacisz tylk
 
 ## Podłączenie klientów przez MCP
 
-Adres konektora: `https://TWOJA-APLIKACJA.vercel.app/api/mcp`. Klienci logują się przez OAuth (strona zgody w Task Hub, potwierdzenie hasłem aplikacji) albo tokenem z *Ustawienia → Klienci MCP → Nowy token* (token pokazuje się raz; w bazie jest tylko jego skrót). Każde połączenie widać w Ustawieniach i można je unieważnić.
+Adres konektora: `https://TWOJA-APLIKACJA.vercel.app/api/mcp`. Klienci logują się przez OAuth (strona zgody w Task Hub, potwierdzenie hasłem aplikacji) albo tokenem z *Ustawienia → Połączenia → Token dla klienta bez logowania* (token pokazuje się raz; w bazie jest tylko jego skrót). Każde połączenie widać w Ustawieniach i można je unieważnić.
 
 - **Aplikacja Claude** (przeglądarka, komputer, telefon): Ustawienia Claude → Connectors → Add custom connector → adres jak wyżej → Connect. Działa na subskrypcji, bez klucza API.
 - **Claude Code**: `claude mcp add --transport http task-hub https://TWOJA-APLIKACJA.vercel.app/api/mcp`, potem `/mcp` → task-hub → logowanie w przeglądarce. Albo z tokenem: `--header "Authorization: Bearer th_..."`.

@@ -26,6 +26,9 @@ export type StepTile = {
 };
 export type GroupVM = { id: string; name: string; color: number; x: number; y: number; w: number; h: number; members: string[]; auto: boolean };
 export type ProjectVM = { id: string; name: string; color: number };
+export type ProjectRow = ProjectVM & { weight: number; language: string };
+// zadanie w widoku „Projekty”: stan, priorytet, termin, pozostały szacunek i zmierzony czas (minuty)
+export type ProjTask = { id: string; title: string; state: TaskStateKey; base: number; eff: number; due: TaskTile["due"]; remain: number; spent: number; projectId: string | null };
 
 // ---------- kolory i ikony narzędzi ----------
 export const TOOL_COLORS: Record<string, string> = {
@@ -63,6 +66,10 @@ const PATHS: Record<string, string> = {
   check: '<path d="M4 8.5l2.6 2.5L12 5.5"/>',
   clip: '<path d="M10.6 5.4 6.4 9.6a1.4 1.4 0 0 0 2 2l4.6-4.6a2.9 2.9 0 0 0-4.1-4.1L4.3 7.5a4.4 4.4 0 0 0 6.2 6.2l3.3-3.3"/>',
   question: '<circle cx="8" cy="8" r="5.5"/><path d="M6.2 6.3a1.8 1.8 0 1 1 2.6 1.6c-.5.3-.8.6-.8 1.1v.3M8 11.3h.01"/>',
+  search: '<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/>',
+  pen: '<path d="M3 13h3l7-7-3-3-7 7v3z"/><path d="m9 4 3 3"/>',
+  trash: '<path d="M3 4.5h10M6.5 4.5v-1h3v1M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
+  folder: '<path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12z"/>',
 };
 export function Icon({ k, size = 16, sw = 1.5 }: { k: string; size?: number; sw?: number }) {
   return <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: PATHS[k] ?? PATHS.claude }} />;

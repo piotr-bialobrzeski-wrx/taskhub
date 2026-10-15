@@ -16,6 +16,21 @@ describe.skipIf(!DB)("repo", async () => {
   });
   afterAll(async () => { await sql().end({ timeout: 2 }); });
 
+  it("kafelek należy do jednej grupy: nowa grupa i zmiana składu zabierają go z poprzedniej", async () => {
+    const a = await repo.createTask(owner, { title: "Grupowe A" }), b = await repo.createTask(owner, { title: "Grupowe B" }), c = await repo.createTask(owner, { title: "Grupowe C" });
+    const g1 = await repo.createGroup(owner, null, "Pierwsza", [a.id, b.id]);       // automatyczna (bez prostokąta)
+    expect(g1.auto).toBe(true);
+    const g2 = await repo.createGroup(owner, null, "Druga", [b.id, c.id], { x: 10, y: 20, w: 300, h: 200 });
+    const after = await repo.listGroups(owner, null);
+    expect(after.find((g) => g.id === g1.id)!.members).toEqual([a.id]);
+    expect(after.find((g) => g.id === g2.id)!.members).toEqual([b.id, c.id]);
+    await repo.updateGroup(owner, g1.id, { members: [a.id, c.id], auto: false, x: 0, y: 0, w: 100, h: 100 });
+    const again = await repo.listGroups(owner, null);
+    expect(again.find((g) => g.id === g2.id)!.members).toEqual([b.id]);
+    expect(again.find((g) => g.id === g1.id)!.auto).toBe(false);
+    for (const g of again) await repo.deleteGroup(owner, g.id);
+  });
+
   it("zadanie z krokami i zależnościami po indeksie; kolejność kroków", async () => {
     const t = await repo.createTask(owner, { title: "Wysłać ofertę", summary: "cel", level: 4, steps: [
       { title: "Zebrać dane", tool: "clickup", estMin: 20 },

@@ -245,23 +245,29 @@ export async function removeRule(id: string) {
 }
 
 // ---------- projekty, ustawienia, tokeny ----------
-export async function saveProject(fd: FormData) {
+// projekty: widok „Projekty” w menu (nazwa, kolor, ważność, język); ta sama nazwa = ten sam projekt, bez duplikatów
+export async function createProjectAction(name: string): Promise<string> {
   const o = await requireOwner();
-  const id = str(fd, "id"), name = str(fd, "name"); if (!name) return;
-  const weight = Math.min(5, Math.max(1, num(fd, "weight", 3)));
-  const language = str(fd, "language") || "pl";
-  if (id) await repo.updateProject(o.id, id, { name, weight, language });
-  else {
-    const existing = await repo.findProjectByName(o.id, name);   // ta sama nazwa = ten sam projekt, bez duplikatów
-    if (existing) await repo.updateProject(o.id, existing.id, { weight, language });
-    else { const p = await repo.createProject(o.id, name, weight); await repo.updateProject(o.id, p.id, { language }); }
-  }
-  revalidatePath("/settings"); refresh();
+  const n = name.trim().slice(0, 60); if (!n) throw new Error("Podaj nazwę projektu");
+  const existing = await repo.findProjectByName(o.id, n);
+  const p = existing ?? (await repo.createProject(o.id, n, 3));
+  refresh();
+  return p.id;
+}
+export async function updateProjectAction(id: string, patch: { name?: string; weight?: number; language?: string; color?: number }) {
+  const o = await requireOwner();
+  const p: typeof patch = {};
+  if (patch.name !== undefined) { const n = patch.name.trim().slice(0, 60); if (n) p.name = n; }
+  if (patch.weight !== undefined) p.weight = Math.min(5, Math.max(1, Math.round(patch.weight)));
+  if (patch.language !== undefined) p.language = patch.language.trim().slice(0, 8) || "pl";
+  if (patch.color !== undefined) p.color = Math.max(0, Math.round(patch.color)) % 8;
+  await repo.updateProject(o.id, id, p);
+  refresh();
 }
 export async function removeProject(id: string) {
   const o = await requireOwner();
-  await repo.deleteProject(o.id, id);
-  revalidatePath("/settings"); refresh();
+  await repo.deleteProject(o.id, id);   // zadania zostają, tracą tylko etykietę
+  refresh();
 }
 export async function saveSettings(fd: FormData) {
   const o = await requireOwner();

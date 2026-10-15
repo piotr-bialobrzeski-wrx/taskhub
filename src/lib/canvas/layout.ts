@@ -67,6 +67,9 @@ export function computePositions(list: LItem[], groupsIn: LGroup[], size: Size, 
         g.x = Math.min(...xs.map((q) => q.x)) - GPAD; g.y = Math.min(...xs.map((q) => q.y)) - GPAD - GHEAD;
         g.w = Math.max(...xs.map((q) => q.x)) + Wn + GPAD - g.x; g.h = Math.max(...xs.map((q) => q.y)) + H + GPAD - g.y;
       }
+    } else if (g.auto || !g.w || !g.h) {
+      // pusta grupa automatyczna (albo z zerowym prostokątem): widoczny, pusty prostokąt pod resztą, zamiast punktu 0×0
+      g.x = OX + sh * (Wn + GX); g.y = bottom + GGAP; g.w = Wn + 2 * GPAD + 100; g.h = H + GHEAD + 2 * GPAD;
     }
     bottom = Math.max(bottom + GPAD, g.y + g.h);
   });
@@ -83,6 +86,29 @@ export function groupAt(groups: LGroup[], p: Pos, skip?: string): LGroup | null 
 export function membership(groups: LGroup[], P: Record<string, Pos>, size: Size): Record<string, string[]> {
   const out: Record<string, string[]> = Object.fromEntries(groups.map((g) => [g.id, [] as string[]]));
   for (const [id, p] of Object.entries(P)) { const g = groupAt(groups, centerOf(p, size)); if (g) out[g.id].push(id); }
+  return out;
+}
+// Skład grup po upuszczeniu: zmienia się tylko to, co przeciągnięto. Upuszczony kafelek trafia do najmniejszej grupy pod swoim środkiem
+// (albo wychodzi z grupy); przesunięta grupa zabiera swoje kafelki i wolne kafelki pod prostokątem; rozciągnięta dodatkowo gubi te, które wypadły.
+// Reszta zostaje w swoich grupach, nawet gdy prostokąty na siebie nachodzą.
+export type DropChange = { kind: "tiles"; ids: string[] } | { kind: "group"; id: string; resized: boolean };
+export function reassign(groups: LGroup[], P: Record<string, Pos>, size: Size, change: DropChange): Record<string, string[]> {
+  const owner: Record<string, string | null> = {};
+  for (const id of Object.keys(P)) owner[id] = null;
+  groups.forEach((g) => g.members.forEach((id) => { if (id in owner && owner[id] == null) owner[id] = g.id; }));
+  if (change.kind === "tiles") {
+    for (const id of change.ids) if (P[id]) owner[id] = groupAt(groups, centerOf(P[id], size))?.id ?? null;
+  } else {
+    const g = groups.find((x) => x.id === change.id);
+    if (g) for (const id of Object.keys(P)) {
+      const inside = inRect(g, centerOf(P[id], size));
+      if (owner[id] == null && inside) owner[id] = g.id;
+      else if (change.resized && owner[id] === g.id && !inside) owner[id] = null;
+    }
+  }
+  const out: Record<string, string[]> = Object.fromEntries(groups.map((g) => [g.id, [] as string[]]));
+  groups.forEach((g) => g.members.forEach((id) => { if (owner[id] === g.id) out[g.id].push(id); }));   // dotychczasowa kolejność
+  for (const [id, gid] of Object.entries(owner)) if (gid && !out[gid].includes(id)) out[gid].push(id);
   return out;
 }
 export function bounds(P: Record<string, Pos>, groups: LGroup[], size: Size, origin: Pos | null) {

@@ -377,7 +377,14 @@ export async function createGroup(ownerId: string, taskId: string | null, name: 
   const [{ n }] = await sql()`select count(*)::int as n from canvas_groups where owner_id = ${ownerId}`;
   const r0 = rect ?? { x: 0, y: 0, w: 0, h: 0 };
   const [r] = await sql()`insert into canvas_groups (owner_id, task_id, name, color, x, y, w, h, members, auto) values (${ownerId}, ${taskId}, ${name.slice(0, 60)}, ${Number(n) % 8}, ${r0.x}, ${r0.y}, ${r0.w}, ${r0.h}, ${members}, ${!rect}) returning id`;
+  await releaseMembers(ownerId, taskId, r.id as string, members);
   return (await listGroups(ownerId, taskId)).find((g) => g.id === r.id)!;
+}
+// kafelek należy do jednej grupy na kanwie: wchodząc do nowej, wypada z poprzedniej (inaczej znikał z nowej, bo rysujemy go tylko w pierwszej)
+async function releaseMembers(ownerId: string, taskId: string | null, keepId: string, members: string[]): Promise<void> {
+  if (!members.length) return;
+  await sql()`update canvas_groups set members = array(select m from unnest(members) as m where m <> all(${members}::uuid[]))
+    where owner_id = ${ownerId} and task_id is not distinct from ${taskId} and id <> ${keepId} and members && ${members}::uuid[]`;
 }
 export async function updateGroup(ownerId: string, id: string, patch: Partial<Omit<Group, "id" | "taskId">>): Promise<void> {
   const p: Row = {};
@@ -385,7 +392,9 @@ export async function updateGroup(ownerId: string, id: string, patch: Partial<Om
   for (const k of ["x", "y", "w", "h", "color"] as const) if (patch[k] !== undefined) p[k] = patch[k];
   if (patch.members !== undefined) p.members = patch.members;
   if (patch.auto !== undefined) p.auto = patch.auto;
-  if (Object.keys(p).length) await sql()`update canvas_groups set ${sql()(p)} where id = ${id} and owner_id = ${ownerId}`;
+  if (!Object.keys(p).length) return;
+  const [g] = await sql()`update canvas_groups set ${sql()(p)} where id = ${id} and owner_id = ${ownerId} returning task_id`;
+  if (g && patch.members?.length) await releaseMembers(ownerId, (g.taskId as string) ?? null, id, patch.members);
 }
 export async function deleteGroup(ownerId: string, id: string): Promise<void> { await sql()`delete from canvas_groups where id = ${id} and owner_id = ${ownerId}`; }
 
