@@ -1,4 +1,5 @@
-// OAuth 2.1 dla konektorów MCP (aplikacja Claude, ChatGPT, Claude Code): klient rejestruje się sam (RFC 7591),
+// OAuth 2.1 dla konektorów MCP (aplikacja Claude, ChatGPT, Claude Code): klient rejestruje się sam (RFC 7591)
+// albo podaje jako client_id adres swojego dokumentu tożsamości (CIMD, "Claude's published identity"),
 // Piotr daje zgodę na stronie /oauth/authorize, klient wymienia kod na token (PKCE S256, RFC 7636).
 // Token dostępu to zwykły token MCP z api_tokens, więc widać go i można go unieważnić w Ustawieniach.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -37,6 +38,7 @@ export const serverMetadata = (o: string) => ({
   grant_types_supported: ["authorization_code"],
   code_challenge_methods_supported: ["S256"],
   token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
+  client_id_metadata_document_supported: true,
   scopes_supported: [SCOPE],
   service_documentation: `${o}/settings`,
 });
@@ -82,7 +84,36 @@ export async function registerClient(body: unknown) {
 }
 export async function getClient(id: string): Promise<OAuthClient | null> {
   const [r] = await sql()`select * from oauth_clients where id = ${id}`;
-  return r ? { id: r.id as string, name: r.name as string, redirectUris: r.redirectUris as string[], secretHash: (r.secretHash as string) ?? null, authMethod: r.authMethod as string } : null;
+  const cached = r ? { id: r.id as string, name: r.name as string, redirectUris: r.redirectUris as string[], secretHash: (r.secretHash as string) ?? null, authMethod: r.authMethod as string } : null;
+  if (!isCimdUrl(id)) return cached;
+  // klient z dokumentem tożsamości: pobieramy dokument przy pierwszym użyciu i odświeżamy raz na dobę; gdy pobranie zawiedzie, zostaje kopia
+  const fresh = cached && Date.now() - new Date(r!.createdAt as string).getTime() < 24 * 3600_000;
+  if (fresh) return cached;
+  try { return await registerCimdClient(id, await loadCimd(id)); } catch (e) { if (cached) return cached; throw e; }
+}
+
+// ---------- klienci z dokumentem tożsamości (CIMD): client_id to adres https dokumentu JSON z redirect_uris ----------
+export function isCimdUrl(id: string): boolean {
+  try { const u = new URL(id); return u.protocol === "https:" && u.pathname.length > 1 && !u.hash && !u.username && !u.password && !/^(\d+\.){3}\d+$/.test(u.hostname) && u.hostname !== "localhost"; } catch { return false; }
+}
+export async function loadCimd(url: string, fetchFn: typeof fetch = fetch): Promise<unknown> {
+  const res = await fetchFn(url, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(6000) });
+  if (!res.ok) throw new OAuthError("invalid_client", `Dokument tożsamości klienta odpowiedział ${res.status}.`);
+  const body = await res.text();
+  if (body.length > 64_000) throw new OAuthError("invalid_client", "Dokument tożsamości klienta jest za duży.");
+  try { return JSON.parse(body); } catch { throw new OAuthError("invalid_client", "Dokument tożsamości klienta nie jest poprawnym JSON."); }
+}
+export async function registerCimdClient(url: string, doc: unknown): Promise<OAuthClient> {
+  if (!isCimdUrl(url)) throw new OAuthError("invalid_client", "client_id nie jest adresem https dokumentu tożsamości.");
+  const p = Registration.extend({ client_id: z.string() }).safeParse(doc);
+  if (!p.success) throw new OAuthError("invalid_client", "Dokument tożsamości klienta nie ma client_id i redirect_uris.");
+  if (p.data.client_id !== url) throw new OAuthError("invalid_client", "client_id w dokumencie tożsamości różni się od jego adresu.");
+  if (!p.data.redirect_uris.every(redirectOk)) throw new OAuthError("invalid_redirect_uri", "redirect_uri w dokumencie tożsamości musi być https.");
+  const name = (p.data.client_name ?? "").trim().slice(0, 120) || new URL(url).hostname;
+  await sql()`insert into oauth_clients (id, name, redirect_uris, secret_hash, auth_method, metadata, created_at)
+    values (${url}, ${name}, ${sql().json(p.data.redirect_uris)}, null, 'none', ${sql().json({ cimd: true } as never)}, now())
+    on conflict (id) do update set name = excluded.name, redirect_uris = excluded.redirect_uris, created_at = now()`;
+  return { id: url, name, redirectUris: p.data.redirect_uris, secretHash: null, authMethod: "none" };
 }
 
 // ---------- prośba o zgodę ----------

@@ -14,7 +14,7 @@ export default async function Authorize({ searchParams }: { searchParams: Promis
   const wrongPassword = sp.e === "1";
   const signedIn = await isSignedIn();
 
-  let client: { name: string } | null = null, error: string | null = null;
+  let client: { id: string; name: string } | null = null, error: string | null = null;
   try { client = (await checkAuthRequest(q)).client; }
   catch (e) { error = e instanceof OAuthError ? e.message : "Nie udało się sprawdzić prośby o połączenie."; }
 
@@ -32,7 +32,7 @@ export default async function Authorize({ searchParams }: { searchParams: Promis
           </>
         ) : (
           <>
-            <p style={{ margin: 0 }}>Połączyć <b>{client.name}</b> z Task Hub?</p>
+            <p style={{ margin: 0 }}>Połączyć <b>{client.name}</b>{client.id.startsWith("https://") ? <span className="sub"> ({new URL(client.id).hostname})</span> : null} z Task Hub?</p>
             <div className="sub">Po połączeniu będzie czytać i zmieniać Twoje zadania, kroki, fakty i zasady. Po zgodzie wrócisz na {host || "stronę klienta"}. Połączenie pojawi się w Ustawieniach, gdzie można je unieważnić.</div>
             {KEYS.map((k) => (q[k] ? <input key={k} type="hidden" name={k} value={q[k]} /> : null))}
             {signedIn ? null : <input className="in" type="password" name="password" placeholder="Hasło do Task Hub" autoFocus required />}
