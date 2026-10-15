@@ -47,7 +47,9 @@ function buildHandler(ownerId: string) {
       const fx = facts.filter(([, f]) => f.length).map(([id, f]) => `FAKTY KROKU ${id}:\n${f.filter((x) => !x.hidden).map((x) => `- ${x.label}: ${x.value}${x.source ? ` (${x.source.app}${x.source.url ? ", " + x.source.url : ""})` : ""}`).join("\n")}`).join("\n");
       const qs = await repo.listQuestions(ownerId, { taskId });
       const qx = qs.length ? "PYTANIA DO PIOTRA (zadane w aplikacji):\n" + qs.map((q) => `- [${q.id}]${q.stepId ? ` krok ${q.stepId}` : ""} ${q.text} → ${q.answer ? `ODPOWIEDŹ: ${q.answer}` : "(czeka na odpowiedź)"}`).join("\n") : "";
-      return text(ctx + (fx ? "\n" + fx : "") + (qx ? "\n" + qx : ""));
+      const att = await repo.listAttachments({ taskId });
+      const ax = att.length ? "ZAŁĄCZNIKI ZADANIA (grafikę albo plik tekstowy pokaże get_attachment; opis zapisz przez describe_attachment):\n" + att.map((a) => `- [${a.id}] ${a.kind} „${a.name ?? a.url ?? ""}”${a.mime ? ` (${a.mime})` : ""}${a.caption ? ` · ${a.caption}` : ""}${a.analysis ? `: ${a.analysis.slice(0, 400)}` : ""}`).join("\n") : "";
+      return text(ctx + (fx ? "\n" + fx : "") + (qx ? "\n" + qx : "") + (ax ? "\n" + ax : ""));
     });
 
     server.registerTool("get_rules", {
@@ -140,6 +142,7 @@ function buildHandler(ownerId: string) {
       const [tasks, projects, samples, answered] = await Promise.all([repo.listTasks(ownerId), repo.listProjects(ownerId), repo.listSamples(ownerId), repo.listQuestions(ownerId, { answeredUnseen: true })]);
       const open = scoreAll(tasks, projects, samples).filter((s) => !s.task.doneAt && !s.task.deletedAt);
       const noSteps = open.filter((s) => !s.task.steps.length);
+      const attN = await repo.countAttachments(noSteps.map((s) => s.task.id));
       const openQ = await repo.listQuestions(ownerId, { open: true });
       const waitingTask = new Set(openQ.map((q) => q.taskId));
       const ready: string[] = [], approval: string[] = [];
@@ -155,7 +158,7 @@ function buildHandler(ownerId: string) {
       }
       await repo.markQuestionsSeen(ownerId, answered.map((q) => q.id));
       const out = [
-        noSteps.length ? "ZADANIA BEZ KROKÓW (rozłóż przez add_steps, bez pytań, gdy da się przyjąć rozsądne założenia; w razie potrzeby ask_question):\n" + noSteps.filter((s) => !waitingTask.has(s.task.id)).map(brief).join("\n") : "",
+        noSteps.length ? "ZADANIA BEZ KROKÓW (rozłóż przez add_steps, bez pytań, gdy da się przyjąć rozsądne założenia; w razie potrzeby ask_question):\n" + noSteps.filter((s) => !waitingTask.has(s.task.id)).map((s) => brief(s) + (attN[s.task.id] ? ` | załączniki: ${attN[s.task.id]} (get_task, potem get_attachment)` : "")).join("\n") : "",
         answered.length ? "ODPOWIEDZI PIOTRA (kontynuuj pracę w tych zadaniach):\n" + answered.map((q) => `- zadanie [${q.taskId}]${q.stepId ? ` krok [${q.stepId}]` : ""}: pytanie „${q.text}” → odpowiedź: ${q.answer}`).join("\n") : "",
         ready.length ? "KROKI DO ZROBIENIA BEZ ZATWIERDZANIA (zrób je swoimi konektorami i zgłoś complete_step z linkiem; fakty przez add_facts):\n" + ready.join("\n") : "",
         approval.length ? "KROKI WYMAGAJĄCE ZATWIERDZENIA (przygotuj szkic przez set_blocks jako draft, niczego nie wysyłaj):\n" + approval.join("\n") : "",
@@ -172,6 +175,26 @@ function buildHandler(ownerId: string) {
       const q = await repo.askQuestion(ownerId, { taskId: a.taskId, stepId: a.stepId ?? null, text: a.text, options: a.options, recommended: a.recommended ?? null });
       return json({ questionId: q.id });
     });
+
+    server.registerTool("get_attachment", {
+      title: "Pokaż załącznik", description: "Zwraca załącznik zadania z Task Hub: grafikę jako obraz (zrzut ekranu, zdjęcie), plik tekstowy jako tekst. Identyfikatory są w get_task. Po obejrzeniu zapisz krótki opis przez describe_attachment, żeby nie oglądać go ponownie.",
+      inputSchema: z.object({ attachmentId: z.string() }),
+    }, async ({ attachmentId }) => {
+      const f = await repo.getAttachmentFile(ownerId, attachmentId);
+      if (!f) return text("Nie ma takiego załącznika albo nie ma pliku (link zewnętrzny).");
+      const mime = f.mime ?? "application/octet-stream";
+      if (/^image\/(png|jpeg|webp|gif)$/.test(mime)) {
+        if (f.data.length > 3_500_000) return text(`Grafika „${f.name}” jest za duża do pokazania (${Math.round(f.data.length / 1024)} KB).`);
+        return { content: [{ type: "image" as const, data: f.data.toString("base64"), mimeType: mime }, { type: "text" as const, text: `Grafika „${f.name ?? ""}” (${mime}, ${Math.round(f.data.length / 1024)} KB).` }] };
+      }
+      if (/^text\/|json|xml|csv|markdown|javascript/.test(mime) && f.data.length <= 400_000) return text(`PLIK „${f.name ?? ""}” (${mime}):\n` + f.data.toString("utf8"));
+      return text(`Plik „${f.name ?? ""}” (${mime}, ${Math.round(f.data.length / 1024)} KB) nie da się pokazać jako obraz ani tekst. Piotr może go otworzyć w Task Hub: ${appUrl()}/api/files/${f.id}`);
+    });
+
+    server.registerTool("describe_attachment", {
+      title: "Opisz załącznik", description: "Zapisuje przy załączniku krótki podpis (caption, do 6 słów) i analizę (co przedstawia, istotny tekst i liczby dosłownie, wnioski). Opis widać w zadaniu i trafia do kontekstu kolejnych kroków.",
+      inputSchema: z.object({ attachmentId: z.string(), caption: z.string().max(120).optional(), analysis: z.string().max(4000).optional() }),
+    }, async (a) => text((await repo.updateAttachment(ownerId, a.attachmentId, { caption: a.caption, analysis: a.analysis })) ? "Zapisano opis." : "Nie ma takiego załącznika."));
 
     server.registerTool("add_rule", {
       title: "Dodaj zasadę", description: "Dodaje zasadę pracy: scope global | project | tool.",

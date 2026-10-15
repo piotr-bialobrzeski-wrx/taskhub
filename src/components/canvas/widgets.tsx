@@ -1,7 +1,7 @@
 "use client";
 // Drobne kontrolki kanwy: wybór priorytetu/projektu w menu, termin, dok czatu, pole nazwy, toast.
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useFormStatus } from "react-dom";
+import { createPortal, useFormStatus } from "react-dom";
 import { LEVELS } from "@/lib/priority";
 import { Icon, Lvl, projColor, type ProjectVM } from "./ui";
 
@@ -10,11 +10,11 @@ export type PickOption = { key: string; node: ReactNode; on?: boolean };
 export function Picker({ cls, trigger, options, onPick, title }: { cls: string; trigger: ReactNode; options: PickOption[]; onPick: (key: string) => void; title: string }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  const [pos, setPos] = useState<{ left: number; top: number; width: number }>({ left: 0, top: 0, width: 0 });
   useEffect(() => {
     if (!open) return;
     const r = btn.current!.getBoundingClientRect();
-    setPos({ left: Math.min(r.left, window.innerWidth - 230), top: r.bottom + 6 });
+    setPos({ left: Math.min(r.left, window.innerWidth - Math.max(r.width, 160) - 16), top: r.bottom + 6, width: r.width });
     const close = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".ppmenu")) setOpen(false); };
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("pointerdown", close); document.addEventListener("keydown", key);
@@ -25,15 +25,15 @@ export function Picker({ cls, trigger, options, onPick, title }: { cls: string; 
       <button ref={btn} type="button" className={"pp " + cls} aria-haspopup="listbox" aria-expanded={open} title={title} aria-label={title} onPointerDown={(e) => e.stopPropagation()} onClick={() => setOpen((o) => !o)}>
         {trigger}<Icon k="chev" size={10} sw={2.2} />
       </button>
-      {open ? (
-        <div className="ppmenu glass" role="listbox" aria-label={title} style={{ position: "fixed", left: pos.left, top: pos.top }} onPointerDown={(e) => e.stopPropagation()}>
+      {open ? createPortal(
+        // w portalu: panel szczegółów ma backdrop-filter, więc byłby blokiem zawierającym dla position: fixed
+        <div className="ppmenu glass" role="listbox" aria-label={title} style={{ position: "fixed", left: pos.left, top: pos.top, minWidth: pos.width }} onPointerDown={(e) => e.stopPropagation()}>
           {options.map((o) => (
             <button key={o.key} type="button" role="option" aria-selected={!!o.on} className={"pp-opt" + (o.on ? " on" : "")} onClick={() => { setOpen(false); onPick(o.key); }}>
-              {o.node}{o.on ? <span className="ck"><Icon k="check" size={14} sw={2.2} /></span> : null}
+              {o.node}{o.on ? <span className="ck"><Icon k="check" size={12} sw={2.2} /></span> : null}
             </button>
           ))}
-        </div>
-      ) : null}
+        </div>, document.body) : null}
     </>
   );
 }
@@ -44,7 +44,7 @@ export function PrioPicker({ base, eff, why, cls, label, onPick }: { base: numbe
   return (
     <Picker cls={cls} title={title} onPick={(k) => onPick(Number(k))}
       trigger={cls === "btn" && !label ? <>Priorytet</> : <Lvl base={base} eff={e} why={why} label={label ?? cls !== "btn"} />}
-      options={[5, 4, 3, 2, 1].map((l) => ({ key: String(l), on: l === base, node: <><span className="lv-n">{l}</span><Lvl base={l} eff={l} /><span>{LEVELS[l]}</span></> }))} />
+      options={[5, 4, 3, 2, 1].map((l) => ({ key: String(l), on: l === base, node: <Lvl base={l} eff={l} label /> }))} />
   );
 }
 
@@ -61,23 +61,62 @@ export function InlineDate({ value, onChange, min }: { value: string | null; onC
   return <input className="date-in" type="date" defaultValue={value ?? ""} min={min} aria-label="Termin zadania" onChange={(e) => onChange(e.currentTarget.value || null)} />;
 }
 
-// ---------- dok: jedno pole, rośnie do 6 linii, Enter wysyła ----------
-function DockInner({ placeholder, busyText }: { placeholder: string; busyText: string }) {
+// ---------- dok: jedno pole, rośnie do 6 linii, Enter wysyła; załączniki z dysku, ze schowka (Ctrl+V) i przeciągnięte ----------
+const MAX_FILE = 4 * 1024 * 1024;   // limit treści żądania na Vercelu (4,5 MB)
+type Att = { key: string; file: File; preview: string | null };
+const extOf = (name: string) => (name.includes(".") ? name.split(".").pop()!.slice(0, 4).toUpperCase() : "PLIK");
+
+// duże grafiki (zrzuty ekranu bywają po kilka MB) zmniejszamy w przeglądarce: mieszczą się w limicie i są tańsze dla agenta
+async function shrinkImage(file: File): Promise<File> {
+  if (!/^image\/(png|jpeg|webp|bmp|tiff)$/.test(file.type) || file.size < 700_000) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1800 / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement("canvas"); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+    cv.getContext("2d")!.drawImage(bmp, 0, 0, cv.width, cv.height); bmp.close();
+    let blob = await new Promise<Blob | null>((res) => cv.toBlob(res, "image/webp", 0.86));
+    if (!blob || blob.type !== "image/webp") blob = await new Promise<Blob | null>((res) => cv.toBlob(res, "image/jpeg", 0.88));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.[a-z0-9]+$/i, "") + (blob.type === "image/webp" ? ".webp" : ".jpg"), { type: blob.type });
+  } catch { return file; }
+}
+
+function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void }) {
   const { pending } = useFormStatus();
   const ta = useRef<HTMLTextAreaElement>(null);
+  const pick = useRef<HTMLInputElement>(null);
   const grow = () => { const el = ta.current; if (!el) return; el.style.height = "34px"; el.style.height = Math.min(168, el.scrollHeight) + "px"; };
-  useEffect(() => { if (!pending && ta.current) { ta.current.value = ""; grow(); } }, [pending]);
+  useEffect(() => { if (!pending && ta.current) { ta.current.value = ""; grow(); onDone(); } }, [pending]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const canSend = () => !!ta.current?.value.trim() || atts.length > 0;
   return (
-    <div className="dock-row">
-      <textarea ref={ta} name="text" rows={1} placeholder={pending ? busyText : placeholder} aria-label="Wiadomość" disabled={pending} onInput={grow}
-        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (e.currentTarget.value.trim()) e.currentTarget.form?.requestSubmit(); } }} />
-      <button className="send" type="submit" aria-label="Wyślij" disabled={pending}><Icon k="send" size={14} sw={1.9} /></button>
-    </div>
+    <>
+      {atts.length ? (
+        <div className="att">{atts.map((a) => (
+          <span key={a.key} className="att-item" title={a.file.name}>
+            {a.preview ? <img src={a.preview} alt="" /> : <span className="ph">{extOf(a.file.name)}</span>}<span>{a.file.name}</span>
+            <button type="button" aria-label={"Usuń " + a.file.name} onClick={() => onRemove(a.key)}><Icon k="x" size={10} sw={2.2} /></button>
+          </span>
+        ))}</div>
+      ) : null}
+      {err ? <div className="att-err">{err}</div> : null}
+      <div className="dock-row">
+        <button className="icobtn" type="button" aria-label="Dodaj plik lub grafikę" title="Dodaj plik lub grafikę (albo wklej Ctrl+V / przeciągnij tutaj)" disabled={pending} onClick={() => pick.current?.click()}><Icon k="clip" size={15} sw={1.7} /></button>
+        <input ref={pick} type="file" multiple onChange={(e) => { onFiles([...(e.currentTarget.files ?? [])]); e.currentTarget.value = ""; }} />
+        <textarea ref={ta} name="text" rows={1} placeholder={pending ? busyText : placeholder} aria-label="Wiadomość" disabled={pending} onInput={grow}
+          onPaste={(e) => { const files = [...e.clipboardData.files]; if (!files.length) return; if (!e.clipboardData.getData("text/plain")) e.preventDefault(); onFiles(files); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (canSend()) e.currentTarget.form?.requestSubmit(); } }} />
+        <button className="send" type="submit" aria-label="Wyślij" disabled={pending}><Icon k="send" size={14} sw={1.9} /></button>
+      </div>
+    </>
   );
 }
 export function Dock({ action, taskId, placeholder, busyText, context }: { action: (fd: FormData) => Promise<void>; taskId: string | null; placeholder: string; busyText: string; context?: ReactNode }) {
-  // wysokość doku trafia do --dock-h, żeby pasek zaznaczenia, toast i karta odpowiedzi leżały nad nim
   const form = useRef<HTMLFormElement>(null);
+  const filesIn = useRef<HTMLInputElement>(null);
+  const [atts, setAtts] = useState<Att[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const [over, setOver] = useState(false);
+  // wysokość doku trafia do --dock-h, żeby pasek zaznaczenia, toast i karta odpowiedzi leżały nad nim
   useEffect(() => {
     const el = form.current; if (!el) return;
     const app = el.closest<HTMLElement>(".app");
@@ -86,12 +125,29 @@ export function Dock({ action, taskId, placeholder, busyText, context }: { actio
     const ro = new ResizeObserver(set); ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // ukryte pole formularza dostaje aktualną listę plików; tak trafiają do akcji serwera razem z tekstem
+  useEffect(() => { const dt = new DataTransfer(); atts.forEach((a) => dt.items.add(a.file)); if (filesIn.current) filesIn.current.files = dt.files; }, [atts]);
+  useEffect(() => { if (!err) return; const t = setTimeout(() => setErr(null), 4500); return () => clearTimeout(t); }, [err]);
+  const addFiles = async (files: File[]) => {
+    const out: Att[] = [];
+    for (const f0 of files.slice(0, 8)) {
+      const f = await shrinkImage(f0);
+      if (f.size > MAX_FILE) { setErr(`„${f.name}” jest za duży (maks. 4 MB).`); continue; }
+      out.push({ key: crypto.randomUUID(), file: f, preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : null });
+    }
+    if (out.length) setAtts((prev) => [...prev, ...out].slice(0, 8));
+  };
+  const remove = (key: string) => setAtts((prev) => { prev.filter((a) => a.key === key).forEach((a) => { if (a.preview) URL.revokeObjectURL(a.preview); }); return prev.filter((a) => a.key !== key); });
+  const clear = () => setAtts((prev) => { if (!prev.length) return prev; prev.forEach((a) => { if (a.preview) URL.revokeObjectURL(a.preview); }); return []; });
   return (
     <div className="dockwrap">
-      <form ref={form} className="dock glass" action={action} autoComplete="off">
+      <form ref={form} className={"dock glass" + (over ? " drop" : "")} action={action} autoComplete="off"
+        onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setOver(true); } }} onDragLeave={() => setOver(false)}
+        onDrop={(e) => { e.preventDefault(); setOver(false); void addFiles([...e.dataTransfer.files]); }}>
         <input type="hidden" name="taskId" value={taskId ?? ""} />
+        <input ref={filesIn} type="file" name="files" multiple tabIndex={-1} aria-hidden="true" />
         {context ? <div className="ctxrow">{context}</div> : null}
-        <DockInner placeholder={placeholder} busyText={busyText} />
+        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} />
       </form>
     </div>
   );

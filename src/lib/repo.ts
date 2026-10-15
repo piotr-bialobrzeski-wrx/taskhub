@@ -1,4 +1,5 @@
 // Warstwa danych: proste funkcje na SQL. Bez ORM, żeby schemat był czytelny i łatwy do backupu.
+import { randomUUID } from "node:crypto";
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "./db";
 import { Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample } from "./schema";
@@ -283,16 +284,36 @@ export async function latestSnapshots(where: { stepId?: string; taskId?: string 
 // ---------- załączniki ----------
 export type Attachment = { id: string; kind: "image" | "file" | "link"; name: string | null; url: string | null; caption: string | null; analysis: string | null; keep: boolean; expiresAt: string | null; mime: string | null };
 const rowToAttachment = (r: Row): Attachment => ({ id: r.id as string, kind: r.kind as Attachment["kind"], name: (r.name as string) ?? null, url: (r.url as string) ?? null, caption: (r.caption as string) ?? null, analysis: (r.analysis as string) ?? null, keep: !!r.keep, expiresAt: iso(r.expiresAt), mime: (r.mime as string) ?? null });
+const ATT_COLS = ["id", "task_id", "step_id", "kind", "name", "url", "storage_path", "mime", "bytes", "caption", "analysis", "keep", "added_at", "expires_at"];   // bez `data`: listy nie ciągną plików
 export async function listAttachments(where: { stepId?: string; taskId?: string }): Promise<Attachment[]> {
   const rows = where.stepId
-    ? await sql()`select * from attachments where step_id = ${where.stepId} order by added_at`
-    : await sql()`select * from attachments where task_id = ${where.taskId!} order by added_at`;
+    ? await sql()`select ${sql()(ATT_COLS)} from attachments where step_id = ${where.stepId} order by added_at`
+    : await sql()`select ${sql()(ATT_COLS)} from attachments where task_id = ${where.taskId!} order by added_at`;
   return rows.map(rowToAttachment);
 }
-export async function addAttachment(where: { stepId?: string; taskId?: string }, a: { kind: Attachment["kind"]; name?: string; url?: string; storagePath?: string; mime?: string; bytes?: number; caption?: string; analysis?: string; keep?: boolean; expiresAt?: string | null }): Promise<Attachment> {
-  const [r] = await sql()`insert into attachments (task_id, step_id, kind, name, url, storage_path, mime, bytes, caption, analysis, keep, expires_at)
-    values (${where.taskId ?? null}, ${where.stepId ?? null}, ${a.kind}, ${a.name ?? null}, ${a.url ?? null}, ${a.storagePath ?? null}, ${a.mime ?? null}, ${a.bytes ?? null}, ${a.caption ?? null}, ${a.analysis ?? null}, ${!!a.keep}, ${a.expiresAt ?? null}) returning *`;
+// plik wklejony w doku ląduje w bazie (data); adres /api/files/<id> działa po zalogowaniu, agent czyta go przez MCP get_attachment
+export async function addAttachment(where: { stepId?: string; taskId?: string }, a: { kind: Attachment["kind"]; name?: string; url?: string; storagePath?: string; mime?: string; bytes?: number; caption?: string; analysis?: string; keep?: boolean; expiresAt?: string | null; data?: Buffer }): Promise<Attachment> {
+  const id = randomUUID();
+  const url = a.url ?? (a.data ? `/api/files/${id}` : null);
+  const [r] = await sql()`insert into attachments (id, task_id, step_id, kind, name, url, storage_path, mime, bytes, caption, analysis, keep, expires_at, data)
+    values (${id}, ${where.taskId ?? null}, ${where.stepId ?? null}, ${a.kind}, ${a.name ?? null}, ${url}, ${a.storagePath ?? null}, ${a.mime ?? null}, ${a.bytes ?? (a.data ? a.data.length : null)}, ${a.caption ?? null}, ${a.analysis ?? null}, ${!!a.keep}, ${a.expiresAt ?? null}, ${a.data ?? null}) returning ${sql()(ATT_COLS)}`;
   return rowToAttachment(r);
+}
+export async function updateAttachment(ownerId: string, id: string, patch: { caption?: string; analysis?: string }): Promise<boolean> {
+  const rows = await sql()`update attachments a set caption = coalesce(${patch.caption ?? null}, a.caption), analysis = coalesce(${patch.analysis ?? null}, a.analysis)
+    where a.id = ${id} and ${ownerId} = coalesce((select owner_id from tasks where id = a.task_id), (select t.owner_id from steps s join tasks t on t.id = s.task_id where s.id = a.step_id)) returning a.id`;
+  return rows.length > 0;
+}
+export type AttachmentFile = { id: string; name: string | null; mime: string | null; bytes: number | null; data: Buffer };
+export async function getAttachmentFile(ownerId: string, id: string): Promise<AttachmentFile | null> {
+  const [r] = await sql()`select a.id, a.name, a.mime, a.bytes, a.data from attachments a
+    where a.id = ${id} and a.data is not null and ${ownerId} = coalesce((select owner_id from tasks where id = a.task_id), (select t.owner_id from steps s join tasks t on t.id = s.task_id where s.id = a.step_id))`;
+  return r ? { id: r.id as string, name: (r.name as string) ?? null, mime: (r.mime as string) ?? null, bytes: r.bytes == null ? null : Number(r.bytes), data: Buffer.from(r.data as Uint8Array) } : null;
+}
+export async function countAttachments(taskIds: string[]): Promise<Record<string, number>> {
+  if (!taskIds.length) return {};
+  const rows = await sql()`select task_id, count(*)::int as n from attachments where task_id = any(${taskIds}) group by task_id`;
+  return Object.fromEntries(rows.map((r) => [r.taskId as string, Number(r.n)]));
 }
 
 // ---------- zasady ----------
@@ -378,7 +399,7 @@ export async function searchTasks(ownerId: string, q: string, limit = 20): Promi
 export const TRASH_DAYS = 30;
 export async function purgeExpired(ownerId: string): Promise<number> {
   const rows = await sql()`delete from tasks where owner_id = ${ownerId} and deleted_at is not null and deleted_at < now() - interval '30 days' returning id`;
-  await sql()`update attachments set url = null, storage_path = null where expires_at is not null and expires_at < now() and keep = false and (url is not null or storage_path is not null)`;
+  await sql()`update attachments set url = null, storage_path = null, data = null where expires_at is not null and expires_at < now() and keep = false and (url is not null or storage_path is not null or data is not null)`;
   return rows.length;
 }
 

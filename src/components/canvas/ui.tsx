@@ -61,6 +61,7 @@ const PATHS: Record<string, string> = {
   chev: '<path d="m4 6 4 4 4-4"/>',
   widen: '<path d="M2 8h12M2 8l3-3M2 8l3 3M14 8l-3-3M14 8l-3 3"/>',
   check: '<path d="M4 8.5l2.6 2.5L12 5.5"/>',
+  clip: '<path d="M10.6 5.4 6.4 9.6a1.4 1.4 0 0 0 2 2l4.6-4.6a2.9 2.9 0 0 0-4.1-4.1L4.3 7.5a4.4 4.4 0 0 0 6.2 6.2l3.3-3.3"/>',
   question: '<circle cx="8" cy="8" r="5.5"/><path d="M6.2 6.3a1.8 1.8 0 1 1 2.6 1.6c-.5.3-.8.6-.8 1.1v.3M8 11.3h.01"/>',
 };
 export function Icon({ k, size = 16, sw = 1.5 }: { k: string; size?: number; sw?: number }) {
@@ -69,6 +70,7 @@ export function Icon({ k, size = 16, sw = 1.5 }: { k: string; size?: number; sw?
 export const ToolIcon = ({ tool, size = 18 }: { tool: string; size?: number }) => <Icon k={PATHS[tool] ? tool : "claude"} size={size} />;
 
 // ---------- priorytet: pasek 1–5, strzałka gdy pokazany różni się od ustawionego ----------
+const WIDEST = Object.values(LEVELS).reduce((a, b) => (b.length > a.length ? b : a), "");   // etykieta ma zawsze szerokość najdłuższej nazwy
 export function Lvl({ base, eff, why, label }: { base: number; eff: number; why?: string; label?: boolean }) {
   const b = eff - base;
   const tip = b ? `Priorytet ${base}/5, pokazany ${eff}/5: ${why ?? ""}` : `Priorytet ${eff}/5: ${LEVELS[eff]}`;
@@ -78,7 +80,7 @@ export function Lvl({ base, eff, why, label }: { base: number; eff: number; why?
         {[1, 2, 3, 4, 5].map((i) => <i key={i} className={i <= eff ? "on" : ""} />)}
         {b ? <b className={"boost" + (b < 0 ? " down" : "")}>{b < 0 ? "↓" : "↑"}</b> : null}
       </span>
-      {label ? <span className="lvl-t">{LEVELS[eff]}</span> : null}
+      {label ? <span className="lvl-t" data-w={WIDEST}>{LEVELS[eff]}</span> : null}
     </>
   );
 }

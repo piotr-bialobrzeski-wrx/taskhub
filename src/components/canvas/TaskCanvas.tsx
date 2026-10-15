@@ -178,8 +178,8 @@ export function TaskCanvas(p: TaskCanvasProps) {
       <Dock action={chat} taskId={ctxGlobal ? null : t.id} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
         placeholder={ctxGlobal ? (p.aiOn ? "Opisz nowe zadanie albo zapytaj o swoje zadania…" : "Opisz nowe zadanie; kroki ułoży Claude przez konektor…") : (p.aiOn ? "Napisz do agenta o tym zadaniu albo poproś o coś więcej…" : "Dopisz notatkę do tego zadania; polecenia dla Claude wydasz w nim przez konektor…")}
         context={ctxGlobal
-          ? <span className="ctx">Kontekst: wszystkie zadania<button type="button" aria-label="Wróć do kontekstu zadania" title="Wróć do kontekstu zadania" onClick={() => setCtxGlobal(false)}><Icon k="undo" size={12} sw={1.9} /></button></span>
-          : <span className="ctx" title="Wiadomość dotyczy tego zadania">W kontekście: <b>{t.title}</b><button type="button" aria-label="Pisz w kontekście wszystkich zadań" title="Pisz w kontekście wszystkich zadań" onClick={() => setCtxGlobal(true)}><Icon k="x" size={12} sw={2} /></button></span>} />
+          ? <span className="ctx"><span className="k">Kontekst: wszystkie zadania</span><button type="button" aria-label="Wróć do kontekstu zadania" title="Wróć do kontekstu zadania" onClick={() => setCtxGlobal(false)}><Icon k="undo" size={12} sw={1.9} /></button></span>
+          : <span className="ctx" title="Wiadomość dotyczy tego zadania"><span className="k">Kontekst:</span><b>{t.title}</b><button type="button" aria-label="Pisz w kontekście wszystkich zadań" title="Pisz w kontekście wszystkich zadań" onClick={() => setCtxGlobal(true)}><Icon k="x" size={12} sw={2} /></button></span>} />
       <Toast text={toast} />
     </div>
   );

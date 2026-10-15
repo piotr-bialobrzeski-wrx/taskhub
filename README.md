@@ -44,7 +44,9 @@ Adres konektora: `https://TWOJA-APLIKACJA.vercel.app/api/mcp`. Klienci logują s
 
 Bez klucza modelu w aplikacji pracę agenta wykonuje podłączony klient: zadanie bez kroków ma przycisk „Rozłóż na kroki w Claude”, krok oddany do Claude ma „Otwórz w Claude”; prompt każe zapisać wynik przez konektor (`add_steps`, `add_facts`, `set_blocks`, `complete_step`).
 
-Narzędzia serwera: `list_tasks`, `get_task` (zadanie z zasadami i kontekstem), `get_rules`, `create_task`, `update_task`, `add_steps`, `update_step`, `set_blocks` (panel kroku z uniwersalnych bloków), `complete_step` (zgłoszenie wyniku kroku z raportem i linkiem), `add_facts`, `add_snapshot` (surowe dane z innej aplikacji, do interpretacji przez agenta), `add_rule`.
+Narzędzia serwera: `list_tasks`, `get_task` (zadanie z zasadami, kontekstem, pytaniami i listą załączników), `get_rules`, `create_task`, `update_task`, `add_steps`, `update_step`, `set_blocks` (panel kroku z uniwersalnych bloków), `complete_step` (zgłoszenie wyniku kroku z raportem i linkiem), `add_facts`, `add_snapshot` (surowe dane z innej aplikacji, do interpretacji przez agenta), `list_work`, `ask_question`, `get_attachment` (grafika lub plik tekstowy wklejony w doku; grafika wraca jako obraz), `describe_attachment` (podpis i analiza załącznika), `add_rule`.
+
+Załączniki: w doku czatu można wybrać plik z dysku, wkleić zrzut ekranu (Ctrl/Cmd+V) albo przeciągnąć plik. Duże grafiki są zmniejszane w przeglądarce (maks. 1800 px, WebP), limit 4 MB na plik. Pliki leżą w bazie (`attachments.data`) i są serwowane z `/api/files/<id>` tylko po zalogowaniu.
 
 Typowy przebieg: w Task Hub klikasz „Zrób w Claude” przy kroku → otwiera się Claude z gotowym promptem (cel, zasady, wyniki wcześniejszych kroków) → Claude pracuje w swoich konektorach (Slack, ClickUp, Gmail) → na końcu wywołuje `complete_step` albo oddaje raport, który wklejasz. Task Hub odbiera raport, wyciąga linki i, gdy to był ostatni krok, pisze notatkę końcową.
 

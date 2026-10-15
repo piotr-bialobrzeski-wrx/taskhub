@@ -1,7 +1,7 @@
 "use client";
 // Silnik kanwy (port z prototypu): kafelki, strzałki zależności, grupy, zaznaczanie ramką, przeciąganie, zoom kółkiem, przesuwanie środkowym przyciskiem.
 // Rysuje tylko to, co dostanie; co znaczy kafelek i co robią akcje, decyduje rodzic (Board / TaskCanvas).
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bounds, centerOf, computePositions, groupAt, membership, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
 import { GCOL } from "./ui";
 
@@ -63,13 +63,42 @@ export function Canvas(p: CanvasProps) {
   const [panning, setPanning] = useState(false);
 
   useEffect(() => { try { const z = Number(localStorage.getItem("th-zoom-" + p.zoomKey)); if (z) setZoomState(clamp(z, 0.35, 1.6)); } catch { /* brak storage */ } }, [p.zoomKey]);
+
+  // Margines dookoła świata równy widocznej kanwie: widok da się przesunąć w każdą stronę, aż treść dotknie przeciwległej krawędzi
+  // (a więc i wyśrodkować dowolny kafelek). Na starcie treść leży w lewym górnym rogu, jak dotąd.
+  const [pad, setPad] = useState({ x: 0, y: 0 });
+  const padRef = useRef(pad);
+  useLayoutEffect(() => {
+    const c = canvasRef.current; if (!c) return;
+    const set = () => {
+      const n = { x: c.clientWidth, y: c.clientHeight }, o = padRef.current;
+      if (n.x === o.x && n.y === o.y) return;
+      padRef.current = n; setPad(n);
+      requestAnimationFrame(() => { c.scrollLeft += n.x - o.x; c.scrollTop += n.y - o.y; });   // po przerysowaniu sceny: widok zostaje w miejscu
+    };
+    set();
+    const ro = new ResizeObserver(set); ro.observe(c);
+    return () => ro.disconnect();
+  }, []);
+
+  // zmiana powiększenia: punkt pod kursorem (albo środek) zostaje w miejscu; przewinięcie liczymy po przerysowaniu sceny, nie przed
+  const anchor = useRef<{ wx: number; wy: number; px: number; py: number } | null>(null);
   const setZoom = useCallback((nz: number, cx?: number, cy?: number) => {
     const c = canvasRef.current; if (!c) return;
-    const r = c.getBoundingClientRect(); nz = clamp(nz, 0.35, 1.6);
-    const px = cx ?? r.width / 2, py = cy ?? r.height / 2;
-    setZoomState((z) => { const wx = (c.scrollLeft + px) / z, wy = (c.scrollTop + py) / z; requestAnimationFrame(() => { c.scrollLeft = wx * nz - px; c.scrollTop = wy * nz - py; }); return nz; });
+    nz = clamp(nz, 0.35, 1.6);
+    const px = cx ?? c.clientWidth / 2, py = cy ?? c.clientHeight / 2, pd = padRef.current;
+    setZoomState((z) => { anchor.current = { wx: (c.scrollLeft + px - pd.x) / z, wy: (c.scrollTop + py - pd.y) / z, px, py }; return nz; });
     try { localStorage.setItem("th-zoom-" + p.zoomKey, String(nz)); } catch { /* brak storage */ }
   }, [p.zoomKey]);
+  useLayoutEffect(() => {
+    const a = anchor.current, c = canvasRef.current; if (!a || !c) return;
+    anchor.current = null; const pd = padRef.current;
+    c.scrollLeft = a.wx * zoom + pd.x - a.px; c.scrollTop = a.wy * zoom + pd.y - a.py;
+  }, [zoom]);
+  // pole z procentami: wpisanie liczby ustawia powiększenie (35–160)
+  const [zEdit, setZEdit] = useState<string | null>(null);
+  const zCancel = useRef(false), zFocus = useRef(0);
+  const commitZoom = (v: string) => { const n = parseInt(v, 10); if (Number.isFinite(n) && n > 0) setZoom(n / 100); setZEdit(null); };
 
   const groups = useMemo(() => p.groups.map((g) => ({ ...g, ...(gOverride[g.id] ?? {}) })), [p.groups, gOverride]);
   const sLayout = useMemo(() => computePositions(p.items, p.groups, p.size, !!p.origin), [p.items, p.groups, p.size, p.origin]);   // układ wg serwera, bez przeciągania
@@ -190,7 +219,7 @@ export function Canvas(p: CanvasProps) {
   }, [sLayout]);
   useEffect(() => {
     if (!p.apiRef) return;
-    p.apiRef.current = { positions: () => P, viewCenter: () => { const c = canvasRef.current; return c ? { x: (c.scrollLeft + c.clientWidth / 2) / zoom, y: (c.scrollTop + c.clientHeight / 2) / zoom } : { x: 300, y: 300 }; } };
+    p.apiRef.current = { positions: () => P, viewCenter: () => { const c = canvasRef.current, pd = padRef.current; return c ? { x: (c.scrollLeft + c.clientWidth / 2 - pd.x) / zoom, y: (c.scrollTop + c.clientHeight / 2 - pd.y) / zoom } : { x: 300, y: 300 }; } };
   });
 
   // ---------- kanwa: ramka zaznaczenia, przesuwanie, strzałki ----------
@@ -229,8 +258,7 @@ export function Canvas(p: CanvasProps) {
   const onWheel = (ev: React.WheelEvent) => {
     const pinch = ev.ctrlKey || ev.metaKey;
     const mouse = ev.deltaMode !== 0 || (ev.deltaX === 0 && Math.abs(ev.deltaY) >= 40 && Number.isInteger(ev.deltaY));
-    if (!pinch && !mouse) return;
-    ev.preventDefault();
+    if (!pinch && !mouse) return;   // preventDefault robi natywny nasłuch niżej (React podpina wheel jako pasywny)
     const r = canvasRef.current!.getBoundingClientRect(), dy = ev.deltaMode === 1 ? ev.deltaY * 33 : ev.deltaY;
     setZoom(zoom * Math.exp(-dy * (pinch ? 0.01 : 0.0015)), ev.clientX - r.left, ev.clientY - r.top);
   };
@@ -245,7 +273,7 @@ export function Canvas(p: CanvasProps) {
     const panel = document.querySelector<HTMLElement>(".detail:not([hidden])");
     const avail = c.clientWidth - (panel ? panel.offsetWidth + 40 : 40);
     const z = clamp(Math.min(avail / (mx + 20), (c.clientHeight - 100) / (my + 20), 1.2), 0.35, 1.6);
-    setZoomState(z); c.scrollTo(0, 0);
+    setZoomState(z); c.scrollTo(padRef.current.x, padRef.current.y);
   };
 
   // ---------- strzałki ----------
@@ -268,8 +296,8 @@ export function Canvas(p: CanvasProps) {
 
   return (
     <div ref={canvasRef} className={"canvas" + (panning ? " panning" : "") + (drag?.kind === "link" ? " connecting" : "")} onPointerDown={onCanvasDown} onPointerMove={onCanvasMove} onPointerUp={endBand} onPointerCancel={endBand} onWheel={onWheel}>
-      <div className="stage" style={{ width: Math.max(bb.w * zoom, 10), height: Math.max(bb.h * zoom, 10) }}>
-        <div ref={worldRef} className="world" style={{ transform: `scale(${zoom})`, width: bb.w, height: bb.h }} onPointerDown={onWorldDown} onPointerMove={onWorldMove} onPointerUp={endDrag} onPointerCancel={endDrag}
+      <div className="stage" style={{ width: Math.max(bb.w * zoom, 10) + 2 * pad.x, height: Math.max(bb.h * zoom, 10) + 2 * pad.y }}>
+        <div ref={worldRef} className="world" style={{ transform: `scale(${zoom})`, width: bb.w, height: bb.h, left: pad.x, top: pad.y }} onPointerDown={onWorldDown} onPointerMove={onWorldMove} onPointerUp={endDrag} onPointerCancel={endDrag}
           onKeyDown={(ev) => { if (ev.key !== "Enter" && ev.key !== " ") return; const n = (ev.target as HTMLElement).closest<HTMLElement>(".node"); if (!n) return; ev.preventDefault(); if (n.dataset.origin) p.onOpen(null); else if (n.dataset.id) p.onOpen(n.dataset.id); }}>
           {lg.map((g) => (
             <div key={g.id} className={"group" + (p.selectedGroup === g.id ? " on" : "") + (dropGroup === g.id ? " drop" : "")} data-group={g.id} style={{ left: g.x, top: g.y, width: g.w, height: g.h, ["--g" as string]: GCOL[g.color % GCOL.length] }}>
@@ -308,7 +336,11 @@ export function Canvas(p: CanvasProps) {
       {p.empty}
       <div className="zoom glass gpill">
         <button className="icobtn" type="button" onClick={() => setZoom(zoom / 1.15)} aria-label="Oddal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10" /></svg></button>
-        <span>{fmtPct(zoom)}</span>
+        <input value={zEdit ?? fmtPct(zoom)} inputMode="numeric" aria-label="Powiększenie w procentach (35–160)" title="Wpisz powiększenie w procentach (35–160)"
+          onFocus={(e) => { zFocus.current = Date.now(); e.currentTarget.select(); }} onMouseUp={(e) => { if (Date.now() - zFocus.current < 400) e.preventDefault(); }}   /* klik zaznacza całość; mouseup nie cofa zaznaczenia */
+          onChange={(e) => setZEdit(e.currentTarget.value.replace(/\D/g, "").slice(0, 3))}
+          onBlur={(e) => { if (zCancel.current) { zCancel.current = false; setZEdit(null); return; } commitZoom(e.currentTarget.value); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } else if (e.key === "Escape") { e.preventDefault(); zCancel.current = true; e.currentTarget.blur(); } }} />
         <button className="icobtn" type="button" onClick={() => setZoom(zoom * 1.15)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
         <button className="icobtn txt" type="button" onClick={fit}>Dopasuj</button>
         <button className="icobtn txt" type="button" onClick={p.onAutoLayout}>Ułóż</button>

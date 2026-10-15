@@ -31,6 +31,20 @@ describe.skipIf(!DB)("repo", async () => {
     expect(more[0].position).toBe(3);
   });
 
+  it("załącznik z danymi: adres /api/files/<id>, lista bez danych, plik tylko dla właściciela", async () => {
+    const t = await repo.createTask(owner, { title: "Z załącznikiem" });
+    const png = Buffer.from("89504e470d0a1a0a", "hex");
+    const a = await repo.addAttachment({ taskId: t.id }, { kind: "image", name: "zrzut.png", mime: "image/png", keep: true, data: png });
+    expect(a.url).toBe(`/api/files/${a.id}`);
+    expect((await repo.listAttachments({ taskId: t.id })).map((x) => x.id)).toEqual([a.id]);
+    const f = await repo.getAttachmentFile(owner, a.id);
+    expect(f?.mime).toBe("image/png"); expect(f?.data.equals(png)).toBe(true); expect(f?.bytes).toBe(png.length);
+    expect(await repo.getAttachmentFile("00000000-0000-0000-0000-000000000000", a.id)).toBeNull();
+    expect(await repo.updateAttachment(owner, a.id, { caption: "Zrzut", analysis: "Ekran logowania" })).toBe(true);
+    expect((await repo.listAttachments({ taskId: t.id }))[0].analysis).toBe("Ekran logowania");
+    expect(await repo.countAttachments([t.id])).toEqual({ [t.id]: 1 });
+  });
+
   it("ukończenie kroku loguje czas do nauki, ponowne otwarcie go cofa, ostatni krok zamyka zadanie", async () => {
     const t = await repo.createTask(owner, { title: "Jeden krok", steps: [{ title: "Zrób", tool: "code", estMin: 30 }] });
     const s = t.steps[0];

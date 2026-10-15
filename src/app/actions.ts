@@ -32,22 +32,41 @@ export async function logout() {
 }
 
 // ---------- czat z agentem ----------
+const MAX_UPLOAD = 4 * 1024 * 1024;   // limit treści żądania na Vercelu
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+// pliki z doku (z dysku, Ctrl+V, przeciągnięte): do 8 sztuk, każdy do 4 MB
+function uploads(fd: FormData): File[] {
+  return fd.getAll("files").filter((f): f is File => typeof f === "object" && f !== null && "arrayBuffer" in f && (f as File).size > 0 && (f as File).size <= MAX_UPLOAD).slice(0, 8);
+}
+async function attachFiles(taskId: string, files: File[], notes: { caption: string; analysis: string }[] = []) {
+  for (const [i, f] of files.entries()) {
+    const data = Buffer.from(await f.arrayBuffer());
+    await repo.addAttachment({ taskId }, { kind: f.type.startsWith("image/") ? "image" : "file", name: f.name, mime: f.type || undefined, bytes: f.size, keep: true, data, caption: notes[i]?.caption, analysis: notes[i]?.analysis });
+  }
+}
+
 export async function chat(fd: FormData) {
   const o = await requireOwner();
-  const text = str(fd, "text"); if (!text) return;
+  const files = uploads(fd);
+  const typed = str(fd, "text");
+  if (!typed && !files.length) return;
+  const text = typed || (files.length === 1 ? `Załącznik: ${files[0].name}` : `Załączniki: ${files.map((f) => f.name).join(", ")}`);
   const taskId = str(fd, "taskId") || null;
   const ai = await aiFor(o.id);
   let goTo: string | null = null;
   if (!ai.enabled) {
-    // bez klucza modelu: na kanwie tekst staje się zadaniem, w zadaniu zostaje jako notatka rozmowy
-    await repo.addChat(o.id, taskId, "user", text);
-    if (taskId) await repo.addChat(o.id, taskId, "agent", "Zapisałem wiadomość. Agent wbudowany jest wyłączony (brak klucza modelu), więc pracę w tym zadaniu prowadź przyciskami „w Claude”.");
-    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: text }); await repo.addChat(o.id, null, "agent", "Założyłem zadanie z Twojego tekstu. Kroki ułóż przyciskiem „Rozłóż na kroki w Claude” w zadaniu."); goTo = t.id; }
+    // bez klucza modelu: na kanwie tekst staje się zadaniem, w zadaniu zostaje jako notatka rozmowy; pliki trafiają do zadania
+    await repo.addChat(o.id, taskId, "user", text + (typed && files.length ? ` (załączniki: ${files.map((f) => f.name).join(", ")})` : ""));
+    if (taskId) { await attachFiles(taskId, files); await repo.addChat(o.id, taskId, "agent", files.length ? "Zapisałem wiadomość i załączniki przy zadaniu. Claude zobaczy je przez konektor (get_task → get_attachment)." : "Zapisałem wiadomość. Agent wbudowany jest wyłączony (brak klucza modelu), więc pracę w tym zadaniu prowadź przyciskami „w Claude”."); }
+    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files); await repo.addChat(o.id, null, "agent", "Założyłem zadanie z Twojego tekstu. Kroki ułoży Claude przez konektor."); goTo = t.id; }
   } else {
     try {
-      const { done } = await runChat(text, { ai, ownerId: o.id, taskId });
+      const images = await Promise.all(files.filter((f) => IMAGE_TYPES.has(f.type)).map(async (f) => ({ mediaType: f.type as "image/png", base64: Buffer.from(await f.arrayBuffer()).toString("base64") })));
+      const { done, result } = await runChat(text, { ai, ownerId: o.id, taskId, images });
       const created = done.find((d) => d.taskId && d.label.startsWith("Nowe zadanie"));
       if (!taskId && created?.taskId) goTo = created.taskId;
+      const target = taskId ?? created?.taskId ?? null;
+      if (target) await attachFiles(target, files, result.attachments ?? []);
     } catch (e) {
       await repo.addChat(o.id, taskId, "user", text);
       await repo.addChat(o.id, taskId, "agent", "Agent nie odpowiedział: " + fail(e));
