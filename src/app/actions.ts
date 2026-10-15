@@ -80,6 +80,29 @@ export async function trashTask(id: string) {
   refresh(id);
   redirect("/");
 }
+// szybkie dodanie z kanwy (bez przeładowania i przekierowania)
+export async function createTaskQuick(title: string) {
+  const o = await requireOwner();
+  const t = title.trim().slice(0, 200); if (!t) return;
+  await repo.createTask(o.id, { title: t, source: t });
+  refresh();
+}
+export async function addStepQuick(taskId: string, title: string, after: string | null) {
+  const o = await requireOwner();
+  const task = await repo.getTask(o.id, taskId); if (!task) throw new Error("Nie ma takiego zadania");
+  const t = title.trim().slice(0, 200); if (!t) return;
+  await repo.addSteps(taskId, [{ title: t, tool: "manual", dependsOn: after && task.steps.some((s) => s.id === after) ? [after] : [] }]);
+  refresh(taskId);
+}
+// z archiwum: otwiera ponownie ostatni zrobiony krok, zadanie wraca na kanwę
+export async function reopenLast(taskId: string) {
+  const o = await requireOwner();
+  const task = await repo.getTask(o.id, taskId); if (!task) throw new Error("Nie ma takiego zadania");
+  const last = [...task.steps].reverse().find((s) => s.status === "done");
+  if (last) await repo.reopenStep(o.id, taskId, last);
+  else await repo.updateTask(o.id, taskId, { deletedAt: null });
+  refresh(taskId);
+}
 export async function restoreTask(id: string) {
   const o = await requireOwner();
   await repo.updateTask(o.id, id, { deletedAt: null });
@@ -238,4 +261,114 @@ export async function revokeToken(id: string) {
   const o = await requireOwner();
   await repo.deleteApiToken(o.id, id);
   revalidatePath("/settings");
+}
+
+// ---------- kanwa: położenia, grupy, zaznaczenie ----------
+export async function saveTaskPositions(items: { id: string; x: number; y: number }[]) {
+  const o = await requireOwner();
+  await repo.setTaskPositions(o.id, items.slice(0, 500));
+}
+export async function saveStepPositions(taskId: string, items: { id: string; x: number; y: number }[]) {
+  const o = await requireOwner();
+  await repo.setStepPositions(o.id, taskId, items.slice(0, 200));
+}
+export async function autoLayout(taskId: string | null) {
+  const o = await requireOwner();
+  if (taskId) await repo.clearStepPositions(o.id, taskId); else await repo.clearTaskPositions(o.id);
+  for (const g of await repo.listGroups(o.id, taskId)) await repo.updateGroup(o.id, g.id, { auto: true });
+  refresh(taskId);
+}
+export async function createGroupAction(taskId: string | null, name: string, members: string[], rect: { x: number; y: number; w: number; h: number }) {
+  const o = await requireOwner();
+  const g = await repo.createGroup(o.id, taskId, name || "Nowa grupa", members, rect);
+  refresh(taskId);
+  return g.id;
+}
+export async function updateGroupAction(taskId: string | null, id: string, patch: { name?: string; color?: number; x?: number; y?: number; w?: number; h?: number; members?: string[]; auto?: boolean }) {
+  const o = await requireOwner();
+  await repo.updateGroup(o.id, id, patch);
+  refresh(taskId);
+}
+export async function deleteGroupAction(taskId: string | null, id: string) {
+  const o = await requireOwner();
+  await repo.deleteGroup(o.id, id);
+  refresh(taskId);
+}
+export async function batchTasks(ids: string[], op: { level?: number; projectId?: string | null; done?: boolean; trash?: boolean }) {
+  const o = await requireOwner();
+  for (const id of ids.slice(0, 200)) {
+    const t = await repo.getTask(o.id, id); if (!t) continue;
+    if (op.level) await repo.updateTask(o.id, id, { level: Math.min(5, Math.max(1, op.level)) });
+    if (op.projectId !== undefined) await repo.updateTask(o.id, id, { projectId: op.projectId });
+    if (op.trash) await repo.updateTask(o.id, id, { deletedAt: new Date().toISOString() });
+    if (op.done) for (const s of t.steps) if (s.status !== "done") await finishStep(o.id, id, s.id);
+  }
+  refresh();
+}
+export async function batchSteps(taskId: string, ids: string[], op: { done?: boolean; remove?: boolean }) {
+  const o = await requireOwner();
+  const t = await repo.getTask(o.id, taskId); if (!t) return;
+  for (const id of ids) {
+    const s = t.steps.find((x) => x.id === id); if (!s) continue;
+    if (op.remove) await repo.deleteStep(id);
+    else if (op.done && s.status !== "done") await finishStep(o.id, taskId, id);
+  }
+  refresh(taskId);
+}
+export async function setTaskField(taskId: string, patch: { due?: string | null; level?: number; projectId?: string | null }) {
+  const o = await requireOwner();
+  await repo.updateTask(o.id, taskId, { ...patch, level: patch.level ? Math.min(5, Math.max(1, patch.level)) : undefined });
+  refresh(taskId);
+}
+// pojedyncze pola z panelu zadania (kontrolki wywołują je bez formularza)
+export async function setLevel(taskId: string, level: number) { await setTaskField(taskId, { level }); }
+export async function setProject(taskId: string, projectId: string | null) { await setTaskField(taskId, { projectId }); }
+export async function setDue(taskId: string, due: string | null) { await setTaskField(taskId, { due }); }
+export async function setStepLink(taskId: string, stepId: string, link: string) {
+  const o = await requireOwner();
+  await stepOf(o.id, taskId, stepId);
+  await repo.updateStep(stepId, { link: link ? url(link) : null });
+  refresh(taskId);
+}
+
+// ---------- pytania agenta zadane w aplikacji ----------
+export async function answerQuestionAction(taskId: string, questionId: string, answer: string) {
+  const o = await requireOwner();
+  if (!answer.trim()) return;
+  await repo.answerQuestion(o.id, questionId, answer.trim());
+  refresh(taskId);
+}
+export async function answerQuestionForm(fd: FormData) {
+  const taskId = str(fd, "taskId"), id = str(fd, "questionId"), answer = str(fd, "answer") || str(fd, "option");
+  await answerQuestionAction(taskId, id, answer);
+}
+export async function dismissQuestion(taskId: string, questionId: string) {
+  const o = await requireOwner();
+  await repo.deleteQuestion(o.id, questionId);
+  refresh(taskId);
+}
+export async function answerBlockForm(fd: FormData) {
+  const o = await requireOwner();
+  const taskId = str(fd, "taskId"), stepId = str(fd, "stepId");
+  await stepOf(o.id, taskId, stepId);
+  const answer = str(fd, "answer") || str(fd, "option"); if (!answer) return;
+  await repo.answerBlockQuestion(stepId, num(fd, "index", 0), answer);
+  refresh(taskId);
+}
+
+// ---------- zależności z kanwy (strzałki) ----------
+export async function linkTasks(from: string, to: string, add: boolean) {
+  const o = await requireOwner();
+  const t = await repo.getTask(o.id, to); if (!t || from === to) return;
+  const deps = new Set(t.dependsOn); if (add) deps.add(from); else deps.delete(from);
+  await repo.setTaskDependencies(to, [...deps]);
+  refresh();
+}
+export async function linkSteps(taskId: string, from: string, to: string, add: boolean) {
+  const o = await requireOwner();
+  const t = await repo.getTask(o.id, taskId); if (!t || from === to) return;
+  const s = t.steps.find((x) => x.id === to); if (!s || !t.steps.find((x) => x.id === from)) return;
+  const deps = new Set(s.dependsOn); if (add) deps.add(from); else deps.delete(from);
+  await repo.setStepDependencies(to, [...deps]);
+  refresh(taskId);
 }

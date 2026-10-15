@@ -9,6 +9,11 @@ import { finishStep } from "@/lib/services";
 import { Blocks, Fact } from "@/lib/schema";
 import { sql } from "@/lib/db";
 import { originOf, wwwAuthenticate } from "@/lib/oauth";
+import { externalLink as externalLinkOf } from "@/lib/links";
+import { appUrl } from "@/lib/session";
+
+// link kroku to adres elementu w zewnętrznej aplikacji; adres samego Task Hub nie jest linkiem kroku
+const externalLink = (link: string | undefined | null) => externalLinkOf(link, appUrl());
 
 export const maxDuration = 60;
 
@@ -40,7 +45,9 @@ function buildHandler(ownerId: string) {
       const facts = await Promise.all(t.steps.map(async (s) => [s.id, await repo.listFacts({ stepId: s.id })] as const));
       const ctx = contextText({ tasks, projects, rules, samples, factPrefs, currentTaskId: taskId });
       const fx = facts.filter(([, f]) => f.length).map(([id, f]) => `FAKTY KROKU ${id}:\n${f.filter((x) => !x.hidden).map((x) => `- ${x.label}: ${x.value}${x.source ? ` (${x.source.app}${x.source.url ? ", " + x.source.url : ""})` : ""}`).join("\n")}`).join("\n");
-      return text(ctx + (fx ? "\n" + fx : ""));
+      const qs = await repo.listQuestions(ownerId, { taskId });
+      const qx = qs.length ? "PYTANIA DO PIOTRA (zadane w aplikacji):\n" + qs.map((q) => `- [${q.id}]${q.stepId ? ` krok ${q.stepId}` : ""} ${q.text} → ${q.answer ? `ODPOWIEDŹ: ${q.answer}` : "(czeka na odpowiedź)"}`).join("\n") : "";
+      return text(ctx + (fx ? "\n" + fx : "") + (qx ? "\n" + qx : ""));
     });
 
     server.registerTool("get_rules", {
@@ -49,7 +56,7 @@ function buildHandler(ownerId: string) {
     }, async ({ projectId, tools }) => text(rulesText(await repo.listRules(ownerId), projectId ?? null, tools ?? []) || "(brak zasad)"));
 
     server.registerTool("create_task", {
-      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. Kroki: tool (slack, gmail, clickup, calendar, claude, claudeapp, code, manual...), est w minutach (wielokrotność 15), dependsOn jako n1, n2 (numery kroków w tej paczce).",
+      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool (slack, gmail, clickup, calendar, claude, claudeapp, code, manual...), est w minutach (wielokrotność 15), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub.",
       inputSchema: z.object({
         title: z.string(), summary: z.string().optional(), source: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().optional(), project: z.string().optional(),
         steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional() })).optional(),
@@ -57,7 +64,7 @@ function buildHandler(ownerId: string) {
     }, async (a) => {
       let projectId: string | null = null;
       if (a.project) projectId = ((await repo.findProjectByName(ownerId, a.project)) ?? (await repo.createProject(ownerId, a.project))).id;
-      const t = await repo.createTask(ownerId, { title: a.title, summary: a.summary, source: a.source, level: a.level, due: a.due ?? null, projectId, steps: (a.steps ?? []).map((s) => ({ ...s, estMin: s.est })) });
+      const t = await repo.createTask(ownerId, { title: a.title, summary: a.summary, source: a.source, level: a.level, due: a.due ?? null, projectId, steps: (a.steps ?? []).map((s) => ({ ...s, link: externalLink(s.link), estMin: s.est })) });
       return json({ taskId: t.id, steps: t.steps.map((s) => ({ id: s.id, title: s.title })) });
     });
 
@@ -72,20 +79,20 @@ function buildHandler(ownerId: string) {
     });
 
     server.registerTool("add_steps", {
-      title: "Dodaj kroki", description: "Dodaje kroki do zadania.",
+      title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. Termin zadania ustaw osobno przez update_task(due).",
       inputSchema: z.object({ taskId: z.string(), steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional() })) }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
-      const steps = await repo.addSteps(t.id, a.steps.map((s) => ({ ...s, estMin: s.est })));
+      const steps = await repo.addSteps(t.id, a.steps.map((s) => ({ ...s, link: externalLink(s.link), estMin: s.est })));
       return json(steps.map((s) => ({ id: s.id, title: s.title })));
     });
 
     server.registerTool("update_step", {
-      title: "Zmień krok", description: "Zmienia tytuł, opis, szacunek albo link kroku.",
+      title: "Zmień krok", description: "Zmienia tytuł, opis, szacunek albo link kroku (link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket).",
       inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), est: z.number().int().optional(), link: z.string().optional() }),
     }, async (a) => {
       if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
-      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, estMin: a.est, link: a.link }); return text("Zmieniono.");
+      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null }); return text("Zmieniono.");
     });
 
     server.registerTool("set_blocks", {
@@ -124,6 +131,46 @@ function buildHandler(ownerId: string) {
     }, async (a) => {
       if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
       await repo.addSnapshot({ stepId: a.stepId }, a.app, a.raw, { url: a.url, sourceId: a.sourceId }); return text("Zapisano migawkę.");
+    });
+
+    server.registerTool("list_work", {
+      title: "Co czeka na agenta", description: "Lista pracy dla agenta: zadania bez kroków (rozłożyć przez add_steps), kroki gotowe do zrobienia bez zatwierdzania (zrobić i zgłosić complete_step), kroki wymagające zatwierdzenia (przygotować szkic przez set_blocks i zostawić), odpowiedzi Piotra na pytania (przeczytać i kontynuować; oznaczane jako przeczytane). Kroki wykonuj tylko narzędziami, które masz; resztę zostaw.",
+      inputSchema: z.object({}),
+    }, async () => {
+      const [tasks, projects, samples, answered] = await Promise.all([repo.listTasks(ownerId), repo.listProjects(ownerId), repo.listSamples(ownerId), repo.listQuestions(ownerId, { answeredUnseen: true })]);
+      const open = scoreAll(tasks, projects, samples).filter((s) => !s.task.doneAt && !s.task.deletedAt);
+      const noSteps = open.filter((s) => !s.task.steps.length);
+      const openQ = await repo.listQuestions(ownerId, { open: true });
+      const waitingTask = new Set(openQ.map((q) => q.taskId));
+      const ready: string[] = [], approval: string[] = [];
+      for (const s of open) {
+        if (waitingTask.has(s.task.id)) continue;
+        for (const st of s.task.steps) {
+          if (st.status !== "todo") continue;
+          if (!st.dependsOn.every((d) => s.task.steps.find((x) => x.id === d)?.status === "done")) continue;
+          if (st.tool === "manual") continue;
+          const line = `- krok [${st.id}] „${st.title}” (${st.tool}) w zadaniu [${s.task.id}] „${s.task.title}”${st.detail ? ": " + st.detail.slice(0, 200) : ""}`;
+          (st.needsApproval ? approval : ready).push(line);
+        }
+      }
+      await repo.markQuestionsSeen(ownerId, answered.map((q) => q.id));
+      const out = [
+        noSteps.length ? "ZADANIA BEZ KROKÓW (rozłóż przez add_steps, bez pytań, gdy da się przyjąć rozsądne założenia; w razie potrzeby ask_question):\n" + noSteps.filter((s) => !waitingTask.has(s.task.id)).map(brief).join("\n") : "",
+        answered.length ? "ODPOWIEDZI PIOTRA (kontynuuj pracę w tych zadaniach):\n" + answered.map((q) => `- zadanie [${q.taskId}]${q.stepId ? ` krok [${q.stepId}]` : ""}: pytanie „${q.text}” → odpowiedź: ${q.answer}`).join("\n") : "",
+        ready.length ? "KROKI DO ZROBIENIA BEZ ZATWIERDZANIA (zrób je swoimi konektorami i zgłoś complete_step z linkiem; fakty przez add_facts):\n" + ready.join("\n") : "",
+        approval.length ? "KROKI WYMAGAJĄCE ZATWIERDZENIA (przygotuj szkic przez set_blocks jako draft, niczego nie wysyłaj):\n" + approval.join("\n") : "",
+        openQ.length ? `ZADANIA CZEKAJĄCE NA ODPOWIEDŹ PIOTRA (pomiń): ${[...waitingTask].map((id) => `[${id}]`).join(", ")}` : "",
+      ].filter(Boolean).join("\n\n");
+      return text(out || "Nic nie czeka na agenta.");
+    });
+
+    server.registerTool("ask_question", {
+      title: "Zapytaj Piotra w aplikacji", description: "Zadaje Piotrowi pytanie w Task Hub (nie w czacie): tekst, opcjonalne opcje z zaleceniem. Pytaj tylko, gdy bez odpowiedzi nie da się sensownie kontynuować; odpowiedź przyjdzie w list_work i get_task. Zadanie z otwartym pytaniem czeka.",
+      inputSchema: z.object({ taskId: z.string(), stepId: z.string().optional(), text: z.string().max(2000), options: z.array(z.object({ label: z.string().max(80), note: z.string().max(200).optional() })).max(6).optional(), recommended: z.number().int().min(0).optional() }),
+    }, async (a) => {
+      const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
+      const q = await repo.askQuestion(ownerId, { taskId: a.taskId, stepId: a.stepId ?? null, text: a.text, options: a.options, recommended: a.recommended ?? null });
+      return json({ questionId: q.id });
     });
 
     server.registerTool("add_rule", {

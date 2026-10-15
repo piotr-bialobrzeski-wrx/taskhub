@@ -6,7 +6,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
   if (await isSignedIn()) redirect("/");
   const { e } = await searchParams;
   return (
-    <main className="app">
+    <main className="page">
       <form className="card login stack" action={login}>
         <h1 style={{ margin: 0, fontSize: 18 }}>Task Hub</h1>
         <input className="in" type="password" name="password" placeholder="Hasło" autoFocus required />

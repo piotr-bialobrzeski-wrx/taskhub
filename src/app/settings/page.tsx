@@ -7,6 +7,7 @@ import { calibrationText } from "@/lib/time";
 import { toolLabel } from "@/lib/schema";
 import { PendingButton } from "@/components/Pending";
 import { TokenForm } from "@/components/TokenForm";
+import { projColor } from "@/components/canvas/ui";
 import { createToken, removeProject, revokeToken, saveProject, saveSettings } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export default async function Settings() {
   const pref = (o.settings as { aiProvider?: string }).aiProvider ?? "";
   const mcp = appUrl() + "/api/mcp";
   return (
-    <main className="app">
+    <main className="page">
       <div className="top"><Link className="pill" href="/">← Kanwa</Link><h1>Ustawienia</h1><span className="sp" /><Link className="pill" href="/rules">Zasady</Link></div>
 
       <h2 className="sec">Agent</h2>
@@ -38,7 +39,7 @@ export default async function Settings() {
         {projects.map((p) => (
           <form key={p.id} className="card row" action={saveProject} style={{ flexWrap: "wrap" }}>
             <input type="hidden" name="id" value={p.id} />
-            <span className={"chip pc-" + p.color}><span className="d" /></span>
+            <span className="pdot" style={{ ["--c" as string]: projColor(p.color) }} title={"Kolor " + (p.color % 5 + 1)} />
             <input className="in" name="name" defaultValue={p.name} style={{ maxWidth: 260 }} required />
             <label className="row" style={{ gap: 6 }}><span className="sub">ważność</span>
               <select className="in" name="weight" defaultValue={p.weight} style={{ width: "auto" }}>{[5, 4, 3, 2, 1].map((w) => <option key={w} value={w}>{w}</option>)}</select></label>

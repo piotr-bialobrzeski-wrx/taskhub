@@ -55,7 +55,7 @@ Supabase robi codzienne kopie na płatnych planach; na Free zrób własne: `pg_d
 ## Układ kodu
 
 ```
-supabase/migrations/   schemat bazy (0001 tabele, 0002 wektory)
+supabase/migrations/   schemat bazy (0001 tabele, 0002 wektory, 0003 OAuth, 0004 położenia na kanwie i pytania agenta)
 scripts/migrate.ts     aplikuje migracje
 src/lib/schema.ts      typy domenowe i uniwersalne bloki (zod)
 src/lib/priority.ts    priorytet efektywny z powodami
@@ -65,7 +65,9 @@ src/lib/ai/            dostawcy modeli: provider.ts (interfejs), anthropic.ts, o
 src/lib/agent/         context (kontekst dla agenta), chat (czat i akcje), compose (panel z bloków), notes (raporty, notatka końcowa, szkic), handoff (prompt do Claude)
 src/lib/services.ts    operacje złożone wspólne dla UI i MCP
 src/app/api/mcp        serwer MCP
-src/app/               widoki: kanwa, zadanie, zasady, ustawienia, logowanie; actions.ts (akcje serwera)
-src/components/        Prio, BlockRenderer (jeden renderer dla wszystkich bloków), czat, stoper
+src/lib/canvas/        layout (układ kafelków, grupy), vm (modele kafelków: stan, termin, czas)
+src/app/               widoki: kanwa zadań, kanwa kroków zadania (panele renderowane na serwerze), zasady, ustawienia, logowanie; actions.ts (akcje serwera)
+src/components/canvas/ Canvas (silnik: przeciąganie, strzałki, grupy, zoom), Board (poziom 1), TaskCanvas (poziom 2), widgets (pickery, dok), ui (ikony, pasek priorytetu)
+src/components/        BlockRenderer (jeden renderer dla wszystkich bloków, pytania z odpowiedzią), stoper, przyciski
 tests/                 vitest
 ```

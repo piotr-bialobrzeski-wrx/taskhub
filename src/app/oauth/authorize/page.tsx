@@ -22,7 +22,7 @@ export default async function Authorize({ searchParams }: { searchParams: Promis
   try { host = new URL(q.redirect_uri ?? "").hostname; } catch { /* pusty host */ }
 
   return (
-    <main className="app">
+    <main className="page">
       <form className="card login stack" method="post" action="/api/oauth/authorize">
         <h1 style={{ margin: 0, fontSize: 18 }}>Task Hub</h1>
         {error || !client ? (

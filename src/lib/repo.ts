@@ -1,7 +1,7 @@
 // Warstwa danych: proste funkcje na SQL. Bez ORM, żeby schemat był czytelny i łatwy do backupu.
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "./db";
-import { Blocks, type Block, type Fact, type Project, type Rule, type Step, type Task, type TimeSample } from "./schema";
+import { Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample } from "./schema";
 import { spentMin } from "./time";
 
 type Row = Record<string, unknown>;
@@ -69,7 +69,8 @@ function rowToStep(r: Row, deps: string[]): Step {
     tool: r.tool as string, status: r.status as Step["status"], prevStatus: (r.prevStatus as string) ?? null, needsApproval: !!r.needsApproval,
     estMin: Number(r.estMin), spentSec: Number(r.spentSec), spentManual: !!r.spentManual, link: (r.link as string) ?? null,
     handoffAt: iso(r.handoffAt), report: (r.report as string) ?? null, output: (r.output as string) ?? "",
-    review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), logged: !!r.logged, dependsOn: deps,
+    review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), logged: !!r.logged,
+    pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps,
   };
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
@@ -165,7 +166,7 @@ export async function purgeTask(ownerId: string, id: string): Promise<void> {
   await sql()`delete from tasks where id = ${id} and owner_id = ${ownerId}`;
 }
 
-export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean }>;
+export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null }>;
 export async function updateStep(id: string, patch: StepPatch): Promise<void> {
   const p: Row = {};
   if (patch.title !== undefined) p.title = patch.title.slice(0, 200);
@@ -183,6 +184,7 @@ export async function updateStep(id: string, patch: StepPatch): Promise<void> {
   if (patch.output !== undefined) p.output = patch.output;
   if (patch.review !== undefined) p.review = patch.review === null ? null : sql().json(patch.review as never);
   if (patch.blocks !== undefined) { p.blocks = patch.blocks === null ? null : sql().json(patch.blocks); p.blocks_at = patch.blocks === null ? null : new Date(); }
+  if (patch.pos !== undefined) p.pos = patch.pos === null ? null : sql().json(patch.pos);
   if (patch.position !== undefined) p.position = patch.position;
   if (patch.logged !== undefined) p.logged = patch.logged;
   if (!Object.keys(p).length) return;
@@ -391,4 +393,52 @@ export async function deleteApiToken(ownerId: string, id: string): Promise<void>
 }
 export async function setUserSettings(ownerId: string, patch: Record<string, unknown>): Promise<void> {
   await sql()`update users set settings = settings || ${sql().json(patch as never)} where id = ${ownerId}`;
+}
+
+// ---------- położenia na kanwie ----------
+export async function setTaskPositions(ownerId: string, items: { id: string; x: number; y: number }[]): Promise<void> {
+  for (const it of items) await sql()`update tasks set pos = ${sql().json({ x: Math.round(it.x), y: Math.round(it.y) })} where id = ${it.id} and owner_id = ${ownerId}`;
+}
+export async function clearTaskPositions(ownerId: string): Promise<void> { await sql()`update tasks set pos = null where owner_id = ${ownerId}`; }
+export async function setStepPositions(ownerId: string, taskId: string, items: { id: string; x: number; y: number }[]): Promise<void> {
+  for (const it of items) await sql()`update steps set pos = ${sql().json({ x: Math.round(it.x), y: Math.round(it.y) })} where id = ${it.id} and task_id = ${taskId} and task_id in (select id from tasks where owner_id = ${ownerId})`;
+}
+export async function clearStepPositions(ownerId: string, taskId: string): Promise<void> {
+  await sql()`update steps set pos = null where task_id = ${taskId} and task_id in (select id from tasks where owner_id = ${ownerId})`;
+}
+
+// ---------- pytania agenta zadawane w aplikacji ----------
+const rowToQuestion = (r: Row): Question => ({
+  id: r.id as string, taskId: r.taskId as string, stepId: (r.stepId as string) ?? null, text: r.text as string,
+  options: (r.options as Question["options"]) ?? [], recommended: r.recommended == null ? null : Number(r.recommended), answer: (r.answer as string) ?? null,
+  askedAt: iso(r.askedAt) as string, answeredAt: iso(r.answeredAt), seenAt: iso(r.seenAt),
+});
+export async function listQuestions(ownerId: string, where: { taskId?: string; open?: boolean; answeredUnseen?: boolean } = {}): Promise<Question[]> {
+  const rows = await sql()`select * from questions where owner_id = ${ownerId}
+    ${where.taskId ? sql()`and task_id = ${where.taskId}` : sql()``}
+    ${where.open ? sql()`and answered_at is null` : sql()``}
+    ${where.answeredUnseen ? sql()`and answered_at is not null and seen_at is null` : sql()``}
+    order by asked_at`;
+  return rows.map(rowToQuestion);
+}
+export async function askQuestion(ownerId: string, q: { taskId: string; stepId?: string | null; text: string; options?: Question["options"]; recommended?: number | null }): Promise<Question> {
+  const [r] = await sql()`insert into questions (owner_id, task_id, step_id, text, options, recommended)
+    values (${ownerId}, ${q.taskId}, ${q.stepId ?? null}, ${q.text.slice(0, 2000)}, ${sql().json((q.options ?? []).slice(0, 6) as never)}, ${q.recommended ?? null}) returning *`;
+  return rowToQuestion(r);
+}
+export async function answerQuestion(ownerId: string, id: string, answer: string): Promise<void> {
+  await sql()`update questions set answer = ${answer.slice(0, 4000)}, answered_at = now(), seen_at = null where id = ${id} and owner_id = ${ownerId}`;
+}
+export async function markQuestionsSeen(ownerId: string, ids: string[]): Promise<void> {
+  if (ids.length) await sql()`update questions set seen_at = now() where owner_id = ${ownerId} and id = any(${ids})`;
+}
+export async function deleteQuestion(ownerId: string, id: string): Promise<void> { await sql()`delete from questions where id = ${id} and owner_id = ${ownerId}`; }
+
+// odpowiedź na blok "question" w panelu kroku (agent wbudowany albo konektor ułożył pytanie w blokach)
+export async function answerBlockQuestion(stepId: string, index: number, answer: string): Promise<void> {
+  const [r] = await sql()`select blocks from steps where id = ${stepId}`;
+  const p = r?.blocks ? Blocks.safeParse(r.blocks) : null; if (!p || !p.success) return;
+  const b = p.data[index]; if (!b || b.type !== "question") return;
+  b.answer = answer.slice(0, 2000);
+  await sql()`update steps set blocks = ${sql().json(p.data as never)} where id = ${stepId}`;
 }

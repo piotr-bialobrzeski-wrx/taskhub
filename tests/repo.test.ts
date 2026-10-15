@@ -99,4 +99,25 @@ describe.skipIf(!DB)("repo", async () => {
     expect(await repo.purgeExpired(owner)).toBeGreaterThanOrEqual(1);
     expect(await repo.getTask(owner, t.id)).toBeNull();
   });
+  it("pytania agenta: otwarte, odpowiedź, odczyt przez agenta; położenia kafelków", async () => {
+    const t = await repo.createTask(owner, { title: "Z pytaniem", steps: [{ title: "Krok" }, { title: "Drugi" }] });
+    const q = await repo.askQuestion(owner, { taskId: t.id, stepId: t.steps[0].id, text: "Którą wersję?", options: [{ label: "A" }, { label: "B", note: "szybsza" }], recommended: 1 });
+    expect((await repo.listQuestions(owner, { taskId: t.id, open: true })).map((x) => x.id)).toEqual([q.id]);
+    await repo.answerQuestion(owner, q.id, "B");
+    expect(await repo.listQuestions(owner, { taskId: t.id, open: true })).toEqual([]);
+    const unseen = await repo.listQuestions(owner, { answeredUnseen: true });
+    expect(unseen.find((x) => x.id === q.id)?.answer).toBe("B");
+    await repo.markQuestionsSeen(owner, [q.id]);
+    expect((await repo.listQuestions(owner, { answeredUnseen: true })).some((x) => x.id === q.id)).toBe(false);
+
+    await repo.setStepPositions(owner, t.id, [{ id: t.steps[1].id, x: 400, y: 200 }]);
+    await repo.setTaskPositions(owner, [{ id: t.id, x: 40, y: 132 }]);
+    let fresh = (await repo.getTask(owner, t.id))!;
+    expect(fresh.steps[1].pos).toEqual({ x: 400, y: 200 });
+    expect(fresh.pos).toEqual({ x: 40, y: 132 });
+    await repo.clearStepPositions(owner, t.id);
+    fresh = (await repo.getTask(owner, t.id))!;
+    expect(fresh.steps[1].pos).toBeNull();
+  });
+
 });

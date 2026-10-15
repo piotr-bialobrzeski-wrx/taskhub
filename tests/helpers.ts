@@ -6,7 +6,7 @@ import { AiError } from "@/lib/ai/provider";
 let n = 0;
 export const step = (p: Partial<Step> = {}): Step => ({
   id: "s" + ++n, taskId: "t1", position: n, title: "Krok " + n, detail: "", tool: "manual", status: "todo", prevStatus: null, needsApproval: false,
-  estMin: 15, spentSec: 0, spentManual: false, link: null, handoffAt: null, report: null, output: "", review: null, blocks: null, blocksAt: null, logged: false, dependsOn: [], ...p,
+  estMin: 15, spentSec: 0, spentManual: false, link: null, handoffAt: null, report: null, output: "", review: null, blocks: null, blocksAt: null, logged: false, pos: null, dependsOn: [], ...p,
 });
 export const task = (p: Partial<Task> = {}): Task => ({
   id: "t" + ++n, ownerId: "o", projectId: null, title: "Zadanie", summary: "", source: "", level: 3, due: null, doneAt: null, deletedAt: null,

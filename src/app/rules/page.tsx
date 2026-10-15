@@ -39,7 +39,7 @@ export default async function Rules() {
     { key: "tool", title: "Narzędzia", hint: "Jak pisać w Slacku, mailu, ClickUpie." },
   ];
   return (
-    <main className="app">
+    <main className="page">
       <div className="top"><Link className="pill" href="/">← Kanwa</Link><h1>Zasady pracy</h1><span className="sp" /><Link className="pill" href="/settings">Ustawienia</Link></div>
       <p className="sub" style={{ marginTop: 0 }}>Agent w aplikacji, Claude, Claude Code i GPT dostają te zasady przy każdym zadaniu (przez konektor MCP albo w prompcie). Klienci trzymają u siebie tylko konfigurację narzędzi.</p>
       {groups.map((g) => {

@@ -127,9 +127,25 @@ export const Step = z.object({
   blocks: Blocks.nullable(),
   blocksAt: z.string().nullable(),
   logged: z.boolean(),
+  pos: z.object({ x: z.number(), y: z.number() }).nullable(),
   dependsOn: z.array(z.string()),
 });
 export type Step = z.infer<typeof Step>;
+
+// pytanie agenta zadane w aplikacji; Piotr odpowiada w Task Hub, agent czyta odpowiedź przez konektor
+export const Question = z.object({
+  id: z.string(),
+  taskId: z.string(),
+  stepId: z.string().nullable(),
+  text: z.string(),
+  options: z.array(z.object({ label: z.string(), note: z.string().optional() })),
+  recommended: z.number().int().nullable(),
+  answer: z.string().nullable(),
+  askedAt: z.string(),
+  answeredAt: z.string().nullable(),
+  seenAt: z.string().nullable(),
+});
+export type Question = z.infer<typeof Question>;
 
 export const Project = z.object({
   id: z.string(),
