@@ -27,9 +27,9 @@ Testy: `npm test` (testy bazy odpalają się tylko z `TEST_DATABASE_URL=postgres
 
 ## Wdrożenie: Supabase + Vercel (darmowe plany wystarczą)
 
-1. **Supabase** (baza): [supabase.com](https://supabase.com) → New project, region Frankfurt, zapisz hasło bazy. W *Project Settings → Database → Connection string* wybierz tryb **Transaction** (pooler, port 6543) i skopiuj adres jako `DATABASE_URL`. W *SQL Editor* uruchom `create extension if not exists vector;` (jedno kliknięcie, pozwala na warstwę wektorową).
-2. **Migracje**: lokalnie `DATABASE_URL=... npm run db:migrate`. Skrypt zapisuje w tabeli `schema_migrations`, które pliki już poszły, więc można go uruchamiać wielokrotnie.
-3. **Vercel** (hosting): [vercel.com](https://vercel.com) → Add New Project → wskaż repo GitHub. W *Environment Variables* wpisz wszystkie zmienne z `.env.example` (`DATABASE_URL`, `TASKHUB_OWNER_EMAIL`, `TASKHUB_PASSWORD`, `TASKHUB_SECRET`, klucz `ANTHROPIC_API_KEY` i/lub `OPENAI_API_KEY`, `APP_URL` = adres z Vercela). Deploy. Każdy push na `main` wdraża nową wersję.
+1. **Supabase** (baza): [supabase.com](https://supabase.com) → New project, region Frankfurt (eu-central-1), zapisz hasło bazy; w sekcji Security wyłącz Data API (aplikacja łączy się bezpośrednio). Kliknij **Connect** → zakładka **Transaction pooler** → skopiuj URI, wstaw hasło w miejsce `[YOUR-PASSWORD]`; to jest `DATABASE_URL`. „Direct connection” nie działa z Vercela (tylko IPv6).
+2. **Migracje** uruchamiają się same przy każdym buildzie (`npm run build` najpierw wykonuje `migrate --if-configured`). Skrypt zapisuje w tabeli `schema_migrations`, które pliki już poszły, więc kolejne wdrożenia niczego nie psują. Lokalnie: `DATABASE_URL=... npm run db:migrate`. Warstwa wektorowa (pgvector) jest opcjonalna: gdy rozszerzenia nie ma, ta jedna migracja jest pomijana z ostrzeżeniem.
+3. **Vercel** (hosting): [vercel.com](https://vercel.com) → Add New Project → wskaż repo GitHub. W *Environment Variables* wpisz zmienne z `.env.example` (`DATABASE_URL`, `TASKHUB_OWNER_EMAIL`, `TASKHUB_PASSWORD`, `TASKHUB_SECRET`, klucz `ANTHROPIC_API_KEY` i/lub `OPENAI_API_KEY`; `APP_URL` można dodać po pierwszym wdrożeniu, gdy znasz adres). Deploy. Każdy push na `main` wdraża nową wersję. Funkcje działają we Frankfurcie (`vercel.json`), blisko bazy.
 4. Wejdź na adres aplikacji, zaloguj się hasłem z `TASKHUB_PASSWORD`.
 
 Koszt: Supabase Free (500 MB) i Vercel Hobby wystarczą na długo; płacisz tylko za tokeny modelu.
