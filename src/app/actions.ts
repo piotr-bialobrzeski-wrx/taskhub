@@ -267,10 +267,12 @@ export async function revokeToken(id: string) {
 export async function saveTaskPositions(items: { id: string; x: number; y: number }[]) {
   const o = await requireOwner();
   await repo.setTaskPositions(o.id, items.slice(0, 500));
+  refresh();   // kanwa trzyma upuszczony kafelek w miejscu, aż dostanie zapisane położenie
 }
 export async function saveStepPositions(taskId: string, items: { id: string; x: number; y: number }[]) {
   const o = await requireOwner();
   await repo.setStepPositions(o.id, taskId, items.slice(0, 200));
+  refresh(taskId);
 }
 export async function autoLayout(taskId: string | null) {
   const o = await requireOwner();

@@ -8,10 +8,13 @@ import { GCOL } from "./ui";
 export type CanvasItem = LItem & { cls: string; done?: boolean; aria: string };
 export type CanvasGroup = LGroup & { name: string; color: number };
 export type CanvasApi = { positions: () => Record<string, Pos>; viewCenter: () => Pos };
+type Rect = { x: number; y: number; w: number; h: number };
+type Held = { k: string; ox: number; oy: number; base: Pos };   // ox/oy: skąd ciągniemy; base: położenie wg serwera w chwili chwycenia
+const DBL_MS = 400;                                              // dwa kliknięcia w ten sam kafelek w tym czasie = dwuklik
 
 type Drag =
-  | { kind: "move"; id: string; sx: number; sy: number; group: { k: string; ox: number; oy: number }[]; moved: boolean }
-  | { kind: "gmove" | "gresize"; corner: string; g: CanvasGroup; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; mem: { k: string; ox: number; oy: number }[]; moved: boolean }
+  | { kind: "move"; id: string; sx: number; sy: number; group: Held[]; moved: boolean }
+  | { kind: "gmove" | "gresize"; corner: string; g: CanvasGroup; base: Rect; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; mem: Held[]; moved: boolean }
   | { kind: "link"; from: string; to: string | null; p: Pos }
   | { kind: "origin"; sx: number; sy: number };
 
@@ -29,7 +32,7 @@ export type CanvasProps = {
   onSelectGroup: (id: string | null) => void;
   renaming: string | null;
   onRename: (id: string, name: string | null) => void;
-  onOpen: (id: string | null) => void;          // dwuklik / Enter: null = kafelek zadania (origin)
+  onOpen: (id: string | null) => void;          // dwuklik (liczony z pointerup, bo przechwycenie wskaźnika psuje zwykły dblclick) / Enter: null = kafelek zadania (origin)
   onClickTile?: (id: string) => void;            // pojedyncze kliknięcie (poziom kroków otwiera panel)
   onMove: (items: { id: string; x: number; y: number }[]) => void;
   onLink?: (from: string, to: string) => void;
@@ -47,8 +50,11 @@ const fmtPct = (z: number) => Math.round(z * 100) + "%";
 export function Canvas(p: CanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null), worldRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoomState] = useState(1);
-  const [override, setOverride] = useState<Record<string, Pos>>({});      // położenia w trakcie przeciągania
+  const [override, setOverride] = useState<Record<string, Pos>>({});      // położenia w trakcie przeciągania i po upuszczeniu, do czasu zapisu
   const [gOverride, setGOverride] = useState<Record<string, Partial<CanvasGroup>>>({});
+  const dropped = useRef<Record<string, Pos>>({});                        // upuszczone kafelki: położenie wg serwera w chwili chwycenia
+  const gDropped = useRef<Record<string, Rect>>({});                      // upuszczone/zmienione grupy: prostokąt wg serwera w chwili chwycenia
+  const lastClick = useRef<{ id: string; t: number } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragRef = useRef<Drag | null>(null);
   const [band, setBand] = useState<{ x0: number; y0: number; x: number; y: number; base: Set<string>; moved: boolean } | null>(null);
@@ -66,7 +72,8 @@ export function Canvas(p: CanvasProps) {
   }, [p.zoomKey]);
 
   const groups = useMemo(() => p.groups.map((g) => ({ ...g, ...(gOverride[g.id] ?? {}) })), [p.groups, gOverride]);
-  const layout = useMemo(() => computePositions(p.items, groups, p.size, !!p.origin), [p.items, groups, p.size, p.origin]);
+  const sLayout = useMemo(() => computePositions(p.items, p.groups, p.size, !!p.origin), [p.items, p.groups, p.size, p.origin]);   // układ wg serwera, bez przeciągania
+  const layout = useMemo(() => (Object.keys(gOverride).length ? computePositions(p.items, groups, p.size, !!p.origin) : sLayout), [p.items, groups, p.size, p.origin, gOverride, sLayout]);
   const P = useMemo(() => ({ ...layout.P, ...override }), [layout.P, override]);
   const lg = useMemo(() => layout.groups.map((g) => ({ ...(p.groups.find((x) => x.id === g.id) ?? ({} as CanvasGroup)), ...g, ...(gOverride[g.id] ?? {}) })) as CanvasGroup[], [layout.groups, p.groups, gOverride]);
   const bb = bounds(P, lg, p.size, layout.origin);
@@ -78,6 +85,13 @@ export function Canvas(p: CanvasProps) {
   const itemsDone = useMemo(() => new Map(p.items.map((x) => [x.id, !!x.done])), [p.items]);
 
   // ---------- przeciąganie kafelków, grup, strzałek ----------
+  const hold = (k: string): Held => ({ k, ox: P[k].x, oy: P[k].y, base: dropped.current[k] ?? sLayout.P[k] });
+  // drugie kliknięcie w to samo w ciągu DBL_MS = dwuklik (zwykłe zdarzenie dblclick trafia w .world przez przechwycenie wskaźnika)
+  const isDouble = (id: string) => {
+    const now = Date.now(), prev = lastClick.current;
+    if (prev && prev.id === id && now - prev.t < DBL_MS) { lastClick.current = null; return true; }
+    lastClick.current = { id, t: now }; return false;
+  };
   const onWorldDown = (ev: React.PointerEvent) => {
     if (ev.button !== 0) return;
     const t = ev.target as HTMLElement;
@@ -86,8 +100,9 @@ export function Canvas(p: CanvasProps) {
     if (gh) {
       ev.preventDefault(); ev.stopPropagation(); (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
       const g = lg.find((x) => x.id === (gh.dataset.ghead || gh.dataset.gresize)); if (!g) return;
-      const mem = g.members.filter((k) => P[k]).map((k) => ({ k, ox: P[k].x, oy: P[k].y }));
-      const d: Drag = { kind: gh.dataset.ghead ? "gmove" : "gresize", corner: gh.dataset.corner || "br", g, sx: ev.clientX, sy: ev.clientY, ox: g.x, oy: g.y, ow: g.w, oh: g.h, mem, moved: false };
+      const mem = g.members.filter((k) => P[k]).map((k) => hold(k));
+      const sg = sLayout.groups.find((x) => x.id === g.id), base = gDropped.current[g.id] ?? (sg ? { x: sg.x, y: sg.y, w: sg.w, h: sg.h } : { x: g.x, y: g.y, w: g.w, h: g.h });
+      const d: Drag = { kind: gh.dataset.ghead ? "gmove" : "gresize", corner: gh.dataset.corner || "br", g, base, sx: ev.clientX, sy: ev.clientY, ox: g.x, oy: g.y, ow: g.w, oh: g.h, mem, moved: false };
       dragRef.current = d; setDrag(d); p.onSelectGroup(g.id); p.onSelect(new Set());
       return;
     }
@@ -99,9 +114,10 @@ export function Canvas(p: CanvasProps) {
     const id = node.dataset.id!;
     if (ev.shiftKey || ev.metaKey || ev.ctrlKey) { const s = new Set(p.selected); if (s.has(id)) s.delete(id); else s.add(id); p.onSelect(s); return; }
     const keys = p.selected.has(id) && p.selected.size > 1 ? [...p.selected].filter((k) => P[k]) : [id];
-    const d: Drag = { kind: "move", id, sx: ev.clientX, sy: ev.clientY, group: keys.map((k) => ({ k, ox: P[k].x, oy: P[k].y })), moved: false };
+    const d: Drag = { kind: "move", id, sx: ev.clientX, sy: ev.clientY, group: keys.map(hold), moved: false };
     dragRef.current = d; setDrag(d);
   };
+
   const onWorldMove = (ev: React.PointerEvent) => {
     const d = dragRef.current; if (!d) return;
     if (d.kind === "move") {
@@ -135,24 +151,43 @@ export function Canvas(p: CanvasProps) {
     const d = dragRef.current; dragRef.current = null; setDrag(null);
     if (!d) return;
     if (d.kind === "move") {
-      if (!d.moved) { if (p.onClickTile) p.onClickTile(d.id); else p.onSelect(new Set([d.id])); p.onSelectGroup(null); return; }
+      if (!d.moved) {
+        if (isDouble(d.id)) { p.onOpen(d.id); return; }
+        if (p.onClickTile) p.onClickTile(d.id); else p.onSelect(new Set([d.id]));
+        p.onSelectGroup(null); return;
+      }
+      // kafelki zostają w nowym miejscu (override) aż serwer przyśle zapisane położenia; patrz efekt niżej
+      d.group.forEach((g) => { dropped.current[g.k] = g.base; });
       const moved = d.group.map((g) => ({ id: g.k, x: P[g.k].x, y: P[g.k].y }));
       p.onMove(moved);
       // przynależność do grup po upuszczeniu
       const mem = membership(lg, P, p.size);
-      lg.forEach((g) => { const next = mem[g.id], cur = g.members; if (next.length !== cur.length || next.some((k) => !cur.includes(k))) p.onGroupChange(g.id, { members: next, auto: false }); });
+      // grupa automatyczna zostaje tam, gdzie jest narysowana (zapisujemy jej prostokąt), inaczej po zmianie składu wróciłaby do starego prostokąta z bazy
+      lg.forEach((g) => { const next = mem[g.id], cur = g.members; if (next.length !== cur.length || next.some((k) => !cur.includes(k))) p.onGroupChange(g.id, { x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), members: next, auto: false }); });
     } else if (d.kind === "gmove" || d.kind === "gresize") {
-      if (!d.moved) return;
+      if (!d.moved) { if (d.kind === "gmove" && isDouble("g:" + d.g.id)) p.onRename(d.g.id, d.g.name); return; }
       const g = lg.find((x) => x.id === d.g.id); if (!g) return;
       const mem = membership(lg, P, p.size);
+      gDropped.current[g.id] = d.base;
+      if (d.kind === "gmove") d.mem.forEach((m) => { dropped.current[m.k] = m.base; });
       p.onGroupChange(g.id, { x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), members: mem[g.id], auto: false });
       if (d.kind === "gmove") p.onMove(d.mem.map((m) => ({ id: m.k, x: P[m.k].x, y: P[m.k].y })));
-      setGOverride((prev) => { const n = { ...prev }; delete n[g.id]; return n; });
     } else if (d.kind === "link") {
       if (d.to && p.onLink) p.onLink(d.from, d.to);
-    } else if (d.kind === "origin") { p.onClickTile ? p.onClickTile("__origin") : p.onOpen(null); }
+    } else if (d.kind === "origin") {
+      if (isDouble("__origin")) p.onOpen(null);
+      else if (p.onClickTile) p.onClickTile("__origin"); else p.onOpen(null);
+    }
   };
-  useEffect(() => { if (!drag) setOverride({}); }, [p.items, drag]);   // po zapisie serwer podaje nowe położenia
+  // Po upuszczeniu kafelek (grupa) zostaje tam, gdzie go położono, dopóki serwer nie przyśle innego położenia niż w chwili chwycenia:
+  // wtedy zapis dotarł (albo „Ułóż” je skasował) i wracamy do położeń z serwera. Bez tego kafelek skakał na stare miejsce zaraz po upuszczeniu.
+  useEffect(() => {
+    const same = (a: Pos | undefined, b: Pos) => !!a && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5;
+    const stale = Object.keys(dropped.current).filter((k) => !same(sLayout.P[k], dropped.current[k]));
+    if (stale.length) { stale.forEach((k) => delete dropped.current[k]); setOverride((prev) => { const n = { ...prev }; stale.forEach((k) => delete n[k]); return n; }); }
+    const gStale = Object.keys(gDropped.current).filter((id) => { const g = sLayout.groups.find((x) => x.id === id), b = gDropped.current[id]; return !g || !same(g, b) || Math.abs(g.w - b.w) >= 0.5 || Math.abs(g.h - b.h) >= 0.5; });
+    if (gStale.length) { gStale.forEach((id) => delete gDropped.current[id]); setGOverride((prev) => { const n = { ...prev }; gStale.forEach((id) => delete n[id]); return n; }); }
+  }, [sLayout]);
   useEffect(() => {
     if (!p.apiRef) return;
     p.apiRef.current = { positions: () => P, viewCenter: () => { const c = canvasRef.current; return c ? { x: (c.scrollLeft + c.clientWidth / 2) / zoom, y: (c.scrollTop + c.clientHeight / 2) / zoom } : { x: 300, y: 300 }; } };
@@ -163,6 +198,7 @@ export function Canvas(p: CanvasProps) {
     const c = canvasRef.current!;
     if (ev.button === 1) { ev.preventDefault(); c.setPointerCapture(ev.pointerId); setPanning(true); panRef.current = { x: ev.clientX, y: ev.clientY, l: c.scrollLeft, t: c.scrollTop }; return; }
     const t = ev.target as HTMLElement;
+    if (t.closest("button, input, a, .zoom")) return;   // przyciski na kanwie (zoom, Dopasuj, Ułóż): bez przechwycenia wskaźnika, inaczej ich klik trafia w kanwę
     const hit = ev.button === 0 && t.closest<HTMLElement>("[data-edge]");
     if (hit) { ev.preventDefault(); const [from, to] = hit.dataset.edge!.split(">"); p.onUnlink?.(from, to); return; }
     if (ev.button !== 0 || ev.pointerType === "touch" || t.closest(".node") || t.closest(".group")) return;
@@ -234,11 +270,10 @@ export function Canvas(p: CanvasProps) {
     <div ref={canvasRef} className={"canvas" + (panning ? " panning" : "") + (drag?.kind === "link" ? " connecting" : "")} onPointerDown={onCanvasDown} onPointerMove={onCanvasMove} onPointerUp={endBand} onPointerCancel={endBand} onWheel={onWheel}>
       <div className="stage" style={{ width: Math.max(bb.w * zoom, 10), height: Math.max(bb.h * zoom, 10) }}>
         <div ref={worldRef} className="world" style={{ transform: `scale(${zoom})`, width: bb.w, height: bb.h }} onPointerDown={onWorldDown} onPointerMove={onWorldMove} onPointerUp={endDrag} onPointerCancel={endDrag}
-          onDoubleClick={(ev) => { const n = (ev.target as HTMLElement).closest<HTMLElement>(".node"); if (!n) return; if (n.dataset.origin) p.onOpen(null); else if (n.dataset.id) p.onOpen(n.dataset.id); }}
           onKeyDown={(ev) => { if (ev.key !== "Enter" && ev.key !== " ") return; const n = (ev.target as HTMLElement).closest<HTMLElement>(".node"); if (!n) return; ev.preventDefault(); if (n.dataset.origin) p.onOpen(null); else if (n.dataset.id) p.onOpen(n.dataset.id); }}>
           {lg.map((g) => (
             <div key={g.id} className={"group" + (p.selectedGroup === g.id ? " on" : "") + (dropGroup === g.id ? " drop" : "")} data-group={g.id} style={{ left: g.x, top: g.y, width: g.w, height: g.h, ["--g" as string]: GCOL[g.color % GCOL.length] }}>
-              <div className={"g-head" + (p.renaming === g.id ? " edit" : "")} data-ghead={g.id} title="Przeciągnij, aby przesunąć grupę z kafelkami · dwuklik zmienia nazwę" onDoubleClick={(e) => { e.stopPropagation(); p.onRename(g.id, g.name); }}>
+              <div className={"g-head" + (p.renaming === g.id ? " edit" : "")} data-ghead={g.id} title="Przeciągnij, aby przesunąć grupę z kafelkami · dwuklik zmienia nazwę">
                 {p.renaming === g.id
                   ? <input className="g-input" defaultValue={g.name} aria-label="Nazwa grupy" autoFocus onFocus={(e) => e.currentTarget.select()}
                       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); p.onGroupChange(g.id, { name: e.currentTarget.value.trim() || g.name }); p.onRename("", null); } else if (e.key === "Escape") { e.preventDefault(); p.onRename("", null); } }}
