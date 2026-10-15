@@ -61,7 +61,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
         {t.noteSummary ? <div className="note ok">{t.noteSummary}</div> : null}
         <div className="row sub" style={{ flexWrap: "wrap" }}>
           <span>szacunek {fmtMin(taskEst(t))}</span>
-          <span>zostało ~{fmtMin(remainCal(t, b.samples))}</span>
+          {t.doneAt ? null : <span>zostało ~{fmtMin(remainCal(t, b.samples))}</span>}
           {taskSpent(t) ? <span>zrobione {fmtMin(taskSpent(t))}</span> : null}
           {t.dependsOn.length ? <span>po: {t.dependsOn.map((d) => b.tasks.find((x) => x.id === d)?.title ?? "?").join(", ")}</span> : null}
         </div>

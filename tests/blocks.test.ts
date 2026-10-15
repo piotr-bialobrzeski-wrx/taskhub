@@ -19,12 +19,12 @@ describe("uniwersalne bloki", () => {
     expect(Blocks.safeParse([{ type: "clickup_card" }]).success).toBe(false);
     expect(Fact.safeParse({ label: "x" }).success).toBe(false);
   });
-  it("składanie bez modelu: szczegóły, fakty, szkic, załączniki, link", () => {
+  it("składanie bez modelu: szczegóły, fakty, szkic, załączniki; link zostaje przyciskiem akcji", () => {
     const s = step({ detail: "Napisz do Ani", output: "Cześć Aniu…", needsApproval: true, tool: "slack", link: "https://slack.com/x" });
     const blocks = composeStatic(s, [{ label: "Adresat", value: "Ania", pinned: false, hidden: false }, { label: "Szum", value: "1", pinned: false, hidden: true }], [
       { id: "a1", kind: "image", name: "z.png", url: "https://x/z.png", caption: null, analysis: null, keep: false, expiresAt: null, mime: "image/png" },
     ]);
-    expect(blocks.map((b) => b.type)).toEqual(["text", "facts", "draft", "media", "link"]);
+    expect(blocks.map((b) => b.type)).toEqual(["text", "facts", "draft", "media"]);
     const facts = blocks[1] as { facts: unknown[] }; expect(facts.facts).toHaveLength(1);
     const draft = blocks[2] as { target: { app: string } }; expect(draft.target.app).toBe("slack");
   });

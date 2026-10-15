@@ -19,7 +19,7 @@ html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.
 a { color: var(--accent); text-decoration: none; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
-.app { max-width: 1080px; margin: 0 auto; padding: var(--s-6) var(--s-5) 80px; }
+.app { max-width: 1080px; margin: 0 auto; padding: var(--s-6) var(--s-5) 110px; }
 .top { display: flex; align-items: center; gap: var(--s-4); margin-bottom: var(--s-6); }
 .top h1 { font-size: 18px; margin: 0; }
 .top .sp { flex: 1; }
@@ -88,6 +88,7 @@ input.in { height: 34px; padding: 0 var(--s-4); border: 0; border-radius: var(--
 .chat { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(720px, calc(100% - 32px)); display: flex; gap: var(--s-3); padding: var(--s-3); border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 8px 30px rgba(0,0,0,.35), inset 0 0 0 1px var(--line); }
 .chat input { flex: 1; height: 38px; border: 0; background: transparent; padding: 0 var(--s-4); outline: none; }
 .reply { margin-top: var(--s-4); }
+.reply .lbl { display: block; }
 .tag { font-size: 11px; color: var(--sub); }
 .tool-dot { width: 8px; height: 8px; border-radius: 99px; background: var(--c); display: inline-block; }
 /* kolory projektów, formularze, drobne */

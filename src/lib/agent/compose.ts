@@ -24,7 +24,7 @@ Zasady:
 - Pisz po polsku, chyba że zasady projektu każą inaczej (np. treść szkicu po angielsku).
 Odpowiadasz wyłącznie JSON zgodnym ze schematem.`;
 
-// szybka wersja bez modelu: fakty przypięte, załączniki, link
+// szybka wersja bez modelu: szczegóły, fakty, szkic lub wynik, załączniki (link kroku jest przyciskiem w akcjach)
 export function composeStatic(step: Step, facts: Fact[], attachments: repo.Attachment[]): Block[] {
   const blocks: Block[] = [];
   const shown = facts.filter((f) => !f.hidden);
@@ -35,7 +35,6 @@ export function composeStatic(step: Step, facts: Fact[], attachments: repo.Attac
     : { type: "text", title: step.status === "done" ? "Wynik" : "Szkic", body: step.output });
   const media = attachments.filter((a) => a.url).map((a) => ({ kind: a.kind, url: a.url!, name: a.name ?? undefined, caption: a.caption ?? undefined, analysis: a.analysis ?? undefined, mime: a.mime ?? undefined }));
   if (media.length) blocks.push({ type: "media", items: media });
-  if (step.link) blocks.push({ type: "link", links: [{ url: step.link, title: `Otwórz w ${toolLabel(step.tool)}`, source: { app: step.tool } }] });
   return blocks;
 }
 

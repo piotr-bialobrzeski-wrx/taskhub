@@ -207,8 +207,13 @@ export async function saveProject(fd: FormData) {
   const o = await requireOwner();
   const id = str(fd, "id"), name = str(fd, "name"); if (!name) return;
   const weight = Math.min(5, Math.max(1, num(fd, "weight", 3)));
-  if (id) await repo.updateProject(o.id, id, { name, weight, language: str(fd, "language") || "pl" });
-  else { const p = await repo.createProject(o.id, name, weight); if (str(fd, "language")) await repo.updateProject(o.id, p.id, { language: str(fd, "language") }); }
+  const language = str(fd, "language") || "pl";
+  if (id) await repo.updateProject(o.id, id, { name, weight, language });
+  else {
+    const existing = await repo.findProjectByName(o.id, name);   // ta sama nazwa = ten sam projekt, bez duplikatów
+    if (existing) await repo.updateProject(o.id, existing.id, { weight, language });
+    else { const p = await repo.createProject(o.id, name, weight); await repo.updateProject(o.id, p.id, { language }); }
+  }
   revalidatePath("/settings"); refresh();
 }
 export async function removeProject(id: string) {

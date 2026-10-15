@@ -57,7 +57,7 @@ export default async function Home() {
     <main className="app">
       <div className="top">
         <h1>Task Hub</h1>
-        <span className="sub">{open.length} otwartych · ~{fmtMin(totalLeft)}{totalLeft !== rawLeft ? ` (szacunki ${fmtMin(rawLeft)})` : ""} · ok. {Math.ceil(totalLeft / 60 / WORK_HOURS)} dni</span>
+        <span className="sub">{open.length} otwartych{open.length ? ` · ~${fmtMin(totalLeft)}${totalLeft !== rawLeft ? ` (szacunki ${fmtMin(rawLeft)})` : ""} · ok. ${Math.ceil(totalLeft / 60 / WORK_HOURS)} dni` : ""}</span>
         <span className="sp" />
         <Link className="pill" href="/rules">Zasady</Link>
         <Link className="pill" href="/settings">Ustawienia</Link>
@@ -78,7 +78,7 @@ export default async function Home() {
       })}
 
       <div className="stack">
-        {open.length ? open.map((s) => <TaskRow key={s.task.id} s={s} samples={b.samples} />) : <div className="card sub">Brak otwartych zadań. Napisz w polu na dole, co wpadło, a agent założy zadanie i rozbije je na kroki.</div>}
+        {open.length ? open.map((s) => <TaskRow key={s.task.id} s={s} samples={b.samples} />) : <div className="card sub">Brak otwartych zadań.</div>}
       </div>
 
       {done.length ? (
