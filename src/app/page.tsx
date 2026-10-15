@@ -8,6 +8,7 @@ import { fmtMin, remainCal, remainEst, taskSpent, todayISO, WORK_HOURS } from "@
 import { taskState, type Scored } from "@/lib/agent/context";
 import { Prio } from "@/components/Prio";
 import { ChatBar } from "@/components/ChatBar";
+import { availableProviders } from "@/lib/ai";
 import { PendingButton } from "@/components/Pending";
 import { chat, logout, purgeTaskAction, restoreTask } from "./actions";
 import type { TimeSample } from "@/lib/schema";
@@ -47,6 +48,7 @@ export default async function Home() {
   const done = live.filter((s) => s.task.doneAt);
   const trash = b.tasks.filter((t) => t.deletedAt);
   const today = todayISO();
+  const aiOn = availableProviders().length > 0;
   const dueToday = open.filter((s) => s.task.due && s.task.due <= today);
   const totalLeft = open.reduce((a, s) => a + remainCal(s.task, b.samples), 0);
   const rawLeft = open.reduce((a, s) => a + remainEst(s.task), 0);
@@ -105,7 +107,9 @@ export default async function Home() {
 
       {lastAgent ? <div className="reply note" style={{ marginTop: 20 }}><span className="lbl">Agent</span>{lastAgent.text}</div> : null}
 
-      <ChatBar action={chat} placeholder={b.tasks.length ? "Co wpadło? Albo: mam 1,5 h, co robić?" : "Wklej wiadomość albo opisz sprawę, agent założy zadanie"} />
+      {aiOn
+        ? <ChatBar action={chat} placeholder={b.tasks.length ? "Co wpadło? Albo: mam 1,5 h, co robić?" : "Wklej wiadomość albo opisz sprawę, agent założy zadanie"} />
+        : <ChatBar action={chat} mode="plain" placeholder="Opisz sprawę albo wklej wiadomość; powstanie zadanie, kroki ułożysz w Claude" />}
     </main>
   );
 }

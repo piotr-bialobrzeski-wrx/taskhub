@@ -230,7 +230,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       </details>
 
       {lastAgent ? <div className="reply note"><span className="lbl">Agent</span>{lastAgent.text}</div> : null}
-      <ChatBar action={chat} taskId={t.id} placeholder="Napisz do agenta o tym zadaniu: dodaj krok, zmień, podaj adresata…" />
+      {aiOn
+        ? <ChatBar action={chat} taskId={t.id} placeholder="Napisz do agenta o tym zadaniu: dodaj krok, zmień, podaj adresata…" />
+        : <ChatBar action={chat} taskId={t.id} mode="plain" placeholder="Dopisz notatkę do zadania (polecenia wydawaj w Claude)" />}
     </main>
   );
 }
