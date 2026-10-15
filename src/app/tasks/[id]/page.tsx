@@ -5,7 +5,7 @@ import { requireOwner, appUrl } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { bundle } from "@/lib/services";
 import { composeStatic } from "@/lib/agent/compose";
-import { handoffPrompt, claudeUrl, codeCommand } from "@/lib/agent/handoff";
+import { breakdownPrompt, handoffPrompt, claudeUrl, codeCommand } from "@/lib/agent/handoff";
 import { EXTERNAL_TOOLS, TOOL_LABELS, toolLabel, type Step } from "@/lib/schema";
 import { calEst, calibrationFor, estOf, fmtMin, remainCal, spentMin, taskEst, taskSpent } from "@/lib/time";
 import { LEVELS } from "@/lib/priority";
@@ -90,6 +90,19 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
 
       <h2 className="sec">Kroki</h2>
       <div className="stack">
+        {!t.steps.length && !t.doneAt && !aiOn ? (() => {
+          const bp = breakdownPrompt(t, b.rules, { appUrl: appUrl(), projectName: cur.project?.name });
+          return (
+            <div className="card stack">
+              <div className="sub">Zadanie nie ma jeszcze kroków. Ułóż je w swoim Claude; przez konektor Task Hub zapisze je tu od razu.</div>
+              <div className="actions">
+                <a className="pill primary" href={claudeUrl(bp)} target="_blank" rel="noopener">Rozłóż na kroki w Claude ↗</a>
+                <CopyButton text={bp} label="Kopiuj prompt" />
+                <CopyButton text={codeCommand(bp)} label="Kopiuj komendę Claude Code" />
+              </div>
+            </div>
+          );
+        })() : null}
         {t.steps.map((s, i) => {
           const facts = factsPerStep[i];
           const blocks = s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments);

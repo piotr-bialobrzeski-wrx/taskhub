@@ -16,8 +16,19 @@ JAK TO WPADŁO: ${(task.source || "-").slice(0, 1500)}
 ${(opts.attachments ?? []).length ? `GRAFIKI (analiza):\n${opts.attachments!.map((a, k) => `- ${k + 1}. ${a.caption ?? ""}: ${(a.analysis ?? "").slice(0, 1200)}`).join("\n")}\n` : ""}${task.noteText ? `NOTATKA: ${task.noteText}\n` : ""}${rt ? rt + "\n" : ""}
 TEN KROK (${toolLabel(step.tool)}): ${step.title}
 ${step.detail ? `SZCZEGÓŁY: ${step.detail}\n` : ""}${prev ? `WYNIKI WCZEŚNIEJSZYCH KROKÓW:\n${prev}\n` : ""}${done ? `INNE ZROBIONE KROKI:\n${done}\n` : ""}
-Na końcu zgłoś wynik do Task Hub: jeśli masz podłączony konektor Task Hub, wywołaj complete_step dla kroku ${step.id} z krótkim podsumowaniem i linkiem do wyniku. Jeśli nie, napisz na końcu RAPORT (3-6 zdań: co powstało, gdzie jest, link, co zostało do zrobienia), który wkleję w Task Hub.${opts.appUrl ? `\nKrok w Task Hub: ${opts.appUrl}/tasks/${task.id}?step=${step.id}` : ""}`;
+Jeśli masz podłączony konektor Task Hub: istotne informacje, które zbierzesz po drodze (z ClickUp, Slacka, poczty), zapisz przez add_facts przy kroku ${step.id}, a szkic do zatwierdzenia albo pytanie do mnie ułóż przez set_blocks. Na końcu zgłoś wynik przez complete_step dla kroku ${step.id} z krótkim podsumowaniem i linkiem do wyniku. Jeśli nie, napisz na końcu RAPORT (3-6 zdań: co powstało, gdzie jest, link, co zostało do zrobienia), który wkleję w Task Hub.${opts.appUrl ? `\nKrok w Task Hub: ${opts.appUrl}/tasks/${task.id}?step=${step.id}` : ""}`;
 }
 
 export const claudeUrl = (prompt: string) => "https://claude.ai/new?q=" + encodeURIComponent(prompt);
 export const codeCommand = (prompt: string) => `claude "${prompt.replace(/(["\\$`])/g, "\\$1")}"`;
+
+// Rozłożenie zadania na kroki w Claude z subskrypcji (bez klucza API w aplikacji): Claude zapisuje kroki przez add_steps.
+export function breakdownPrompt(task: Task, rules: Rule[], opts: { appUrl?: string; projectName?: string } = {}): string {
+  const rt = rulesText(rules, task.projectId, []);
+  return `Rozłóż na kroki zadanie „${task.title}” z mojej aplikacji Task Hub (id zadania: ${task.id}).
+
+CEL: ${task.summary || "-"}
+JAK TO WPADŁO: ${(task.source || "-").slice(0, 2500)}
+${opts.projectName ? `PROJEKT: ${opts.projectName}\n` : ""}${task.due ? `TERMIN: ${task.due}\n` : ""}${rt ? rt + "\n" : ""}
+Jeśli masz podłączony konektor Task Hub: wywołaj get_task dla tego zadania (pełny kontekst) i get_rules, zaproponuj mi kroki, a po mojej zgodzie zapisz je przez add_steps. Każdy krok: title (co zrobić, od czasownika), tool (slack, gmail, clickup, calendar, claude, claudeapp, code, manual albo inna aplikacja), detail (co dokładnie, gdzie, dla kogo), est w minutach (wielokrotność 15), needsApproval true, gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 dla kroków, które muszą poczekać na wcześniejsze. 2-7 kroków, bez kroków pustych; gdy czegoś brakuje w opisie, dopytaj przed zapisem. Jeśli konektora nie masz, wypisz kroki w tym układzie jako listę, a ja wkleję je do Task Hub.${opts.appUrl ? `\nZadanie w Task Hub: ${opts.appUrl}/tasks/${task.id}` : ""}`;
+}

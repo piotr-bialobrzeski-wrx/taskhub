@@ -41,8 +41,8 @@ export async function chat(fd: FormData) {
   if (!ai.enabled) {
     // bez klucza modelu: na kanwie tekst staje się zadaniem, w zadaniu zostaje jako notatka rozmowy
     await repo.addChat(o.id, taskId, "user", text);
-    if (taskId) await repo.addChat(o.id, taskId, "agent", "Brak klucza modelu (ANTHROPIC_API_KEY albo OPENAI_API_KEY), zapisałem wiadomość bez działań.");
-    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: text }); await repo.addChat(o.id, null, "agent", "Brak klucza modelu, założyłem zadanie z Twojego tekstu."); goTo = t.id; }
+    if (taskId) await repo.addChat(o.id, taskId, "agent", "Zapisałem wiadomość. Agent wbudowany jest wyłączony (brak klucza modelu), więc pracę w tym zadaniu prowadź przyciskami „w Claude”.");
+    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: text }); await repo.addChat(o.id, null, "agent", "Założyłem zadanie z Twojego tekstu. Kroki ułóż przyciskiem „Rozłóż na kroki w Claude” w zadaniu."); goTo = t.id; }
   } else {
     try {
       const { done } = await runChat(text, { ai, ownerId: o.id, taskId });

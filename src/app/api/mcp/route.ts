@@ -1,4 +1,4 @@
-// Serwer MCP Task Hub: Claude, Claude Code, ChatGPT i własne agenty podłączają się tutaj tokenem.
+// Serwer MCP Task Hub: Claude, Claude Code, ChatGPT i własne agenty podłączają się tutaj tokenem (OAuth albo nagłówek).
 // Dostają zadania z zasadami i kontekstem, zgłaszają wyniki kroków, dopisują fakty i migawki.
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
@@ -6,12 +6,19 @@ import * as repo from "@/lib/repo";
 import { contextText, brief, scoreAll } from "@/lib/agent/context";
 import { rulesText } from "@/lib/agent/context";
 import { finishStep } from "@/lib/services";
-import { Fact } from "@/lib/schema";
+import { Blocks, Fact } from "@/lib/schema";
+import { sql } from "@/lib/db";
+import { originOf, wwwAuthenticate } from "@/lib/oauth";
 
 export const maxDuration = 60;
 
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 const json = (v: unknown) => text(JSON.stringify(v, null, 1));
+// krok należy do właściciela tokenu? zwraca id zadania
+async function ownedStep(ownerId: string, stepId: string): Promise<string | null> {
+  const [r] = await sql()`select s.task_id from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId}`;
+  return r ? (r.taskId as string) : null;
+}
 
 function buildHandler(ownerId: string) {
   return createMcpHandler((server) => {
@@ -76,15 +83,28 @@ function buildHandler(ownerId: string) {
     server.registerTool("update_step", {
       title: "Zmień krok", description: "Zmienia tytuł, opis, szacunek albo link kroku.",
       inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), est: z.number().int().optional(), link: z.string().optional() }),
-    }, async (a) => { await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, estMin: a.est, link: a.link }); return text("Zmieniono."); });
+    }, async (a) => {
+      if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
+      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, estMin: a.est, link: a.link }); return text("Zmieniono.");
+    });
+
+    server.registerTool("set_blocks", {
+      title: "Ułóż panel kroku", description: "Zapisuje panel kroku z uniwersalnych bloków, tak jak robi to agent wbudowany: text, facts (fakty z pochodzeniem), thread (wątek wiadomości), draft (szkic do zatwierdzenia z target.app i target.where), list, media, link, question (pytanie z opcjami). Pokaż tylko to, co ważne dla tego kroku. rememberFor: nazwa aplikacji źródłowej, jeśli ten układ ma być wzorem dla podobnych kroków.",
+      inputSchema: z.object({ stepId: z.string(), blocks: Blocks, rememberFor: z.string().optional() }),
+    }, async (a) => {
+      if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
+      await repo.updateStep(a.stepId, { blocks: a.blocks });
+      if (a.rememberFor) await repo.setLayoutMemory(ownerId, a.rememberFor, a.blocks);
+      return text("Panel zapisany.");
+    });
 
     server.registerTool("complete_step", {
       title: "Krok gotowy", description: "Zgłasza wynik kroku: krótkie podsumowanie, link do wyniku, opcjonalnie czas w minutach. Gdy to ostatni krok, zadanie się kończy i agent pisze notatkę końcową.",
       inputSchema: z.object({ stepId: z.string(), summary: z.string(), link: z.string().optional(), spentMin: z.number().int().optional() }),
     }, async (a) => {
-      const [row] = await (await import("@/lib/db")).sql()`select task_id from steps where id = ${a.stepId}`;
-      if (!row) return text("Nie ma takiego kroku.");
-      const r = await finishStep(ownerId, row.taskId as string, a.stepId, { report: a.summary, link: a.link, addSpentSec: a.spentMin ? a.spentMin * 60 : 0 });
+      const taskId = await ownedStep(ownerId, a.stepId);
+      if (!taskId) return text("Nie ma takiego kroku.");
+      const r = await finishStep(ownerId, taskId, a.stepId, { report: a.summary, link: a.link, addSpentSec: a.spentMin ? a.spentMin * 60 : 0 });
       return text(r.closed ? "Krok zapisany, zadanie ukończone." : "Krok zapisany.");
     });
 
@@ -92,6 +112,7 @@ function buildHandler(ownerId: string) {
       title: "Dopisz fakty", description: "Zapisuje istotne informacje do kroku z pochodzeniem (np. z ClickUp: lista, sprint, estymata).",
       inputSchema: z.object({ stepId: z.string(), facts: z.array(Fact).max(12), replace: z.boolean().optional() }),
     }, async (a) => {
+      if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
       const old = a.replace ? [] : await repo.listFacts({ stepId: a.stepId });
       await repo.replaceFacts({ stepId: a.stepId }, [...old, ...a.facts]);
       return text("Zapisano fakty.");
@@ -100,7 +121,10 @@ function buildHandler(ownerId: string) {
     server.registerTool("add_snapshot", {
       title: "Zapisz migawkę", description: "Zapisuje surowe dane z zewnętrznej aplikacji (np. cały ticket z ClickUp) przy kroku; agent w Task Hub wybierze z nich istotne pola.",
       inputSchema: z.object({ stepId: z.string(), app: z.string(), raw: z.unknown(), url: z.string().optional(), sourceId: z.string().optional() }),
-    }, async (a) => { await repo.addSnapshot({ stepId: a.stepId }, a.app, a.raw, { url: a.url, sourceId: a.sourceId }); return text("Zapisano migawkę."); });
+    }, async (a) => {
+      if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
+      await repo.addSnapshot({ stepId: a.stepId }, a.app, a.raw, { url: a.url, sourceId: a.sourceId }); return text("Zapisano migawkę.");
+    });
 
     server.registerTool("add_rule", {
       title: "Dodaj zasadę", description: "Dodaje zasadę pracy: scope global | project | tool.",
@@ -118,7 +142,7 @@ async function authorize(req: Request): Promise<string | null> {
 
 async function handle(req: Request): Promise<Response> {
   const ownerId = await authorize(req);
-  if (!ownerId) return new Response(JSON.stringify({ error: "Brak albo zły token. Nagłówek: Authorization: Bearer th_..." }), { status: 401, headers: { "content-type": "application/json", "www-authenticate": 'Bearer realm="task-hub"' } });
+  if (!ownerId) return new Response(JSON.stringify({ error: "Brak albo zły token. Połącz konektor przez OAuth (aplikacja Claude: Connectors) albo podaj nagłówek Authorization: Bearer th_..." }), { status: 401, headers: { "content-type": "application/json", "www-authenticate": wwwAuthenticate(originOf(req)) } });
   return buildHandler(ownerId)(req);
 }
 

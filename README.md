@@ -29,24 +29,22 @@ Testy: `npm test` (testy bazy odpalają się tylko z `TEST_DATABASE_URL=postgres
 
 1. **Supabase** (baza): [supabase.com](https://supabase.com) → New project, region Frankfurt (eu-central-1), zapisz hasło bazy; w sekcji Security wyłącz Data API (aplikacja łączy się bezpośrednio). Kliknij **Connect** → zakładka **Transaction pooler** → skopiuj URI, wstaw hasło w miejsce `[YOUR-PASSWORD]`; to jest `DATABASE_URL`. „Direct connection” nie działa z Vercela (tylko IPv6).
 2. **Migracje** uruchamiają się same przy każdym buildzie (`npm run build` najpierw wykonuje `migrate --if-configured`). Skrypt zapisuje w tabeli `schema_migrations`, które pliki już poszły, więc kolejne wdrożenia niczego nie psują. Lokalnie: `DATABASE_URL=... npm run db:migrate`. Warstwa wektorowa (pgvector) jest opcjonalna: gdy rozszerzenia nie ma, ta jedna migracja jest pomijana z ostrzeżeniem.
-3. **Vercel** (hosting): [vercel.com](https://vercel.com) → Add New Project → wskaż repo GitHub. W *Environment Variables* wpisz zmienne z `.env.example` (`DATABASE_URL`, `TASKHUB_OWNER_EMAIL`, `TASKHUB_PASSWORD`, `TASKHUB_SECRET`, klucz `ANTHROPIC_API_KEY` i/lub `OPENAI_API_KEY`; `APP_URL` można dodać po pierwszym wdrożeniu, gdy znasz adres). Deploy. Każdy push na `main` wdraża nową wersję. Funkcje działają we Frankfurcie (`vercel.json`), blisko bazy.
+3. **Vercel** (hosting): [vercel.com](https://vercel.com) → Add New Project → wskaż repo GitHub. W *Environment Variables* wpisz zmienne z `.env.example` (`DATABASE_URL`, `TASKHUB_OWNER_EMAIL`, `TASKHUB_PASSWORD`, `TASKHUB_SECRET`, opcjonalnie klucz `ANTHROPIC_API_KEY` i/lub `OPENAI_API_KEY` dla agenta wbudowanego; `APP_URL` można dodać po pierwszym wdrożeniu, gdy znasz adres). Deploy. Każdy push na `main` wdraża nową wersję. Funkcje działają we Frankfurcie (`vercel.json`), blisko bazy.
 4. Wejdź na adres aplikacji, zaloguj się hasłem z `TASKHUB_PASSWORD`.
 
 Koszt: Supabase Free (500 MB) i Vercel Hobby wystarczą na długo; płacisz tylko za tokeny modelu.
 
 ## Podłączenie klientów przez MCP
 
-W aplikacji: *Ustawienia → Klienci MCP → Nowy token*. Token pokazuje się raz; w bazie jest tylko jego skrót.
+Adres konektora: `https://TWOJA-APLIKACJA.vercel.app/api/mcp`. Klienci logują się przez OAuth (strona zgody w Task Hub, potwierdzenie hasłem aplikacji) albo tokenem z *Ustawienia → Klienci MCP → Nowy token* (token pokazuje się raz; w bazie jest tylko jego skrót). Każde połączenie widać w Ustawieniach i można je unieważnić.
 
-Claude Code:
+- **Aplikacja Claude** (przeglądarka, komputer, telefon): Ustawienia Claude → Connectors → Add custom connector → adres jak wyżej → Connect. Działa na subskrypcji, bez klucza API.
+- **Claude Code**: `claude mcp add --transport http task-hub https://TWOJA-APLIKACJA.vercel.app/api/mcp`, potem `/mcp` → task-hub → logowanie w przeglądarce. Albo z tokenem: `--header "Authorization: Bearer th_..."`.
+- **ChatGPT**: Settings → Connectors → Create → adres jak wyżej, uwierzytelnianie OAuth.
 
-```bash
-claude mcp add --transport http task-hub https://TWOJA-APLIKACJA.vercel.app/api/mcp --header "Authorization: Bearer th_..."
-```
+Bez klucza modelu w aplikacji pracę agenta wykonuje podłączony klient: zadanie bez kroków ma przycisk „Rozłóż na kroki w Claude”, krok oddany do Claude ma „Otwórz w Claude”; prompt każe zapisać wynik przez konektor (`add_steps`, `add_facts`, `set_blocks`, `complete_step`).
 
-Claude (aplikacja) i ChatGPT: dodaj własny konektor MCP z adresem `https://TWOJA-APLIKACJA.vercel.app/api/mcp` i nagłówkiem `Authorization: Bearer th_...`.
-
-Narzędzia serwera: `list_tasks`, `get_task` (zadanie z zasadami i kontekstem), `get_rules`, `create_task`, `update_task`, `add_steps`, `update_step`, `complete_step` (zgłoszenie wyniku kroku z raportem i linkiem), `add_facts`, `add_snapshot` (surowe dane z innej aplikacji, do interpretacji przez agenta), `add_rule`.
+Narzędzia serwera: `list_tasks`, `get_task` (zadanie z zasadami i kontekstem), `get_rules`, `create_task`, `update_task`, `add_steps`, `update_step`, `set_blocks` (panel kroku z uniwersalnych bloków), `complete_step` (zgłoszenie wyniku kroku z raportem i linkiem), `add_facts`, `add_snapshot` (surowe dane z innej aplikacji, do interpretacji przez agenta), `add_rule`.
 
 Typowy przebieg: w Task Hub klikasz „Zrób w Claude” przy kroku → otwiera się Claude z gotowym promptem (cel, zasady, wyniki wcześniejszych kroków) → Claude pracuje w swoich konektorach (Slack, ClickUp, Gmail) → na końcu wywołuje `complete_step` albo oddaje raport, który wklejasz. Task Hub odbiera raport, wyciąga linki i, gdy to był ostatni krok, pisze notatkę końcową.
 
