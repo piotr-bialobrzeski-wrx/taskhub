@@ -37,7 +37,7 @@ a { color: var(--accent); }
 [hidden] { display: none !important; }
 
 /* ---------- powierzchnie ---------- */
-.app { position: fixed; inset: 0; overflow: hidden;
+.app { position: fixed; inset: 0; overflow: hidden; --side: 16px; --mk-h: 0px;   /* --side: margines doku z boków (w wąskim oknie robi miejsce pigułkom zoomu i Kafelek/Grupa); --mk-h: ile pigułka Kafelek/Grupa zajmuje nad dokiem na telefonie */
   background: radial-gradient(560px 380px at 8% -8%, var(--glow-1), transparent 62%), radial-gradient(640px 420px at 96% 4%, var(--glow-2), transparent 60%), var(--bg); }
 .page { max-width: 1080px; margin: 0 auto; padding: var(--s-6) var(--s-5) 60px; min-height: 100%; }
 .glass { background: var(--glass); backdrop-filter: blur(22px) saturate(160%);   /* tylko bez prefiksu: z dopisanym -webkit- minifikator gubił wersję dla Chrome */
@@ -180,13 +180,10 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .gpill.center { position: absolute; left: 50%; transform: translateX(-50%); }
 .pillbar > .pl { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: calc(50% - 110px); pointer-events: none; }   /* lewa strona kończy się przed środkową pigułką */
 .pillbar > .pl > .gpill { flex: 0 1 auto; }
-.pillbar > .pl > .gpill ~ .gpill { flex: none; }   /* Kafelek/Grupa nie kurczy się; skraca się tytuł w pigułce wstecz */
 .pillbar.fixed { position: fixed; }
 .brand { display: inline-flex; align-items: center; gap: 8px; height: 32px; min-width: 0; padding: 0 8px 0 5px; border: 0; border-radius: 999px; background: transparent; color: var(--text); font: inherit; font-weight: 650; letter-spacing: -0.01em; cursor: pointer; }
 .brand:hover, .brand[aria-expanded="true"] { background: var(--accent-soft); }
 .brand .ct { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.brand > svg { color: var(--sub); flex: none; transition: transform .15s; }
-.brand[aria-expanded="true"] > svg { transform: rotate(180deg); }
 .crumb { padding: 6px 12px 6px 4px; font-weight: 650; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; }
 .crumb .ct { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .logo { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(180deg, var(--accent-2), var(--accent)); display: grid; place-items: center; color: var(--accent-text); flex: none; }
@@ -198,7 +195,10 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .menu .mi:hover { background: var(--accent-soft); }
 .menu .mi small { color: var(--sub); font-size: 11.5px; }
 .menu hr { border: 0; height: 1px; background: var(--line); margin: 4px 8px; }
-.namer { position: absolute; z-index: 12; left: max(16px, env(safe-area-inset-left, 0px)); top: calc(66px + env(safe-area-inset-top, 0px)); display: flex; gap: 6px; align-items: center; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5); border-radius: 999px; width: min(420px, calc(100% - 32px)); }
+/* Kafelek/Grupa: prawy dolny róg, lustro pigułki powiększenia; na wąskim ekranie nad dokiem (dok zajmuje całą szerokość) */
+.mkpill, .namer { --mk-b: calc(16px + env(safe-area-inset-bottom, 0px)); }
+.mkpill { position: fixed; z-index: 9; right: max(16px, env(safe-area-inset-right, 0px)); bottom: var(--mk-b); }
+.namer { position: fixed; z-index: 12; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(var(--mk-b) + 52px); display: flex; gap: 6px; align-items: center; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5); border-radius: 999px; width: min(420px, calc(100% - 32px)); }
 .namer input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; padding: 6px 0; }
 .zoom { position: fixed; z-index: 9; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 2px; padding: var(--s-2); border-radius: 999px; }
 .zoom input { width: 48px; height: 28px; border: 0; padding: 0; border-radius: 999px; background: transparent; font: 600 11.5px/1 var(--font-mono); color: var(--sub); text-align: center; font-variant-numeric: tabular-nums; outline: none; }
@@ -211,12 +211,12 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .runbar.withpanel { left: max(16px, env(safe-area-inset-left, 0px)); transform: none; max-width: calc(100% - var(--dw, 520px) - 64px); }
 .rb-t { font-size: 12.5px; color: var(--sub); overflow: hidden; text-overflow: ellipsis; }
 .rb-t b { color: var(--text); }
-.selbar { position: absolute; z-index: 11; left: 50%; transform: translateX(-50%); bottom: calc(30px + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px));
-  display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 16px; border-radius: 999px; white-space: nowrap; width: min(720px, calc(100% - 32px)); overflow-x: auto; }   /* tak szeroki jak dok czatu */
+.selbar { position: absolute; z-index: 11; left: 50%; transform: translateX(-50%); bottom: calc(30px + var(--mk-h) + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 16px; border-radius: 999px; white-space: nowrap; width: min(720px, calc(100% - 2 * var(--side))); overflow-x: auto; }   /* tak szeroki jak dok czatu */
 .selbar .end { margin-left: auto; }
 .selbar .dv { width: 1px; height: 22px; background: var(--line); flex: none; margin: 0 4px; }
 .selbar .btn { padding: 7px 12px; }
-.toast { position: absolute; z-index: 20; left: 50%; transform: translateX(-50%); bottom: calc(34px + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); padding: 9px 16px; border-radius: 999px; font-size: 12.5px; max-width: calc(100% - 32px); }
+.toast { position: absolute; z-index: 20; left: 50%; transform: translateX(-50%); bottom: calc(34px + var(--mk-h) + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); padding: 9px 16px; border-radius: 999px; font-size: 12.5px; max-width: calc(100% - 2 * var(--side)); }
 .empty { position: fixed; z-index: 4; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(460px, calc(100% - 32px)); border-radius: var(--r-lg); padding: var(--s-7); display: flex; flex-direction: column; gap: 12px; }
 .empty h2 { margin: 0; font-size: 18px; }
 .empty p { margin: 0; color: var(--sub); }
@@ -272,7 +272,7 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 
 /* ---------- dok, odpowiedź agenta, pytania ---------- */
 .dockwrap { position: absolute; z-index: 10; left: 0; right: 0; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; justify-content: center;
-  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); pointer-events: none; }
+  padding-left: max(var(--side), env(safe-area-inset-left, 0px)); padding-right: max(var(--side), env(safe-area-inset-right, 0px)); pointer-events: none; }
 .dock { pointer-events: auto; display: flex; flex-direction: column; gap: var(--s-2); width: min(720px, 100%); padding: var(--s-2); border-radius: 23px; margin: 0; }
 .dock-row { display: flex; align-items: flex-end; gap: var(--s-2); padding-left: var(--s-1); }
 .dock input[type="file"] { display: none; }
@@ -295,13 +295,13 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .ctx b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ctx button { width: 20px; height: 20px; border: 0; border-radius: 999px; background: transparent; color: var(--sub); display: grid; place-items: center; padding: 0; flex: none; }
 .ctx button:hover { background: var(--surface); color: var(--text); }
-.answer { position: absolute; z-index: 10; left: 50%; transform: translateX(-50%); bottom: calc(38px + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px));
-  width: min(720px, calc(100% - 32px)); max-height: 46vh; overflow: auto; padding: var(--s-3) var(--s-3) var(--s-5) var(--s-5); border-radius: var(--r-lg); display: flex; flex-direction: column; gap: var(--s-3); }
+.answer { position: absolute; z-index: 10; left: 50%; transform: translateX(-50%); bottom: calc(38px + var(--mk-h) + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px));
+  width: min(720px, calc(100% - 2 * var(--side))); max-height: 46vh; overflow: auto; padding: var(--s-3) var(--s-3) var(--s-5) var(--s-5); border-radius: var(--r-lg); display: flex; flex-direction: column; gap: var(--s-3); }
 .ans-head { display: flex; align-items: center; }
-/* odpowiedź agenta: sama treść, X w prawym górnym rogu (wcięcie 6 = promień karty 20 − promień przycisku 14), tekst zawija się przed kolumną X */
+/* odpowiedź agenta: sama treść, X w prawej kolumnie wyśrodkowany w pionie (wcięcie 6 = promień karty 20 − promień przycisku 14), tekst zawija się przed kolumną X */
 .answer.plain { padding: var(--s-4) 44px var(--s-4) var(--s-5); overflow: visible; }
 .answer.plain .ans-text { padding-right: 0; max-height: 46vh; overflow: auto; }
-.ans-x { position: absolute; top: var(--s-2); right: var(--s-2); width: 28px; height: 28px; }
+.ans-x { position: absolute; top: 50%; transform: translateY(-50%); right: var(--s-2); width: 28px; height: 28px; }
 .ans-text { white-space: pre-wrap; line-height: 1.55; padding-right: var(--s-3); }
 .answer .row .in { flex: 1; }
 
@@ -484,10 +484,12 @@ body:has(> main.page) { background: radial-gradient(560px 380px at 8% -8%, var(-
 .hm-t { font-size: 11px; color: var(--sub); padding: 0 4px; }
 .hm-day { align-self: center; font-size: 11px; font-weight: 600; color: var(--sub); padding: var(--s-3) 0 var(--s-1); text-transform: uppercase; letter-spacing: .05em; }
 
+/* okno 861–1240 px: pigułki w dolnych rogach (zoom 244 px, Kafelek/Grupa 189 px) zachodziłyby na dok, więc dok i to, co nad nim, zwęża się symetrycznie */
+@media (min-width: 861px) and (max-width: 1240px) { .app:has(.zoom), .app:has(.mkpill) { --side: 280px; } }
 @media (max-width: 860px) {
   .gpill.center, .gpill[aria-label="Agent"] { display: none; }
   .pillbar > .pl { max-width: none; }
-  .crumb .ct, .vd, .brand .ct, .brand > svg { display: none; }                 /* wąski ekran: same ikony po lewej, szukajka bierze resztę */
+  .crumb .ct, .vd, .brand .ct { display: none; }                 /* wąski ekran: same ikony po lewej, szukajka bierze resztę */
   .brand { padding: 0 5px; }
   .a-stats { display: none; }
   .p-head { flex-wrap: wrap; }
@@ -498,6 +500,8 @@ body:has(> main.page) { background: radial-gradient(560px 380px at 8% -8%, var(-
   .p-tasks { padding-left: 0; }
   .detail { top: auto; left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: auto; max-width: none; height: 62%; }
   .grip, .zoom { display: none; }
+  .mkpill, .namer { --mk-b: calc(28px + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); }
+  .app:has(.mkpill) { --mk-h: 56px; }                                /* telefon: odpowiedź, pasek zaznaczenia i toast idą nad pigułkę Kafelek/Grupa */
   .runbar { max-width: calc(100% - 32px); }
   .grid2 { grid-template-columns: 1fr; }
 }

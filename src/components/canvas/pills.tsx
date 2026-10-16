@@ -26,11 +26,11 @@ export function useView(key: string) {
   return { view, onView };
 }
 
-// logo z nazwą jest przyciskiem menu (menu rozwija się pod spodem)
+// logo z nazwą jest przyciskiem menu (menu rozwija się pod spodem; bez ptaszka, rozwinięte menu samo to pokazuje)
 export function BrandButton({ open, onClick }: { open: boolean; onClick: () => void }) {
   return (
     <button className="brand" type="button" aria-label="Menu" aria-haspopup="menu" aria-expanded={open} onClick={onClick}>
-      <span className="logo"><Icon k="logo" size={12} sw={2} /></span><span className="ct">Task Hub</span><Icon k="chev" size={11} sw={2.2} />
+      <span className="logo"><Icon k="logo" size={12} sw={2} /></span><span className="ct">Task Hub</span>
     </button>
   );
 }
@@ -47,10 +47,10 @@ export function BackPill({ title, onBack, children }: { title?: string; onBack?:
   );
 }
 
-// Kafelek i Grupa: osobna pigułka, bo to narzędzia kanwy, nie część menu
+// Kafelek i Grupa: narzędzia kanwy w prawym dolnym rogu (lustro pigułki powiększenia po lewej), nie część górnego paska
 export function MakePill({ tileTitle, groupTitle, onTile, onGroup }: { tileTitle: string; groupTitle: string; onTile: () => void; onGroup: () => void }) {
   return (
-    <div className="gpill glass" role="toolbar" aria-label="Nowe na kanwie">
+    <div className="gpill glass mkpill" role="toolbar" aria-label="Nowe na kanwie">
       <button className="icobtn mk" type="button" title={tileTitle} onClick={onTile}><Icon k="tile" size={18} />Kafelek</button>
       <button className="icobtn mk" type="button" title={groupTitle} onClick={onGroup}><Icon k="group" size={18} />Grupa</button>
     </div>

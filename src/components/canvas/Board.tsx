@@ -267,7 +267,6 @@ export function Board(p: BoardProps) {
           {off ? <BackPill title={proj ? "Projekty" : "Archiwum"} onBack={showCanvas} /> : (
             <>
               <div className="gpill glass"><BrandButton open={menu} onClick={() => setMenu((m) => !m)} /></div>
-              {view === "canvas" ? <MakePill tileTitle="Nowe zadanie jako kafelek" groupTitle={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onTile={() => setNamer(namer === "tile" ? null : "tile")} onGroup={() => setNamer(namer === "group" ? null : "group")} /> : null}
             </>
           )}
         </div>
@@ -276,6 +275,7 @@ export function Board(p: BoardProps) {
         <SearchPill index={p.index} screen={screen} value={q} onChange={setQ} onPick={onPick} />
         <AgentPill agent={p.agent} aiOn={p.aiOn} />
       </div>
+      {!off && view === "canvas" ? <MakePill tileTitle="Nowe zadanie jako kafelek" groupTitle={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onTile={() => setNamer(namer === "tile" ? null : "tile")} onGroup={() => setNamer(namer === "group" ? null : "group")} /> : null}
 
       {menu ? (
         <div className="menu glass" role="menu" onPointerDown={(e) => e.stopPropagation()}>

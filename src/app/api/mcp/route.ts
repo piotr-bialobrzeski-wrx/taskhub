@@ -211,10 +211,33 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       inputSchema: z.object({ attachmentId: z.string(), caption: z.string().max(120).optional(), analysis: z.string().max(4000).optional() }),
     }, async (a) => text((await repo.updateAttachment(ownerId, a.attachmentId, { caption: a.caption, analysis: a.analysis })) ? "Zapisano opis." : "Nie ma takiego załącznika."));
 
+    server.registerTool("list_projects", {
+      title: "Projekty", description: "Lista projektów: id, nazwa, ważność 1–5, język, w którym agent pisze (pl, en, de, uk, fr, es).",
+      inputSchema: z.object({}),
+    }, async () => json((await repo.listProjects(ownerId)).map((p) => ({ id: p.id, name: p.name, weight: p.weight, language: p.language }))));
+
+    server.registerTool("create_project", {
+      title: "Nowy projekt", description: "Tworzy projekt albo, gdy projekt o tej nazwie już jest, uzupełnia jego ważność i język. weight: 1–5, language: pl | en | de | uk | fr | es.",
+      inputSchema: z.object({ name: z.string().min(1).max(60), weight: z.number().int().min(1).max(5).optional(), language: z.enum(["pl", "en", "de", "uk", "fr", "es"]).optional() }),
+    }, async (a) => {
+      const found = await repo.findProjectByName(ownerId, a.name);
+      const p = found ?? (await repo.createProject(ownerId, a.name, a.weight));
+      const patch = { ...(a.weight !== undefined && a.weight !== p.weight ? { weight: a.weight } : {}), ...(a.language && a.language !== p.language ? { language: a.language } : {}) };
+      if (Object.keys(patch).length) await repo.updateProject(ownerId, p.id, patch);
+      return json({ projectId: p.id, created: !found, name: p.name, weight: patch.weight ?? p.weight, language: patch.language ?? p.language });
+    });
+
     server.registerTool("add_rule", {
-      title: "Dodaj zasadę", description: "Dodaje zasadę pracy: scope global | project | tool.",
-      inputSchema: z.object({ scope: z.enum(["global", "project", "tool"]), title: z.string(), body: z.string(), projectId: z.string().optional(), tool: z.string().optional() }),
-    }, async (a) => { const r = await repo.upsertRule(ownerId, a); return json({ ruleId: r.id }); });
+      title: "Dodaj zasadę", description: "Dodaje zasadę pracy: scope global | project | tool. Dla scope project podaj projectId albo project (nazwa); dla scope tool podaj tool (slack, gmail, clickup, calendar, figma...).",
+      inputSchema: z.object({ scope: z.enum(["global", "project", "tool"]), title: z.string(), body: z.string(), projectId: z.string().optional(), project: z.string().optional(), tool: z.string().optional() }),
+    }, async ({ project, ...a }) => {
+      let projectId = a.projectId;
+      if (a.scope === "project" && !projectId && project) projectId = (await repo.findProjectByName(ownerId, project))?.id;
+      if (a.scope === "project" && !projectId) throw new Error("Zasada projektu wymaga projectId albo nazwy istniejącego projektu (project).");
+      if (a.scope === "tool" && !a.tool) throw new Error("Zasada narzędzia wymaga pola tool.");
+      const r = await repo.upsertRule(ownerId, { ...a, projectId });
+      return json({ ruleId: r.id });
+    });
   }, { serverInfo: { name: "task-hub", version: "0.1.0" } });
 }
 

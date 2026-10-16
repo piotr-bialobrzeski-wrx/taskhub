@@ -129,13 +129,13 @@ export function TaskCanvas(p: TaskCanvasProps) {
       <div className="pillbar">
         <div className="pl">
           <BackPill onBack={() => router.push("/")}><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="ct">{t.title}</span></BackPill>
-          {view === "canvas" ? <MakePill tileTitle={after ? "Nowy krok po zaznaczonym" : "Nowy krok"} groupTitle={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onTile={() => setNamer(namer === "tile" ? null : "tile")} onGroup={() => setNamer(namer === "group" ? null : "group")} /> : null}
         </div>
         <ViewPill view={view} onView={onView} />
         <span className="sp" />
         <SearchPill index={p.index} screen="task" here={t.id} onPick={onPick} />
         <AgentPill agent={p.agent} aiOn={p.aiOn} />
       </div>
+      {view === "canvas" ? <MakePill tileTitle={after ? "Nowy krok po zaznaczonym" : "Nowy krok"} groupTitle={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onTile={() => setNamer(namer === "tile" ? null : "tile")} onGroup={() => setNamer(namer === "group" ? null : "group")} /> : null}
 
       {p.runbar ? <div className={"runbar glass" + (panel ? " withpanel" : "")}>{p.runbar}</div> : null}
 

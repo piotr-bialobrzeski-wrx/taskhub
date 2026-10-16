@@ -28,7 +28,8 @@ final class WebWindowController: NSWindowController, WKNavigationDelegate, WKUID
         w.delegate = self
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.allowsBackForwardNavigationGestures = true
+        // bez gestu wstecz/dalej: WebKit łapał poziomy ruch dwoma palcami i kanwa przesuwała się tylko w pionie
+        webView.allowsBackForwardNavigationGestures = false
         if #available(macOS 12.0, *) { webView.underPageBackgroundColor = Theme.bgNS }
     }
 

@@ -61,7 +61,7 @@ export async function chat(fd: FormData) {
     await repo.addChat(o.id, taskId, "user", text + (typed && files.length ? ` (załączniki: ${files.map((f) => f.name).join(", ")})` : ""));
     // komunikaty mówią, co z tego ma Piotr, nie jak działa mechanizm
     if (taskId) { await attachFiles(taskId, files); await repo.addChat(o.id, taskId, "agent", files.length ? `Dopisałem to do zadania razem z ${files.length === 1 ? "załącznikiem" : "załącznikami"}. Claude weźmie to pod uwagę przy kolejnych krokach.` : "Dopisałem to do zadania. Claude weźmie to pod uwagę przy kolejnych krokach."); }
-    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files); await repo.addChat(o.id, null, "agent", newTaskText((await repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS)).alive)); goTo = t.id; }
+    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files); await repo.addChat(o.id, null, "agent", newTaskText(t.title, (await repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS)).alive)); goTo = t.id; }
   } else {
     try {
       const images = await Promise.all(files.filter((f) => IMAGE_TYPES.has(f.type)).map(async (f) => ({ mediaType: f.type as "image/png", base64: Buffer.from(await f.arrayBuffer()).toString("base64") })));

@@ -6,4 +6,6 @@ export const BRIDGE_TEXT = "Mostek na Twoim komputerze pracuje na bieżąco: now
 // zdanie w zadaniu bez kroków
 export const stepsHint = (bridgeAlive: boolean) => bridgeAlive ? "Claude rozpisze je sam za chwilę, mostek na Twoim komputerze pracuje na bieżąco." : `Claude rozpisze je sam, ${AUTO_EVERY} zagląda tu po nową pracę.`;
 // komunikat po dodaniu zadania z doku
-export const newTaskText = (bridgeAlive: boolean) => bridgeAlive ? "Mam to. Zadanie jest na kanwie, Claude już zaczyna nad nim pracę: rozpisze kroki i zrobi to, co nie wymaga Twojej zgody." : "Mam to. Zadanie jest na kanwie. Claude rozpisze je na kroki i zrobi to, co nie wymaga Twojej zgody.";
+// skrót nazwy do komunikatu: jedno zdanie, bez urywania w pół słowa
+export const shortTitle = (title: string, max = 60) => { const t = title.replace(/\s+/g, " ").trim(); if (t.length <= max) return t; const cut = t.slice(0, max); return (cut.includes(" ") ? cut.slice(0, cut.lastIndexOf(" ")) : cut) + "…"; };
+export const newTaskText = (title: string, bridgeAlive: boolean) => `Dodałem zadanie „${shortTitle(title)}”. ${bridgeAlive ? "Claude już nad nim pracuje: rozpisze kroki i zrobi to, co nie wymaga Twojej zgody." : "Claude rozpisze je na kroki i zrobi to, co nie wymaga Twojej zgody."}`;

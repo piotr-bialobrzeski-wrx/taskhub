@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   await repo.addChat(a.ownerId, null, "user", text);
   const t = await repo.createTask(a.ownerId, { title: text.slice(0, 120), source: text });
   const alive = (await repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS)).alive;
-  const message = newTaskText(alive);
+  const message = newTaskText(t.title, alive);
   await repo.addChat(a.ownerId, null, "agent", message);
   return Response.json({ id: t.id, url: `${appUrl()}/tasks/${t.id}`, message });
 }
