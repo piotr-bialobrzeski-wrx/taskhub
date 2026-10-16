@@ -4,7 +4,7 @@ Wzorzec z Project Hub: aplikacja w chmurze nie ma jak sama uruchomić Claude na 
 
 Dwie postacie tego samego mechanizmu:
 
-- **Aplikacja Task Hub na Maca** (`app/`): instalator .pkg, mostek w środku, stan w pasku menu, okno z aplikacją, szybkie dodawanie zadania. To główna droga.
+- **Aplikacja Task Hub na Maca** (`macos/`): instalator .pkg, mostek w środku, stan w pasku menu, okno z aplikacją, szybkie dodawanie zadania. To główna droga.
 - **Skrypt** (`public/bridge/taskhub-bridge.mjs`, serwowany pod `/bridge/taskhub-bridge.mjs`): ta sama logika bez aplikacji, dla serwera, Linuxa, testów i jako zapas. Node 20+, bez zależności.
 
 ## Jak to działa po stronie serwera

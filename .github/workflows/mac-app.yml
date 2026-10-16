@@ -1,5 +1,5 @@
 # Buduje aplikację Task Hub na Maca (instalator .pkg i obraz .dmg) i publikuje ją jako wydanie na GitHubie.
-# Wersja siedzi w app/VERSION. Push do main z nową wersją daje właściwe wydanie app-v<wersja> (tag tworzy sam GitHub,
+# Wersja siedzi w macos/VERSION. Push do main z nową wersją daje właściwe wydanie app-v<wersja> (tag tworzy sam GitHub,
 # bo push tagów z sesji w chmurze jest zablokowany); kolejne pushe z tą samą wersją odświeżają wydanie wstępne „app-latest”.
 # Na właściwe wydanie wskazuje https://github.com/piotr-bialobrzeski-wrx/taskhub/releases/latest (link w Ustawieniach Task Hub).
 name: mac-app
@@ -8,7 +8,7 @@ on:
   push:
     branches: [main]
     tags: ["app-v*"]
-    paths: ["app/**", ".github/workflows/mac-app.yml"]
+    paths: ["macos/**", ".github/workflows/mac-app.yml"]
   workflow_dispatch:
 
 permissions:
@@ -29,7 +29,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VER="$(tr -d ' \n\r' < app/VERSION)"
+          VER="$(tr -d ' \n\r' < macos/VERSION)"
           if [[ "$GITHUB_REF" == refs/tags/app-v* ]]; then
             echo "version=${GITHUB_REF#refs/tags/app-v}" >> "$GITHUB_OUTPUT"
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
@@ -40,7 +40,7 @@ jobs:
             echo "tag=app-latest" >> "$GITHUB_OUTPUT"
             echo "pre=true" >> "$GITHUB_OUTPUT"
           else
-            # nowa wersja w app/VERSION: właściwe wydanie app-v<wersja> (tag tworzy gh release create)
+            # nowa wersja w macos/VERSION: właściwe wydanie app-v<wersja> (tag tworzy gh release create)
             echo "version=$VER" >> "$GITHUB_OUTPUT"
             echo "tag=app-v$VER" >> "$GITHUB_OUTPUT"
             echo "pre=false" >> "$GITHUB_OUTPUT"
@@ -48,17 +48,17 @@ jobs:
 
       - name: Budowa
         run: |
-          mkdir -p app/out
+          mkdir -p macos/out
           set -o pipefail
-          app/build.sh "${{ steps.v.outputs.version }}" "${GITHUB_RUN_NUMBER}" 2>&1 | tee app/out/build.log
+          macos/build.sh "${{ steps.v.outputs.version }}" "${GITHUB_RUN_NUMBER}" 2>&1 | tee macos/out/build.log
 
       - name: Zgłoś błąd budowy jako komentarz do commita
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          { echo '### Budowa aplikacji na Maca nie powiodła się'; echo; echo '```'; tail -c 6000 app/out/build.log 2>/dev/null || echo '(brak dziennika)'; echo '```'; } > app/out/comment.md
-          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -F body=@app/out/comment.md >/dev/null || true
+          { echo '### Budowa aplikacji na Maca nie powiodła się'; echo; echo '```'; tail -c 6000 macos/out/build.log 2>/dev/null || echo '(brak dziennika)'; echo '```'; } > macos/out/comment.md
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -F body=@macos/out/comment.md >/dev/null || true
 
       - name: Wydanie
         if: success()
@@ -68,7 +68,7 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
           PRE: ${{ steps.v.outputs.pre }}
         run: |
-          cat > app/out/notes.md <<'EOF'
+          cat > macos/out/notes.md <<'EOF'
           Aplikacja Task Hub na Maca (macOS 13 lub nowszy, Apple Silicon i Intel): okno z Task Hub, ikona w pasku menu,
           okienko „Nowe zadanie” (⌃⌥T) i mostek, który uruchamia Claude Code na tym Macu, gdy tylko pojawi się praca.
 
@@ -82,10 +82,10 @@ jobs:
           EOF
           if [[ "$PRE" == "true" ]]; then
             gh release delete "$TAG" -y --cleanup-tag 2>/dev/null || true
-            gh release create "$TAG" app/build/*.pkg app/build/*.dmg app/build/*.zip --title "Task Hub na Maca (budowa $VERSION)" --notes-file app/out/notes.md --prerelease --target "$GITHUB_SHA"
+            gh release create "$TAG" macos/build/*.pkg macos/build/*.dmg macos/build/*.zip --title "Task Hub na Maca (budowa $VERSION)" --notes-file macos/out/notes.md --prerelease --target "$GITHUB_SHA"
           elif gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" app/build/*.pkg app/build/*.dmg app/build/*.zip --clobber
-            gh release edit "$TAG" --title "Task Hub na Maca $VERSION" --notes-file app/out/notes.md --prerelease=false --latest
+            gh release upload "$TAG" macos/build/*.pkg macos/build/*.dmg macos/build/*.zip --clobber
+            gh release edit "$TAG" --title "Task Hub na Maca $VERSION" --notes-file macos/out/notes.md --prerelease=false --latest
           else
-            gh release create "$TAG" app/build/*.pkg app/build/*.dmg app/build/*.zip --title "Task Hub na Maca $VERSION" --notes-file app/out/notes.md --latest --target "$GITHUB_SHA"
+            gh release create "$TAG" macos/build/*.pkg macos/build/*.dmg macos/build/*.zip --title "Task Hub na Maca $VERSION" --notes-file macos/out/notes.md --latest --target "$GITHUB_SHA"
           fi

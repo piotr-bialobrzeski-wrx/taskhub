@@ -1,7 +1,7 @@
 #!/bin/bash
 # Buduje Task Hub.app (arm64 + x86_64), instalator .pkg i obraz .dmg. Tylko narzędzia z Xcode Command Line Tools.
-#   app/build.sh 0.1.0 [numer_budowy]
-# Wynik: app/build/Task Hub.app, app/build/Task-Hub-<wersja>.pkg, app/build/Task-Hub-<wersja>.dmg
+#   macos/build.sh 0.1.0 [numer_budowy]
+# Wynik: macos/build/Task Hub.app, macos/build/Task-Hub-<wersja>.pkg, macos/build/Task-Hub-<wersja>.dmg
 set -euo pipefail
 cd "$(dirname "$0")"
 VERSION="${1:-0.0.0}"

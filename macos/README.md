@@ -30,11 +30,11 @@ Mostek pracuje także przy zamkniętym oknie (aplikacja zostaje w pasku menu). G
 
 ## Budowa
 
-Na Macu z Xcode Command Line Tools: `app/build.sh 0.1.0`. Wynik w `app/build/`.
+Na Macu z Xcode Command Line Tools: `macos/build.sh 0.1.0`. Wynik w `macos/build/`.
 
-Na GitHubie: wersja siedzi w `app/VERSION`. Push do `main` z nową wersją buduje właściwe wydanie `app-v<wersja>` (tag zakłada sam
+Na GitHubie: wersja siedzi w `macos/VERSION`. Push do `main` z nową wersją buduje właściwe wydanie `app-v<wersja>` (tag zakłada sam
 GitHub Actions, bo push tagów z sesji w chmurze jest zablokowany), na które wskazuje `…/releases/latest` (link „Pobierz aplikację”
-w Ustawieniach Task Hub). Kolejne pushe z tą samą wersją odświeżają wydanie wstępne `app-latest`. Nowa wersja dla Piotra = podbij `app/VERSION`.
+w Ustawieniach Task Hub). Kolejne pushe z tą samą wersją odświeżają wydanie wstępne `app-latest`. Nowa wersja dla Piotra = podbij `macos/VERSION`.
 
 ## Instalacja u użytkownika
 
