@@ -1,0 +1,43 @@
+# Diagnostyka produkcji z GitHub Actions: sesje w chmurze nie dosięgają vercel.app, a runner GitHuba tak.
+# Odpala się ręcznie (workflow_dispatch) albo po zmianie tego pliku; wynik ląduje jako komentarz do commita
+# (do odczytania przez `gh api repos/<repo>/commits/<sha>/comments`).
+name: Diagnostyka produkcji
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/diag.yml"]
+permissions:
+  contents: write
+concurrency:
+  group: diag-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Zapytaj produkcję
+        shell: bash
+        run: |
+          set +e
+          B=https://taskhub-lac.vercel.app
+          INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"diag","version":"0"}}}'
+          {
+            echo "## Diagnostyka produkcji ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            echo
+            for u in "$B/api/health" "$B/.well-known/oauth-protected-resource/api/mcp" "$B/.well-known/oauth-protected-resource" "$B/.well-known/oauth-authorization-server" "$B/api/mcp"; do
+              echo "### GET $u"; echo '```'; curl -sS -m 25 -i "$u" 2>&1 | head -c 1500; echo; echo '```'; echo
+            done
+            echo "### POST $B/api/mcp (bez tokenu)"; echo '```'
+            curl -sS -m 25 -i -X POST "$B/api/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d "$INIT" 2>&1 | head -c 1500; echo; echo '```'; echo
+            echo "### POST $B/api/mcp (zły token)"; echo '```'
+            curl -sS -m 25 -i -X POST "$B/api/mcp" -H 'authorization: Bearer th_zly' -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d "$INIT" 2>&1 | head -c 1500; echo; echo '```'; echo
+            echo "### GET $B/api/bridge/work (bez tokenu)"; echo '```'
+            curl -sS -m 25 -i "$B/api/bridge/work" 2>&1 | head -c 800; echo; echo '```'
+          } > out.md
+          cat out.md
+      - name: Wynik jako komentarz do commita
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" -F body=@out.md --silent
