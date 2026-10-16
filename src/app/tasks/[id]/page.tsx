@@ -5,7 +5,7 @@ import * as repo from "@/lib/repo";
 import { bundle } from "@/lib/services";
 import { composeStatic } from "@/lib/agent/compose";
 import { breakdownPrompt, handoffPrompt, claudeUrl, codeCommand } from "@/lib/agent/handoff";
-import { EXTERNAL_TOOLS, TOOL_LABELS, toolLabel, type Question, type Step, type Task } from "@/lib/schema";
+import { EXTERNAL_TOOLS, toolLabel, type Question, type Step, type Task } from "@/lib/schema";
 import { calEst, calibrationFor, estOf, fmtMin, spentMin, taskEst, taskSpent, todayISO } from "@/lib/time";
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
@@ -17,6 +17,9 @@ import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { Timer } from "@/components/Timer";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
+import { StepEditFields } from "@/components/StepEditFields";
+import { GrowTextarea } from "@/components/GrowTextarea";
+import { agentLabel, indexFrom } from "@/lib/search";
 import { Icon, plural } from "@/components/canvas/ui";
 import { InlineDate, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
 import { addSpent, answerQuestionForm, backToTodo, compose, dismissQuestion, factPref, handoff, linkSteps, linkTasks, markDone, prepare, removeStep, reopen, saveOutput, saveReport, setDue, setLevel, setProject, trashTask, updateStepForm, updateTaskForm } from "../../actions";
@@ -122,8 +125,8 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
         <form className="stack" action={updateTaskForm}>
           <input type="hidden" name="id" value={t.id} /><input type="hidden" name="level" value={t.level} /><input type="hidden" name="due" value={t.due ?? ""} /><input type="hidden" name="projectId" value={t.projectId ?? ""} />
           <label className="field"><span>Tytuł</span><input className="in" name="title" defaultValue={t.title} required /></label>
-          <label className="field"><span>Cel</span><textarea className="in" name="summary" defaultValue={t.summary} /></label>
-          <label className="field"><span>Jak wpadło</span><textarea className="in" name="source" defaultValue={t.source} /></label>
+          <label className="field"><span>Cel</span><GrowTextarea name="summary" defaultValue={t.summary} /></label>
+          <label className="field"><span>Jak wpadło</span><GrowTextarea name="source" defaultValue={t.source} /></label>
           <div className="actions"><PendingButton className="btn primary">Zapisz</PendingButton></div>
         </form>
       </details>
@@ -140,7 +143,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       task={{ id: t.id, title: t.title, base: cur.score.base, eff: cur.score.eff, why: cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; "), state: taskStateOf(t, b.tasks), progress: { done: t.steps.filter((s) => s.status === "done").length, all: t.steps.length }, estText: estTextOf(t) }}
       steps={tiles}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
-      aiOn={aiOn} agent={providers.length ? (providers[0] === "anthropic" ? "Claude" : "GPT") : "Claude"}
+      aiOn={aiOn} agent={agentLabel(providers)} index={indexFrom(b)}
       lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text } : null}
       focus={focus ?? null} runbar={runbar} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} />
   );
@@ -200,7 +203,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         <form className="handoff-box" action={saveReport}>
           <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} />
           <div className="lbl">Raport z Claude</div>
-          <textarea className="out" name="report" placeholder="Wklej link do artefaktu, PR albo podsumowanie tego, co powstało…" required />
+          <GrowTextarea className="out" minRows={3} name="report" placeholder="Wklej link do artefaktu, PR albo podsumowanie tego, co powstało…" required />
           <div className="row"><input className="in" name="link" placeholder="Link do wyniku (opcjonalnie)" /><PendingButton className="btn primary" busy="Odbieram…">Odbierz</PendingButton></div>
         </form>
       ) : null}
@@ -208,7 +211,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         <form className="stack" action={saveOutput}>
           <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} />
           <div className="lbl">Szkic</div>
-          <textarea className="out" name="output" defaultValue={s.output} />
+          <GrowTextarea className="out" minRows={3} name="output" defaultValue={s.output} />
           <div className="actions"><PendingButton className="btn">Zapisz treść</PendingButton></div>
         </form>
       ) : null}
@@ -235,14 +238,11 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         <form className="stack" action={updateStepForm}>
           <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} />
           <label className="field"><span>Tytuł</span><input className="in" name="title" defaultValue={s.title} required /></label>
-          <label className="field"><span>Szczegóły</span><textarea className="in" name="detail" defaultValue={s.detail} /></label>
+          <label className="field"><span>Szczegóły</span><GrowTextarea name="detail" defaultValue={s.detail} /></label>
           <div className="grid2">
-            <label className="field"><span>Narzędzie</span>
-              <select className="in" name="tool" defaultValue={s.tool}>{Object.entries(TOOL_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}{TOOL_LABELS[s.tool] ? null : <option value={s.tool}>{s.tool}</option>}</select></label>
+            <StepEditFields tool={s.tool} after={s.dependsOn[0] ?? ""} steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title }))} />
             <label className="field"><span>Szacunek (min, co 15)</span><input className="in" type="number" name="est" min={15} step={15} defaultValue={s.estMin} /></label>
             <label className="field"><span>Czas zrobiony (min)</span><input className="in" type="number" name="spentMin" min={0} step={5} defaultValue={Math.round(s.spentSec / 60)} /></label>
-            <label className="field"><span>Po kroku</span>
-              <select className="in" name="after" defaultValue={s.dependsOn[0] ?? ""}><option value="">bez zależności</option>{t.steps.filter((x) => x.id !== s.id).map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}</select></label>
           </div>
           <label className="field"><span>Link (gdzie to jest w {toolLabel(s.tool)})</span><input className="in" name="link" defaultValue={s.link ?? ""} placeholder="https://…" /></label>
           <label className="row" style={{ fontSize: 12.5 }}><input type="checkbox" name="needsApproval" defaultChecked={s.needsApproval} /> wymaga zatwierdzenia (wysyła coś na zewnątrz)</label>

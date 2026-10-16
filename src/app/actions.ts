@@ -305,6 +305,13 @@ export async function autoLayout(taskId: string | null) {
   for (const g of await repo.listGroups(o.id, taskId)) await repo.updateGroup(o.id, g.id, { auto: true });
   refresh(taskId);
 }
+// „Cofnij” po „Ułóż”: przywraca zapamiętane położenia kafelków i prostokąty grup (łącznie z tym, czy grupa była automatyczna)
+export async function restoreLayout(taskId: string | null, items: { id: string; x: number; y: number }[], groups: { id: string; x: number; y: number; w: number; h: number; auto: boolean }[]) {
+  const o = await requireOwner();
+  if (taskId) await repo.setStepPositions(o.id, taskId, items.slice(0, 200)); else await repo.setTaskPositions(o.id, items.slice(0, 500));
+  for (const g of groups.slice(0, 100)) await repo.updateGroup(o.id, g.id, { x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), auto: g.auto });
+  refresh(taskId);
+}
 export async function createGroupAction(taskId: string | null, name: string, members: string[], rect: { x: number; y: number; w: number; h: number }) {
   const o = await requireOwner();
   const g = await repo.createGroup(o.id, taskId, name || "Nowa grupa", members, rect);
@@ -329,6 +336,8 @@ export async function batchTasks(ids: string[], op: { level?: number; projectId?
     if (op.projectId !== undefined) await repo.updateTask(o.id, id, { projectId: op.projectId });
     if (op.trash) await repo.updateTask(o.id, id, { deletedAt: new Date().toISOString() });
     if (op.done) for (const s of t.steps) if (s.status !== "done") await finishStep(o.id, id, s.id);
+    // „Wróć do pracy”: ostatni zrobiony krok wraca do poprzedniego stanu, zadanie przestaje być ukończone
+    if (op.done === false) { const last = [...t.steps].reverse().find((s) => s.status === "done"); if (last) await repo.reopenStep(o.id, id, last); }
   }
   refresh();
 }
@@ -339,8 +348,15 @@ export async function batchSteps(taskId: string, ids: string[], op: { done?: boo
     const s = t.steps.find((x) => x.id === id); if (!s) continue;
     if (op.remove) await repo.deleteStep(id);
     else if (op.done && s.status !== "done") await finishStep(o.id, taskId, id);
+    else if (op.done === false && s.status === "done") await repo.reopenStep(o.id, taskId, s);
   }
   refresh(taskId);
+}
+// historia rozmowy (dok → ikona zegara): strona po 50 wpisów, od najstarszego; before = kursor na starsze
+const CHAT_PAGE = 50;
+export async function loadChat(taskId: string | null, before: string | null): Promise<{ id: string; role: "user" | "agent"; text: string; createdAt: string }[]> {
+  const o = await requireOwner();
+  return (await repo.listChat(o.id, taskId, CHAT_PAGE, before)).map((m) => ({ id: m.id, role: m.role, text: m.text, createdAt: m.createdAt }));
 }
 export async function setTaskField(taskId: string, patch: { due?: string | null; level?: number; projectId?: string | null }) {
   const o = await requireOwner();

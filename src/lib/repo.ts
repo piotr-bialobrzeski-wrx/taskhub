@@ -344,10 +344,12 @@ export async function listSamples(ownerId: string): Promise<TimeSample[]> {
 
 // ---------- czat ----------
 export type ChatMessage = { id: string; role: "user" | "agent"; text: string; actions: unknown; createdAt: string };
-export async function listChat(ownerId: string, taskId: string | null, limit = 20): Promise<ChatMessage[]> {
+// before: kursor (created_at) do wczytywania starszych wpisów w historii rozmowy
+export async function listChat(ownerId: string, taskId: string | null, limit = 20, before: string | null = null): Promise<ChatMessage[]> {
+  const cut = before ?? "9999-12-31T00:00:00Z";
   const rows = taskId
-    ? await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} order by created_at desc limit ${limit}`
-    : await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id is null order by created_at desc limit ${limit}`;
+    ? await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and created_at < ${cut} order by created_at desc limit ${limit}`
+    : await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id is null and created_at < ${cut} order by created_at desc limit ${limit}`;
   return rows.reverse().map((r) => ({ id: r.id as string, role: r.role as "user" | "agent", text: r.text as string, actions: r.actions, createdAt: iso(r.createdAt) as string }));
 }
 export async function addChat(ownerId: string, taskId: string | null, role: "user" | "agent", text: string, actions?: unknown): Promise<void> {
@@ -406,8 +408,10 @@ export async function searchTasks(ownerId: string, q: string, limit = 20): Promi
 
 // ---------- kosz / archiwum ----------
 export const TRASH_DAYS = 30;
+export const CHAT_DAYS = 180;   // rozmowa ogólna (bez zadania) znika po pół roku; rozmowa w zadaniu żyje tak długo jak zadanie
 export async function purgeExpired(ownerId: string): Promise<number> {
   const rows = await sql()`delete from tasks where owner_id = ${ownerId} and deleted_at is not null and deleted_at < now() - interval '30 days' returning id`;
+  await sql()`delete from chat_messages where owner_id = ${ownerId} and task_id is null and created_at < now() - interval '180 days'`;
   await sql()`update attachments set url = null, storage_path = null, data = null where expires_at is not null and expires_at < now() and keep = false and (url is not null or storage_path is not null or data is not null)`;
   return rows.length;
 }

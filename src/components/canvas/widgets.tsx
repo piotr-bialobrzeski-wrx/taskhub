@@ -1,13 +1,14 @@
 "use client";
 // Drobne kontrolki kanwy: wybór priorytetu/projektu w menu, termin, dok czatu, pole nazwy, toast.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal, useFormStatus } from "react-dom";
 import { LEVELS } from "@/lib/priority";
+import { loadChat } from "@/app/actions";
 import { Icon, Lvl, projColor, type ProjectVM } from "./ui";
 
 // ---------- menu wyboru przy przycisku ----------
 export type PickOption = { key: string; node: ReactNode; on?: boolean };
-export function Picker({ cls, trigger, options, onPick, title }: { cls: string; trigger: ReactNode; options: PickOption[]; onPick: (key: string) => void; title: string }) {
+export function Picker({ cls, menuCls, trigger, options, onPick, title }: { cls: string; menuCls?: string; trigger: ReactNode; options: PickOption[]; onPick: (key: string) => void; title: string }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; width: number }>({ left: 0, top: 0, width: 0 });
@@ -27,7 +28,7 @@ export function Picker({ cls, trigger, options, onPick, title }: { cls: string; 
       </button>
       {open ? createPortal(
         // w portalu: panel szczegółów ma backdrop-filter, więc byłby blokiem zawierającym dla position: fixed
-        <div className="ppmenu glass" role="listbox" aria-label={title} style={{ position: "fixed", left: pos.left, top: pos.top, minWidth: pos.width }} onPointerDown={(e) => e.stopPropagation()}>
+        <div className={"ppmenu glass" + (menuCls ? " " + menuCls : "")} role="listbox" aria-label={title} style={{ position: "fixed", left: pos.left, top: pos.top, minWidth: menuCls ? undefined : pos.width }} onPointerDown={(e) => e.stopPropagation()}>
           {options.map((o) => (
             <button key={o.key} type="button" role="option" aria-selected={!!o.on} className={"pp-opt" + (o.on ? " on" : "")} onClick={() => { setOpen(false); onPick(o.key); }}>
               {o.node}{o.on ? <span className="ck"><Icon k="check" size={12} sw={2.2} /></span> : null}
@@ -81,7 +82,46 @@ async function shrinkImage(file: File): Promise<File> {
   } catch { return file; }
 }
 
-function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void }) {
+// ---------- historia rozmowy: cały ekran pod szkłem, wpisy w kontekście (zadanie albo ogólne), z godzinami i dniami ----------
+type Msg = { id: string; role: "user" | "agent"; text: string; createdAt: string };
+const CHAT_PAGE = 50;   // tyle wpisów na stronę zwraca loadChat
+const dayOf = (iso: string) => new Date(iso).toLocaleDateString("pl-PL", { day: "numeric", month: "long", year: "numeric" });
+const dayLabel = (iso: string) => {
+  const d = new Date(iso), t = new Date(); const y = new Date(t); y.setDate(t.getDate() - 1);
+  return d.toDateString() === t.toDateString() ? "Dziś" : d.toDateString() === y.toDateString() ? "Wczoraj" : dayOf(iso);
+};
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+export function ChatHistory({ taskId, title, onClose }: { taskId: string | null; title: string; onClose: () => void }) {
+  const [msgs, setMsgs] = useState<Msg[] | null>(null);
+  const [more, setMore] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const list = useRef<HTMLDivElement>(null);
+  const load = async (before: string | null) => {
+    setBusy(true);
+    try { const r = await loadChat(taskId, before); setMsgs((m) => (before ? [...r, ...(m ?? [])] : r)); setMore(r.length >= CHAT_PAGE); } finally { setBusy(false); }
+  };
+  useEffect(() => { void load(null).then(() => requestAnimationFrame(() => { const el = list.current; if (el) el.scrollTop = el.scrollHeight; })); }, [taskId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key); }, [onClose]);
+  return createPortal(
+    <div className="hist glass" role="dialog" aria-modal="true" aria-label={title} onPointerDown={(e) => e.stopPropagation()}>
+      <div className="hist-h"><b>{title}</b><span className="sp" /><button className="icobtn" type="button" aria-label="Zamknij" title="Zamknij (Esc)" onClick={onClose}><Icon k="x" size={13} sw={2} /></button></div>
+      <div ref={list} className="hist-b">
+        {msgs === null ? <p className="sub">Wczytuję…</p> : !msgs.length ? <p className="sub" style={{ textAlign: "center" }}>Jeszcze nie było tu rozmowy.</p> : (
+          <>
+            {more ? <button className="btn" type="button" style={{ alignSelf: "center" }} disabled={busy} onClick={() => load(msgs[0].createdAt)}>{busy ? "Wczytuję…" : "Starsze wpisy"}</button> : null}
+            {msgs.map((m, i) => (
+              <Fragment key={m.id}>
+                {i === 0 || dayOf(m.createdAt) !== dayOf(msgs[i - 1].createdAt) ? <div className="hm-day">{dayLabel(m.createdAt)}</div> : null}
+                <div className={"hm " + m.role}><div className="hm-b">{m.text}</div><span className="hm-t">{m.role === "agent" ? "Agent · " : ""}{timeOf(m.createdAt)}</span></div>
+              </Fragment>
+            ))}
+          </>
+        )}
+      </div>
+    </div>, document.body);
+}
+
+function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone, onHistory }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void; onHistory: () => void }) {
   const { pending } = useFormStatus();
   const ta = useRef<HTMLTextAreaElement>(null);
   const pick = useRef<HTMLInputElement>(null);
@@ -105,13 +145,15 @@ function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone
         <textarea ref={ta} name="text" rows={1} placeholder={pending ? busyText : placeholder} aria-label="Wiadomość" disabled={pending} onInput={grow}
           onPaste={(e) => { const files = [...e.clipboardData.files]; if (!files.length) return; if (!e.clipboardData.getData("text/plain")) e.preventDefault(); onFiles(files); }}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (canSend()) e.currentTarget.form?.requestSubmit(); } }} />
+        <button className="icobtn" type="button" aria-label="Historia rozmowy" title="Historia rozmowy" onClick={onHistory}><Icon k="history" size={15} sw={1.7} /></button>
         <button className="send" type="submit" aria-label="Wyślij" disabled={pending}><Icon k="send" size={14} sw={1.9} /></button>
       </div>
     </>
   );
 }
-export function Dock({ action, taskId, placeholder, busyText, context }: { action: (fd: FormData) => Promise<void>; taskId: string | null; placeholder: string; busyText: string; context?: ReactNode }) {
+export function Dock({ action, taskId, placeholder, busyText, context, historyTitle }: { action: (fd: FormData) => Promise<void>; taskId: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string }) {
   const form = useRef<HTMLFormElement>(null);
+  const [hist, setHist] = useState(false);
   const filesIn = useRef<HTMLInputElement>(null);
   const [atts, setAtts] = useState<Att[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -147,8 +189,9 @@ export function Dock({ action, taskId, placeholder, busyText, context }: { actio
         <input type="hidden" name="taskId" value={taskId ?? ""} />
         <input ref={filesIn} type="file" name="files" multiple tabIndex={-1} aria-hidden="true" />
         {context ? <div className="ctxrow">{context}</div> : null}
-        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} />
+        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} onHistory={() => setHist(true)} />
       </form>
+      {hist ? <ChatHistory taskId={taskId} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(false)} /> : null}
     </div>
   );
 }

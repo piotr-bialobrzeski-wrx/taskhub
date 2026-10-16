@@ -1,18 +1,21 @@
 "use client";
 // Poziom 2: kafelek zadania (origin) i kafelki kroków na kanwie, panel szczegółów (treść z serwera), pasek stanu, dok w kontekście zadania.
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, STEP_SIZE } from "@/lib/canvas/layout";
 import { Icon, Lvl, ST_LABEL, TS_LABEL, plural, toolColor, type GroupVM, type StepTile, type TaskStateKey } from "./ui";
-import { AgentPill, GroupBar, ViewPill, useView } from "./Board";
+import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
+import { AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
+import { SearchPill } from "./SearchPill";
+import type { SearchItem } from "@/lib/search-core";
 import { Dock, Namer, Toast, useToast } from "./widgets";
 import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, linkSteps, saveStepPositions, updateGroupAction } from "@/app/actions";
 
 export type TaskCanvasProps = {
   task: { id: string; title: string; base: number; eff: number; why: string; state: TaskStateKey; progress: { done: number; all: number }; estText: string };
   steps: (StepTile & { toolName: string })[];
-  groups: GroupVM[];
+  groups: GroupVM[]; index: SearchItem[];
   aiOn: boolean; agent: string; lastAgent: { id: string; text: string } | null;
   focus: string | null;
   runbar: ReactNode;                       // treść paska stanu nad kanwą
@@ -25,7 +28,9 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 export function TaskCanvas(p: TaskCanvasProps) {
+  const router = useRouter();
   const { toast, run } = useToast();
+  const undoL = useUndoLayout(run);
   const { view, onView } = useView("task");
   const api = useRef<CanvasApi | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -56,6 +61,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const groups: CanvasGroup[] = useMemo(() => p.groups.map((g) => ({ ...g })), [p.groups]);
   const group = selGroup ? p.groups.find((g) => g.id === selGroup) ?? null : null;
   const ids = [...sel], n = sel.size, word = plural(n, "krok", "kroki", "kroków");
+  const allDone = n > 0 && ids.every((id) => byId.get(id)?.state === "done");
   const t = p.task;
 
   const groupRect = (members: string[]) => {
@@ -77,6 +83,12 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const endGrip = () => { if (!grip.current) return; grip.current = null; setGripOn(false); try { localStorage.setItem("th-dw", String(dw)); } catch { /* brak storage */ } };
   const widen = () => { const w = dw < 700 ? 760 : 520; setDw(w); try { localStorage.setItem("th-dw", String(w)); } catch { /* brak storage */ } };
   const cur = panel && panel !== "__task" ? byId.get(panel) ?? null : null;
+  // wynik szukania: krok tego zadania otwiera się na miejscu (panel + środek kanwy); reszta prowadzi pod swój adres
+  const onPick = (it: SearchItem): boolean => {
+    if (it.kind !== "step" || it.taskId !== t.id) return false;
+    openStep(it.id); if (view === "canvas") api.current?.centerOn(it.id); return true;
+  };
+  const layoutNow = () => { undoL.remember(layoutSnapshot(api.current, p.steps.map((s) => s.id), p.groups)); run(() => autoLayout(t.id), "Ułożono"); };
 
   return (
     <div className="app">
@@ -98,7 +110,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
           onMove={(moved) => run(() => saveStepPositions(t.id, moved))}
           onLink={(from, to) => run(() => linkSteps(t.id, from, to, true), "Połączono: drugi krok zacznie się po pierwszym")} onUnlink={(from, to) => run(() => linkSteps(t.id, from, to, false), "Usunięto połączenie")}
           onGroupChange={(id, patch) => run(() => updateGroupAction(t.id, id, patch))} onGroupCreate={(rect, members) => run(async () => { await freeze(members); await createGroupAction(t.id, "Nowa grupa", members, rect); })}
-          onAutoLayout={() => run(() => autoLayout(t.id), "Ułożono")} />
+          onAutoLayout={layoutNow} onUndoLayout={undoL.canUndo ? () => undoL.undo(t.id) : null} />
       ) : (
         <div className="listview">
           <div className="stage-grp">
@@ -115,18 +127,13 @@ export function TaskCanvas(p: TaskCanvasProps) {
       )}
 
       <div className="pillbar">
-        <div className="gpill glass">
-          <Link className="icobtn" href="/" aria-label="Wróć do wszystkich zadań"><Icon k="back" size={15} sw={1.8} /></Link>
-          <span className="crumb"><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="ct">{t.title}</span></span>
-          {view === "canvas" ? (
-            <>
-              <span className="vd" />
-              <button className="icobtn mk" type="button" title={after ? "Nowy krok po zaznaczonym" : "Nowy krok"} onClick={() => setNamer(namer === "tile" ? null : "tile")}><Icon k="tile" size={18} />Kafelek</button>
-              <button className="icobtn mk" type="button" title={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onClick={() => setNamer(namer === "group" ? null : "group")}><Icon k="group" size={18} />Grupa</button>
-            </>
-          ) : null}
+        <div className="pl">
+          <BackPill onBack={() => router.push("/")}><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="ct">{t.title}</span></BackPill>
+          {view === "canvas" ? <MakePill tileTitle={after ? "Nowy krok po zaznaczonym" : "Nowy krok"} groupTitle={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onTile={() => setNamer(namer === "tile" ? null : "tile")} onGroup={() => setNamer(namer === "group" ? null : "group")} /> : null}
         </div>
         <ViewPill view={view} onView={onView} />
+        <span className="sp" />
+        <SearchPill index={p.index} screen="task" here={t.id} onPick={onPick} />
         <AgentPill agent={p.agent} aiOn={p.aiOn} />
       </div>
 
@@ -145,11 +152,12 @@ export function TaskCanvas(p: TaskCanvasProps) {
             <><span className="rb-t">Usunąć <b>{n} {word}</b>? Tego nie da się cofnąć.</span><span className="dv" />
               <button className="btn danger" type="button" onClick={() => { const list = ids; setConfirm(false); setSel(new Set()); setPanel(null); run(() => batchSteps(t.id, list, { remove: true }), "Usunięto"); }}>Tak, usuń</button><button className="btn" type="button" onClick={() => setConfirm(false)}>Anuluj</button></>
           ) : (
-            <><span className="rb-t">Zaznaczono <b>{n} {word}</b></span><span className="dv" />
+            <><span className="rb-t"><b>{n} {word}</b></span><span className="dv" />
               <button className="btn" type="button" onClick={() => setNamer("group")}>Zgrupuj</button>
-              <button className="btn" type="button" onClick={() => { const list = ids; setSel(new Set()); run(() => batchSteps(t.id, list, { done: true }), "Oznaczono jako gotowe"); }}>Oznacz jako gotowe</button>
+              {allDone ? <button className="btn" type="button" onClick={() => { const list = ids; setSel(new Set()); run(() => batchSteps(t.id, list, { done: false }), "Przywrócono do pracy"); }}>Wróć do pracy</button>
+                : <button className="btn" type="button" onClick={() => { const list = ids; setSel(new Set()); run(() => batchSteps(t.id, list, { done: true }), "Oznaczono jako gotowe"); }}>Oznacz jako gotowe</button>}
               <button className="btn danger" type="button" onClick={() => setConfirm(true)}>Usuń</button>
-              <button className="icobtn" type="button" aria-label="Odznacz wszystko" title="Odznacz (Esc)" onClick={() => { setSel(new Set()); setConfirm(false); }}><Icon k="x" size={12} sw={2} /></button></>
+              <button className="icobtn end" type="button" aria-label="Odznacz wszystko" title="Odznacz (Esc)" onClick={() => { setSel(new Set()); setConfirm(false); }}><Icon k="x" size={12} sw={2} /></button></>
           )}
         </div>
       ) : null}
@@ -176,7 +184,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
       ) : null}
 
       <Dock action={chat} taskId={ctxGlobal ? null : t.id} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
-        placeholder={ctxGlobal ? (p.aiOn ? "Opisz nowe zadanie albo zapytaj o swoje zadania…" : "Opisz nowe zadanie; kroki ułoży Claude przez konektor…") : (p.aiOn ? "Napisz do agenta o tym zadaniu albo poproś o coś więcej…" : "Dopisz notatkę do tego zadania; polecenia dla Claude wydasz w nim przez konektor…")}
+        placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : "Napisz, co dalej z tym zadaniem, albo dopisz notatkę…"}
         context={ctxGlobal
           ? <span className="ctx"><span className="k">Kontekst: wszystkie zadania</span><button type="button" aria-label="Wróć do kontekstu zadania" title="Wróć do kontekstu zadania" onClick={() => setCtxGlobal(false)}><Icon k="undo" size={12} sw={1.9} /></button></span>
           : <span className="ctx" title="Wiadomość dotyczy tego zadania"><span className="k">Kontekst:</span><b>{t.title}</b><button type="button" aria-label="Pisz w kontekście wszystkich zadań" title="Pisz w kontekście wszystkich zadań" onClick={() => setCtxGlobal(true)}><Icon k="x" size={12} sw={2} /></button></span>} />

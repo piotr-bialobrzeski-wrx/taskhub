@@ -69,6 +69,9 @@ const PATHS: Record<string, string> = {
   search: '<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/>',
   pen: '<path d="M3 13h3l7-7-3-3-7 7v3z"/><path d="m9 4 3 3"/>',
   trash: '<path d="M3 4.5h10M6.5 4.5v-1h3v1M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
+  history: '<path d="M2.6 8.6A5.5 5.5 0 1 0 4 4.3"/><path d="M2.5 2.5v2.8h2.8"/><path d="M8 5.2v3l2 1.4"/>',
+  settings: '<circle cx="8" cy="8" r="2.2"/><path d="M8 2v1.8M8 12.2V14M2 8h1.8M12.2 8H14M3.8 3.8l1.3 1.3M10.9 10.9l1.3 1.3M3.8 12.2l1.3-1.3M10.9 5.1l1.3-1.3"/>',
+  rule: '<path d="M4 2.5h8v11H4z"/><path d="M6.5 6h3M6.5 8.5h3M6.5 11h1.5"/>',
   folder: '<path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12z"/>',
 };
 export function Icon({ k, size = 16, sw = 1.5 }: { k: string; size?: number; sw?: number }) {

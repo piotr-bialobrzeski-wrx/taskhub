@@ -3,7 +3,7 @@
 // Rysuje tylko to, co dostanie; co znaczy kafelek i co robią akcje, decyduje rodzic (Board / TaskCanvas).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bounds, centerOf, computePositions, groupAt, reassign, type DropChange, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
-import { GCOL } from "./ui";
+import { GCOL, Icon } from "./ui";
 
 export type CanvasItem = LItem & { cls: string; done?: boolean; aria: string };
 export type CanvasGroup = LGroup & { name: string; color: number };
@@ -40,6 +40,7 @@ export type CanvasProps = {
   onGroupChange: (id: string, patch: Partial<CanvasGroup>) => void;
   onGroupCreate: (rect: { x: number; y: number; w: number; h: number }, members: string[]) => void;
   onAutoLayout: () => void;
+  onUndoLayout?: (() => void) | null;                 // po „Ułóż” ten sam przycisk przez chwilę cofa do poprzedniego układu
   empty?: ReactNode;
   showPorts?: boolean;
 };
@@ -354,7 +355,8 @@ export function Canvas(p: CanvasProps) {
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } else if (e.key === "Escape") { e.preventDefault(); zCancel.current = true; e.currentTarget.blur(); } }} />
         <button className="icobtn" type="button" onClick={() => setZoom(zoom * 1.15)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
         <button className="icobtn txt" type="button" onClick={fit}>Dopasuj</button>
-        <button className="icobtn txt" type="button" onClick={p.onAutoLayout}>Ułóż</button>
+        {p.onUndoLayout ? <button className="icobtn txt undo" type="button" onClick={p.onUndoLayout} title="Przywróć układ sprzed ułożenia"><Icon k="undo" size={12} sw={2} />Cofnij</button>
+          : <button className="icobtn txt" type="button" onClick={p.onAutoLayout} title="Ułóż kafelki automatycznie">Ułóż</button>}
       </div>
     </div>
   );

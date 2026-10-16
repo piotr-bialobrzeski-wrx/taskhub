@@ -1,5 +1,5 @@
 "use client";
-// Poziom 1: wszystkie zadania jako kafelki na kanwie (albo lista), pasek-pigułka, menu, zaznaczanie zbiorcze, archiwum, dok czatu.
+// Poziom 1: wszystkie zadania jako kafelki na kanwie (albo lista), pasek-pigułka, menu pod logo, zaznaczanie zbiorcze, archiwum, projekty, dok czatu.
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -7,15 +7,22 @@ import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Can
 import { GHEAD, GPAD, TASK_SIZE } from "@/lib/canvas/layout";
 import { Icon, Lvl, ToolIcon, TS_LABEL, TS_SHORT, GCOL, plural, projColor, toolColor, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
 import { Dock, Namer, PrioPicker, ProjectPicker, Toast, useToast } from "./widgets";
+import { AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
+import { SearchPill } from "./SearchPill";
 import { Projects, type ProjectPatch } from "./Projects";
-import { autoLayout, batchTasks, chat, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeProject, reopenLast, restoreTask, saveTaskPositions, updateGroupAction, updateProjectAction } from "@/app/actions";
+import { matches, norm, tokens, type Screen, type SearchItem } from "@/lib/search-core";
+import { autoLayout, batchTasks, chat, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeProject, reopenLast, restoreLayout, restoreTask, saveTaskPositions, updateGroupAction, updateProjectAction } from "@/app/actions";
 
 export type ArchRow = { id: string; title: string; when: string; summary: string | null; base: number; eff: number; project: string | null };
+// parametry z adresu, którymi szukajka z innych ekranów otwiera właściwy widok (/?view=projects&p=…, /?view=done&t=…, /?focus=…)
+export type BoardInitial = { view?: string; p?: string; t?: string; focus?: string };
 export type BoardProps = {
-  tasks: TaskTile[]; groups: GroupVM[]; projects: ProjectRow[]; projTasks: ProjTask[];
+  tasks: TaskTile[]; groups: GroupVM[]; projects: ProjectRow[]; projTasks: ProjTask[]; index: SearchItem[]; initial: BoardInitial;
   aiOn: boolean; agent: string; lastAgent: { id: string; text: string } | null;
   archive: { done: ArchRow[]; trash: ArchRow[]; trashDays: number };
 };
+type LayoutSnap = { items: { id: string; x: number; y: number }[]; groups: { id: string; x: number; y: number; w: number; h: number; auto: boolean }[] };
+const UNDO_MS = 8000;   // tyle „Cofnij” zostaje po „Ułóż”
 
 export function TaskTileView({ t }: { t: TaskTile }) {
   const pct = t.progress.all ? (100 * t.progress.done) / t.progress.all : 0;
@@ -48,26 +55,6 @@ export function TaskTileView({ t }: { t: TaskTile }) {
   );
 }
 
-export function AgentPill({ agent, aiOn }: { agent: string; aiOn: boolean }) {
-  return (
-    <div className="gpill glass" aria-label="Agent" title={aiOn ? "Agent wbudowany w aplikację" : "Twój Claude podłączony przez konektor Task Hub"}>
-      <span className="agent-label">Agent</span><span className="seg on">{agent}</span>
-    </div>
-  );
-}
-export const ViewPill = ({ view, onView }: { view: "canvas" | "list"; onView: (v: "canvas" | "list") => void }) => (
-  <div className="gpill glass center" role="tablist" aria-label="Widok">
-    <button className={"seg" + (view === "canvas" ? " on" : "")} role="tab" aria-selected={view === "canvas"} onClick={() => onView("canvas")}><Icon k="canvas" size={14} />Kanwa</button>
-    <button className={"seg" + (view === "list" ? " on" : "")} role="tab" aria-selected={view === "list"} onClick={() => onView("list")}><Icon k="list" size={14} />Lista</button>
-  </div>
-);
-export function useView(key: string) {
-  const [view, setView] = useState<"canvas" | "list">("canvas");
-  useEffect(() => { try { const v = localStorage.getItem("th-view-" + key); if (v === "list") setView("list"); } catch { /* brak storage */ } }, [key]);
-  const onView = (v: "canvas" | "list") => { setView(v); try { localStorage.setItem("th-view-" + key, v); } catch { /* brak storage */ } };
-  return { view, onView };
-}
-
 // pasek zaznaczonej grupy: kolor, nazwa, zaznacz kafelki, rozgrupuj
 export function GroupBar({ g, onColor, onRename, onSelectMembers, onUngroup, onClear }: { g: GroupVM; onColor: (c: number) => void; onRename: () => void; onSelectMembers: () => void; onUngroup: () => void; onClear: () => void }) {
   return (
@@ -78,14 +65,27 @@ export function GroupBar({ g, onColor, onRename, onSelectMembers, onUngroup, onC
       <button className="btn" type="button" onClick={onRename}>Zmień nazwę</button>
       <button className="btn" type="button" disabled={!g.members.length} onClick={onSelectMembers}>Zaznacz kafelki</button>
       <button className="btn danger" type="button" title="Usuwa tylko prostokąt, kafelki zostają" onClick={onUngroup}>Rozgrupuj</button>
-      <button className="icobtn" type="button" aria-label="Odznacz grupę" onClick={onClear}><Icon k="x" size={12} sw={2} /></button>
+      <button className="icobtn end" type="button" aria-label="Odznacz grupę" onClick={onClear}><Icon k="x" size={12} sw={2} /></button>
     </div>
   );
 }
 
-// szukajka: bez wielkości liter i ogonków; każde wpisane słowo musi wystąpić w tytule, opisie, projekcie albo stanie
-const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l");
-export function matchTask(t: TaskTile, words: string[]) { const hay = norm(`${t.title} ${t.summary} ${t.project?.name ?? ""} ${TS_LABEL[t.state]}`); return words.every((w) => hay.includes(w)); }
+// „Ułóż” zapamiętuje układ sprzed ułożenia; „Cofnij” (przez kilka sekund) go przywraca. Wspólne dla obu poziomów kanwy.
+export function useUndoLayout(run: (fn: () => Promise<unknown>, ok?: string) => void) {
+  const [snap, setSnap] = useState<LayoutSnap | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const remember = (s: LayoutSnap) => { setSnap(s); clearTimeout(timer.current); timer.current = window.setTimeout(() => setSnap(null), UNDO_MS); };
+  const undo = (taskId: string | null) => { const s = snap; if (!s) return; setSnap(null); clearTimeout(timer.current); run(() => restoreLayout(taskId, s.items, s.groups), "Przywrócono poprzedni układ"); };
+  return { canUndo: !!snap, remember, undo };
+}
+export function layoutSnapshot(api: CanvasApi | null, ids: string[], groups: GroupVM[]): LayoutSnap {
+  const P = api?.positions() ?? {}, R = api?.groupRects() ?? {};
+  return {
+    items: ids.filter((k) => P[k]).map((k) => ({ id: k, x: Math.round(P[k].x), y: Math.round(P[k].y) })),
+    groups: groups.filter((g) => R[g.id]).map((g) => ({ id: g.id, x: Math.round(R[g.id].x), y: Math.round(R[g.id].y), w: Math.round(R[g.id].w), h: Math.round(R[g.id].h), auto: g.auto })),
+  };
+}
 
 export function Board(p: BoardProps) {
   const router = useRouter();
@@ -97,40 +97,68 @@ export function Board(p: BoardProps) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  const [namer, setNamer] = useState<"tile" | "group" | "project" | null>(null);
+  const [namer, setNamer] = useState<"tile" | "group" | null>(null);
   const [arch, setArch] = useState<"done" | "trash" | null>(null);
   const [proj, setProj] = useState(false);
   const [q, setQ] = useState("");
-  const [qOpen, setQOpen] = useState(false);
-  const qRef = useRef<HTMLInputElement>(null);
+  const [focus, setFocus] = useState<string | null>(null);        // kafelek do wyśrodkowania, gdy kanwa będzie na ekranie
+  const [projFocus, setProjFocus] = useState<string | null>(null);
+  const [archFocus, setArchFocus] = useState<string | null>(null);
   const off = !!arch || proj;   // widok archiwum albo projektów zakrywa kanwę
-  const [archQ, setArchQ] = useState("");
   const [purgeId, setPurgeId] = useState<string | null>(null);
   const [answerOff, setAnswerOff] = useState(true);
+  const undoL = useUndoLayout(run);
+  const applied = useRef<string>("");
 
   useEffect(() => { try { setAnswerOff(!p.lastAgent || sessionStorage.getItem("th-ans") === p.lastAgent.id); } catch { setAnswerOff(!p.lastAgent); } }, [p.lastAgent]);
   useEffect(() => { setSel((s) => { const n = new Set([...s].filter((id) => p.tasks.some((t) => t.id === id))); return n.size === s.size ? s : n; }); }, [p.tasks]);
   useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setMenu(false); setConfirm(false); setNamer(null); setSel(new Set()); setSelGroup(null); return; }
-      // „/” albo Ctrl/Cmd+K: kursor do szukajki (poza polami tekstowymi)
-      const inField = (e.target as HTMLElement).closest("input, textarea, [contenteditable]");
-      if ((e.key === "/" && !inField) || (e.key.toLowerCase() === "k" && (e.ctrlKey || e.metaKey))) { e.preventDefault(); qRef.current?.focus(); }
-    };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { setMenu(false); setConfirm(false); setNamer(null); setSel(new Set()); setSelGroup(null); } };
     document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key);
   }, []);
+  // wejście z adresu (wynik szukania na innym ekranie): otwórz widok, potem wyczyść adres, żeby odświeżenie wracało na kanwę
+  useEffect(() => {
+    const i = p.initial, key = JSON.stringify(i);
+    if (!i || applied.current === key) return;
+    applied.current = key;
+    if (i.view === "projects") { setProj(true); setArch(null); setProjFocus(i.p ?? null); }
+    else if (i.view === "done" || i.view === "trash") { setArch(i.view); setProj(false); setArchFocus(i.t ?? null); }
+    else if (i.focus) { setArch(null); setProj(false); onView("canvas"); setFocus(i.focus); }
+    else return;
+    window.history.replaceState(window.history.state, "", "/");
+  }, [p.initial]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!focus || off || view !== "canvas") return;
+    const t = setTimeout(() => { api.current?.centerOn(focus); setSel(new Set([focus])); setSelGroup(null); setFocus(null); }, 120);
+    return () => clearTimeout(t);
+  }, [focus, off, view]);
+  useEffect(() => {
+    if (!archFocus || !arch) return;
+    const el = document.getElementById("arch-" + archFocus); if (!el) return;
+    el.scrollIntoView({ block: "center" }); el.classList.add("hl");
+    const t = setTimeout(() => { el.classList.remove("hl"); setArchFocus(null); }, 3000); return () => clearTimeout(t);
+  }, [archFocus, arch]);
 
   const byId = useMemo(() => new Map(p.tasks.map((t) => [t.id, t])), [p.tasks]);
-  const words = useMemo(() => norm(q).split(/\s+/).filter(Boolean), [q]);
-  const hits = useMemo(() => (words.length ? p.tasks.filter((t) => matchTask(t, words)) : p.tasks), [p.tasks, words]);
-  const hitIds = useMemo(() => new Set(hits.map((t) => t.id)), [hits]);
+  const words = useMemo(() => tokens(q), [q]);
+  // trafienia wśród kafelków z tego samego indeksu, co lista wyników
+  const hitIds = useMemo(() => new Set(p.index.filter((it) => it.kind === "task" && matches(it.hay, words)).map((it) => it.id)), [p.index, words]);
+  const hits = useMemo(() => (words.length ? p.tasks.filter((t) => hitIds.has(t.id)) : p.tasks), [p.tasks, words, hitIds]);
   // w trakcie szukania pasujące kafelki zostają, reszta blednie
   const items: CanvasItem[] = useMemo(() => p.tasks.map((t) => ({ id: t.id, dependsOn: t.dependsOn, pos: t.pos, cls: "task " + t.state + (words.length ? (hitIds.has(t.id) ? " hit" : " dim") : ""), done: t.state === "done", aria: "Otwórz zadanie " + t.title })), [p.tasks, words.length, hitIds]);
   const groups: CanvasGroup[] = useMemo(() => p.groups.map((g) => ({ ...g })), [p.groups]);
   const group = selGroup ? p.groups.find((g) => g.id === selGroup) ?? null : null;
   const open = (id: string) => router.push(`/tasks/${id}`);
   const ids = [...sel];
-  const goTo = (id: string) => { api.current?.centerOn(id); setSel(new Set([id])); setSelGroup(null); setQOpen(false); };
+  const screen: Screen = arch ?? (proj ? "projects" : "canvas");
+  const showCanvas = () => { setArch(null); setProj(false); setSel(new Set()); setSelGroup(null); };
+  // wynik szukania obsłużony na miejscu: zadanie → środek kanwy, projekt → widok projektów, archiwum → właściwa zakładka; reszta idzie pod adres
+  const onPick = (it: SearchItem): boolean => {
+    if (it.kind === "task") { if (view === "canvas") { setArch(null); setProj(false); setFocus(it.id); } else open(it.id); return true; }
+    if (it.kind === "project") { setArch(null); setProj(true); setProjFocus(it.id); return true; }
+    if (it.kind === "done" || it.kind === "trash") { setProj(false); setArch(it.kind); setArchFocus(it.id); return true; }
+    return false;
+  };
 
   // grupa ułożona automatycznie (np. przez agenta) dostaje na stałe prostokąt i położenia kafelków z pierwszego narysowania:
   // inaczej skakała po kanwie przy każdej zmianie wolnych kafelków
@@ -164,10 +192,11 @@ export function Board(p: BoardProps) {
     setNamer(null); setSel(new Set()); run(async () => { await freeze(members); const id = await createGroupAction(null, name, members, rect); setSelGroup(id); });
   };
   const batch = (op: Parameters<typeof batchTasks>[1], ok: string) => { const list = ids; setConfirm(false); setSel(new Set()); run(() => batchTasks(list, op), ok); };
+  const layoutNow = () => { undoL.remember(layoutSnapshot(api.current, p.tasks.map((t) => t.id), p.groups)); run(() => autoLayout(null), "Ułożono"); };
 
   const n = sel.size, word = plural(n, "zadanie", "zadania", "zadań");
-  const aq = archQ.trim().toLowerCase();
-  const archRows = (arch === "done" ? p.archive.done : p.archive.trash).filter((r) => !aq || (r.title + " " + (r.summary ?? "")).toLowerCase().includes(aq));
+  const allDone = n > 0 && ids.every((id) => byId.get(id)?.state === "done");   // same ukończone: przycisk cofa „gotowe”
+  const archRows = (arch === "done" ? p.archive.done : p.archive.trash).filter((r) => !words.length || matches(norm(`${r.title} ${r.summary ?? ""} ${r.project ?? ""}`), words));
 
   return (
     <div className="app">
@@ -177,9 +206,9 @@ export function Board(p: BoardProps) {
           onOpen={(id) => { if (id) open(id); }} onMove={(moved) => run(() => saveTaskPositions(moved))}
           onLink={(from, to) => run(() => linkTasks(from, to, true), "Połączono: drugie zadanie zacznie się po pierwszym")} onUnlink={(from, to) => run(() => linkTasks(from, to, false), "Usunięto połączenie")}
           onGroupChange={(id, patch) => run(() => updateGroupAction(null, id, patch))} onGroupCreate={(rect, members) => run(async () => { await freeze(members); await createGroupAction(null, "Nowa grupa", members, rect); })}
-          onAutoLayout={() => run(() => autoLayout(null), "Ułożono")}
+          onAutoLayout={layoutNow} onUndoLayout={undoL.canUndo ? () => undoL.undo(null) : null}
           empty={p.tasks.length ? null : (
-            <div className="empty glass"><h2>Pierwsze zadanie</h2><p>{p.aiOn ? "Opisz je w polu na dole. Agent ustali kroki, kolejność i to, co może iść równolegle." : "Opisz je w polu na dole. Powstanie zadanie, a kroki ułoży Twój Claude przez konektor Task Hub."}</p></div>
+            <div className="empty glass"><h2>Pierwsze zadanie</h2><p>Napisz na dole, co masz na głowie, albo wklej maila czy wiadomość. Task Hub zrobi z tego zadanie i poprowadzi je krok po kroku.</p></div>
           )} />
       ) : (
         <div className="listview">
@@ -203,13 +232,12 @@ export function Board(p: BoardProps) {
             <div className="arch-tabs">
               <button className={"seg" + (arch === "done" ? " on" : "")} type="button" onClick={() => setArch("done")}>Ukończone ({p.archive.done.length})</button>
               <button className={"seg" + (arch === "trash" ? " on" : "")} type="button" onClick={() => setArch("trash")}>Kosz ({p.archive.trash.length})</button>
-              <input className="arch-q" type="search" placeholder="Szukaj…" value={archQ} onChange={(e) => setArchQ(e.target.value)} aria-label="Szukaj w archiwum" />
             </div>
             <p>{arch === "done" ? "Ukończone zadania zostają tu na zawsze; agent dostaje ich notatki jako kontekst." : `Zadania w koszu znikają po ${p.archive.trashDays} dniach; agenci ich nie widzą.`}</p>
           </div>
           <div className="stage-grp">
             {archRows.length ? archRows.map((r) => (
-              <div key={r.id} className="lrow arow">
+              <div key={r.id} id={"arch-" + r.id} className="lrow arow">
                 <span style={{ paddingTop: 3 }}><Lvl base={r.base} eff={r.eff} /></span>
                 <div className="a-main">
                   <button type="button" className="a-title" onClick={() => open(r.id)}>{r.title}</button>
@@ -224,57 +252,28 @@ export function Board(p: BoardProps) {
                   )}
                 </div>
               </div>
-            )) : <p className="sub">Pusto.</p>}
+            )) : <p className="sub">{words.length ? "Nic nie pasuje." : "Pusto."}</p>}
           </div>
         </div>
       ) : null}
 
       {proj ? (
-        <Projects projects={p.projects} tasks={p.projTasks} onTask={open} onNew={() => setNamer("project")}
+        <Projects projects={p.projects} tasks={p.projTasks} focus={projFocus} onTask={open} onNew={(name) => run(() => createProjectAction(name), "Dodano projekt")}
           onPatch={(id, patch: ProjectPatch) => run(() => updateProjectAction(id, patch))} onRemove={(id) => run(() => removeProject(id), "Usunięto projekt, zadania zostały")} />
       ) : null}
 
       <div className="pillbar">
-        <div className="gpill glass">
-          {arch || proj ? (
-            <><button className="icobtn" type="button" aria-label="Wróć do kanwy" onClick={() => { setArch(null); setProj(false); }}><Icon k="back" size={15} sw={1.8} /></button><span className="crumb"><span className="ct">{proj ? "Projekty" : "Archiwum"}</span></span></>
-          ) : (
+        <div className="pl">
+          {off ? <BackPill title={proj ? "Projekty" : "Archiwum"} onBack={showCanvas} /> : (
             <>
-              <button className="icobtn" type="button" aria-label="Menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}><Icon k="menu" size={15} sw={1.7} /></button>
-              <span className="crumb"><span className="logo"><Icon k="logo" size={12} sw={2} /></span><span className="ct">Task Hub</span></span>
-              {view === "canvas" ? (
-                <>
-                  <span className="vd" />
-                  <button className="icobtn mk" type="button" title="Nowe zadanie jako kafelek" onClick={() => setNamer(namer === "tile" ? null : "tile")}><Icon k="tile" size={18} />Kafelek</button>
-                  <button className="icobtn mk" type="button" title={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onClick={() => setNamer(namer === "group" ? null : "group")}><Icon k="group" size={18} />Grupa</button>
-                </>
-              ) : null}
+              <div className="gpill glass"><BrandButton open={menu} onClick={() => setMenu((m) => !m)} /></div>
+              {view === "canvas" ? <MakePill tileTitle="Nowe zadanie jako kafelek" groupTitle={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onTile={() => setNamer(namer === "tile" ? null : "tile")} onGroup={() => setNamer(namer === "group" ? null : "group")} /> : null}
             </>
           )}
         </div>
         {off ? null : <ViewPill view={view} onView={onView} />}
         <span className="sp" />
-        {off ? null : (
-          <div className={"gpill glass srch" + (q ? " on" : "")} role="search">
-            <Icon k="search" size={15} sw={1.8} />
-            <input ref={qRef} type="text" value={q} placeholder="Szukaj zadań… (/)" aria-label="Szukaj zadań" autoComplete="off" spellCheck={false}
-              onChange={(e) => { setQ(e.currentTarget.value); setQOpen(true); }} onFocus={() => setQOpen(true)} onBlur={() => setTimeout(() => setQOpen(false), 150)}
-              onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); setQ(""); e.currentTarget.blur(); } else if (e.key === "Enter" && hits.length && words.length) { e.preventDefault(); if (view === "canvas") goTo(hits[0].id); else open(hits[0].id); } }} />
-            {q ? <button className="icobtn sm" type="button" aria-label="Wyczyść" onClick={() => { setQ(""); qRef.current?.focus(); }}><Icon k="x" size={11} sw={2.2} /></button> : null}
-            {qOpen && words.length ? (
-              <div className="sres glass" role="listbox" aria-label="Pasujące zadania">
-                {hits.length ? hits.slice(0, 8).map((t) => (
-                  <button key={t.id} type="button" role="option" className="sr" onMouseDown={(e) => e.preventDefault()} onClick={() => (view === "canvas" ? goTo(t.id) : open(t.id))} onDoubleClick={() => open(t.id)} title="Kliknij: pokaż na kanwie · dwuklik: otwórz">
-                    <Lvl base={t.base} eff={t.eff} /><span className="n-title">{t.title}</span>
-                    {t.project ? <span className="proj-tag" style={{ ["--c" as string]: projColor(t.project.color) }}>{t.project.name}</span> : null}
-                    <span className={"st " + t.state}>{TS_SHORT[t.state]}</span>
-                  </button>
-                )) : <span className="sub" style={{ padding: "6px 10px" }}>Brak pasujących zadań</span>}
-                {hits.length > 8 ? <span className="sub" style={{ padding: "4px 10px" }}>…i jeszcze {hits.length - 8}</span> : null}
-              </div>
-            ) : null}
-          </div>
-        )}
+        <SearchPill index={p.index} screen={screen} value={q} onChange={setQ} onPick={onPick} />
         <AgentPill agent={p.agent} aiOn={p.aiOn} />
       </div>
 
@@ -283,8 +282,6 @@ export function Board(p: BoardProps) {
           <button className="mi" role="menuitem" type="button" onClick={() => { setMenu(false); setProj(true); setArch(null); setSel(new Set()); setSelGroup(null); }}>Projekty<small>Kolor, ważność, język i zadania każdego projektu</small></button>
           <Link className="mi" role="menuitem" href="/settings" onClick={() => setMenu(false)}>Ustawienia<small>Agent, konektor i podłączeni klienci</small></Link>
           <Link className="mi" role="menuitem" href="/rules" onClick={() => setMenu(false)}>Zasady pracy<small>Jak agent ma działać: ogólne, projektu, narzędzia</small></Link>
-          <hr />
-          <button className="mi" role="menuitem" type="button" onClick={() => { setMenu(false); run(() => autoLayout(null), "Ułożono wszystkie zadania"); }}>Ułóż wszystkie zadania automatycznie<small>Usuwa ręczne położenia na tej kanwie</small></button>
           <hr />
           <button className="mi" role="menuitem" type="button" onClick={() => { setMenu(false); setArch("done"); setProj(false); setSel(new Set()); setSelGroup(null); }}>Archiwum<small>Ukończone zadania i kosz</small></button>
           <hr />
@@ -295,7 +292,6 @@ export function Board(p: BoardProps) {
 
       {namer === "tile" ? <Namer label="Nazwa nowego zadania" placeholder="Nazwa zadania" onClose={() => setNamer(null)} onSubmit={(name) => { setNamer(null); run(() => createTaskQuick(name), "Dodano zadanie"); }} /> : null}
       {namer === "group" ? <Namer label="Nazwa grupy" placeholder={n ? `Nazwa grupy dla ${n} ${word}` : "Nazwa grupy"} onClose={() => setNamer(null)} onSubmit={makeGroup} /> : null}
-      {namer === "project" ? <Namer label="Nazwa nowego projektu" placeholder="Nazwa projektu" onClose={() => setNamer(null)} onSubmit={(name) => { setNamer(null); run(() => createProjectAction(name), "Dodano projekt"); }} /> : null}
 
       {!off && view === "canvas" && group && !n ? (
         <GroupBar g={group} onColor={(c) => run(() => updateGroupAction(null, group.id, { color: c }))} onRename={() => setRenaming(group.id)}
@@ -307,13 +303,14 @@ export function Board(p: BoardProps) {
             <><span className="rb-t">Przenieść <b>{n} {word}</b> do kosza?</span><span className="dv" />
               <button className="btn danger" type="button" onClick={() => batch({ trash: true }, "Przeniesiono do kosza")}>Tak, do kosza</button><button className="btn" type="button" onClick={() => setConfirm(false)}>Anuluj</button></>
           ) : (
-            <><span className="rb-t">Zaznaczono <b>{n} {word}</b></span><span className="dv" />
+            <><span className="rb-t"><b>{n} {word}</b></span><span className="dv" />
               <ProjectPicker projects={p.projects} value={null} cls="btn" onPick={(id) => batch({ projectId: id }, id ? "Przypisano do projektu" : "Odpięto od projektu")} />
               <PrioPicker base={3} cls="btn" onPick={(l) => batch({ level: l }, "Zmieniono priorytet")} />
               <button className="btn" type="button" onClick={() => setNamer("group")}>Zgrupuj</button>
-              <button className="btn" type="button" onClick={() => batch({ done: true }, "Oznaczono jako gotowe")}>Oznacz jako gotowe</button>
+              {allDone ? <button className="btn" type="button" onClick={() => batch({ done: false }, "Przywrócono do pracy")}>Wróć do pracy</button>
+                : <button className="btn" type="button" onClick={() => batch({ done: true }, "Oznaczono jako gotowe")}>Oznacz jako gotowe</button>}
               <button className="btn danger" type="button" onClick={() => setConfirm(true)}>Usuń</button>
-              <button className="icobtn" type="button" aria-label="Odznacz wszystko" title="Odznacz (Esc)" onClick={() => { setSel(new Set()); setConfirm(false); }}><Icon k="x" size={12} sw={2} /></button></>
+              <button className="icobtn end" type="button" aria-label="Odznacz wszystko" title="Odznacz (Esc)" onClick={() => { setSel(new Set()); setConfirm(false); }}><Icon k="x" size={12} sw={2} /></button></>
           )}
         </div>
       ) : null}
@@ -325,7 +322,7 @@ export function Board(p: BoardProps) {
         </div>
       ) : null}
 
-      {off ? null : <Dock action={chat} taskId={null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"} placeholder={p.aiOn ? "Opisz nowe zadanie albo zapytaj o swoje zadania…" : "Opisz nowe zadanie albo wklej wiadomość; kroki ułoży Claude przez konektor…"} />}
+      {off ? null : <Dock action={chat} taskId={null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"} placeholder="Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" />}
       <Toast text={toast} />
     </div>
   );
