@@ -6,6 +6,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var store: Store
     @ObservedObject var bridge: Bridge
+    @ObservedObject var updater: Updater
     @State private var connectInfo = ""
     @State private var checking = false
     @State private var claudeInfo = ""
@@ -55,12 +56,22 @@ struct SettingsView: View {
                 Text("Mostek pyta Task Hub co kilkanaście sekund (bez tokenów) i uruchamia Claude Code tylko wtedy, gdy czeka praca. Gdy Mac śpi, pracę przejmuje automat co godzinę.")
                     .font(.system(size: 11.5)).foregroundColor(Theme.sub)
             }
+            Section("Aktualizacje") {
+                Toggle("Aktualizuj automatycznie (sprawdza co 6 godzin)", isOn: $store.cfg.autoUpdate)
+                LabeledContent("Wersja") {
+                    HStack(spacing: 8) {
+                        Text(updater.currentVersion)
+                        Button("Sprawdź teraz") { Task { @MainActor in await updater.check(auto: false) } }
+                        if updater.ready != nil { Button("Uruchom ponownie") { updater.relaunch() } }
+                    }
+                }
+                if !updater.status.isEmpty { Text(updater.status).font(.system(size: 12)).foregroundColor(Theme.sub).lineLimit(2) }
+            }
             Section("Dziennik") {
                 HStack(spacing: 10) {
                     Button("Pokaż dziennik") { NSWorkspace.shared.open(Log.url) }
                     Text(Log.url.path).font(.system(size: 11)).foregroundColor(Theme.sub).lineLimit(1).truncationMode(.middle)
                 }
-                Text("Task Hub na Maca \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")").font(.system(size: 11)).foregroundColor(Theme.sub)
             }
         }
         .formStyle(.grouped)

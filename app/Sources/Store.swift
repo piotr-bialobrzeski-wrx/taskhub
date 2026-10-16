@@ -3,12 +3,27 @@
 import Foundation
 
 struct Config: Codable, Equatable {
-    var url: String = ""        // adres Task Hub, np. https://taskhub-lac.vercel.app
-    var token: String = ""      // token mostka z Ustawień Task Hub
-    var name: String = ""       // nazwa tego komputera (widać ją w Task Hub)
-    var claude: String = ""     // ścieżka do Claude Code; puste = szukaj w typowych miejscach
-    var model: String = ""      // model dla biegów; puste = domyślny Claude Code
-    var bridge: Bool = true     // czy mostek ma pracować
+    var url = ""            // adres Task Hub, np. https://taskhub-lac.vercel.app
+    var token = ""          // token mostka z Ustawień Task Hub
+    var name = ""           // nazwa tego komputera (widać ją w Task Hub)
+    var claude = ""         // ścieżka do Claude Code; puste = szukaj w typowych miejscach
+    var model = ""          // model dla biegów; puste = domyślny Claude Code
+    var bridge = true       // czy mostek ma pracować
+    var autoUpdate = true   // czy aplikacja ma się sama aktualizować z GitHuba
+
+    init() {}
+
+    // brakujące klucze (starszy plik) dostają wartości domyślne zamiast psuć całą konfigurację
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decodeIfPresent(String.self, forKey: .url) ?? ""
+        token = try c.decodeIfPresent(String.self, forKey: .token) ?? ""
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        claude = try c.decodeIfPresent(String.self, forKey: .claude) ?? ""
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        bridge = try c.decodeIfPresent(Bool.self, forKey: .bridge) ?? true
+        autoUpdate = try c.decodeIfPresent(Bool.self, forKey: .autoUpdate) ?? true
+    }
 }
 
 final class Store: ObservableObject {

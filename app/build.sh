@@ -38,8 +38,11 @@ echo "== podpis (ad hoc)"
 codesign --force --deep --sign - --identifier com.taskhub.app "$APP"
 codesign --verify --verbose=2 "$APP"
 
+echo "== archiwum do samoaktualizacji"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/Task-Hub-$VERSION.zip"
+
 echo "== instalator"
 pkgbuild --component "$APP" --install-location /Applications --identifier com.taskhub.app --version "$VERSION" "$OUT/Task-Hub-$VERSION.pkg"
 hdiutil create -volname "Task Hub" -srcfolder "$APP" -ov -format UDZO "$OUT/Task-Hub-$VERSION.dmg" >/dev/null
 ls -la "$OUT"
-echo "== gotowe: $APP, $OUT/Task-Hub-$VERSION.pkg, $OUT/Task-Hub-$VERSION.dmg"
+echo "== gotowe: $APP, $OUT/Task-Hub-$VERSION.pkg, $OUT/Task-Hub-$VERSION.dmg, $OUT/Task-Hub-$VERSION.zip"

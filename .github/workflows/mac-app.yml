@@ -77,13 +77,15 @@ jobs:
           2. Aplikacja trafia do /Applications (Launchpad, Spotlight).
           3. Zainstaluj Claude Code i zaloguj się raz w Terminalu: `claude`, potem `/login`.
           4. W Task Hub (przeglądarka) → Ustawienia → Mostek na komputerze → utwórz token → „Połącz aplikację Task Hub na tym Macu”.
+
+          Kolejne wersje aplikacja pobiera i instaluje sama (plik `.zip`), bez ponownego przechodzenia przez ten krok.
           EOF
           if [[ "$PRE" == "true" ]]; then
             gh release delete "$TAG" -y --cleanup-tag 2>/dev/null || true
-            gh release create "$TAG" app/build/*.pkg app/build/*.dmg --title "Task Hub na Maca (budowa $VERSION)" --notes-file app/out/notes.md --prerelease --target "$GITHUB_SHA"
+            gh release create "$TAG" app/build/*.pkg app/build/*.dmg app/build/*.zip --title "Task Hub na Maca (budowa $VERSION)" --notes-file app/out/notes.md --prerelease --target "$GITHUB_SHA"
           elif gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" app/build/*.pkg app/build/*.dmg --clobber
+            gh release upload "$TAG" app/build/*.pkg app/build/*.dmg app/build/*.zip --clobber
             gh release edit "$TAG" --title "Task Hub na Maca $VERSION" --notes-file app/out/notes.md --prerelease=false --latest
           else
-            gh release create "$TAG" app/build/*.pkg app/build/*.dmg --title "Task Hub na Maca $VERSION" --notes-file app/out/notes.md --latest --target "$GITHUB_SHA"
+            gh release create "$TAG" app/build/*.pkg app/build/*.dmg app/build/*.zip --title "Task Hub na Maca $VERSION" --notes-file app/out/notes.md --latest --target "$GITHUB_SHA"
           fi

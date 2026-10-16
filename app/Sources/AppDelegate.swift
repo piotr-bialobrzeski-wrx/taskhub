@@ -8,6 +8,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let store = Store.shared
     private(set) lazy var bridge = Bridge(store: store)
+    private(set) lazy var updater = Updater(store: store)
     private var web: WebWindowController! = nil
     private var quick: QuickEntryController! = nil
     private var settings: NSWindowController? = nil
@@ -36,6 +37,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             web.show()
             showSettings()
+        }
+        // samoaktualizacja: cicho, gdy okna zamknięte i mostek nie pracuje; inaczej pytamy
+        updater.canRelaunchQuietly = { [weak self] in
+            guard let self = self else { return false }
+            let visible = [self.web.window, self.settings?.window, self.quick.window].contains { $0?.isVisible == true }
+            return !visible && self.bridge.state != .running
+        }
+        updater.askRelaunch = { [weak self] v in self?.askRelaunch(v) }
+        updater.startSchedule()
+    }
+
+    private func askRelaunch(_ version: String) {
+        let a = NSAlert()
+        a.messageText = "Task Hub \(version) gotowy"
+        a.informativeText = "Nowa wersja jest już zainstalowana. Uruchomić aplikację ponownie teraz? Mostek wznowi pracę po chwili."
+        a.addButton(withTitle: "Uruchom ponownie")
+        a.addButton(withTitle: "Później")
+        NSApp.activate(ignoringOtherApps: true)
+        if a.runModal() == .alertFirstButtonReturn { updater.relaunch() }
+    }
+
+    @objc func checkUpdates() {
+        Task { @MainActor [self] in
+            await self.updater.check(auto: false)
+            if self.updater.ready == nil { self.alert("Aktualizacje", self.updater.status.isEmpty ? "Masz najnowszą wersję (\(self.updater.currentVersion))." : self.updater.status) }
         }
     }
 
@@ -120,6 +146,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         now.isEnabled = bridge.running
         menu.addItem(now)
         menu.addItem(.separator())
+        if let v = updater.ready {
+            menu.addItem(item("Uruchom ponownie: wersja \(v) gotowa", #selector(relaunchApp), ""))
+        }
         menu.addItem(item("Ustawienia…", #selector(showSettings), ","))
         menu.addItem(item("Dziennik", #selector(showLog), ""))
         menu.addItem(.separator())
@@ -169,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         main.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "O Task Hub", action: #selector(showAbout), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Sprawdź aktualizacje…", action: #selector(checkUpdates), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Ustawienia…", action: #selector(showSettings), keyEquivalent: ",")
         appMenu.addItem(.separator())
@@ -239,6 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func pokeBridge() { bridge.poke() }
+    @objc func relaunchApp() { updater.relaunch() }
 
     @objc func showLog() {
         if !FileManager.default.fileExists(atPath: Log.url.path) { Log.write("dziennik założony") }
@@ -248,7 +279,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func showSettings() {
         if settings == nil {
             // Form (lista) nie ma własnej wysokości, więc rozmiar okna ustawiamy wprost; inaczej okno ma sam pasek tytułu
-            let host = NSHostingController(rootView: SettingsView(store: store, bridge: bridge))
+            let host = NSHostingController(rootView: SettingsView(store: store, bridge: bridge, updater: updater))
             host.view.frame = NSRect(x: 0, y: 0, width: 620, height: 640)
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 640), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             w.title = "Ustawienia Task Hub"
