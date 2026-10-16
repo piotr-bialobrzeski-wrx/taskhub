@@ -1,9 +1,9 @@
 // Agent z udawanym dostawcą: czat zakłada zadanie, przełączanie dostawców, hand-off, kontekst z zasadami.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Ai, AiError } from "@/lib/ai";
-import { FakeProvider, project, step, task } from "./helpers";
+import { FakeProvider, project, rule, step, task } from "./helpers";
 import { handoffPrompt } from "@/lib/agent/handoff";
-import { contextText } from "@/lib/agent/context";
+import { contextText, procedureMatches, rulesText } from "@/lib/agent/context";
 import { z } from "zod";
 
 describe("warstwa modelu niezależna od dostawcy", () => {
@@ -29,7 +29,7 @@ describe("prompt hand-off i kontekst", () => {
     const s1 = step({ title: "Zebrać wymagania", status: "done", output: "Lista: A, B" });
     const s2 = step({ title: "Zbudować prototyp", tool: "claudeapp", dependsOn: [s1.id] });
     const t = task({ title: "Prototyp sklepu", summary: "Pokazać klientowi", steps: [s1, s2], projectId: "p1" });
-    const p = handoffPrompt(t, s2, [{ id: "r", scope: "project", projectId: "p1", tool: null, title: "Język", body: "Po angielsku", visibility: "private" }], { appUrl: "https://hub.example" });
+    const p = handoffPrompt(t, s2, [rule({ scope: "project", projectId: "p1", title: "Język", body: "Po angielsku" })], { appUrl: "https://hub.example" });
     expect(p).toContain("Pokazać klientowi");
     expect(p).toContain("Po angielsku");
     expect(p).toContain("Lista: A, B");
@@ -38,13 +38,37 @@ describe("prompt hand-off i kontekst", () => {
   });
   it("kontekst kanwy wypisuje zadania z priorytetem efektywnym, w zadaniu dodaje zasady narzędzi", () => {
     const t = task({ title: "Mail do Ani", level: 3, steps: [step({ tool: "gmail" })] , projectId: "p1" });
-    const rules = [{ id: "1", scope: "tool" as const, projectId: null, tool: "gmail", title: "Mail", body: "Podpis: Piotr", visibility: "private" as const }];
+    const rules = [rule({ scope: "tool", tool: "gmail", title: "Mail", body: "Podpis: Piotr" })];
     const board = contextText({ tasks: [t], projects: [project({ weight: 5 })], rules, samples: [] });
     expect(board).toContain("Mail do Ani");
     expect(board).toContain("efektywny 4");
     expect(board).not.toContain("Podpis: Piotr");
     const inside = contextText({ tasks: [t], projects: [project()], rules, samples: [], currentTaskId: t.id });
     expect(inside).toContain("Podpis: Piotr");
+  });
+  it("zasady w trzech sekcjach: profil i zasady zawsze, procedura w całości tylko gdy pasuje wyzwalacz, inaczej skrót w spisie", () => {
+    const rules = [
+      rule({ kind: "profile", scope: "project", projectId: "p1", title: "Shiftwow", body: "Język: angielski\nKlient: Shiftwow" }),
+      rule({ kind: "rule", title: "Formatowanie", body: "Bez myślników." }),
+      rule({ kind: "procedure", title: "User story", summary: "Jak pisać story w ClickUp.", trigger: "story, user story", body: "Tytuł story od czasownika..." }),
+      rule({ kind: "procedure", scope: "tool", tool: "slack", title: "Wątek na Slacku", summary: "Jak odpowiadać w wątku.", trigger: "slack", body: "Krótko, w wątku, bez emoji." }),
+      rule({ kind: "procedure", title: "Przegląd", summary: "Co sprawdzać przy przeglądzie.", trigger: "przegląd", body: "Sprawdź listę i terminy." }),
+    ];
+    const t = rulesText(rules, "p1", ["clickup"], { text: "Napisać user story dla logowania" });
+    expect(t.indexOf("PROFIL")).toBeLessThan(t.indexOf("ZASADY PRACY"));
+    expect(t.indexOf("ZASADY PRACY")).toBeLessThan(t.indexOf("PROCEDURY"));
+    expect(t).toContain("Klient: Shiftwow");
+    expect(t).toContain("Bez myślników.");
+    expect(t).toContain("Tytuł story od czasownika");           // pasuje po słowie z tekstu kroku
+    expect(t).not.toContain("Krótko, w wątku");                   // narzędzie slack nie jest w krokach: nie ma jej wcale (zakres)
+    expect(t).toContain("- Przegląd: Co sprawdzać przy przeglądzie. [gdy: przegląd]"); // tylko skrót
+    expect(t).not.toContain("Sprawdź listę i terminy.");
+    const s = rulesText(rules, null, ["slack"], { topic: ["przeglad"] });  // temat bez polskich znaków też pasuje
+    expect(s).toContain("Krótko, w wątku, bez emoji.");
+    expect(s).toContain("Sprawdź listę i terminy.");
+    expect(s).not.toContain("Klient: Shiftwow");                  // profil innego projektu nie wchodzi
+    expect(procedureMatches(rules[2], [], { topic: ["user story"] })).toBe(true);   // temat zawarty w tytule
+    expect(procedureMatches(rules[2], [], { text: "Odpisać na maila" })).toBe(false);
   });
 });
 

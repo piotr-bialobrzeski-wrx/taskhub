@@ -18,7 +18,7 @@ import { createBridgeToken, createToken, revokeToken, saveSettings } from "../ac
 
 export const dynamic = "force-dynamic";
 
-const TOOLS = "list_tasks, get_task, get_rules, create_task, update_task, add_steps, update_step, set_blocks, complete_step, add_facts, add_snapshot, list_work, ask_question, get_attachment, describe_attachment, add_rule";
+const TOOLS = "list_tasks, get_task, get_rules, create_task, update_task, add_steps, update_step, set_blocks, complete_step, add_facts, add_snapshot, list_work, ask_question, get_attachment, describe_attachment, list_projects, create_project, list_rules, add_rule, update_rule";
 const OUTCOME: Record<string, string> = { done: "zrobione", error: "błąd", limit: "limit Claude", auth: "wylogowany", stale: "wygasł" };
 
 function More({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {

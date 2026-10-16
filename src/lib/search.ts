@@ -46,7 +46,7 @@ export function indexFrom(b: Bundle, now = Date.now()): SearchItem[] {
   for (const p of b.projects) out.push({ kind: "project", id: p.id, title: p.name, hay: norm(p.name), href: `/?view=projects&p=${p.id}`, color: p.color });
   for (const r of b.rules) {
     const where = r.scope === "project" ? proj(r.projectId)?.name ?? "projekt" : r.scope === "tool" ? toolLabel(r.tool ?? "") : "ogólna";
-    out.push({ kind: "rule", id: r.id, title: r.title, hay: norm(`${r.title} ${r.body} ${SCOPE[r.scope]} ${where}`), href: `/rules#rule-${r.id}`, sub: where });
+    out.push({ kind: "rule", id: r.id, title: r.title, hay: norm(`${r.title} ${r.body} ${r.summary ?? ""} ${SCOPE[r.scope]} ${where}`), href: `/rules#rule-${r.id}`, sub: where });
   }
   STATIC.forEach((s, i) => out.push({ kind: "setting", id: "s" + i, title: s.title, hay: norm(`${s.title} ${s.sub} ${s.extra}`), href: s.href, sub: s.sub }));
   return out;

@@ -247,8 +247,9 @@ export async function factPref(taskId: string, factId: string, pref: { pinned?: 
 export async function saveRule(fd: FormData) {
   const o = await requireOwner();
   const scope = (str(fd, "scope") || "global") as Rule["scope"];
+  const kind = (["profile", "rule", "procedure"].includes(str(fd, "kind")) ? str(fd, "kind") : "rule") as Rule["kind"];
   const title = str(fd, "title"), body = str(fd, "body"); if (!title || !body) return;
-  await repo.upsertRule(o.id, { id: str(fd, "id") || undefined, scope, title, body, projectId: scope === "project" ? str(fd, "projectId") || null : null, tool: scope === "tool" ? str(fd, "tool") || null : null, visibility: (str(fd, "visibility") || "private") as Rule["visibility"] });
+  await repo.upsertRule(o.id, { id: str(fd, "id") || undefined, kind, scope, title, body, projectId: scope === "project" ? str(fd, "projectId") || null : null, tool: scope === "tool" ? str(fd, "tool") || null : null, summary: kind === "procedure" ? str(fd, "summary") || null : null, trigger: kind === "procedure" ? str(fd, "trigger") || null : null, visibility: (str(fd, "visibility") || "private") as Rule["visibility"] });
   revalidatePath("/rules");
 }
 export async function removeRule(id: string) {

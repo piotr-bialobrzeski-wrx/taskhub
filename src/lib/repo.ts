@@ -323,7 +323,7 @@ export async function countAttachments(taskIds: string[]): Promise<Record<string
 }
 
 // ---------- zasady ----------
-const rowToRule = (r: Row): Rule => ({ id: r.id as string, scope: r.scope as Rule["scope"], projectId: (r.projectId as string) ?? null, tool: (r.tool as string) ?? null, title: r.title as string, body: r.body as string, visibility: r.visibility as Rule["visibility"] });
+const rowToRule = (r: Row): Rule => ({ id: r.id as string, kind: ((r.kind as Rule["kind"]) ?? "rule"), scope: r.scope as Rule["scope"], projectId: (r.projectId as string) ?? null, tool: (r.tool as string) ?? null, title: r.title as string, body: r.body as string, trigger: (r.trigger as string) ?? null, summary: (r.summary as string) ?? null, visibility: r.visibility as Rule["visibility"] });
 export async function listRules(ownerId: string): Promise<Rule[]> {
   const rows = await sql()`select * from rules where owner_id = ${ownerId} order by scope, position, created_at`;
   return rows.map(rowToRule);
@@ -332,15 +332,44 @@ export async function listRules(ownerId: string): Promise<Rule[]> {
 export function rulesFor(rules: Rule[], projectId: string | null, tools: string[]): Rule[] {
   return rules.filter((r) => r.scope === "global" || (r.scope === "project" && r.projectId === projectId) || (r.scope === "tool" && r.tool && tools.includes(r.tool)));
 }
-export async function upsertRule(ownerId: string, rule: Partial<Rule> & { title: string; body: string; scope: Rule["scope"] }): Promise<Rule> {
-  if (rule.id) {
-    const [r] = await sql()`update rules set title = ${rule.title}, body = ${rule.body}, scope = ${rule.scope}, project_id = ${rule.projectId ?? null}, tool = ${rule.tool ?? null}, visibility = ${rule.visibility ?? "private"} where id = ${rule.id} and owner_id = ${ownerId} returning *`;
-    return rowToRule(r);
+// ta sama nazwa w tym samym zakresie (i dla tego samego projektu albo narzędzia) = ta sama zasada; dzięki temu ponowne wgranie nie robi duplikatów
+export async function findRule(ownerId: string, w: { scope: Rule["scope"]; projectId?: string | null; tool?: string | null; title: string }): Promise<Rule | null> {
+  const rows = await sql()`select * from rules where owner_id = ${ownerId} and scope = ${w.scope} and project_id is not distinct from ${w.projectId ?? null} and tool is not distinct from ${w.tool ?? null} and lower(title) = lower(${w.title.trim()}) limit 1`;
+  return rows.length ? rowToRule(rows[0]) : null;
+}
+export type RuleInput = Partial<Rule> & { title: string; body: string; scope: Rule["scope"] };
+// każdy zapis zostawia migawkę w rule_versions (historia brzmienia zasady)
+export async function upsertRule(ownerId: string, rule: RuleInput): Promise<Rule> {
+  const kind = rule.kind ?? "rule", trigger = rule.trigger?.trim() || null, summary = rule.summary?.trim() || null, title = rule.title.trim(), body = rule.body.trim();
+  if (rule.id) {   // zapis bez zmian (np. ponowne wgranie tych samych zasad) nie zostawia pustej wersji w historii
+    const [cur] = await sql()`select * from rules where id = ${rule.id} and owner_id = ${ownerId}`;
+    if (cur && cur.kind === kind && cur.title === title && cur.body === body && cur.scope === rule.scope && (cur.projectId ?? null) === (rule.projectId ?? null) && (cur.tool ?? null) === (rule.tool ?? null) && (cur.trigger ?? null) === trigger && (cur.summary ?? null) === summary && cur.visibility === (rule.visibility ?? "private")) return rowToRule(cur);
   }
-  const [r] = await sql()`insert into rules (owner_id, scope, project_id, tool, title, body, visibility) values (${ownerId}, ${rule.scope}, ${rule.projectId ?? null}, ${rule.tool ?? null}, ${rule.title}, ${rule.body}, ${rule.visibility ?? "private"}) returning *`;
+  const rows = rule.id
+    ? await sql()`update rules set kind = ${kind}, title = ${title}, body = ${body}, scope = ${rule.scope}, project_id = ${rule.projectId ?? null}, tool = ${rule.tool ?? null}, trigger = ${trigger}, summary = ${summary}, visibility = ${rule.visibility ?? "private"}, updated_at = now() where id = ${rule.id} and owner_id = ${ownerId} returning *`
+    : await sql()`insert into rules (owner_id, kind, scope, project_id, tool, title, body, trigger, summary, visibility) values (${ownerId}, ${kind}, ${rule.scope}, ${rule.projectId ?? null}, ${rule.tool ?? null}, ${title}, ${body}, ${trigger}, ${summary}, ${rule.visibility ?? "private"}) returning *`;
+  const r = rows[0];
+  if (!r) throw new Error("Nie ma takiej zasady.");
+  await snapshotRule(ownerId, r, rule.id ? "updated" : "created");
   return rowToRule(r);
 }
-export async function deleteRule(ownerId: string, id: string): Promise<void> { await sql()`delete from rules where id = ${id} and owner_id = ${ownerId}`; }
+export async function deleteRule(ownerId: string, id: string): Promise<void> {
+  const [r] = await sql()`delete from rules where id = ${id} and owner_id = ${ownerId} returning *`;
+  if (r) await snapshotRule(ownerId, r, "deleted");
+}
+export type RuleChange = "created" | "updated" | "deleted";
+export type RuleVersion = { id: string; ruleId: string; change: RuleChange; kind: Rule["kind"]; scope: Rule["scope"]; title: string; body: string; trigger: string | null; summary: string | null; changedAt: string };
+async function snapshotRule(ownerId: string, r: Row, change: RuleChange): Promise<void> {
+  await sql()`insert into rule_versions (rule_id, owner_id, change, kind, scope, project_id, tool, title, body, trigger, summary)
+    values (${r.id as string}, ${ownerId}, ${change}, ${(r.kind as string) ?? "rule"}, ${r.scope as string}, ${(r.projectId as string) ?? null}, ${(r.tool as string) ?? null}, ${r.title as string}, ${r.body as string}, ${(r.trigger as string) ?? null}, ${(r.summary as string) ?? null})`;
+}
+// historia: najnowsza migawka pierwsza; bez ruleId = wszystkie zasady właściciela (strona zasad pokazuje je przy kartach)
+export async function listRuleVersions(ownerId: string, ruleId?: string, limit = 500): Promise<RuleVersion[]> {
+  const rows = ruleId
+    ? await sql()`select * from rule_versions where owner_id = ${ownerId} and rule_id = ${ruleId} order by changed_at desc limit ${limit}`
+    : await sql()`select * from rule_versions where owner_id = ${ownerId} order by changed_at desc limit ${limit}`;
+  return rows.map((r) => ({ id: r.id as string, ruleId: r.ruleId as string, change: r.change as RuleChange, kind: r.kind as Rule["kind"], scope: r.scope as Rule["scope"], title: r.title as string, body: r.body as string, trigger: (r.trigger as string) ?? null, summary: (r.summary as string) ?? null, changedAt: iso(r.changedAt) as string }));
+}
 
 // ---------- czasy ----------
 export async function listSamples(ownerId: string): Promise<TimeSample[]> {

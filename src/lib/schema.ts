@@ -177,13 +177,21 @@ export const Task = z.object({
 });
 export type Task = z.infer<typeof Task>;
 
+// Trzy rodzaje zasad: profil = dane o projekcie albo narzędziu (język, klient, kanały), zasada = krótka reguła zawsze w prompcie,
+// procedura = dłuższa instrukcja podawana w całości tylko, gdy pasuje wyzwalacz (narzędzie, temat, słowo z kroku); inaczej tylko skrót w spisie.
+export const RULE_KINDS = ["profile", "rule", "procedure"] as const;
+export type RuleKind = (typeof RULE_KINDS)[number];
+export const RULE_KIND_LABELS: Record<RuleKind, string> = { profile: "Profil", rule: "Zasada", procedure: "Procedura" };
 export const Rule = z.object({
   id: z.string(),
+  kind: z.enum(RULE_KINDS),
   scope: z.enum(["global", "project", "tool"]),
   projectId: z.string().nullable(),
   tool: z.string().nullable(),
   title: z.string(),
   body: z.string(),
+  trigger: z.string().nullable(),   // procedura: słowa wyzwalające po przecinku (slack, story, bug, przegląd)
+  summary: z.string().nullable(),   // procedura: jedno zdanie do spisu, gdy pełna treść nie jest podawana
   visibility: z.enum(["private", "project", "shared"]),
 });
 export type Rule = z.infer<typeof Rule>;

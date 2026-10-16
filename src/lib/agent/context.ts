@@ -30,12 +30,35 @@ export function brief(s: Scored): string {
   return `- [${t.id}] ${t.title} | priorytet ${t.level}/5${s.score.eff !== t.level ? ` (efektywny ${s.score.eff}: ${whyText(s.score)})` : ""} | ${taskState(t)} | kroki ${p}/${t.steps.length} | zostało ~${fmtMin(remainEst(t))}${taskSpent(t) ? ` | zrobione ${fmtMin(taskSpent(t))}` : ""}${t.due ? ` | termin ${t.due}` : ""}${s.project ? ` | projekt: ${s.project.name}` : ""}${t.summary ? " | " + t.summary.slice(0, 140) : ""}`;
 }
 
-// zasady jako bloki: linia z zakresem i tytułem, pod nią treść z zachowanymi punktami (jedna linia na zasadę sklejała wielopunktową treść w ścianę tekstu)
-export function rulesText(rules: Rule[], projectId: string | null, tools: string[]): string {
+// Zasady w prompcie w trzech sekcjach: PROFIL (dane o projekcie i narzędziach), ZASADY (zawsze) i PROCEDURY (pełna treść tylko tych, które
+// pasują do kroku; reszta w spisie samym skrótem). Bloki: linia z zakresem i tytułem, pod nią treść z zachowanymi punktami.
+export type RulesOpts = { topic?: string[]; text?: string };
+const fold = (s: string) => s.toLowerCase().replace(/ł/g, "l").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+export const triggerTokens = (trigger: string | null | undefined): string[] => (trigger ?? "").split(/[,;\n]/).map((t) => fold(t.trim())).filter(Boolean);
+// procedura pasuje, gdy słowo wyzwalacza to narzędzie kroku, podany temat albo fragment tekstu kroku; temat zawarty w tytule też ją włącza
+export function procedureMatches(r: Rule, tools: string[], opts: RulesOpts = {}): boolean {
+  const topics = (opts.topic ?? []).map(fold).filter(Boolean), text = fold(opts.text ?? ""), title = fold(r.title);
+  const toolSet = new Set(tools.flatMap((t) => [fold(t), fold(toolLabel(t))]));
+  if (topics.some((t) => title.includes(t))) return true;
+  return triggerTokens(r.trigger).some((k) => toolSet.has(k) || topics.some((t) => t === k || t.includes(k)) || (text.length > 0 && text.includes(k)));
+}
+export function rulesText(rules: Rule[], projectId: string | null, tools: string[], opts: RulesOpts = {}): string {
   const list = rulesFor(rules, projectId, tools);
   if (!list.length) return "";
   const scopeOf = (r: Rule) => r.scope === "global" ? "ogólna" : r.scope === "project" ? "projekt" : `narzędzie ${toolLabel(r.tool ?? "")}`;
-  return "ZASADY PRACY (stosuj je zawsze):\n\n" + list.map((r) => `[${scopeOf(r)}] ${r.title}\n${r.body.trim()}`).join("\n\n");
+  const block = (r: Rule) => `[${scopeOf(r)}] ${r.title}\n${r.body.trim()}`;
+  const profiles = list.filter((r) => r.kind === "profile"), always = list.filter((r) => r.kind === "rule"), procs = list.filter((r) => r.kind === "procedure");
+  const out: string[] = [];
+  if (profiles.length) out.push("PROFIL (fakty o projekcie i narzędziach; stosuj je jak dane):\n\n" + profiles.map(block).join("\n\n"));
+  if (always.length) out.push("ZASADY PRACY (stosuj je zawsze):\n\n" + always.map(block).join("\n\n"));
+  if (procs.length) {
+    const on = procs.filter((r) => procedureMatches(r, tools, opts)), off = procs.filter((r) => !on.includes(r));
+    const listed = off.map((r) => `- ${r.title}: ${(r.summary ?? "").trim() || r.body.trim().slice(0, 120)}${r.trigger ? ` [gdy: ${r.trigger}]` : ""}`).join("\n");
+    const hint = "tylko spis; pełną treść pobierzesz przez get_rules z polem topic, gdy któraś pasuje do pracy";
+    if (!on.length) out.push(`PROCEDURY (${hint}):\n${listed}`);
+    else out.push("PROCEDURY (pełna treść tych, które pasują do tej pracy):\n\n" + on.map(block).join("\n\n") + (off.length ? `\n\nPozostałe procedury (${hint}):\n${listed}` : ""));
+  }
+  return out.join("\n\n");
 }
 
 export function notesText(tasks: Task[]): string {
@@ -58,14 +81,14 @@ ${c.factPrefs ?? ""}`.trim();
   const cur = c.currentTaskId ? scored.find((s) => s.task.id === c.currentTaskId) : null;
   if (!cur) {
     return `${head}
-${rulesText(c.rules, null, [])}
+${rulesText(c.rules, null, [], { topic: ["czat"] })}
 MIEJSCE: główna kanwa, kontekst = wszystkie zadania.
 ZADANIA (${open.length}):
 ${open.slice(0, 60).map(brief).join("\n") || "(brak zadań)"}${notesText(c.tasks)}`;
   }
   const t = cur.task, others = open.filter((s) => s.task.id !== t.id);
   return `${head}
-${rulesText(c.rules, t.projectId, t.steps.map((s) => s.tool))}
+${rulesText(c.rules, t.projectId, t.steps.map((s) => s.tool), { topic: ["czat"], text: `${t.title} ${t.summary}` })}
 MIEJSCE: wnętrze zadania [${t.id}] "${t.title}". To jest domyślny kontekst wiadomości.
 OBECNE ZADANIE: priorytet ${t.level}/5 (${LEVELS[cur.score.eff]}${cur.score.why.length ? ", efektywny " + cur.score.eff + ": " + whyText(cur.score) : ""}), stan: ${taskState(t)}${t.due ? `, termin ${t.due}` : ""}${cur.project ? `, projekt ${cur.project.name}` : ""}
 Podsumowanie: ${t.summary || "-"}

@@ -33,7 +33,7 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean } = {}
   const out = [
     going.length ? "KROKI W TOKU (zaczęte przez Piotra albo poprzedni przebieg; zrób je teraz i zgłoś complete_step, a gdy nie możesz: leave_step z powodem):\n" + going.join("\n") : "",
     approved.length ? "ZATWIERDZONE SZKICE DO WYSŁANIA (wyślij dokładnie treść z bloku draft w get_task, bez zmian, potem complete_step z linkiem):\n" + approved.join("\n") : "",
-    noSteps.length ? "ZADANIA BEZ KROKÓW (get_task, get_rules, potem add_steps bez pytań, gdy da się przyjąć rozsądne założenia; w razie potrzeby ask_question):\n" + noSteps.map((s) => brief(s) + (attN[s.task.id] ? ` | załączniki: ${attN[s.task.id]} (get_task, potem get_attachment)` : "")).join("\n") : "",
+    noSteps.length ? "ZADANIA BEZ KROKÓW (get_task, get_rules z topic „rozpisanie”, potem add_steps bez pytań, gdy da się przyjąć rozsądne założenia; w razie potrzeby ask_question):\n" + noSteps.map((s) => brief(s) + (attN[s.task.id] ? ` | załączniki: ${attN[s.task.id]} (get_task, potem get_attachment)` : "")).join("\n") : "",
     answered.length ? "ODPOWIEDZI PIOTRA (kontynuuj pracę w tych zadaniach):\n" + answered.map((q) => `- zadanie [${q.taskId}]${q.stepId ? ` krok [${q.stepId}]` : ""}: pytanie „${q.text}” → odpowiedź: ${q.answer}`).join("\n") : "",
     ready.length ? "KROKI DO ZROBIENIA BEZ ZGODY (start_step, zrób swoimi konektorami, complete_step z linkiem; fakty przez add_facts):\n" + ready.join("\n") : "",
     approval.length ? "KROKI WYMAGAJĄCE ZGODY PIOTRA (przygotuj gotowy szkic przez set_blocks jako blok draft ze status proposed; niczego nie wysyłaj, krok sam przejdzie do zatwierdzenia):\n" + approval.join("\n") : "",

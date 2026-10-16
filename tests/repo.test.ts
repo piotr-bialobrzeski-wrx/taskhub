@@ -12,6 +12,7 @@ describe.skipIf(!DB)("repo", async () => {
     await sql()`delete from tasks where owner_id = ${owner}`;
     await sql()`delete from projects where owner_id = ${owner}`;
     await sql()`delete from rules where owner_id = ${owner}`;
+    await sql()`delete from rule_versions where owner_id = ${owner}`;
     await sql()`delete from api_tokens where owner_id = ${owner}`;
   });
   afterAll(async () => { await sql().end({ timeout: 2 }); });
@@ -103,6 +104,16 @@ describe.skipIf(!DB)("repo", async () => {
     const rules = await repo.listRules(owner);
     expect(repo.rulesFor(rules, p.id, ["gmail"]).map((r) => r.title).sort()).toEqual(["Język", "Styl"]);
     expect(repo.rulesFor(rules, null, ["slack"]).map((r) => r.title).sort()).toEqual(["Slack", "Styl"]);
+    expect(rules.map((r) => r.kind)).toEqual(["rule", "rule", "rule"]);                       // domyślny rodzaj
+    // procedura: rodzaj, skrót i wyzwalacz; ta sama nazwa w zakresie = ta sama zasada; każda zmiana zostawia wersję
+    const proc = await repo.upsertRule(owner, { kind: "procedure", scope: "global", title: "User story", summary: "Jak pisać story.", trigger: "story, clickup", body: "Wersja 1" });
+    expect(await repo.findRule(owner, { scope: "global", title: "user story" })).toMatchObject({ id: proc.id, kind: "procedure", trigger: "story, clickup" });
+    expect(await repo.findRule(owner, { scope: "project", projectId: p.id, title: "User story" })).toBeNull();
+    await repo.upsertRule(owner, { ...proc, body: "Wersja 2" });
+    await repo.upsertRule(owner, { ...proc, body: "Wersja 2" });   // bez zmian: bez nowej wersji
+    await repo.deleteRule(owner, proc.id);
+    const hist = await repo.listRuleVersions(owner, proc.id);
+    expect(hist.map((v) => [v.change, v.body])).toEqual([["deleted", "Wersja 2"], ["updated", "Wersja 2"], ["created", "Wersja 1"]]);
     await repo.createTask(owner, { title: "Zamówić catering na warsztat", source: "Ania prosi o catering na czwartek", projectId: p.id });
     const found = await repo.searchTasks(owner, "catering");
     expect(found.map((t) => t.title)).toContain("Zamówić catering na warsztat");

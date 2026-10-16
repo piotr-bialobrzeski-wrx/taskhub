@@ -8,7 +8,7 @@ export function handoffPrompt(task: Task, step: Step, rules: Rule[], opts: { app
   const i = task.steps.indexOf(step) + 1;
   const prev = task.steps.filter((s) => step.dependsOn.includes(s.id)).map((d) => `- ${d.title}: ${(d.report || d.output || "(brak treści)").slice(0, 1200)}`).join("\n");
   const done = task.steps.filter((x) => x !== step && x.status === "done" && !step.dependsOn.includes(x.id)).map((x) => `- ${x.title}`).join("\n");
-  const rt = rulesText(rules, task.projectId, [step.tool]);
+  const rt = rulesText(rules, task.projectId, [step.tool], { text: `${step.title} ${step.detail}` });
   return `Pracujemy nad krokiem ${i} zadania „${task.title}” z mojej aplikacji Task Hub.
 
 CEL ZADANIA: ${task.summary || "-"}
@@ -24,11 +24,11 @@ export const codeCommand = (prompt: string) => `claude "${prompt.replace(/(["\\$
 
 // Rozłożenie zadania na kroki w Claude z subskrypcji (bez klucza API w aplikacji): Claude zapisuje kroki przez add_steps.
 export function breakdownPrompt(task: Task, rules: Rule[], opts: { appUrl?: string; projectName?: string } = {}): string {
-  const rt = rulesText(rules, task.projectId, []);
+  const rt = rulesText(rules, task.projectId, [], { topic: ["rozpisanie"], text: `${task.title} ${task.summary}` });
   return `Rozłóż na kroki zadanie „${task.title}” z mojej aplikacji Task Hub (id zadania: ${task.id}).
 
 CEL: ${task.summary || "-"}
 JAK TO WPADŁO: ${(task.source || "-").slice(0, 2500)}
 ${opts.projectName ? `PROJEKT: ${opts.projectName}\n` : ""}${task.due ? `TERMIN: ${task.due}\n` : ""}${rt ? rt + "\n" : ""}
-Jeśli masz podłączony konektor Task Hub: wywołaj get_task dla tego zadania (pełny kontekst) i get_rules, a potem od razu zapisz kroki przez add_steps, bez pytania mnie o zgodę. Nie dopytuj: przyjmij rozsądne założenia i wpisz je w detail kroku. Gdy bez jakiejś informacji nie da się ułożyć kroków, zapisz kroki, które się da, i zadaj jedno pytanie przez ask_question (odpowiem w aplikacji). Gdy w treści jest termin, ustaw go przez update_task(due: YYYY-MM-DD). Każdy krok: title (co zrobić, od czasownika), tool (slack, gmail, clickup, calendar, claude, claudeapp, code, manual albo inna aplikacja), detail (co dokładnie, gdzie, dla kogo), est w minutach (wielokrotność 15), needsApproval true, gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 dla kroków, które muszą poczekać na wcześniejsze; link tylko gdy krok ma swój element w zewnętrznej aplikacji (nigdy adres Task Hub). 2-7 kroków, bez kroków pustych. Jeśli konektora nie masz, wypisz kroki w tym układzie jako listę, a ja wkleję je do Task Hub.${opts.appUrl ? `\nZadanie w Task Hub: ${opts.appUrl}/tasks/${task.id}` : ""}`;
+Jeśli masz podłączony konektor Task Hub: wywołaj get_task dla tego zadania (pełny kontekst) i get_rules z topic ["rozpisanie"], a potem od razu zapisz kroki przez add_steps, bez pytania mnie o zgodę. Nie dopytuj: przyjmij rozsądne założenia i wpisz je w detail kroku. Gdy bez jakiejś informacji nie da się ułożyć kroków, zapisz kroki, które się da, i zadaj jedno pytanie przez ask_question (odpowiem w aplikacji). Gdy w treści jest termin, ustaw go przez update_task(due: YYYY-MM-DD). Każdy krok: title (co zrobić, od czasownika), tool (slack, gmail, clickup, calendar, claude, claudeapp, code, manual albo inna aplikacja), detail (co dokładnie, gdzie, dla kogo), est w minutach (wielokrotność 15), needsApproval true, gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 dla kroków, które muszą poczekać na wcześniejsze; link tylko gdy krok ma swój element w zewnętrznej aplikacji (nigdy adres Task Hub). 2-7 kroków, bez kroków pustych. Jeśli konektora nie masz, wypisz kroki w tym układzie jako listę, a ja wkleję je do Task Hub.${opts.appUrl ? `\nZadanie w Task Hub: ${opts.appUrl}/tasks/${task.id}` : ""}`;
 }

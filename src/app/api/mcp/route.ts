@@ -55,9 +55,9 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("get_rules", {
-      title: "Zasady pracy", description: "Zasady: ogólne, projektu i narzędzi (styl pisania, język, gdzie szukać).",
-      inputSchema: z.object({ projectId: z.string().optional(), tools: z.array(z.string()).optional() }),
-    }, async ({ projectId, tools }) => text(rulesText(await repo.listRules(ownerId), projectId ?? null, tools ?? []) || "(brak zasad)"));
+      title: "Zasady pracy", description: "Zasady pracy w trzech sekcjach: PROFIL (dane o projekcie i narzędziach), ZASADY (zawsze) i PROCEDURY (pełna treść tych, które pasują do tools albo topic; reszta w spisie). projectId: projekt zadania; tools: narzędzia kroku (slack, gmail, clickup...); topic: tematy pracy albo nazwa procedury ze spisu, np. [\"rozpisanie\", \"story\", \"bug\", \"przegląd\"]; text: tytuł i szczegóły kroku (dopasowanie po słowach).",
+      inputSchema: z.object({ projectId: z.string().optional(), tools: z.array(z.string()).optional(), topic: z.array(z.string()).optional(), text: z.string().optional() }),
+    }, async ({ projectId, tools, topic, text: t }) => text(rulesText(await repo.listRules(ownerId), projectId ?? null, tools ?? [], { topic, text: t }) || "(brak zasad)"));
 
     server.registerTool("create_task", {
       title: "Nowe zadanie", description: "Tworzy zadanie z krokami. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool (slack, gmail, clickup, calendar, claude, claudeapp, code, manual...), est w minutach (wielokrotność 15), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub.",
@@ -227,16 +227,40 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       return json({ projectId: p.id, created: !found, name: p.name, weight: patch.weight ?? p.weight, language: patch.language ?? p.language });
     });
 
+    server.registerTool("list_rules", {
+      title: "Spis zasad", description: "Wszystkie zasady właściciela z id (do update_rule): kind, scope, projekt, narzędzie, tytuł, skrót, wyzwalacz.",
+      inputSchema: z.object({}),
+    }, async () => {
+      const [rules, projects] = await Promise.all([repo.listRules(ownerId), repo.listProjects(ownerId)]);
+      const pname = (id: string | null) => projects.find((p) => p.id === id)?.name ?? null;
+      return json(rules.map((r) => ({ id: r.id, kind: r.kind, scope: r.scope, project: pname(r.projectId), tool: r.tool, title: r.title, summary: r.summary, trigger: r.trigger, chars: r.body.length })));
+    });
+
+    const RuleKind = z.enum(["profile", "rule", "procedure"]);
     server.registerTool("add_rule", {
-      title: "Dodaj zasadę", description: "Dodaje zasadę pracy: scope global | project | tool. Dla scope project podaj projectId albo project (nazwa); dla scope tool podaj tool (slack, gmail, clickup, calendar, figma...).",
-      inputSchema: z.object({ scope: z.enum(["global", "project", "tool"]), title: z.string(), body: z.string(), projectId: z.string().optional(), project: z.string().optional(), tool: z.string().optional() }),
+      title: "Dodaj zasadę", description: "Dodaje zasadę pracy. kind: profile (dane o projekcie albo narzędziu: język, klient, kanały), rule (krótka reguła zawsze w prompcie; domyślnie), procedure (dłuższa instrukcja; wymaga summary = jedno zdanie do spisu i zwykle trigger = słowa wyzwalające po przecinku: narzędzia, tematy, słowa z tytułu kroku, np. \"slack, story, bug\"). scope global | project | tool: dla project podaj projectId albo project (nazwa); dla tool podaj tool (slack, gmail, clickup, calendar, figma...). Ta sama nazwa w tym samym zakresie = aktualizacja istniejącej zasady, bez duplikatu.",
+      inputSchema: z.object({ kind: RuleKind.optional(), scope: z.enum(["global", "project", "tool"]), title: z.string().min(1), body: z.string().min(1), summary: z.string().optional(), trigger: z.string().optional(), projectId: z.string().optional(), project: z.string().optional(), tool: z.string().optional() }),
     }, async ({ project, ...a }) => {
       let projectId = a.projectId;
       if (a.scope === "project" && !projectId && project) projectId = (await repo.findProjectByName(ownerId, project))?.id;
       if (a.scope === "project" && !projectId) throw new Error("Zasada projektu wymaga projectId albo nazwy istniejącego projektu (project).");
       if (a.scope === "tool" && !a.tool) throw new Error("Zasada narzędzia wymaga pola tool.");
-      const r = await repo.upsertRule(ownerId, { ...a, projectId });
-      return json({ ruleId: r.id });
+      if (a.kind === "procedure" && !a.summary?.trim()) throw new Error("Procedura wymaga summary: jedno zdanie do spisu.");
+      const found = await repo.findRule(ownerId, { scope: a.scope, projectId: a.scope === "project" ? projectId : null, tool: a.scope === "tool" ? a.tool : null, title: a.title });
+      const r = await repo.upsertRule(ownerId, { ...a, id: found?.id, projectId: a.scope === "project" ? projectId : null, tool: a.scope === "tool" ? a.tool : null, visibility: found?.visibility });
+      return json({ ruleId: r.id, created: !found });
+    });
+
+    server.registerTool("update_rule", {
+      title: "Zmień zasadę", description: "Zmienia pola istniejącej zasady (id z list_rules): kind, title, body, summary, trigger. Pola pominięte zostają; każda zmiana zapisuje się w historii wersji.",
+      inputSchema: z.object({ ruleId: z.string(), kind: RuleKind.optional(), title: z.string().min(1).optional(), body: z.string().min(1).optional(), summary: z.string().optional(), trigger: z.string().optional() }),
+    }, async (a) => {
+      const cur = (await repo.listRules(ownerId)).find((r) => r.id === a.ruleId);
+      if (!cur) throw new Error("Nie ma takiej zasady.");
+      const next = { ...cur, kind: a.kind ?? cur.kind, title: a.title ?? cur.title, body: a.body ?? cur.body, summary: a.summary ?? cur.summary, trigger: a.trigger ?? cur.trigger };
+      if (next.kind === "procedure" && !next.summary?.trim()) throw new Error("Procedura wymaga summary: jedno zdanie do spisu.");
+      const r = await repo.upsertRule(ownerId, next);
+      return json({ ruleId: r.id, kind: r.kind });
     });
   }, { serverInfo: { name: "task-hub", version: "0.1.0" } });
 }

@@ -1,5 +1,5 @@
 // Pomocnicze: dane testowe bez bazy i sztuczny dostawca modelu.
-import type { Step, Task, Project } from "@/lib/schema";
+import type { Step, Task, Project, Rule } from "@/lib/schema";
 import type { AiProvider, GenerateJsonOptions } from "@/lib/ai/provider";
 import { AiError } from "@/lib/ai/provider";
 
@@ -12,6 +12,7 @@ export const task = (p: Partial<Task> = {}): Task => ({
   id: "t" + ++n, ownerId: "o", projectId: null, title: "Zadanie", summary: "", source: "", level: 3, due: null, doneAt: null, deletedAt: null,
   noteText: null, noteSummary: null, noteAt: null, pos: null, createdAt: new Date().toISOString(), dependsOn: [], steps: [step()], ...p,
 });
+export const rule = (p: Partial<Rule> = {}): Rule => ({ id: "r" + ++n, kind: "rule", scope: "global", projectId: null, tool: null, title: "Zasada", body: "Treść", trigger: null, summary: null, visibility: "private", ...p });
 export const project = (p: Partial<Project> = {}): Project => ({ id: "p1", name: "Projekt", color: 0, weight: 3, language: "pl", ...p });
 
 // sztuczny dostawca: zwraca kolejne odpowiedzi z kolejki, sprawdzone schematem jak u prawdziwego

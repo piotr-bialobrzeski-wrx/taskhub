@@ -1,17 +1,25 @@
 "use client";
-// Formularz zasady: zakres z własnej listy (nie systemowej); projekt albo narzędzie pojawia się dopiero, gdy zakres tego wymaga.
-// Treść rośnie sama razem z tekstem, bez uchwytu. Widoczność (prywatna/projekt/wspólna) ma znaczenie dopiero przy kilku użytkownikach, więc zostaje domyślna.
+// Formularz zasady: rodzaj (profil / zasada / procedura) i zakres z własnych list (nie systemowych); projekt albo narzędzie pojawia się
+// dopiero, gdy zakres tego wymaga; skrót i wyzwalacz tylko dla procedury. Treść rośnie sama razem z tekstem, bez uchwytu.
+// Widoczność (prywatna/projekt/wspólna) ma znaczenie dopiero przy kilku użytkownikach, więc zostaje domyślna.
 import { useState } from "react";
 import { Picker } from "@/components/canvas/widgets";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { PendingButton } from "@/components/Pending";
 import { projColor } from "@/components/canvas/ui";
-import { TOOL_LABELS, type Rule } from "@/lib/schema";
+import { RULE_KINDS, TOOL_LABELS, type Rule, type RuleKind } from "@/lib/schema";
 
+const KINDS: Record<RuleKind, string> = { profile: "profil: dane o projekcie albo narzędziu", rule: "zasada: zawsze w prompcie", procedure: "procedura: w całości, gdy pasuje wyzwalacz" };
 const SCOPES: Record<Rule["scope"], string> = { global: "ogólna, stosowana zawsze", project: "dla projektu", tool: "dla narzędzia" };
+const BODY_HINT: Record<RuleKind, string> = {
+  profile: "np. Język: angielski. Klient: Shiftwow. Kanał: #shiftwow-dev.",
+  rule: "np. Krótko, po polsku, bez emoji, na końcu pytanie o termin.",
+  procedure: "np. 1. Tytuł od czasownika. 2. Sekcje: cel, kryteria, uwagi. 3. ...",
+};
 type Proj = { id: string; name: string; color: number };
 
 export function RuleForm({ r, projects, action }: { r?: Rule; projects: Proj[]; action: (fd: FormData) => Promise<void> }) {
+  const [kind, setKind] = useState<RuleKind>(r?.kind ?? "rule");
   const [scope, setScope] = useState<Rule["scope"]>(r?.scope ?? "global");
   const [projectId, setProjectId] = useState<string>(r?.projectId && projects.some((p) => p.id === r.projectId) ? r.projectId : projects[0]?.id ?? "");
   const [tool, setTool] = useState<string>(r?.tool && TOOL_LABELS[r.tool] ? r.tool : "slack");
@@ -20,11 +28,15 @@ export function RuleForm({ r, projects, action }: { r?: Rule; projects: Proj[]; 
   return (
     <form className="stack" action={action}>
       {r ? <input type="hidden" name="id" value={r.id} /> : null}
+      <input type="hidden" name="kind" value={kind} />
       <input type="hidden" name="scope" value={scope} />
       <input type="hidden" name="projectId" value={scope === "project" ? projectId : ""} />
       <input type="hidden" name="tool" value={scope === "tool" ? tool : ""} />
       <input type="hidden" name="visibility" value={r?.visibility ?? "private"} />
       <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div className="field"><span>Rodzaj</span>
+          <Picker cls="boxed" title="Rodzaj zasady" trigger={<span className="pp-t">{KINDS[kind]}</span>} onPick={(k) => setKind(k as RuleKind)}
+            options={RULE_KINDS.map((k) => ({ key: k, on: k === kind, node: <span>{KINDS[k]}</span> }))} /></div>
         <div className="field"><span>Zakres</span>
           <Picker cls="boxed" title="Zakres zasady" trigger={<span className="pp-t">{SCOPES[scope]}</span>} onPick={(k) => setScope(k as Rule["scope"])}
             options={(Object.keys(SCOPES) as Rule["scope"][]).map((k) => ({ key: k, on: k === scope, node: <span>{SCOPES[k]}</span> }))} /></div>
@@ -43,9 +55,15 @@ export function RuleForm({ r, projects, action }: { r?: Rule; projects: Proj[]; 
           </div>
         ) : null}
       </div>
-      <label className="field"><span>Tytuł</span><input className="in" name="title" defaultValue={r?.title ?? ""} placeholder="np. Styl wiadomości na Slacku" required /></label>
+      <label className="field"><span>Tytuł</span><input className="in" name="title" defaultValue={r?.title ?? ""} placeholder={kind === "profile" ? "np. Shiftwow" : kind === "procedure" ? "np. User story w ClickUp" : "np. Styl wiadomości na Slacku"} required /></label>
+      {kind === "procedure" ? (
+        <>
+          <label className="field"><span>Skrót do spisu</span><input className="in" name="summary" defaultValue={r?.summary ?? ""} placeholder="jedno zdanie: co obejmuje ta procedura" required /></label>
+          <label className="field"><span>Wyzwalacz</span><input className="in" name="trigger" defaultValue={r?.trigger ?? ""} placeholder="słowa po przecinku: narzędzie, temat, słowo z tytułu kroku, np. clickup, story, bug" /></label>
+        </>
+      ) : null}
       <label className="field"><span>Treść</span>
-        <GrowTextarea name="body" defaultValue={r?.body ?? ""} placeholder="np. Krótko, po polsku, bez emoji, na końcu pytanie o termin." required /></label>
+        <GrowTextarea name="body" defaultValue={r?.body ?? ""} placeholder={BODY_HINT[kind]} required /></label>
       <div className="actions"><PendingButton className="pill primary">Zapisz</PendingButton></div>
     </form>
   );
