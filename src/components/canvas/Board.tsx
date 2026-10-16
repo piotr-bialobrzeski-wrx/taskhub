@@ -319,9 +319,9 @@ export function Board(p: BoardProps) {
       ) : null}
 
       {!off && p.lastAgent && !answerOff && !n && !group ? (
-        <div className="answer glass" aria-live="polite">
-          <div className="ans-head"><span className="lbl" style={{ margin: 0 }}>Agent</span><span className="sp" /><button className="icobtn" type="button" aria-label="Zamknij odpowiedź" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans", p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button></div>
+        <div className="answer plain glass" role="status" aria-live="polite">
           <div className="ans-text">{p.lastAgent.text}</div>
+          <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans", p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button>
         </div>
       ) : null}
 

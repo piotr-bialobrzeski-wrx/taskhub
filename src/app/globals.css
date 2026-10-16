@@ -288,6 +288,10 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .answer { position: absolute; z-index: 10; left: 50%; transform: translateX(-50%); bottom: calc(38px + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px));
   width: min(680px, calc(100% - 32px)); max-height: 46vh; overflow: auto; padding: var(--s-3) var(--s-3) var(--s-5) var(--s-5); border-radius: var(--r-lg); display: flex; flex-direction: column; gap: var(--s-3); }
 .ans-head { display: flex; align-items: center; }
+/* odpowiedź agenta: sama treść, X w prawym górnym rogu (wcięcie 6 = promień karty 20 − promień przycisku 14), tekst zawija się przed kolumną X */
+.answer.plain { padding: var(--s-4) 44px var(--s-4) var(--s-5); overflow: visible; }
+.answer.plain .ans-text { padding-right: 0; max-height: 46vh; overflow: auto; }
+.ans-x { position: absolute; top: var(--s-2); right: var(--s-2); width: 28px; height: 28px; }
 .ans-text { white-space: pre-wrap; line-height: 1.55; padding-right: var(--s-3); }
 .answer .row .in { flex: 1; }
 
