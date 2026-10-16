@@ -110,7 +110,10 @@ final class QuickEntryController: NSWindowController, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.backgroundColor = Theme.bgNS
-        panel.contentViewController = NSHostingController(rootView: QuickEntryView(m: model))
+        let host = NSHostingController(rootView: QuickEntryView(m: model))
+        host.view.frame = NSRect(x: 0, y: 0, width: 580, height: 250)
+        panel.contentViewController = host
+        if (panel.contentView?.frame.height ?? 0) < 100 { panel.setContentSize(NSSize(width: 580, height: 250)) }
         super.init(window: panel)
         panel.delegate = self
         model.close = { [weak self] in self?.window?.close() }

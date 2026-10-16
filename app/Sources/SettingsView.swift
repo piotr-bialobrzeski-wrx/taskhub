@@ -64,7 +64,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 600)
+        .frame(minWidth: 560, idealWidth: 620, maxWidth: .infinity, minHeight: 420, idealHeight: 640, maxHeight: .infinity)
     }
 
     @MainActor private func check() {

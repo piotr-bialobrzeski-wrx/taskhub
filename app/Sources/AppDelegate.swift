@@ -247,12 +247,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func showSettings() {
         if settings == nil {
+            // Form (lista) nie ma własnej wysokości, więc rozmiar okna ustawiamy wprost; inaczej okno ma sam pasek tytułu
             let host = NSHostingController(rootView: SettingsView(store: store, bridge: bridge))
-            let w = NSWindow(contentViewController: host)
+            host.view.frame = NSRect(x: 0, y: 0, width: 620, height: 640)
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 640), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             w.title = "Ustawienia Task Hub"
-            w.styleMask = [.titled, .closable, .miniaturizable]
             w.isReleasedWhenClosed = false
-            w.setFrameAutosaveName("TaskHubSettings")
+            w.contentViewController = host
+            w.contentMinSize = NSSize(width: 560, height: 420)
+            w.setContentSize(NSSize(width: 620, height: 640))
             w.center()
             settings = NSWindowController(window: w)
         }
