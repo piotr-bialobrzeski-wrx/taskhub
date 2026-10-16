@@ -30,10 +30,12 @@ export function brief(s: Scored): string {
   return `- [${t.id}] ${t.title} | priorytet ${t.level}/5${s.score.eff !== t.level ? ` (efektywny ${s.score.eff}: ${whyText(s.score)})` : ""} | ${taskState(t)} | kroki ${p}/${t.steps.length} | zostało ~${fmtMin(remainEst(t))}${taskSpent(t) ? ` | zrobione ${fmtMin(taskSpent(t))}` : ""}${t.due ? ` | termin ${t.due}` : ""}${s.project ? ` | projekt: ${s.project.name}` : ""}${t.summary ? " | " + t.summary.slice(0, 140) : ""}`;
 }
 
+// zasady jako bloki: linia z zakresem i tytułem, pod nią treść z zachowanymi punktami (jedna linia na zasadę sklejała wielopunktową treść w ścianę tekstu)
 export function rulesText(rules: Rule[], projectId: string | null, tools: string[]): string {
   const list = rulesFor(rules, projectId, tools);
   if (!list.length) return "";
-  return "ZASADY PRACY (stosuj je zawsze):\n" + list.map((r) => `- [${r.scope === "global" ? "ogólna" : r.scope === "project" ? "projekt" : toolLabel(r.tool ?? "")}] ${r.title}: ${r.body}`).join("\n");
+  const scopeOf = (r: Rule) => r.scope === "global" ? "ogólna" : r.scope === "project" ? "projekt" : `narzędzie ${toolLabel(r.tool ?? "")}`;
+  return "ZASADY PRACY (stosuj je zawsze):\n\n" + list.map((r) => `[${scopeOf(r)}] ${r.title}\n${r.body.trim()}`).join("\n\n");
 }
 
 export function notesText(tasks: Task[]): string {
