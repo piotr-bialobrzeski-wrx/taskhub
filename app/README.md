@@ -19,6 +19,7 @@ Mostek pracuje także przy zamkniętym oknie (aplikacja zostaje w pasku menu). G
   `QuickEntry.swift` (szybkie zadanie), `SettingsView.swift` (ustawienia), `Bridge.swift` (pętla mostka), `ProcessRunner.swift` (bieg Claude Code,
   stream-json, strażnik), `ClaudeCLI.swift` (szukanie Claude Code, środowisko, limit/wylogowanie), `Store.swift` (config.json), `HotKey.swift` (⌃⌥T),
   `Theme.swift` (kolory i pigułki z aplikacji webowej), `Log.swift` (dziennik).
+- `VERSION` – numer wersji aplikacji (podbicie = nowe wydanie).
 - `Info.plist` – tożsamość (`com.taskhub.app`), schemat `taskhub`, macOS 13+.
 - `Icon/icon-1024.png` – ikona; `build.sh` robi z niej `AppIcon.icns`.
 - `build.sh` – budowa (arm64 + x86_64), podpis ad hoc, `.pkg` (instaluje do /Applications) i `.dmg`.
@@ -28,8 +29,9 @@ Mostek pracuje także przy zamkniętym oknie (aplikacja zostaje w pasku menu). G
 
 Na Macu z Xcode Command Line Tools: `app/build.sh 0.1.0`. Wynik w `app/build/`.
 
-Na GitHubie: każdy push do `main` ze zmianą w `app/` buduje wydanie wstępne `app-latest`; tag `app-vX.Y.Z` daje właściwe wydanie,
-na które wskazuje `…/releases/latest` (link „Pobierz aplikację” w Ustawieniach Task Hub).
+Na GitHubie: wersja siedzi w `app/VERSION`. Push do `main` z nową wersją buduje właściwe wydanie `app-v<wersja>` (tag zakłada sam
+GitHub Actions, bo push tagów z sesji w chmurze jest zablokowany), na które wskazuje `…/releases/latest` (link „Pobierz aplikację”
+w Ustawieniach Task Hub). Kolejne pushe z tą samą wersją odświeżają wydanie wstępne `app-latest`. Nowa wersja dla Piotra = podbij `app/VERSION`.
 
 ## Instalacja u użytkownika
 
