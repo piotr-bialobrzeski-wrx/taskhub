@@ -15,7 +15,7 @@ Mostek pracuje także przy zamkniętym oknie (aplikacja zostaje w pasku menu). G
 
 ## Pliki
 
-- `Sources/` – kod: `main.swift` (start), `AppDelegate.swift` (menu, pasek menu, okna, link taskhub://), `WebWindow.swift` (okno z aplikacją),
+- `Sources/` – kod: `App.swift` (start, @main), `AppDelegate.swift` (menu, pasek menu, okna, link taskhub://), `WebWindow.swift` (okno z aplikacją),
   `QuickEntry.swift` (szybkie zadanie), `SettingsView.swift` (ustawienia), `Bridge.swift` (pętla mostka), `ProcessRunner.swift` (bieg Claude Code,
   stream-json, strażnik), `ClaudeCLI.swift` (szukanie Claude Code, środowisko, limit/wylogowanie), `Store.swift` (config.json), `HotKey.swift` (⌃⌥T),
   `Theme.swift` (kolory i pigułki z aplikacji webowej), `Log.swift` (dziennik).

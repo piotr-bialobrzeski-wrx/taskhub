@@ -15,7 +15,7 @@ SDK="$(xcrun --show-sdk-path --sdk macosx)"
 echo "== swiftc $(swiftc --version 2>&1 | head -1)"
 for ARCH in arm64 x86_64; do
   echo "== kompilacja $ARCH"
-  swiftc -O -swift-version 5 -target "$ARCH-apple-macos13.0" -sdk "$SDK" -module-name TaskHub \
+  swiftc -O -swift-version 5 -parse-as-library -target "$ARCH-apple-macos13.0" -sdk "$SDK" -module-name TaskHub \
     -framework AppKit -framework WebKit -framework SwiftUI -framework Carbon -framework ServiceManagement -framework Combine \
     -o "$OUT/obj/TaskHub-$ARCH" Sources/*.swift
 done
