@@ -228,12 +228,12 @@ final class Bridge: ObservableObject {
                 if !model.isEmpty { args += ["--model", model] }
                 let runner = ProcessRunner(bin: bin, args: args, cwd: Store.workDir.path, env: ClaudeCLI.env(), maxSeconds: Double(maxMin * 60))
                 current = runner
-                result = await runner.run { [weak self] step in
+                let bridge = self
+                result = await runner.run { step in
                     Task { @MainActor in
-                        guard let self = self else { return }
-                        self.detail = step
+                        bridge.detail = step
                         Log.write("  · \(step)")
-                        await self.touch(id, note: step)
+                        await bridge.touch(id, note: step)
                     }
                 }
                 current = nil
