@@ -2,7 +2,8 @@
 import AppKit
 
 let app = NSApplication.shared
-let delegate = AppDelegate()
+var delegate: AppDelegate? = nil          // NSApplication trzyma delegata słabo, więc trzymamy go tu
+delegate = AppDelegate()
 app.delegate = delegate
-app.setActivationPolicy(.regular)
+_ = app.setActivationPolicy(.regular)
 app.run()
