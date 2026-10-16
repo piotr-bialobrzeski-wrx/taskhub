@@ -140,7 +140,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       task={{ id: t.id, title: t.title, base: cur.score.base, eff: cur.score.eff, why: cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; "), state: taskStateOf(t, b.tasks), progress: { done: t.steps.filter((s) => s.status === "done").length, all: t.steps.length }, estText: estTextOf(t) }}
       steps={tiles}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
-      aiOn={aiOn} agent={providers.length ? (providers[0] === "anthropic" ? "Claude" : "GPT") : "Claude · konektor"}
+      aiOn={aiOn} agent={providers.length ? (providers[0] === "anthropic" ? "Claude" : "GPT") : "Claude"}
       lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text } : null}
       focus={focus ?? null} runbar={runbar} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} />
   );

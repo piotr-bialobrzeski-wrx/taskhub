@@ -40,7 +40,7 @@ export default async function Home() {
       projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color, weight: p.weight, language: p.language }))}
       projTasks={projTasks}
       aiOn={providers.length > 0}
-      agent={providers.length ? (providers[0] === "anthropic" ? "Claude" : "GPT") : "Claude · konektor"}
+      agent={providers.length ? (providers[0] === "anthropic" ? "Claude" : "GPT") : "Claude"}
       lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text } : null}
       archive={{
         done: doneArch.map((s) => row(s, `ukończone ${fmtDate(s.task.doneAt!)}`)),
