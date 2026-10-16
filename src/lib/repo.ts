@@ -23,14 +23,20 @@ export async function ensureOwner(): Promise<{ id: string; email: string; name: 
 
 // ---------- tokeny MCP ----------
 export const hashToken = (t: string) => createHash("sha256").update(t).digest("hex");
-export async function createApiToken(ownerId: string, name: string): Promise<string> {
+export type TokenKind = "client" | "bridge";
+export async function createApiToken(ownerId: string, name: string, kind: TokenKind = "client"): Promise<string> {
   const token = "th_" + randomBytes(24).toString("base64url");
-  await sql()`insert into api_tokens (owner_id, name, token_hash) values (${ownerId}, ${name}, ${hashToken(token)})`;
+  await sql()`insert into api_tokens (owner_id, name, token_hash, kind) values (${ownerId}, ${name}, ${hashToken(token)}, ${kind})`;
   return token;
 }
+export type TokenAuth = { id: string; ownerId: string; kind: TokenKind; name: string };
+// użycie tokenu mostka (także przez Claude Code, który mostek uruchomił) jest zarazem jego pulsem
+export async function tokenForSecret(token: string): Promise<TokenAuth | null> {
+  const [r] = await sql()`update api_tokens set last_used_at = now(), seen_at = case when kind = 'bridge' then now() else seen_at end where token_hash = ${hashToken(token)} returning id, owner_id, kind, name`;
+  return r ? { id: r.id as string, ownerId: r.ownerId as string, kind: (r.kind as TokenKind) ?? "client", name: r.name as string } : null;
+}
 export async function ownerForToken(token: string): Promise<string | null> {
-  const [r] = await sql()`update api_tokens set last_used_at = now() where token_hash = ${hashToken(token)} returning owner_id`;
-  return r ? (r.ownerId as string) : null;
+  return (await tokenForSecret(token))?.ownerId ?? null;
 }
 
 // ---------- projekty ----------
@@ -417,16 +423,55 @@ export async function purgeExpired(ownerId: string): Promise<number> {
 }
 
 // ---------- tokeny i ustawienia (widok ustawień) ----------
-export type ApiTokenInfo = { id: string; name: string; createdAt: string; lastUsedAt: string | null };
+export type ApiTokenInfo = { id: string; name: string; kind: TokenKind; createdAt: string; lastUsedAt: string | null; seenAt: string | null; meta: Record<string, unknown> };
 export async function listApiTokens(ownerId: string): Promise<ApiTokenInfo[]> {
-  const rows = await sql()`select id, name, created_at, last_used_at from api_tokens where owner_id = ${ownerId} order by created_at desc`;
-  return rows.map((r) => ({ id: r.id as string, name: r.name as string, createdAt: iso(r.createdAt) as string, lastUsedAt: iso(r.lastUsedAt) }));
+  const rows = await sql()`select id, name, kind, created_at, last_used_at, seen_at, meta from api_tokens where owner_id = ${ownerId} order by created_at desc`;
+  return rows.map((r) => ({ id: r.id as string, name: r.name as string, kind: (r.kind as TokenKind) ?? "client", createdAt: iso(r.createdAt) as string, lastUsedAt: iso(r.lastUsedAt), seenAt: iso(r.seenAt), meta: (r.meta as Record<string, unknown>) ?? {} }));
 }
 export async function deleteApiToken(ownerId: string, id: string): Promise<void> {
   await sql()`delete from api_tokens where id = ${id} and owner_id = ${ownerId}`;
 }
 export async function setUserSettings(ownerId: string, patch: Record<string, unknown>): Promise<void> {
   await sql()`update users set settings = settings || ${sql().json(patch as never)} where id = ${ownerId}`;
+}
+
+// ---------- mostek na komputerze ----------
+// Puls: token rodzaju "bridge" ma seen_at i meta (komputer, silnik, stan). Bieg: jeden otwarty na właściciela (unikalny indeks częściowy),
+// więc dwa komputery nie wykonają tej samej pracy; bieg bez sygnału wygasa.
+export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null };
+const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null });
+export type BridgeStatus = { alive: boolean; seenAt: string | null; name: string | null; meta: Record<string, unknown>; run: BridgeRun | null };
+
+export async function bridgeSeen(tokenId: string, meta: Record<string, unknown>): Promise<void> {
+  await sql()`update api_tokens set seen_at = now(), last_used_at = now(), meta = meta || ${sql().json(meta as never)} where id = ${tokenId} and kind = 'bridge'`;
+}
+export async function bridgeStatus(ownerId: string, aliveMs: number): Promise<BridgeStatus> {
+  const [t] = await sql()`select name, seen_at, meta from api_tokens where owner_id = ${ownerId} and kind = 'bridge' and seen_at is not null order by seen_at desc limit 1`;
+  const [r] = await sql()`select * from bridge_runs where owner_id = ${ownerId} and ended_at is null limit 1`;
+  const seenAt = t ? (iso(t.seenAt) as string) : null;
+  return { alive: !!seenAt && Date.now() - new Date(seenAt).getTime() < aliveMs, seenAt, name: t ? (t.name as string) : null, meta: t ? ((t.meta as Record<string, unknown>) ?? {}) : {}, run: r ? rowToRun(r) : null };
+}
+export async function expireBridgeRuns(ownerId: string, staleMin: number): Promise<number> {
+  const rows = await sql()`update bridge_runs set ended_at = now(), outcome = 'stale' where owner_id = ${ownerId} and ended_at is null and touched_at < now() - make_interval(mins => ${staleMin}) returning id`;
+  return rows.length;
+}
+export async function startBridgeRun(ownerId: string, tokenId: string | null, bridge: string): Promise<BridgeRun | null> {
+  const [r] = await sql()`insert into bridge_runs (owner_id, token_id, bridge) values (${ownerId}, ${tokenId}, ${bridge.slice(0, 80)}) on conflict (owner_id) where ended_at is null do nothing returning *`;
+  return r ? rowToRun(r) : null;
+}
+export async function touchBridgeRun(ownerId: string, id: string, note?: string): Promise<boolean> {
+  const rows = note === undefined
+    ? await sql()`update bridge_runs set touched_at = now() where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id`
+    : await sql()`update bridge_runs set touched_at = now(), note = ${note.slice(0, 200)} where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id`;
+  return rows.length > 0;
+}
+export async function endBridgeRun(ownerId: string, id: string, outcome: string, note?: string): Promise<boolean> {
+  const rows = await sql()`update bridge_runs set ended_at = now(), touched_at = now(), outcome = ${outcome.slice(0, 20)}, note = coalesce(${note?.slice(0, 600) ?? null}, note) where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id`;
+  return rows.length > 0;
+}
+export async function listBridgeRuns(ownerId: string, limit = 8): Promise<BridgeRun[]> {
+  const rows = await sql()`select * from bridge_runs where owner_id = ${ownerId} order by started_at desc limit ${limit}`;
+  return rows.map(rowToRun);
 }
 
 // ---------- położenia na kanwie ----------

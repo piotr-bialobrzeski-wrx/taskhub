@@ -10,6 +10,8 @@ const SCOPE: Record<string, string> = { global: "ogólna", project: "projektu", 
 // miejsca w ustawieniach i menu; kotwica otwiera zwiniętą sekcję (PageBar → HashOpener)
 const STATIC: { title: string; href: string; sub: string; extra: string }[] = [
   { title: "Agent", href: "/settings#agent", sub: "Ustawienia", extra: "model agenta wbudowany claude gpt kto wykonuje pracę rozkłada zadania" },
+  { title: "Mostek na komputerze", href: "/settings#bridge", sub: "Ustawienia › Agent", extra: "mostek aplikacja mac claude code od razu praca na bieżąco token mostka instalacja project hub" },
+  { title: "Ostatnie biegi mostka", href: "/settings#runs", sub: "Ustawienia › Agent", extra: "mostek biegi historia co zrobił limit błąd" },
   { title: "Jak włączyć agenta wbudowanego", href: "/settings#agent-key", sub: "Ustawienia › Agent", extra: "klucz api anthropic openai vercel zmienna środowiskowa płatny tokeny" },
   { title: "Połączenia", href: "/settings#connections", sub: "Ustawienia", extra: "konektor mcp podłączone klienty claude claude code chatgpt unieważnij" },
   { title: "Adres konektora", href: "/settings#connections", sub: "Ustawienia › Połączenia", extra: "mcp url adres kopiuj" },

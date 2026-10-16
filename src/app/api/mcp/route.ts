@@ -5,6 +5,8 @@ import { z } from "zod";
 import * as repo from "@/lib/repo";
 import { contextText, brief, scoreAll } from "@/lib/agent/context";
 import { rulesText } from "@/lib/agent/context";
+import { workSummary } from "@/lib/agent/work";
+import { BRIDGE_ALIVE_MS, ago } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
 import { Blocks, Fact } from "@/lib/schema";
 import { sql } from "@/lib/db";
@@ -25,7 +27,7 @@ async function ownedStep(ownerId: string, stepId: string): Promise<string | null
   return r ? (r.taskId as string) : null;
 }
 
-function buildHandler(ownerId: string) {
+function buildHandler(ownerId: string, kind: repo.TokenKind) {
   return createMcpHandler((server) => {
     server.registerTool("list_tasks", {
       title: "Lista zadań", description: "Otwarte zadania z priorytetem efektywnym, stanem, szacunkami i terminami. Opcjonalnie szukaj po tekście.",
@@ -169,40 +171,15 @@ function buildHandler(ownerId: string) {
     });
 
     server.registerTool("list_work", {
-      title: "Co czeka na agenta", description: "Lista pracy dla agenta, w kolejności robienia: kroki w toku (zaczęte, dokończ), zatwierdzone szkice do wysłania, zadania bez kroków (rozłóż przez add_steps), odpowiedzi Piotra, kroki gotowe bez zgody (start_step → zrób swoimi konektorami → complete_step), kroki wymagające zgody (przygotuj szkic przez set_blocks jako draft, niczego nie wysyłaj). Rób tylko to, do czego masz narzędzia; krok, którego nie możesz zrobić, oddaj przez leave_step. Nigdy niczego nie usuwaj.",
-      inputSchema: z.object({}),
-    }, async () => {
-      const [tasks, projects, samples, answered] = await Promise.all([repo.listTasks(ownerId), repo.listProjects(ownerId), repo.listSamples(ownerId), repo.listQuestions(ownerId, { answeredUnseen: true })]);
-      const open = scoreAll(tasks, projects, samples).filter((s) => !s.task.doneAt && !s.task.deletedAt);
-      const unfinished = new Set(tasks.filter((t) => !t.doneAt && !t.deletedAt).map((t) => t.id));
-      const free = open.filter((s) => !s.task.dependsOn.some((d) => unfinished.has(d)));   // zadania, które nie czekają na inne zadania
-      const noSteps = free.filter((s) => !s.task.steps.length);
-      const attN = await repo.countAttachments(noSteps.map((s) => s.task.id));
-      const openQ = await repo.listQuestions(ownerId, { open: true });
-      const waitingTask = new Set(openQ.map((q) => q.taskId));
-      const going: string[] = [], approved: string[] = [], ready: string[] = [], approval: string[] = [];
-      for (const s of free) {
-        if (waitingTask.has(s.task.id)) continue;
-        for (const st of s.task.steps) {
-          const line = `- krok [${st.id}] „${st.title}” (${st.tool}) w zadaniu [${s.task.id}] „${s.task.title}”${st.detail ? ": " + st.detail.slice(0, 200) : ""}`;
-          if (st.status === "handoff") { (st.blocks?.some((b) => b.type === "draft" && b.status === "approved") || st.prevStatus === "draft" ? approved : going).push(line + (st.handoffAt ? ` (od ${st.handoffAt})` : "")); continue; }
-          if (st.status !== "todo") continue;
-          if (!st.dependsOn.every((d) => s.task.steps.find((x) => x.id === d)?.status === "done")) continue;
-          if (st.tool === "manual") continue;
-          if (st.needsApproval) { if (!st.blocks?.some((b) => b.type === "draft")) approval.push(line); } else ready.push(line);
-        }
+      title: "Co czeka na agenta", description: "Lista pracy dla agenta, w kolejności robienia: kroki w toku (zaczęte, dokończ), zatwierdzone szkice do wysłania, zadania bez kroków (rozłóż przez add_steps), odpowiedzi Piotra, kroki gotowe bez zgody (start_step → zrób swoimi konektorami → complete_step), kroki wymagające zgody (przygotuj szkic przez set_blocks jako draft, niczego nie wysyłaj). Rób tylko to, do czego masz narzędzia; krok, którego nie możesz zrobić, oddaj przez leave_step. Nigdy niczego nie usuwaj. Gdy mostek na komputerze Piotra jest aktywny, inni agenci dostają „MOSTEK AKTYWNY” i nie robią nic (force: true pokaże pracę mimo to).",
+      inputSchema: z.object({ force: z.boolean().optional() }),
+    }, async ({ force }) => {
+      // mostek pracuje na bieżąco: automat co godzinę i inni agenci ustępują, żeby nie robić tego samego dwa razy
+      if (kind !== "bridge" && !force) {
+        const st = await repo.bridgeStatus(ownerId, BRIDGE_ALIVE_MS);
+        if (st.alive) return text(`MOSTEK AKTYWNY: Claude Code na komputerze Piotra (${st.name ?? "mostek"}) wykonuje pracę na bieżąco (ostatni sygnał ${ago(st.seenAt)}). Nic nie rób i zakończ. list_work z force: true pokaże pracę mimo to.`);
       }
-      await repo.markQuestionsSeen(ownerId, answered.map((q) => q.id));
-      const out = [
-        going.length ? "KROKI W TOKU (zaczęte przez Piotra albo poprzedni przebieg; zrób je teraz i zgłoś complete_step, a gdy nie możesz: leave_step z powodem):\n" + going.join("\n") : "",
-        approved.length ? "ZATWIERDZONE SZKICE DO WYSŁANIA (wyślij dokładnie treść z bloku draft w get_task, bez zmian, potem complete_step z linkiem):\n" + approved.join("\n") : "",
-        noSteps.length ? "ZADANIA BEZ KROKÓW (get_task, get_rules, potem add_steps bez pytań, gdy da się przyjąć rozsądne założenia; w razie potrzeby ask_question):\n" + noSteps.filter((s) => !waitingTask.has(s.task.id)).map((s) => brief(s) + (attN[s.task.id] ? ` | załączniki: ${attN[s.task.id]} (get_task, potem get_attachment)` : "")).join("\n") : "",
-        answered.length ? "ODPOWIEDZI PIOTRA (kontynuuj pracę w tych zadaniach):\n" + answered.map((q) => `- zadanie [${q.taskId}]${q.stepId ? ` krok [${q.stepId}]` : ""}: pytanie „${q.text}” → odpowiedź: ${q.answer}`).join("\n") : "",
-        ready.length ? "KROKI DO ZROBIENIA BEZ ZGODY (start_step, zrób swoimi konektorami, complete_step z linkiem; fakty przez add_facts):\n" + ready.join("\n") : "",
-        approval.length ? "KROKI WYMAGAJĄCE ZGODY PIOTRA (przygotuj gotowy szkic przez set_blocks jako blok draft ze status proposed; niczego nie wysyłaj, krok sam przejdzie do zatwierdzenia):\n" + approval.join("\n") : "",
-        openQ.length ? `ZADANIA CZEKAJĄCE NA ODPOWIEDŹ PIOTRA (pomiń): ${[...waitingTask].map((id) => `[${id}]`).join(", ")}` : "",
-      ].filter(Boolean).join("\n\n");
-      return text(out || "Nic nie czeka na agenta.");
+      return text((await workSummary(ownerId)).text);
     });
 
     server.registerTool("ask_question", {
@@ -241,17 +218,17 @@ function buildHandler(ownerId: string) {
   }, { serverInfo: { name: "task-hub", version: "0.1.0" } });
 }
 
-async function authorize(req: Request): Promise<string | null> {
+async function authorize(req: Request): Promise<repo.TokenAuth | null> {
   const h = req.headers.get("authorization") ?? "";
   const m = /^Bearer\s+(.+)$/i.exec(h);
   if (!m) return null;
-  return repo.ownerForToken(m[1].trim());
+  return repo.tokenForSecret(m[1].trim());
 }
 
 async function handle(req: Request): Promise<Response> {
-  const ownerId = await authorize(req);
-  if (!ownerId) return new Response(JSON.stringify({ error: "Brak albo zły token. Połącz konektor przez OAuth (aplikacja Claude: Connectors) albo podaj nagłówek Authorization: Bearer th_..." }), { status: 401, headers: { "content-type": "application/json", "www-authenticate": wwwAuthenticate(originOf(req)) } });
-  return buildHandler(ownerId)(req);
+  const auth = await authorize(req);
+  if (!auth) return new Response(JSON.stringify({ error: "Brak albo zły token. Połącz konektor przez OAuth (aplikacja Claude: Connectors) albo podaj nagłówek Authorization: Bearer th_..." }), { status: 401, headers: { "content-type": "application/json", "www-authenticate": wwwAuthenticate(originOf(req)) } });
+  return buildHandler(auth.ownerId, auth.kind)(req);
 }
 
 export { handle as GET, handle as POST, handle as DELETE };

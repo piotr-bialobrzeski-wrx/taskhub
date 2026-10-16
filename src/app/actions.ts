@@ -8,6 +8,8 @@ import { requireOwner } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { aiFor, composeFlow, finishStep, prepareStep } from "@/lib/services";
 import { runChat } from "@/lib/agent/chat";
+import { newTaskText } from "@/lib/auto";
+import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import type { Rule } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -59,7 +61,7 @@ export async function chat(fd: FormData) {
     await repo.addChat(o.id, taskId, "user", text + (typed && files.length ? ` (załączniki: ${files.map((f) => f.name).join(", ")})` : ""));
     // komunikaty mówią, co z tego ma Piotr, nie jak działa mechanizm
     if (taskId) { await attachFiles(taskId, files); await repo.addChat(o.id, taskId, "agent", files.length ? `Dopisałem to do zadania razem z ${files.length === 1 ? "załącznikiem" : "załącznikami"}. Claude weźmie to pod uwagę przy kolejnych krokach.` : "Dopisałem to do zadania. Claude weźmie to pod uwagę przy kolejnych krokach."); }
-    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files); await repo.addChat(o.id, null, "agent", "Mam to. Zadanie jest na kanwie. Claude rozpisze je na kroki i zrobi to, co nie wymaga Twojej zgody."); goTo = t.id; }
+    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files); await repo.addChat(o.id, null, "agent", newTaskText((await repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS)).alive)); goTo = t.id; }
   } else {
     try {
       const images = await Promise.all(files.filter((f) => IMAGE_TYPES.has(f.type)).map(async (f) => ({ mediaType: f.type as "image/png", base64: Buffer.from(await f.arrayBuffer()).toString("base64") })));
@@ -291,6 +293,13 @@ export async function createToken(_prev: TokenState, fd: FormData): Promise<Toke
   const o = await requireOwner();
   const name = str(fd, "name") || "klient MCP";
   try { const token = await repo.createApiToken(o.id, name); revalidatePath("/settings"); return { token }; }
+  catch (e) { return { error: fail(e) }; }
+}
+// token mostka: program na komputerze Piotra odpytuje Task Hub i uruchamia Claude Code do pracy
+export async function createBridgeToken(_prev: TokenState, fd: FormData): Promise<TokenState> {
+  const o = await requireOwner();
+  const name = str(fd, "name") || "Mostek";
+  try { const token = await repo.createApiToken(o.id, name, "bridge"); revalidatePath("/settings"); return { token }; }
   catch (e) { return { error: fail(e) }; }
 }
 export async function revokeToken(id: string) {

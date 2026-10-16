@@ -11,7 +11,8 @@ import { calEst, calibrationFor, estOf, fmtMin, spentMin, taskEst, taskSpent, to
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
-import { AUTO_EVERY } from "@/lib/auto";
+import { stepsHint } from "@/lib/auto";
+import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import { fmtDate, fmtTime, stepTile, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
@@ -35,12 +36,13 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const cur = b.scored.find((s) => s.task.id === id);
   if (!cur) notFound();
   const t = cur.task;
-  const [factsPerStep, attachments, chatLog, groups, questions] = await Promise.all([
+  const [factsPerStep, attachments, chatLog, groups, questions, bridge] = await Promise.all([
     Promise.all(t.steps.map((s) => repo.listFacts({ stepId: s.id }))),
     repo.listAttachments({ taskId: t.id }),
     repo.listChat(o.id, t.id, 2),
     repo.listGroups(o.id, t.id),
     repo.listQuestions(o.id, { taskId: t.id, open: true }),
+    repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS),
   ]);
   const providers = availableProviders(), aiOn = providers.length > 0;
   const lastAgent = [...chatLog].reverse().find((m) => m.role === "agent");
@@ -112,7 +114,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       ) : null}
       {bp && !aiOn ? (
         <div><div className="lbl">Kroki</div>
-          <p>Claude rozpisze je sam, {AUTO_EVERY} zagląda tu po nową pracę. Gdy się spieszysz, zrób to ręcznie w Claude (poniżej gotowy prompt).</p>
+          <p>{stepsHint(bridge.alive)} Gdy się spieszysz, zrób to ręcznie w Claude (poniżej gotowy prompt).</p>
           <details className="edit" style={{ marginTop: 8 }}><summary>Rozpisz ręcznie w Claude</summary><PromptBox text={bp} openUrl={claudeUrl(bp)} /></details>
         </div>
       ) : null}
