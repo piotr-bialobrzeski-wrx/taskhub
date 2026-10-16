@@ -19,7 +19,7 @@ export function scoreAll(tasks: Task[], projects: Project[], samples: TimeSample
 export const taskState = (t: Task): string => {
   if (t.deletedAt) return "w koszu";
   if (t.steps.length && t.steps.every((s) => s.status === "done")) return "ukończone";
-  if (t.steps.some((s) => s.status === "handoff")) return "w Claude";
+  if (t.steps.some((s) => s.status === "handoff")) return "w toku";
   if (t.steps.some((s) => s.status === "draft")) return "do zatwierdzenia";
   if (t.steps.some((s) => s.status === "done")) return "w toku";
   return "nowe";

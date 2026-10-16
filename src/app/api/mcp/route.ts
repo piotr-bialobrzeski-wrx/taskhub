@@ -86,6 +86,7 @@ function buildHandler(ownerId: string) {
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
       const steps = await repo.addSteps(t.id, a.steps.map((s) => ({ ...s, link: externalLink(s.link), estMin: s.est })));
+      await repo.addChat(ownerId, t.id, "agent", `Rozpisałem ${steps.length} ${steps.length === 1 ? "krok" : steps.length < 5 ? "kroki" : "kroków"}: ${steps.map((s) => s.title).join(", ")}.`);
       return json(steps.map((s) => ({ id: s.id, title: s.title })));
     });
 
@@ -101,9 +102,16 @@ function buildHandler(ownerId: string) {
       title: "Ułóż panel kroku", description: "Zapisuje panel kroku z uniwersalnych bloków, tak jak robi to agent wbudowany: text, facts (fakty z pochodzeniem), thread (wątek wiadomości), draft (szkic do zatwierdzenia z target.app i target.where), list, media, link, question (pytanie z opcjami). Pokaż tylko to, co ważne dla tego kroku. rememberFor: nazwa aplikacji źródłowej, jeśli ten układ ma być wzorem dla podobnych kroków.",
       inputSchema: z.object({ stepId: z.string(), blocks: Blocks, rememberFor: z.string().optional() }),
     }, async (a) => {
-      if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
+      const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
       await repo.updateStep(a.stepId, { blocks: a.blocks });
       if (a.rememberFor) await repo.setLayoutMemory(ownerId, a.rememberFor, a.blocks);
+      // szkic czekający na zgodę: krok przechodzi do zatwierdzenia, Piotr widzi to na kafelku i w rozmowie zadania
+      const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId);
+      if (st && st.status !== "done" && st.status !== "draft" && a.blocks.some((b) => b.type === "draft" && b.status === "proposed")) {
+        await repo.updateStep(st.id, { status: "draft", prevStatus: st.status === "handoff" ? st.prevStatus : st.status, handoffAt: null });
+        await repo.addChat(ownerId, taskId, "agent", `Szkic do zatwierdzenia: „${st.title}”. Zatwierdź w panelu kroku, a wyślę dokładnie tę treść.`);
+        return text("Panel zapisany, krok czeka na zatwierdzenie Piotra.");
+      }
       return text("Panel zapisany.");
     });
 
@@ -114,7 +122,32 @@ function buildHandler(ownerId: string) {
       const taskId = await ownedStep(ownerId, a.stepId);
       if (!taskId) return text("Nie ma takiego kroku.");
       const r = await finishStep(ownerId, taskId, a.stepId, { report: a.summary, link: a.link, addSpentSec: a.spentMin ? a.spentMin * 60 : 0 });
+      const title = r.task.steps.find((x) => x.id === a.stepId)?.title ?? "";
+      await repo.addChat(ownerId, taskId, "agent", `Gotowe: „${title}”. ${a.summary}${a.link ? ` ${a.link}` : ""}${r.closed ? " To był ostatni krok, zadanie ukończone." : ""}`);
       return text(r.closed ? "Krok zapisany, zadanie ukończone." : "Krok zapisany.");
+    });
+
+    server.registerTool("start_step", {
+      title: "Zaczynam krok", description: "Oznacza krok jako w toku: Piotr widzi na kafelku, że Claude nad nim pracuje. Wywołaj tuż przed robieniem kroku. Po zrobieniu zgłoś complete_step; gdy nie da się go zrobić (brak narzędzia, brak dostępu), oddaj go przez leave_step z powodem.",
+      inputSchema: z.object({ stepId: z.string() }),
+    }, async (a) => {
+      const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
+      const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
+      if (st.status === "done") return text("Ten krok jest już zrobiony.");
+      if (st.status !== "handoff") await repo.updateStep(st.id, { status: "handoff", prevStatus: st.status, handoffAt: new Date().toISOString() });
+      return text("Krok w toku.");
+    });
+
+    server.registerTool("leave_step", {
+      title: "Oddaję krok", description: "Gdy kroku nie da się zrobić (brak narzędzia, dostępu albo danych): krok wraca do gotowych, a Piotr widzi powód w zadaniu. Nie używaj do pytań, od tego jest ask_question.",
+      inputSchema: z.object({ stepId: z.string(), reason: z.string().max(600) }),
+    }, async (a) => {
+      const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
+      const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
+      if (st.status === "done") return text("Ten krok jest już zrobiony.");
+      if (st.status === "handoff") await repo.updateStep(st.id, { status: st.prevStatus === "draft" ? "draft" : "todo", prevStatus: null, handoffAt: null });
+      await repo.addChat(ownerId, taskId, "agent", `Nie zrobiłem kroku „${st.title}”: ${a.reason}`);
+      return text("Krok oddany.");
     });
 
     server.registerTool("add_facts", {
@@ -136,32 +169,37 @@ function buildHandler(ownerId: string) {
     });
 
     server.registerTool("list_work", {
-      title: "Co czeka na agenta", description: "Lista pracy dla agenta: zadania bez kroków (rozłożyć przez add_steps), kroki gotowe do zrobienia bez zatwierdzania (zrobić i zgłosić complete_step), kroki wymagające zatwierdzenia (przygotować szkic przez set_blocks i zostawić), odpowiedzi Piotra na pytania (przeczytać i kontynuować; oznaczane jako przeczytane). Kroki wykonuj tylko narzędziami, które masz; resztę zostaw.",
+      title: "Co czeka na agenta", description: "Lista pracy dla agenta, w kolejności robienia: kroki w toku (zaczęte, dokończ), zatwierdzone szkice do wysłania, zadania bez kroków (rozłóż przez add_steps), odpowiedzi Piotra, kroki gotowe bez zgody (start_step → zrób swoimi konektorami → complete_step), kroki wymagające zgody (przygotuj szkic przez set_blocks jako draft, niczego nie wysyłaj). Rób tylko to, do czego masz narzędzia; krok, którego nie możesz zrobić, oddaj przez leave_step. Nigdy niczego nie usuwaj.",
       inputSchema: z.object({}),
     }, async () => {
       const [tasks, projects, samples, answered] = await Promise.all([repo.listTasks(ownerId), repo.listProjects(ownerId), repo.listSamples(ownerId), repo.listQuestions(ownerId, { answeredUnseen: true })]);
       const open = scoreAll(tasks, projects, samples).filter((s) => !s.task.doneAt && !s.task.deletedAt);
-      const noSteps = open.filter((s) => !s.task.steps.length);
+      const unfinished = new Set(tasks.filter((t) => !t.doneAt && !t.deletedAt).map((t) => t.id));
+      const free = open.filter((s) => !s.task.dependsOn.some((d) => unfinished.has(d)));   // zadania, które nie czekają na inne zadania
+      const noSteps = free.filter((s) => !s.task.steps.length);
       const attN = await repo.countAttachments(noSteps.map((s) => s.task.id));
       const openQ = await repo.listQuestions(ownerId, { open: true });
       const waitingTask = new Set(openQ.map((q) => q.taskId));
-      const ready: string[] = [], approval: string[] = [];
-      for (const s of open) {
+      const going: string[] = [], approved: string[] = [], ready: string[] = [], approval: string[] = [];
+      for (const s of free) {
         if (waitingTask.has(s.task.id)) continue;
         for (const st of s.task.steps) {
+          const line = `- krok [${st.id}] „${st.title}” (${st.tool}) w zadaniu [${s.task.id}] „${s.task.title}”${st.detail ? ": " + st.detail.slice(0, 200) : ""}`;
+          if (st.status === "handoff") { (st.blocks?.some((b) => b.type === "draft" && b.status === "approved") || st.prevStatus === "draft" ? approved : going).push(line + (st.handoffAt ? ` (od ${st.handoffAt})` : "")); continue; }
           if (st.status !== "todo") continue;
           if (!st.dependsOn.every((d) => s.task.steps.find((x) => x.id === d)?.status === "done")) continue;
           if (st.tool === "manual") continue;
-          const line = `- krok [${st.id}] „${st.title}” (${st.tool}) w zadaniu [${s.task.id}] „${s.task.title}”${st.detail ? ": " + st.detail.slice(0, 200) : ""}`;
-          (st.needsApproval ? approval : ready).push(line);
+          if (st.needsApproval) { if (!st.blocks?.some((b) => b.type === "draft")) approval.push(line); } else ready.push(line);
         }
       }
       await repo.markQuestionsSeen(ownerId, answered.map((q) => q.id));
       const out = [
-        noSteps.length ? "ZADANIA BEZ KROKÓW (rozłóż przez add_steps, bez pytań, gdy da się przyjąć rozsądne założenia; w razie potrzeby ask_question):\n" + noSteps.filter((s) => !waitingTask.has(s.task.id)).map((s) => brief(s) + (attN[s.task.id] ? ` | załączniki: ${attN[s.task.id]} (get_task, potem get_attachment)` : "")).join("\n") : "",
+        going.length ? "KROKI W TOKU (zaczęte przez Piotra albo poprzedni przebieg; zrób je teraz i zgłoś complete_step, a gdy nie możesz: leave_step z powodem):\n" + going.join("\n") : "",
+        approved.length ? "ZATWIERDZONE SZKICE DO WYSŁANIA (wyślij dokładnie treść z bloku draft w get_task, bez zmian, potem complete_step z linkiem):\n" + approved.join("\n") : "",
+        noSteps.length ? "ZADANIA BEZ KROKÓW (get_task, get_rules, potem add_steps bez pytań, gdy da się przyjąć rozsądne założenia; w razie potrzeby ask_question):\n" + noSteps.filter((s) => !waitingTask.has(s.task.id)).map((s) => brief(s) + (attN[s.task.id] ? ` | załączniki: ${attN[s.task.id]} (get_task, potem get_attachment)` : "")).join("\n") : "",
         answered.length ? "ODPOWIEDZI PIOTRA (kontynuuj pracę w tych zadaniach):\n" + answered.map((q) => `- zadanie [${q.taskId}]${q.stepId ? ` krok [${q.stepId}]` : ""}: pytanie „${q.text}” → odpowiedź: ${q.answer}`).join("\n") : "",
-        ready.length ? "KROKI DO ZROBIENIA BEZ ZATWIERDZANIA (zrób je swoimi konektorami i zgłoś complete_step z linkiem; fakty przez add_facts):\n" + ready.join("\n") : "",
-        approval.length ? "KROKI WYMAGAJĄCE ZATWIERDZENIA (przygotuj szkic przez set_blocks jako draft, niczego nie wysyłaj):\n" + approval.join("\n") : "",
+        ready.length ? "KROKI DO ZROBIENIA BEZ ZGODY (start_step, zrób swoimi konektorami, complete_step z linkiem; fakty przez add_facts):\n" + ready.join("\n") : "",
+        approval.length ? "KROKI WYMAGAJĄCE ZGODY PIOTRA (przygotuj gotowy szkic przez set_blocks jako blok draft ze status proposed; niczego nie wysyłaj, krok sam przejdzie do zatwierdzenia):\n" + approval.join("\n") : "",
         openQ.length ? `ZADANIA CZEKAJĄCE NA ODPOWIEDŹ PIOTRA (pomiń): ${[...waitingTask].map((id) => `[${id}]`).join(", ")}` : "",
       ].filter(Boolean).join("\n\n");
       return text(out || "Nic nie czeka na agenta.");

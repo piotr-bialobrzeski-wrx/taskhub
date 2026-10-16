@@ -82,7 +82,7 @@ async function shrinkImage(file: File): Promise<File> {
   } catch { return file; }
 }
 
-// ---------- historia rozmowy: cały ekran pod szkłem, wpisy w kontekście (zadanie albo ogólne), z godzinami i dniami ----------
+// ---------- historia rozmowy: szkło nad kanwą, dok zostaje widoczny i działa; wpisy dosunięte do dołu (najnowsze przy polu), starsze wyżej ----------
 type Msg = { id: string; role: "user" | "agent"; text: string; createdAt: string };
 const CHAT_PAGE = 50;   // tyle wpisów na stronę zwraca loadChat
 const dayOf = (iso: string) => new Date(iso).toLocaleDateString("pl-PL", { day: "numeric", month: "long", year: "numeric" });
@@ -91,6 +91,8 @@ const dayLabel = (iso: string) => {
   return d.toDateString() === t.toDateString() ? "Dziś" : d.toDateString() === y.toDateString() ? "Wczoraj" : dayOf(iso);
 };
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+
+// zamykanie: X u góry, ikona w doku (ta sama, która otworzyła), klik obok kolumny, Esc
 export function ChatHistory({ taskId, title, onClose }: { taskId: string | null; title: string; onClose: () => void }) {
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
   const [more, setMore] = useState(false);
@@ -98,30 +100,39 @@ export function ChatHistory({ taskId, title, onClose }: { taskId: string | null;
   const list = useRef<HTMLDivElement>(null);
   const load = async (before: string | null) => {
     setBusy(true);
-    try { const r = await loadChat(taskId, before); setMsgs((m) => (before ? [...r, ...(m ?? [])] : r)); setMore(r.length >= CHAT_PAGE); } finally { setBusy(false); }
+    try {
+      const el = list.current, keep = el ? el.scrollHeight - el.scrollTop : 0;
+      const r = await loadChat(taskId, before); setMsgs((m) => (before ? [...r, ...(m ?? [])] : r)); setMore(r.length >= CHAT_PAGE);
+      requestAnimationFrame(() => { const e = list.current; if (!e) return; e.scrollTop = before ? e.scrollHeight - keep : e.scrollHeight; });
+    } finally { setBusy(false); }
   };
-  useEffect(() => { void load(null).then(() => requestAnimationFrame(() => { const el = list.current; if (el) el.scrollTop = el.scrollHeight; })); }, [taskId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(null); }, [taskId]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key); }, [onClose]);
-  return createPortal(
-    <div className="hist glass" role="dialog" aria-modal="true" aria-label={title} onPointerDown={(e) => e.stopPropagation()}>
-      <div className="hist-h"><b>{title}</b><span className="sp" /><button className="icobtn" type="button" aria-label="Zamknij" title="Zamknij (Esc)" onClick={onClose}><Icon k="x" size={13} sw={2} /></button></div>
-      <div ref={list} className="hist-b">
-        {msgs === null ? <p className="sub">Wczytuję…</p> : !msgs.length ? <p className="sub" style={{ textAlign: "center" }}>Jeszcze nie było tu rozmowy.</p> : (
-          <>
-            {more ? <button className="btn" type="button" style={{ alignSelf: "center" }} disabled={busy} onClick={() => load(msgs[0].createdAt)}>{busy ? "Wczytuję…" : "Starsze wpisy"}</button> : null}
-            {msgs.map((m, i) => (
-              <Fragment key={m.id}>
-                {i === 0 || dayOf(m.createdAt) !== dayOf(msgs[i - 1].createdAt) ? <div className="hm-day">{dayLabel(m.createdAt)}</div> : null}
-                <div className={"hm " + m.role}><div className="hm-b">{m.text}</div><span className="hm-t">{m.role === "agent" ? "Agent · " : ""}{timeOf(m.createdAt)}</span></div>
-              </Fragment>
-            ))}
-          </>
-        )}
+  return (
+    <div className="hist glass" role="dialog" aria-label={title} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="hist-col">
+        <div className="hist-h"><b>{title}</b><span className="sp" /><button className="icobtn" type="button" aria-label="Zamknij historię" title="Zamknij (Esc)" onClick={onClose}><Icon k="x" size={13} sw={2} /></button></div>
+        <div ref={list} className="hist-b">
+          <div className="hist-list">
+            {msgs === null ? <p className="sub" style={{ textAlign: "center" }}>Wczytuję…</p> : !msgs.length ? <p className="sub" style={{ textAlign: "center" }}>Jeszcze nie było tu rozmowy.</p> : (
+              <>
+                {more ? <button className="btn" type="button" style={{ alignSelf: "center" }} disabled={busy} onClick={() => load(msgs[0].createdAt)}>{busy ? "Wczytuję…" : "Starsze wpisy"}</button> : null}
+                {msgs.map((m, i) => (
+                  <Fragment key={m.id}>
+                    {i === 0 || dayOf(m.createdAt) !== dayOf(msgs[i - 1].createdAt) ? <div className="hm-day">{dayLabel(m.createdAt)}</div> : null}
+                    <div className={"hm " + m.role}><div className="hm-b">{m.text}</div><span className="hm-t">{m.role === "agent" ? "Claude · " : ""}{timeOf(m.createdAt)}</span></div>
+                  </Fragment>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
       </div>
-    </div>, document.body);
+    </div>
+  );
 }
 
-function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone, onHistory }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void; onHistory: () => void }) {
+function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone, hist, onHistory }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void; hist: boolean; onHistory: () => void }) {
   const { pending } = useFormStatus();
   const ta = useRef<HTMLTextAreaElement>(null);
   const pick = useRef<HTMLInputElement>(null);
@@ -145,7 +156,7 @@ function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone
         <textarea ref={ta} name="text" rows={1} placeholder={pending ? busyText : placeholder} aria-label="Wiadomość" disabled={pending} onInput={grow}
           onPaste={(e) => { const files = [...e.clipboardData.files]; if (!files.length) return; if (!e.clipboardData.getData("text/plain")) e.preventDefault(); onFiles(files); }}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (canSend()) e.currentTarget.form?.requestSubmit(); } }} />
-        <button className="icobtn" type="button" aria-label="Historia rozmowy" title="Historia rozmowy" onClick={onHistory}><Icon k="history" size={15} sw={1.7} /></button>
+        <button className={"icobtn" + (hist ? " on" : "")} type="button" aria-label={hist ? "Zamknij historię" : "Historia rozmowy"} title={hist ? "Zamknij historię" : "Historia rozmowy"} aria-pressed={hist} onClick={onHistory}><Icon k={hist ? "x" : "history"} size={hist ? 13 : 15} sw={hist ? 2 : 1.7} /></button>
         <button className="send" type="submit" aria-label="Wyślij" disabled={pending}><Icon k="send" size={14} sw={1.9} /></button>
       </div>
     </>
@@ -181,17 +192,18 @@ export function Dock({ action, taskId, placeholder, busyText, context, historyTi
   };
   const remove = (key: string) => setAtts((prev) => { prev.filter((a) => a.key === key).forEach((a) => { if (a.preview) URL.revokeObjectURL(a.preview); }); return prev.filter((a) => a.key !== key); });
   const clear = () => setAtts((prev) => { if (!prev.length) return prev; prev.forEach((a) => { if (a.preview) URL.revokeObjectURL(a.preview); }); return []; });
+  // historia jest rodzeństwem formularza w tym samym kontekście warstw: szkło pod dokiem, dok nad nim (pole dalej działa)
   return (
-    <div className="dockwrap">
+    <div className={"dockwrap" + (hist ? " hist-on" : "")}>
+      {hist ? <ChatHistory taskId={taskId} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(false)} /> : null}
       <form ref={form} className={"dock glass" + (over ? " drop" : "")} action={action} autoComplete="off"
         onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setOver(true); } }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); void addFiles([...e.dataTransfer.files]); }}>
         <input type="hidden" name="taskId" value={taskId ?? ""} />
         <input ref={filesIn} type="file" name="files" multiple tabIndex={-1} aria-hidden="true" />
         {context ? <div className="ctxrow">{context}</div> : null}
-        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} onHistory={() => setHist(true)} />
+        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} hist={hist} onHistory={() => setHist((h) => !h)} />
       </form>
-      {hist ? <ChatHistory taskId={taskId} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(false)} /> : null}
     </div>
   );
 }

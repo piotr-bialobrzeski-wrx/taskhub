@@ -137,7 +137,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
         <AgentPill agent={p.agent} aiOn={p.aiOn} />
       </div>
 
-      <div className={"runbar glass" + (panel ? " withpanel" : "")}>{p.runbar}</div>
+      {p.runbar ? <div className={"runbar glass" + (panel ? " withpanel" : "")}>{p.runbar}</div> : null}
 
       {namer === "tile" ? <Namer label="Nazwa nowego kroku" placeholder={after ? "Nazwa kroku (po zaznaczonym)" : "Nazwa kroku"} onClose={() => setNamer(null)} onSubmit={(name) => { setNamer(null); run(() => addStepQuick(t.id, name, after), "Dodano krok"); }} /> : null}
       {namer === "group" ? <Namer label="Nazwa grupy" placeholder={n ? `Nazwa grupy dla ${n} ${word}` : "Nazwa grupy"} onClose={() => setNamer(null)} onSubmit={(name) => { const members = ids; const rect = groupRect(members); setNamer(null); setSel(new Set()); setPanel(null); run(async () => { await freeze(members); const id = await createGroupAction(t.id, name, members, rect); setSelGroup(id); }); }} /> : null}

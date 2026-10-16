@@ -12,7 +12,7 @@ import type { Rule } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const num = (fd: FormData, k: string, def: number) => { const v = Number(str(fd, k)); return Number.isFinite(v) && str(fd, k) !== "" ? v : def; };
-const url = (s: string) => (/^https?:\/\//.test(s) ? s : s ? null : null);
+const url = (s: string) => (/^https?:\/\//.test(s) ? s : /^[\w.-]+\.[a-z]{2,}(\/\S*)?$/i.test(s) ? "https://" + s : null);
 const fail = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function refresh(taskId?: string | null) {
@@ -57,8 +57,9 @@ export async function chat(fd: FormData) {
   if (!ai.enabled) {
     // bez klucza modelu: na kanwie tekst staje się zadaniem, w zadaniu zostaje jako notatka rozmowy; pliki trafiają do zadania
     await repo.addChat(o.id, taskId, "user", text + (typed && files.length ? ` (załączniki: ${files.map((f) => f.name).join(", ")})` : ""));
-    if (taskId) { await attachFiles(taskId, files); await repo.addChat(o.id, taskId, "agent", files.length ? "Zapisałem wiadomość i załączniki przy zadaniu. Claude zobaczy je przez konektor (get_task → get_attachment)." : "Zapisałem wiadomość. Agent wbudowany jest wyłączony (brak klucza modelu), więc pracę w tym zadaniu prowadź przyciskami „w Claude”."); }
-    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files); await repo.addChat(o.id, null, "agent", "Założyłem zadanie z Twojego tekstu. Kroki ułoży Claude przez konektor."); goTo = t.id; }
+    // komunikaty mówią, co z tego ma Piotr, nie jak działa mechanizm
+    if (taskId) { await attachFiles(taskId, files); await repo.addChat(o.id, taskId, "agent", files.length ? `Dopisałem to do zadania razem z ${files.length === 1 ? "załącznikiem" : "załącznikami"}. Claude weźmie to pod uwagę przy kolejnych krokach.` : "Dopisałem to do zadania. Claude weźmie to pod uwagę przy kolejnych krokach."); }
+    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files); await repo.addChat(o.id, null, "agent", "Mam to. Zadanie jest na kanwie. Claude rozpisze je na kroki i zrobi to, co nie wymaga Twojej zgody."); goTo = t.id; }
   } else {
     try {
       const images = await Promise.all(files.filter((f) => IMAGE_TYPES.has(f.type)).map(async (f) => ({ mediaType: f.type as "image/png", base64: Buffer.from(await f.arrayBuffer()).toString("base64") })));
@@ -148,19 +149,19 @@ export async function addStepForm(fd: FormData) {
   await repo.addSteps(taskId, [{ title, detail: str(fd, "detail"), tool: str(fd, "tool") || "manual", estMin: num(fd, "est", 15), needsApproval: fd.get("needsApproval") === "on", link: url(str(fd, "link")) ?? undefined, dependsOn: after ? [after] : [] }]);
   refresh(taskId);
 }
-export async function updateStepForm(fd: FormData) {
+// edycja w miejscu: jedno pole naraz, tam gdzie je widać w panelu kroku
+export async function patchStep(taskId: string, stepId: string, patch: { title?: string; detail?: string; tool?: string; estMin?: number; spentMin?: number; link?: string; needsApproval?: boolean }) {
   const o = await requireOwner();
-  const taskId = str(fd, "taskId"), stepId = str(fd, "stepId");
   const { step } = await stepOf(o.id, taskId, stepId);
-  const spentMinutes = num(fd, "spentMin", -1);
-  await repo.updateStep(stepId, {
-    title: str(fd, "title") || undefined, detail: str(fd, "detail"), tool: str(fd, "tool") || step.tool,
-    estMin: Math.max(15, Math.round(num(fd, "est", step.estMin) / 15) * 15), needsApproval: fd.get("needsApproval") === "on",
-    link: str(fd, "link") ? url(str(fd, "link")) : null,
-    ...(spentMinutes >= 0 && spentMinutes * 60 !== step.spentSec ? { spentSec: Math.round(spentMinutes * 60), spentManual: true } : {}),
-  });
-  const after = str(fd, "after");
-  if (after !== "-") await repo.setStepDependencies(stepId, after ? [after] : []);
+  const p: repo.StepPatch = {};
+  if (patch.title !== undefined && patch.title.trim()) p.title = patch.title.trim().slice(0, 200);
+  if (patch.detail !== undefined) p.detail = patch.detail.trim();
+  if (patch.tool) p.tool = patch.tool;
+  if (patch.estMin !== undefined && Number.isFinite(patch.estMin)) p.estMin = Math.max(15, Math.round(patch.estMin / 15) * 15);
+  if (patch.spentMin !== undefined && Number.isFinite(patch.spentMin) && patch.spentMin >= 0) { p.spentSec = Math.round(patch.spentMin * 60); p.spentManual = true; }
+  if (patch.link !== undefined) p.link = patch.link.trim() ? url(patch.link.trim()) : null;
+  if (patch.needsApproval !== undefined) p.needsApproval = patch.needsApproval;
+  if (Object.keys(p).length) await repo.updateStep(step.id, p);
   refresh(taskId);
 }
 export async function removeStep(taskId: string, stepId: string) {
@@ -196,10 +197,20 @@ export async function compose(taskId: string, stepId: string) {
   try { await composeFlow(o.id, taskId, stepId); } catch (e) { await repo.addChat(o.id, taskId, "agent", "Nie udało się złożyć panelu: " + fail(e)); }
   refresh(taskId);
 }
+// „Uruchom”: krok przechodzi w toku (kafelek pokazuje pracę); Claude z konektora bierze go z list_work i zgłasza wynik przez complete_step
 export async function handoff(taskId: string, stepId: string) {
   const o = await requireOwner();
   const { step } = await stepOf(o.id, taskId, stepId);
   await repo.updateStep(stepId, { status: "handoff", prevStatus: step.status, handoffAt: new Date().toISOString() });
+  refresh(taskId);
+}
+// zatwierdzenie szkicu: krok, który coś wysyła, idzie do wysłania (Claude wyśle dokładnie zatwierdzoną treść); inny szkic jest po prostu gotowy
+export async function approveStep(taskId: string, stepId: string) {
+  const o = await requireOwner();
+  const { step } = await stepOf(o.id, taskId, stepId);
+  if (!step.needsApproval) { await finishStep(o.id, taskId, stepId); refresh(taskId); return; }
+  const blocks = step.blocks?.map((b) => (b.type === "draft" && b.status === "proposed" ? { ...b, status: "approved" as const } : b)) ?? null;
+  await repo.updateStep(stepId, { status: "handoff", prevStatus: "draft", handoffAt: new Date().toISOString(), ...(blocks ? { blocks } : {}) });
   refresh(taskId);
 }
 export async function saveReport(fd: FormData) {

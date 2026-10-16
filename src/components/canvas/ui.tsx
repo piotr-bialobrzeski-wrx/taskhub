@@ -8,7 +8,7 @@ export type TaskStateKey = "done" | "blocked" | "draft" | "active" | "new";
 export type StepStateKey = "done" | "draft" | "handoff" | "blocked" | "ready";
 export const TS_LABEL: Record<TaskStateKey, string> = { done: "Ukończone", draft: "Do zatwierdzenia", active: "W toku", blocked: "Czeka", new: "Nowe" };
 export const TS_SHORT: Record<TaskStateKey, string> = { ...TS_LABEL, draft: "Do zatw." };   // na kafelku, obok terminu
-export const ST_LABEL: Record<StepStateKey, string> = { done: "Zrobione", ready: "Gotowy", draft: "Do zatwierdzenia", blocked: "Czeka", handoff: "W Claude" };
+export const ST_LABEL: Record<StepStateKey, string> = { done: "Zrobione", ready: "Gotowy", draft: "Do zatwierdzenia", blocked: "Czeka", handoff: "Pracuje" };
 
 // ---------- modele kafelków (liczone na serwerze, rysowane u klienta) ----------
 export type TaskTile = {
@@ -67,6 +67,9 @@ const PATHS: Record<string, string> = {
   clip: '<path d="M10.6 5.4 6.4 9.6a1.4 1.4 0 0 0 2 2l4.6-4.6a2.9 2.9 0 0 0-4.1-4.1L4.3 7.5a4.4 4.4 0 0 0 6.2 6.2l3.3-3.3"/>',
   question: '<circle cx="8" cy="8" r="5.5"/><path d="M6.2 6.3a1.8 1.8 0 1 1 2.6 1.6c-.5.3-.8.6-.8 1.1v.3M8 11.3h.01"/>',
   search: '<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/>',
+  copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/>',
+  play: '<path d="M5 3.5v9l7.5-4.5z"/>',
+  stop: '<rect x="4" y="4" width="8" height="8" rx="1.5"/>',
   pen: '<path d="M3 13h3l7-7-3-3-7 7v3z"/><path d="m9 4 3 3"/>',
   trash: '<path d="M3 4.5h10M6.5 4.5v-1h3v1M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
   history: '<path d="M2.6 8.6A5.5 5.5 0 1 0 4 4.3"/><path d="M2.5 2.5v2.8h2.8"/><path d="M8 5.2v3l2 1.4"/>',

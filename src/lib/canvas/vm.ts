@@ -55,7 +55,7 @@ export function stepTile(t: Task, s: Step, all: Task[]): StepTile & { toolName: 
   const state = stepStateOf(t, s, all);
   const deps = s.dependsOn.map((d) => t.steps.findIndex((x) => x.id === d) + 1).filter((n) => n > 0);
   const meta = state === "handoff" && s.handoffAt
-    ? `W Claude od ${fmtTime(s.handoffAt)}`
+    ? `Pracuje od ${fmtTime(s.handoffAt)}`
     : `${deps.length ? "Po kroku " + deps.join(", ") : "Start od razu"} · ${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}${s.needsApproval ? " · zatw." : ""}`;
   return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, meta, pos: s.pos, dependsOn: s.dependsOn };
 }

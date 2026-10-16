@@ -1,28 +1,29 @@
 // Wnętrze zadania: kanwa kroków z panelem. Panele (zadania i każdego kroku) są renderowane tu, na serwerze, i przekazywane do kanwy.
+// Pola kroku edytuje się w miejscu, w którym je widać (StepFields); jedna główna akcja na stan kroku.
 import { notFound } from "next/navigation";
 import { requireOwner, appUrl } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { bundle } from "@/lib/services";
 import { composeStatic } from "@/lib/agent/compose";
-import { breakdownPrompt, handoffPrompt, claudeUrl, codeCommand } from "@/lib/agent/handoff";
+import { breakdownPrompt, handoffPrompt, claudeUrl } from "@/lib/agent/handoff";
 import { EXTERNAL_TOOLS, toolLabel, type Question, type Step, type Task } from "@/lib/schema";
 import { calEst, calibrationFor, estOf, fmtMin, spentMin, taskEst, taskSpent, todayISO } from "@/lib/time";
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
-import { fmtDate, stepTile, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
+import { AUTO_EVERY } from "@/lib/auto";
+import { fmtDate, fmtTime, stepTile, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { PendingButton } from "@/components/Pending";
-import { CopyButton } from "@/components/CopyButton";
 import { Timer } from "@/components/Timer";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
-import { StepEditFields } from "@/components/StepEditFields";
 import { GrowTextarea } from "@/components/GrowTextarea";
+import { ConfirmButton, InlineText, PromptBox, StepMeta } from "@/components/StepFields";
 import { agentLabel, indexFrom } from "@/lib/search";
 import { Icon, plural } from "@/components/canvas/ui";
 import { InlineDate, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
-import { addSpent, answerQuestionForm, backToTodo, compose, dismissQuestion, factPref, handoff, linkSteps, linkTasks, markDone, prepare, removeStep, reopen, saveOutput, saveReport, setDue, setLevel, setProject, trashTask, updateStepForm, updateTaskForm } from "../../actions";
+import { addSpent, answerQuestionForm, approveStep, backToTodo, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, removeStep, reopen, saveOutput, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -49,15 +50,10 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const waits = taskWaits(t, b.tasks);
   const bp = !t.steps.length && !t.doneAt ? breakdownPrompt(t, b.rules, { appUrl: origin, projectName: cur.project?.name }) : null;
 
-  // ---------- pasek stanu nad kanwą ----------
-  const ready = tiles.filter((x) => x.state === "ready").length, handed = tiles.filter((x) => x.state === "handoff").length, drafts = tiles.filter((x) => x.state === "draft").length;
+  // ---------- pasek nad kanwą: tylko to, co wymaga uwagi (stan kroków widać po kolorach kafelków) ----------
   const runbar = waits.length ? <span className="rb-t"><b>Czeka na zadanie:</b> {waits.map((w) => w.title).join(", ")}</span>
-    : isComplete(t) ? <span className="rb-t"><b>Zadanie ukończone.</b> Wszystkie kroki zrobione.</span>
-    : bp ? <><span className="rb-t"><b>Brak kroków.</b> {aiOn ? "Napisz w doku, co ma zrobić agent." : "Claude rozłoży je i zapisze tu przez konektor."}</span>{aiOn ? null : <a className="btn primary" href={claudeUrl(bp)} target="_blank" rel="noopener">Rozłóż w Claude</a>}</>
-    : ready ? <span className="rb-t"><b>{ready} {ready === 1 ? "krok gotowy" : "kroki gotowe"}</b> do wykonania{ready > 1 ? " równolegle" : ""}</span>
-    : handed ? <span className="rb-t"><b>{handed} {handed === 1 ? "krok jest" : "kroki są"} w Claude.</b> Raport wróci przez konektor albo wkleisz go w panelu.</span>
-    : drafts ? <span className="rb-t"><b>{drafts} {drafts === 1 ? "szkic czeka" : "szkice czekają"}</b> na Twoje zatwierdzenie</span>
-    : <span className="rb-t">Czeka na kroki wykonywane przez Ciebie</span>;
+    : bp ? <span className="rb-t"><b>Bez kroków.</b> {aiOn ? "Napisz w doku, co ma zrobić agent." : "Claude rozpisze je i zacznie pracę."}</span>
+    : null;
 
   // ---------- karta pytań agenta ----------
   const q: Question | undefined = questions[0];
@@ -116,8 +112,8 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       ) : null}
       {bp && !aiOn ? (
         <div><div className="lbl">Kroki</div>
-          <p>Zadanie nie ma kroków. Przycisk „Rozłóż w Claude” nad kanwą otwiera rozmowę z gotowym promptem; Claude zapisze kroki tu przez konektor. Możesz też skopiować prompt.</p>
-          <div className="actions" style={{ marginTop: 8 }}><CopyButton text={bp} label="Kopiuj prompt" /><CopyButton text={codeCommand(bp)} label="Kopiuj komendę Claude Code" /></div>
+          <p>Claude rozpisze je sam, {AUTO_EVERY} zagląda tu po nową pracę. Gdy się spieszysz, zrób to ręcznie w Claude (poniżej gotowy prompt).</p>
+          <details className="edit" style={{ marginTop: 8 }}><summary>Rozpisz ręcznie w Claude</summary><PromptBox text={bp} openUrl={claudeUrl(bp)} /></details>
         </div>
       ) : null}
       <details className="edit">
@@ -153,61 +149,63 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean;
 }) {
-  const blocks = s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments);
-  const deps = s.dependsOn.map((d) => t.steps.find((x) => x.id === d)).filter((x): x is Step => !!x);
+  // szczegóły są już pod tytułem, więc blok tekstu z tą samą treścią odpada
+  const blocks = (s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
   const cal = calibrationFor(samples, s.tool);
+  const calOn = !!cal && state !== "done" && Math.abs(cal.k - 1) >= 0.1;
   const ext = EXTERNAL_TOOLS.has(s.tool);
+  const runnable = s.tool !== "manual";
   const link = externalLink(s.link, origin);
   const prompt = s.status === "handoff" ? handoffPrompt(t, s, rules, { appUrl: origin, attachments: attachments.filter((a) => a.analysis) }) : null;
   const review = s.review as { summary?: string; links?: string[]; fits?: boolean; warning?: string; pending?: boolean } | null;
   const linkLabel = ext ? "Otwórz wynik" : s.tool === "manual" || s.tool === "claude" ? "Otwórz link" : `Otwórz w ${toolLabel(s.tool)}`;
+  const hasDraftBlock = !!s.blocks?.some((b) => b.type === "draft");
   return (
     <>
-      <h3>{s.title}</h3>
-      {s.detail ? <p>{s.detail}</p> : null}
+      <InlineText taskId={t.id} stepId={s.id} field="title" value={s.title} as="h3" placeholder="Tytuł kroku" />
+      <InlineText taskId={t.id} stepId={s.id} field="detail" value={s.detail} as="p" placeholder="Dodaj szczegóły: co dokładnie, gdzie, dla kogo…" />
       <div className="actions">
         {s.status === "todo" ? (<>
-          {aiOn && !ext && s.tool !== "manual" ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Agent przygotowuje…">Przygotuj</PendingButton></form> : null}
+          {aiOn && !ext && runnable ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Agent przygotowuje…">Przygotuj</PendingButton></form> : null}
           {aiOn ? <form action={compose.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Składam…" title="Agent składa panel z faktów, migawek i załączników">Pokaż kontekst</PendingButton></form> : null}
-          {!aiOn || ext ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className={"btn" + (ext ? " primary" : "")}>{ext ? "Oddaj do Claude" : "Zrób w Claude"}</PendingButton></form> : null}
+          {!aiOn && runnable && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
           <Timer stepId={s.id} onStop={addSpent.bind(null, t.id, s.id)} />
-          <form action={markDone.bind(null, t.id, s.id)}><PendingButton className={"btn" + (ext ? "" : " primary")}>Gotowe</PendingButton></form>
+          <form action={markDone.bind(null, t.id, s.id)}><PendingButton className={"btn" + (!runnable ? " primary" : "")}>Gotowe</PendingButton></form>
+        </>) : null}
+        {s.status === "handoff" ? (<>
+          <span className="working" title={prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />Claude pracuje{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>
+          <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Wróć do kroków gotowych; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form>
         </>) : null}
         {s.status === "draft" ? (<>
-          <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary">Zatwierdź</PendingButton></form>
+          <form action={approveStep.bind(null, t.id, s.id)}><PendingButton className="btn primary" title={s.needsApproval ? "Claude wyśle dokładnie tę treść" : "Szkic jest dobry, krok gotowy"}>{s.needsApproval ? "Zatwierdź i wyślij" : "Zatwierdź"}</PendingButton></form>
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
-          <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn">Odłóż</PendingButton></form>
+          <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Szkic zostaje, krok wraca do gotowych">Odłóż</PendingButton></form>
         </>) : null}
-        {s.status === "handoff" && prompt ? (<>
-          <a className="btn primary" href={claudeUrl(prompt)} target="_blank" rel="noopener">Otwórz w Claude</a>
-          <CopyButton text={prompt} label="Kopiuj prompt" />
-          <CopyButton text={codeCommand(prompt)} label="Kopiuj komendę Claude Code" />
-          <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn"><Icon k="undo" size={13} sw={1.9} /> Cofnij</PendingButton></form>
-        </>) : null}
-        {s.status === "done" ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Przywróć stan sprzed oznaczenia"><Icon k="undo" size={13} sw={1.9} /> Cofnij gotowe</PendingButton></form> : null}
+        {s.status === "done" ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Cofnij gotowe</PendingButton></form> : null}
         {link ? <a className="btn ico" href={link} target="_blank" rel="noopener" title={link}>{linkLabel}<Icon k="ext" size={13} sw={1.6} /></a> : null}
       </div>
-      <div className="time-row">
-        <div><div className="lbl">Szacunek</div><div className="chip" style={{ height: 34, padding: "0 14px" }}>{fmtMin(estOf(s))}{cal && state !== "done" && Math.abs(cal.k - 1) >= 0.1 ? ` → ~${fmtMin(calEst(s, samples))}` : ""}</div></div>
-        <div><div className="lbl">Rzeczywiście</div><div className="chip" style={{ height: 34, padding: "0 14px" }}>{fmtMin(spentMin(s))}</div></div>
-      </div>
-      {cal && state !== "done" && Math.abs(cal.k - 1) >= 0.1 ? <div className="calib">Z Twoich czasów ({cal.scope === "tool" ? toolLabel(s.tool) : "ogólnie"}, {cal.n} {plural(cal.n, "krok", "kroki", "kroków")}): takie kroki trwają zwykle ×{String(cal.k).replace(".", ",")}.</div> : null}
-      {deps.length ? (
-        <div><div className="lbl">Czeka na</div>
-          <div className="deps">{deps.map((d) => <form key={d.id} action={linkSteps.bind(null, t.id, d.id, s.id, false)}><button className="chip" type="submit" title="Usuń tę zależność"><span className="d" style={{ ["--c" as string]: d.status === "done" ? "var(--ok)" : "var(--sub)" }} />{d.title}<span className="x">×</span></button></form>)}</div>
-        </div>
-      ) : null}
+      <StepMeta taskId={t.id}
+        step={{ id: s.id, tool: s.tool, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null }}
+        steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title, done: x.status === "done" }))}
+        calText={calOn && cal ? `Z Twoich czasów (${cal.scope === "tool" ? toolLabel(s.tool) : "ogólnie"}, ${cal.n} ${plural(cal.n, "krok", "kroki", "kroków")}): takie kroki trwają zwykle ×${String(cal.k).replace(".", ",")}.` : null} />
+      <InlineText taskId={t.id} stepId={s.id} field="link" value={s.link ?? ""} as="small" placeholder="Dodaj link do wyniku (ticket, wydarzenie, mail)…" shown={s.link ? "Link: " + s.link.replace(/^https?:\/\//, "").slice(0, 70) : undefined} />
       {state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
 
-      {s.status === "handoff" ? (
-        <form className="handoff-box" action={saveReport}>
-          <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} />
-          <div className="lbl">Raport z Claude</div>
-          <GrowTextarea className="out" minRows={3} name="report" placeholder="Wklej link do artefaktu, PR albo podsumowanie tego, co powstało…" required />
-          <div className="row"><input className="in" name="link" placeholder="Link do wyniku (opcjonalnie)" /><PendingButton className="btn primary" busy="Odbieram…">Odbierz</PendingButton></div>
-        </form>
+      {s.status === "handoff" && prompt ? (
+        <details className="edit">
+          <summary>Awaryjnie: zrób to poza aplikacją</summary>
+          <div className="stack">
+            <PromptBox text={prompt} openUrl={claudeUrl(prompt)} />
+            <form className="handoff-box" action={saveReport}>
+              <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} />
+              <div className="lbl">Wynik zrobiony poza aplikacją</div>
+              <GrowTextarea className="out" minRows={3} name="report" placeholder="Wklej, co powstało: podsumowanie, link do artefaktu albo PR…" required />
+              <div className="row"><input className="in" name="link" placeholder="Link do wyniku (opcjonalnie)" /><PendingButton className="btn primary" busy="Zapisuję…">Zapisz jako gotowe</PendingButton></div>
+            </form>
+          </div>
+        </details>
       ) : null}
-      {s.status === "draft" ? (
+      {s.status === "draft" && !hasDraftBlock ? (
         <form className="stack" action={saveOutput}>
           <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} />
           <div className="lbl">Szkic</div>
@@ -233,23 +231,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           </div>
         </details>
       ) : null}
-      <details className="edit">
-        <summary>Edytuj krok</summary>
-        <form className="stack" action={updateStepForm}>
-          <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} />
-          <label className="field"><span>Tytuł</span><input className="in" name="title" defaultValue={s.title} required /></label>
-          <label className="field"><span>Szczegóły</span><GrowTextarea name="detail" defaultValue={s.detail} /></label>
-          <div className="grid2">
-            <StepEditFields tool={s.tool} after={s.dependsOn[0] ?? ""} steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title }))} />
-            <label className="field"><span>Szacunek (min, co 15)</span><input className="in" type="number" name="est" min={15} step={15} defaultValue={s.estMin} /></label>
-            <label className="field"><span>Czas zrobiony (min)</span><input className="in" type="number" name="spentMin" min={0} step={5} defaultValue={Math.round(s.spentSec / 60)} /></label>
-          </div>
-          <label className="field"><span>Link (gdzie to jest w {toolLabel(s.tool)})</span><input className="in" name="link" defaultValue={s.link ?? ""} placeholder="https://…" /></label>
-          <label className="row" style={{ fontSize: 12.5 }}><input type="checkbox" name="needsApproval" defaultChecked={s.needsApproval} /> wymaga zatwierdzenia (wysyła coś na zewnątrz)</label>
-          <div className="actions"><PendingButton className="btn primary">Zapisz</PendingButton></div>
-        </form>
-        <form action={removeStep.bind(null, t.id, s.id)} style={{ marginTop: 8 }}><PendingButton className="btn danger">Usuń krok</PendingButton></form>
-      </details>
+      <div className="actions"><ConfirmButton label="Usuń krok" question="Usunąć ten krok? Tego nie da się cofnąć." yes="Tak, usuń" action={removeStep.bind(null, t.id, s.id)} /></div>
     </>
   );
 }

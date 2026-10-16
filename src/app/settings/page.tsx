@@ -1,5 +1,6 @@
 // Ustawienia: dwie sekcje (agent, połączenia). Każda ma to, co potrzebne na co dzień na wierzchu, a instrukcje i rzadkie czynności zwinięte.
 // Pasek u góry jak na kanwie: wstecz z tytułem, szukajka, agent. Kotwice (#token itd.) otwierają zwinięte sekcje z wyników szukania.
+import { AUTO_TEXT } from "@/lib/auto";
 import Link from "next/link";
 import { requireOwner, appUrl } from "@/lib/session";
 import * as repo from "@/lib/repo";
@@ -47,7 +48,10 @@ export default async function Settings() {
           {avail.length ? (
             <div className="kv"><span className="k">Model agenta wbudowanego</span><ProviderPicker value={pref} available={avail} action={saveSettings} /></div>
           ) : (
-            <p className="sub" style={{ margin: 0 }}>Agent wbudowany jest wyłączony (brak klucza modelu). Pracuje Twój Claude z subskrypcji, podłączony przez konektor poniżej; pytania zadaje w Task Hub.</p>
+            <>
+              <p className="sub" style={{ margin: 0 }}>Agent wbudowany jest wyłączony (brak klucza modelu). Pracuje Twój Claude z subskrypcji, podłączony przez konektor poniżej; pytania zadaje w Task Hub.</p>
+              <div className="kv"><span className="k">Automat</span><span className="sub" style={{ flex: 1 }}>{AUTO_TEXT}</span></div>
+            </>
           )}
           <div className="kv"><span className="k">Zasady pracy</span><span className="sub" style={{ flex: 1 }}>Jak agent ma działać: ogólne, projektu, narzędzia.</span><Link className="pill" href="/rules">Otwórz zasady</Link></div>
           <More id="agent-key" title="Jak włączyć agenta wbudowanego (płatny klucz API)">
