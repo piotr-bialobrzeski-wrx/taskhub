@@ -1,0 +1,76 @@
+# Buduje aplikację Task Hub na Maca (instalator .pkg i obraz .dmg) i publikuje ją jako wydanie na GitHubie.
+# Każdy push do main ze zmianą w app/ daje wydanie wstępne „app-latest”; tag app-vX.Y.Z daje właściwe wydanie,
+# na które wskazuje https://github.com/piotr-bialobrzeski-wrx/taskhub/releases/latest (link w Ustawieniach Task Hub).
+name: mac-app
+
+on:
+  push:
+    branches: [main]
+    tags: ["app-v*"]
+    paths: ["app/**", ".github/workflows/mac-app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mac-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wersja
+        id: v
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/app-v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/app-v}" >> "$GITHUB_OUTPUT"
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            echo "pre=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "tag=app-latest" >> "$GITHUB_OUTPUT"
+            echo "pre=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Budowa
+        run: |
+          mkdir -p app/out
+          set -o pipefail
+          app/build.sh "${{ steps.v.outputs.version }}" "${GITHUB_RUN_NUMBER}" 2>&1 | tee app/out/build.log
+
+      - name: Zgłoś błąd budowy jako komentarz do commita
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { echo '### Budowa aplikacji na Maca nie powiodła się'; echo; echo '```'; tail -c 6000 app/out/build.log 2>/dev/null || echo '(brak dziennika)'; echo '```'; } > app/out/comment.md
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -F body=@app/out/comment.md >/dev/null || true
+
+      - name: Wydanie
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+          VERSION: ${{ steps.v.outputs.version }}
+          PRE: ${{ steps.v.outputs.pre }}
+        run: |
+          cat > app/out/notes.md <<'EOF'
+          Aplikacja Task Hub na Maca (macOS 13 lub nowszy, Apple Silicon i Intel): okno z Task Hub, ikona w pasku menu,
+          okienko „Nowe zadanie” (⌃⌥T) i mostek, który uruchamia Claude Code na tym Macu, gdy tylko pojawi się praca.
+
+          **Instalacja**
+          1. Pobierz `Task-Hub-<wersja>.pkg` i otwórz go. Jeśli macOS powie, że nie może sprawdzić dewelopera: Ustawienia systemowe → Prywatność i ochrona → „Otwórz mimo to”.
+          2. Aplikacja trafia do /Applications (Launchpad, Spotlight).
+          3. Zainstaluj Claude Code i zaloguj się raz w Terminalu: `claude`, potem `/login`.
+          4. W Task Hub (przeglądarka) → Ustawienia → Mostek na komputerze → utwórz token → „Połącz aplikację Task Hub na tym Macu”.
+          EOF
+          if [[ "$PRE" == "true" ]]; then
+            gh release delete "$TAG" -y --cleanup-tag 2>/dev/null || true
+            gh release create "$TAG" app/build/*.pkg app/build/*.dmg --title "Task Hub na Maca (budowa $VERSION)" --notes-file app/out/notes.md --prerelease --target "$GITHUB_SHA"
+          else
+            gh release create "$TAG" app/build/*.pkg app/build/*.dmg --title "Task Hub na Maca $VERSION" --notes-file app/out/notes.md --latest
+          fi
