@@ -10,6 +10,7 @@ import { AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import type { SearchItem } from "@/lib/search-core";
 import { Dock, Namer, Toast, useToast } from "./widgets";
+import { InlineText } from "@/components/StepFields";
 import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, linkSteps, saveStepPositions, updateGroupAction } from "@/app/actions";
 
 export type TaskCanvasProps = {
@@ -75,8 +76,9 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const after = n === 1 ? ids[0] : panel && panel !== "__task" ? panel : null;
   // pojedyncze kliknięcie otwiera panel kroku (pierścień akcentu); zaznaczenie zbiorcze to ramka albo Shift/Ctrl
   const openStep = (id: string) => { setSel(new Set()); setSelGroup(null); setPanel(id); setConfirm(false); };
+  // pasek panelu kroku: numer, tytuł (edycja klikiem, do 2 linii), stan; narzędzie jest w technikaliach, nie dubluje się tu
   const stepBar = (s: StepTile & { toolName: string }) => (
-    <><span className="n-num">{pad(s.idx)}</span><span className="chip tool" style={{ ["--c" as string]: toolColor(s.tool) }}>{s.toolName}</span><span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span></>
+    <><span className="n-num">{pad(s.idx)}</span><InlineText taskId={t.id} stepId={s.id} field="title" value={s.title} as="bar" placeholder="Tytuł kroku" /><span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span></>
   );
   const onGrip = (e: React.PointerEvent) => { e.preventDefault(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); grip.current = { x: e.clientX, w: dw }; setGripOn(true); };
   const onGripMove = (e: React.PointerEvent) => { const g = grip.current; if (!g) return; setDw(clamp(g.w + (g.x - e.clientX), 360, window.innerWidth - 80)); };

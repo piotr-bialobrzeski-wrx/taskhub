@@ -15,7 +15,7 @@ export function Source({ s }: { s?: Provenance }) {
   return s.url ? <a className="src chip" href={s.url} target="_blank" rel="noopener">{inner}</a> : <span className="src chip">{inner}</span>;
 }
 
-function Facts({ facts }: { facts: Fact[] }) {
+export function Facts({ facts }: { facts: Fact[] }) {
   const shown = facts.filter((f) => !f.hidden);
   if (!shown.length) return null;
   return (

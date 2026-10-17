@@ -318,6 +318,8 @@ export async function completeStep(ownerId: string, task: Task, step: Step, opts
   if (opts.report !== undefined) { patch.report = opts.report; patch.output = opts.report; }
   if (opts.output !== undefined) patch.output = opts.output;
   if (opts.link) patch.link = opts.link;
+  // zatwierdzony szkic, który krok właśnie wysłał, zostaje w zadaniu jako zapis wysyłki
+  if (step.blocks?.some((b) => b.type === "draft" && b.status === "approved")) patch.blocks = step.blocks.map((b) => (b.type === "draft" && b.status === "approved" ? { ...b, status: "sent" as const } : b));
   const sm = spentMin({ spentSec });
   if (sm > 0 && !step.logged) {
     await sql()`insert into time_samples (owner_id, step_id, tool, project_id, est_min, spent_min) values (${ownerId}, ${step.id}, ${step.tool}, ${task.projectId}, ${step.estMin}, ${sm})`;

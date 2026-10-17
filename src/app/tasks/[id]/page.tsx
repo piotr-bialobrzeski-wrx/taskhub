@@ -20,11 +20,13 @@ import { PendingButton } from "@/components/Pending";
 import { Timer } from "@/components/Timer";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
 import { GrowTextarea } from "@/components/GrowTextarea";
-import { ConfirmButton, InlineText, PromptBox, StepMeta } from "@/components/StepFields";
+import { ConfirmButton, InlineText, PromptBox, StepMeta, type StepConnection } from "@/components/StepFields";
 import { agentLabel, indexFrom } from "@/lib/search";
 import { Icon, plural } from "@/components/canvas/ui";
 import { InlineDate, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
-import { addSpent, answerQuestionForm, approveStep, backToTodo, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, removeStep, reopen, saveOutput, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
+import { projColor } from "@/components/canvas/ui";
+import { PublishCard, cardModeOf } from "@/components/PublishCard";
+import { addSpent, answerQuestionForm, backToTodo, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, removeStep, reopen, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -77,10 +79,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   ) : null;
 
   // ---------- panel zadania ----------
-  const taskBar = <><PrioPicker base={cur.score.base} eff={cur.score.eff} why={cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; ")} cls="head" onPick={setLevel.bind(null, t.id)} /><span className="chip">{t.steps.filter((s) => s.status === "done").length}/{t.steps.length} kroków</span></>;
+  const taskBar = <><span className="d-title" title={t.title}>{t.title}</span><PrioPicker base={cur.score.base} eff={cur.score.eff} why={cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; ")} cls="head" onPick={setLevel.bind(null, t.id)} /><span className="chip">{t.steps.filter((s) => s.status === "done").length}/{t.steps.length} kroków</span></>;
   const taskBody = (
     <>
-      <h3>{t.title}</h3>
       {t.summary ? <p>{t.summary}</p> : null}
       <div className="time-row">
         <div><div className="lbl">Projekt</div><ProjectPicker projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color }))} value={t.projectId} cls="boxed" onPick={setProject.bind(null, t.id)} /></div>
@@ -137,7 +138,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   // połączenia do wyboru w kroku: tylko z tej sfery co zadanie (zadanie prywatne nie dostaje Slacka firmy); nazwa firmy do etykiety
   const sphere = sphereOf(cur.project, b.companies);
   const connections = b.connections.filter((c) => c.sphere === sphere).map((c) => ({ id: c.id, label: c.label, app: c.app, account: c.account, company: c.companyId ? b.companies.find((x) => x.id === c.companyId)?.name ?? null : null, sphere: c.sphere, active: c.state === "active" }));
-  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} connections={connections} />; });
+  const company = cur.project?.companyId ? b.companies.find((x) => x.id === cur.project!.companyId)?.name ?? null : null;
+  const ctx = { color: cur.project ? projColor(cur.project.color) : "var(--sub)", text: [cur.project?.name ?? "bez projektu", company ?? (sphere === "private" ? "prywatne" : "zawodowe")].join(" · ") };
+  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} />; });
 
   return (
     <TaskCanvas
@@ -150,10 +153,10 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
-function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, connections }: {
+function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
-  aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null;
-  connections: Parameters<typeof StepMeta>[0]["connections"];
+  aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null; company: string | null;
+  connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string;
 }) {
   // szczegóły są już pod tytułem, więc blok tekstu z tą samą treścią odpada
   const blocks = (s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
@@ -165,37 +168,33 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const prompt = s.status === "handoff" ? handoffPrompt(t, s, rules, { appUrl: origin, companyId, attachments: attachments.filter((a) => a.analysis) }) : null;
   const review = s.review as { summary?: string; links?: string[]; fits?: boolean; warning?: string; pending?: boolean } | null;
   const linkLabel = ext ? "Otwórz wynik" : s.tool === "manual" || s.tool === "claude" ? "Otwórz link" : `Otwórz w ${toolLabel(s.tool)}`;
-  const hasDraftBlock = !!s.blocks?.some((b) => b.type === "draft");
+  // karta publikacji zastępuje blok szkicu i rząd akcji: decyzja stoi przy miejscu docelowym i podglądzie
+  const mode = cardModeOf(s);
+  const shown = mode ? blocks.filter((b) => b.type !== "draft") : blocks;
+  const deps = s.dependsOn.length;
+  const tech = [toolLabel(s.tool), `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}`, s.needsApproval ? "wymaga zgody" : "bez zgody", deps ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
   return (
     <>
-      <InlineText taskId={t.id} stepId={s.id} field="title" value={s.title} as="h3" placeholder="Tytuł kroku" />
+      <div className="pctx" title={`Zadanie: ${t.title}`}><span className="d" style={{ ["--c" as string]: ctx.color }} /><span><b>{t.title}</b> · {ctx.text}</span></div>
       <InlineText taskId={t.id} stepId={s.id} field="detail" value={s.detail} as="p" placeholder="Dodaj szczegóły: co dokładnie, gdzie, dla kogo…" />
-      <div className="actions">
-        {s.status === "todo" ? (<>
-          {aiOn && !ext && runnable ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Agent przygotowuje…">Przygotuj</PendingButton></form> : null}
-          {aiOn ? <form action={compose.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Składam…" title="Agent składa panel z faktów, migawek i załączników">Pokaż kontekst</PendingButton></form> : null}
-          {!aiOn && runnable && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
-          <Timer stepId={s.id} onStop={addSpent.bind(null, t.id, s.id)} />
-          <form action={markDone.bind(null, t.id, s.id)}><PendingButton className={"btn" + (!runnable ? " primary" : "")}>Gotowe</PendingButton></form>
-        </>) : null}
-        {s.status === "handoff" ? (<>
-          <span className="working" title={prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />Claude pracuje{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>
-          <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Wróć do kroków gotowych; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form>
-        </>) : null}
-        {s.status === "draft" ? (<>
-          <form action={approveStep.bind(null, t.id, s.id)}><PendingButton className="btn primary" title={s.needsApproval ? "Claude wyśle dokładnie tę treść" : "Szkic jest dobry, krok gotowy"}>{s.needsApproval ? "Zatwierdź i wyślij" : "Zatwierdź"}</PendingButton></form>
-          {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
-          <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Szkic zostaje, krok wraca do gotowych">Odłóż</PendingButton></form>
-        </>) : null}
-        {s.status === "done" ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Cofnij gotowe</PendingButton></form> : null}
-        {link ? <a className="btn ico" href={link} target="_blank" rel="noopener" title={link}>{linkLabel}<Icon k="ext" size={13} sw={1.6} /></a> : null}
-      </div>
-      <StepMeta taskId={t.id}
-        step={{ id: s.id, tool: s.tool, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null, connectionId: s.connectionId }}
-        steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title, done: x.status === "done" }))}
-        connections={connections}
-        calText={calOn && cal ? `Z Twoich czasów (${cal.scope === "tool" ? toolLabel(s.tool) : "ogólnie"}, ${cal.n} ${plural(cal.n, "krok", "kroki", "kroków")}): takie kroki trwają zwykle ×${String(cal.k).replace(".", ",")}.` : null} />
-      <InlineText taskId={t.id} stepId={s.id} field="link" value={s.link ?? ""} as="small" placeholder="Dodaj link do wyniku (ticket, wydarzenie, mail)…" shown={s.link ? "Link: " + s.link.replace(/^https?:\/\//, "").slice(0, 70) : undefined} />
+      {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} /> : null}
+      {!mode || mode === "sent" ? (
+        <div className="actions">
+          {s.status === "todo" ? (<>
+            {aiOn && !ext && runnable ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Agent przygotowuje…">Przygotuj</PendingButton></form> : null}
+            {aiOn ? <form action={compose.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Składam…" title="Agent składa panel z faktów, migawek i załączników">Pokaż kontekst</PendingButton></form> : null}
+            {!aiOn && runnable && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
+            <Timer stepId={s.id} onStop={addSpent.bind(null, t.id, s.id)} />
+            <form action={markDone.bind(null, t.id, s.id)}><PendingButton className={"btn" + (!runnable ? " primary" : "")}>Gotowe</PendingButton></form>
+          </>) : null}
+          {s.status === "handoff" ? (<>
+            <span className="working" title={prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />Claude pracuje{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>
+            <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Wróć do kroków gotowych; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form>
+          </>) : null}
+          {s.status === "done" ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Cofnij gotowe</PendingButton></form> : null}
+          {link && mode !== "sent" ? <a className="btn ico" href={link} target="_blank" rel="noopener" title={link}>{linkLabel}<Icon k="ext" size={13} sw={1.6} /></a> : null}
+        </div>
+      ) : null}
       {state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
 
       {s.status === "handoff" && prompt ? (
@@ -212,18 +211,21 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           </div>
         </details>
       ) : null}
-      {s.status === "draft" && !hasDraftBlock ? (
-        <form className="stack" action={saveOutput}>
-          <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} />
-          <div className="lbl">Szkic</div>
-          <GrowTextarea className="out" minRows={3} name="output" defaultValue={s.output} />
-          <div className="actions"><PendingButton className="btn">Zapisz treść</PendingButton></div>
-        </form>
-      ) : null}
       {review?.summary ? <div><div className="lbl">Odbiór agenta</div><div className={"review" + (review.fits === false || review.warning ? " warn" : "")}>{review.warning ? <div><b>Uwaga:</b> {review.warning}</div> : null}<div>{review.summary}</div>{review.links?.length ? <div className="deps">{review.links.map((u) => <a key={u} className="chip" href={u} target="_blank" rel="noopener"><span>{u.replace(/^https?:\/\//, "").slice(0, 40)}</span></a>)}</div> : null}</div></div> : null}
-      {blocks.length ? <BlocksView blocks={blocks} form={s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined} /> : null}
+      {shown.length ? <BlocksView blocks={shown} form={s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined} /> : null}
       {s.status === "done" && s.report ? <div><div className="lbl">Raport</div><div className="note">{s.report}</div></div> : null}
-      {s.status === "done" && s.output && !s.blocks?.length ? <div><div className="lbl">Wynik</div><div className="note">{s.output}</div></div> : null}
+      {s.status === "done" && s.output && !s.blocks?.length && mode !== "sent" ? <div><div className="lbl">Wynik</div><div className="note">{s.output}</div></div> : null}
+      <details className="edit tech">
+        <summary><span className="k">Szczegóły techniczne</span> · {tech}</summary>
+        <div className="stack">
+          <StepMeta taskId={t.id}
+            step={{ id: s.id, tool: s.tool, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null, connectionId: s.connectionId }}
+            steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title, done: x.status === "done" }))}
+            connections={connections} showConnection={!mode}
+            calText={calOn && cal ? `Z Twoich czasów (${cal.scope === "tool" ? toolLabel(s.tool) : "ogólnie"}, ${cal.n} ${plural(cal.n, "krok", "kroki", "kroków")}): takie kroki trwają zwykle ×${String(cal.k).replace(".", ",")}.` : null} />
+          <InlineText taskId={t.id} stepId={s.id} field="link" value={s.link ?? ""} as="small" placeholder="Dodaj link do wyniku (ticket, wydarzenie, mail)…" shown={s.link ? "Link: " + s.link.replace(/^https?:\/\//, "").slice(0, 70) : undefined} />
+        </div>
+      </details>
       {facts.length ? (
         <details className="edit">
           <summary>Fakty kroku ({facts.length}): przypnij lub ukryj, agent zapamięta</summary>
