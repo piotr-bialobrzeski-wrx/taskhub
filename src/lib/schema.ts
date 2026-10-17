@@ -57,7 +57,45 @@ export const DraftBlock = z.object({
   subject: z.string().optional(),
   body: z.string(),
   fields: z.array(Fact).max(12).optional(), // pola, które agent ustawi przy wysyłce (priorytet, lista, sprint)
+  columns: z.array(z.string()).max(12).optional(), // wiersze do dopisania (arkusz, tabela): nagłówki i wiersze zamiast body
+  rows: z.array(z.array(z.string())).max(50).optional(),
   status: z.enum(["proposed", "approved", "sent"]).default("proposed"),
+});
+// ---------- klocki kontekstu: mail (koperta), komentarz (dymek z miejscem), tabela (wiersze), wolna treść (markdown) ----------
+export const MailMessage = z.object({
+  from: z.string(),
+  to: z.string().optional(),
+  at: z.string().optional(),
+  subject: z.string().optional(),
+  text: z.string(),
+  mine: z.boolean().optional(),
+});
+export const MailBlock = z.object({
+  type: z.literal("mail"),
+  title: z.string().optional(),
+  source: Provenance.optional(),
+  messages: z.array(MailMessage).min(1).max(20), // od najstarszego; ostatni jest tym, na który Piotr odpowiada
+});
+export const CommentBlock = z.object({
+  type: z.literal("comment"),
+  source: Provenance.optional(),            // app + ref = miejsce (frame w Figmie, zadanie w ClickUp, wiersz arkusza)
+  author: z.string(),
+  at: z.string().optional(),
+  text: z.string(),
+});
+export const TableBlock = z.object({
+  type: z.literal("table"),
+  title: z.string().optional(),
+  source: Provenance.optional(),
+  columns: z.array(z.string()).min(1).max(12),
+  rows: z.array(z.array(z.string())).max(100),
+  highlightFrom: z.number().int().min(0).optional(), // od którego wiersza zaznaczyć jako nowe
+});
+export const FreeBlock = z.object({
+  type: z.literal("free"),
+  title: z.string().optional(),
+  source: Provenance.optional(),
+  markdown: z.string().max(20000),         // gdy żaden inny klocek nie pasuje: nagłówki, akapity, listy, linki, obrazki (http/https)
 });
 export const ListItem = z.object({
   title: z.string(),
@@ -97,10 +135,12 @@ export const QuestionBlock = z.object({
   answer: z.string().optional(),
 });
 export const Block = z.discriminatedUnion("type", [
-  TextBlock, FactsBlock, ThreadBlock, DraftBlock, ListBlock, MediaBlock, LinkBlock, QuestionBlock,
+  TextBlock, FactsBlock, ThreadBlock, DraftBlock, ListBlock, MediaBlock, LinkBlock, QuestionBlock, MailBlock, CommentBlock, TableBlock, FreeBlock,
 ]);
 export type Block = z.infer<typeof Block>;
 export const Blocks = z.array(Block).max(12);
+// klocki kontekstu (to, na czym Piotr pracuje) kontra odpowiedź (blok draft) i pytanie
+export const CONTEXT_BLOCK_TYPES = new Set(["text", "facts", "thread", "list", "media", "link", "mail", "comment", "table", "free"]);
 
 // ---------- rekordy z bazy (kształt używany w aplikacji) ----------
 export const StepStatus = z.enum(["todo", "draft", "done", "handoff"]);
@@ -258,6 +298,7 @@ export type TimeSample = z.infer<typeof TimeSample>;
 export const TOOL_LABELS: Record<string, string> = {
   slack: "Slack", gmail: "E-mail", clickup: "ClickUp", calendar: "Kalendarz", claude: "Dokument",
   claudeapp: "Claude", code: "Claude Code", manual: "Ty", browser: "Przeglądarka", github: "GitHub", figma: "Figma",
+  whatsapp: "WhatsApp", sheets: "Arkusz Google", docs: "Dokument Google",
 };
 export const toolLabel = (tool: string) => TOOL_LABELS[tool] ?? tool;
 // kroki robione poza aplikacją (hand-off do Claude / Claude Code)

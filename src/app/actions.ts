@@ -54,6 +54,7 @@ export async function chat(fd: FormData) {
   if (!typed && !files.length) return;
   const text = typed || (files.length === 1 ? `Załącznik: ${files[0].name}` : `Załączniki: ${files.map((f) => f.name).join(", ")}`);
   const taskId = str(fd, "taskId") || null;
+  const stepId = (taskId && str(fd, "stepId")) || null;   // otwarty krok w panelu: domyślny kontekst wiadomości
   const ai = await aiFor(o.id);
   let goTo: string | null = null;
   if (!ai.enabled) {
@@ -65,7 +66,7 @@ export async function chat(fd: FormData) {
   } else {
     try {
       const images = await Promise.all(files.filter((f) => IMAGE_TYPES.has(f.type)).map(async (f) => ({ mediaType: f.type as "image/png", base64: Buffer.from(await f.arrayBuffer()).toString("base64") })));
-      const { done, result } = await runChat(text, { ai, ownerId: o.id, taskId, images });
+      const { done, result } = await runChat(text, { ai, ownerId: o.id, taskId, stepId, images });
       const created = done.find((d) => d.taskId && d.label.startsWith("Nowe zadanie"));
       if (!taskId && created?.taskId) goTo = created.taskId;
       const target = taskId ?? created?.taskId ?? null;

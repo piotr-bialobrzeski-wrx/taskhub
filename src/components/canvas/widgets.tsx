@@ -162,7 +162,7 @@ function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone
     </>
   );
 }
-export function Dock({ action, taskId, placeholder, busyText, context, historyTitle }: { action: (fd: FormData) => Promise<void>; taskId: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string }) {
+export function Dock({ action, taskId, stepId = null, placeholder, busyText, context, historyTitle }: { action: (fd: FormData) => Promise<void>; taskId: string | null; stepId?: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string }) {
   const form = useRef<HTMLFormElement>(null);
   const [hist, setHist] = useState(false);
   const filesIn = useRef<HTMLInputElement>(null);
@@ -199,7 +199,7 @@ export function Dock({ action, taskId, placeholder, busyText, context, historyTi
       <form ref={form} className={"dock glass" + (over ? " drop" : "")} action={action} autoComplete="off"
         onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setOver(true); } }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); void addFiles([...e.dataTransfer.files]); }}>
-        <input type="hidden" name="taskId" value={taskId ?? ""} />
+        <input type="hidden" name="taskId" value={taskId ?? ""} /><input type="hidden" name="stepId" value={stepId ?? ""} />
         <input ref={filesIn} type="file" name="files" multiple tabIndex={-1} aria-hidden="true" />
         {context ? <div className="ctxrow">{context}</div> : null}
         <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} hist={hist} onHistory={() => setHist((h) => !h)} />

@@ -108,7 +108,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("set_blocks", {
-      title: "Ułóż panel kroku", description: "Zapisuje panel kroku z uniwersalnych bloków, tak jak robi to agent wbudowany: text, facts (fakty z pochodzeniem), thread (wątek wiadomości), draft (szkic do zatwierdzenia z target.app i target.where), list, media, link, question (pytanie z opcjami). Pokaż tylko to, co ważne dla tego kroku. rememberFor: nazwa aplikacji źródłowej, jeśli ten układ ma być wzorem dla podobnych kroków.",
+      title: "Ułóż panel kroku", description: "Zapisuje kartkę kroku z klocków: najpierw kontekst (thread = wątek jako dymki, mail = wątek maili z from/to/subject, comment = jeden komentarz z miejscem, facts, table = wiersze, list, media = zrzuty i pliki z opisem, link, free = markdown gdy nic nie pasuje, text = krótka notatka), potem jeden draft (to, co powstaje: target.app, target.where, action, subject, body; dla wierszy arkusza columns + rows; dla promptu dla agenta target.app code). Każdy klocek kontekstu ma source {app, ref = miejsce, url}. Pokaż tylko to, co ważne dla tego kroku; długi wątek daj cały, aplikacja pokaże ostatnie 3. rememberFor: nazwa aplikacji źródłowej, jeśli ten układ ma być wzorem dla podobnych kroków.",
       inputSchema: z.object({ stepId: z.string(), blocks: Blocks, rememberFor: z.string().optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");

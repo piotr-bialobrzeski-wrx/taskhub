@@ -40,7 +40,8 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const [panel, setPanel] = useState<string | null>(() => (p.focus && p.steps.some((s) => s.id === p.focus) ? p.focus : null));
   const [confirm, setConfirm] = useState(false);
   const [namer, setNamer] = useState<"tile" | "group" | null>(null);
-  const [ctxGlobal, setCtxGlobal] = useState(false);
+  // kontekst pola czatu: domyślnie to, co jest otwarte (krok w panelu, inaczej zadanie); X zawęża o poziom wyżej (krok → zadanie → wszystkie zadania)
+  const [ctxLevel, setCtxLevel] = useState<"auto" | "task" | "global">("auto");
   const [dw, setDw] = useState(520);
   const [gripOn, setGripOn] = useState(false);
   const [answerOff, setAnswerOff] = useState(true);
@@ -85,6 +86,9 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const endGrip = () => { if (!grip.current) return; grip.current = null; setGripOn(false); try { localStorage.setItem("th-dw", String(dw)); } catch { /* brak storage */ } };
   const widen = () => { const w = dw < 700 ? 760 : 520; setDw(w); try { localStorage.setItem("th-dw", String(w)); } catch { /* brak storage */ } };
   const cur = panel && panel !== "__task" ? byId.get(panel) ?? null : null;
+  useEffect(() => { setCtxLevel("auto"); }, [panel]);
+  const ctxGlobal = ctxLevel === "global";
+  const ctxStep = ctxLevel === "auto" ? cur : null;
   // wynik szukania: krok tego zadania otwiera się na miejscu (panel + środek kanwy); reszta prowadzi pod swój adres
   const onPick = (it: SearchItem): boolean => {
     if (it.kind !== "step" || it.taskId !== t.id) return false;
@@ -93,7 +97,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const layoutNow = () => { undoL.remember(layoutSnapshot(api.current, p.steps.map((s) => s.id), p.groups)); run(() => autoLayout(t.id), "Ułożono"); };
 
   return (
-    <div className="app">
+    <div className="app" style={panel ? { ["--dw" as string]: dw + "px" } : undefined}>
       {view === "canvas" ? (
         <Canvas zoomKey={"task"} apiRef={api} items={items} size={STEP_SIZE} groups={groups} render={(id) => { const s = byId.get(id)!; return (
             <>
@@ -177,19 +181,21 @@ export function TaskCanvas(p: TaskCanvasProps) {
         </aside>
       ) : null}
 
-      {p.questions && !n && !group ? <div className="answer glass" aria-live="polite">{p.questions}</div> : null}
+      {p.questions && !n && !group ? <div className={"answer glass" + (panel ? " withpanel" : "")} aria-live="polite">{p.questions}</div> : null}
       {!p.questions && p.lastAgent && !answerOff && !n && !group ? (
-        <div className="answer plain glass" role="status" aria-live="polite">
+        <div className={"answer plain glass" + (panel ? " withpanel" : "")} role="status" aria-live="polite">
           <div className="ans-text">{p.lastAgent.text}</div>
           <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans-" + t.id, p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button>
         </div>
       ) : null}
 
-      <Dock action={chat} taskId={ctxGlobal ? null : t.id} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
-        placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : "Napisz, co dalej z tym zadaniem, albo dopisz notatkę…"}
+      <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
+        placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : ctxStep ? "Napisz, co dalej z tym krokiem: popraw szkic, dopisz, zapytaj…" : "Napisz, co dalej z tym zadaniem, albo dopisz notatkę…"}
         context={ctxGlobal
-          ? <span className="ctx"><span className="k">Kontekst: wszystkie zadania</span><button type="button" aria-label="Wróć do kontekstu zadania" title="Wróć do kontekstu zadania" onClick={() => setCtxGlobal(false)}><Icon k="undo" size={12} sw={1.9} /></button></span>
-          : <span className="ctx" title="Wiadomość dotyczy tego zadania"><span className="k">Kontekst:</span><b>{t.title}</b><button type="button" aria-label="Pisz w kontekście wszystkich zadań" title="Pisz w kontekście wszystkich zadań" onClick={() => setCtxGlobal(true)}><Icon k="x" size={12} sw={2} /></button></span>} />
+          ? <span className="ctx"><span className="k">Kontekst: wszystkie zadania</span><button type="button" aria-label="Wróć do kontekstu zadania" title="Wróć do kontekstu zadania" onClick={() => setCtxLevel("auto")}><Icon k="undo" size={12} sw={1.9} /></button></span>
+          : ctxStep
+            ? <span className="ctx" title="Wiadomość dotyczy otwartego kroku"><span className="k">Kontekst: krok {pad(ctxStep.idx)}</span><b>{ctxStep.title}</b><button type="button" aria-label="Pisz w kontekście całego zadania" title="Pisz w kontekście całego zadania" onClick={() => setCtxLevel("task")}><Icon k="x" size={12} sw={2} /></button></span>
+            : <span className="ctx" title="Wiadomość dotyczy tego zadania"><span className="k">Kontekst:</span><b>{t.title}</b><button type="button" aria-label="Pisz w kontekście wszystkich zadań" title="Pisz w kontekście wszystkich zadań" onClick={() => setCtxLevel("global")}><Icon k="x" size={12} sw={2} /></button></span>} />
       <Toast text={toast} />
     </div>
   );

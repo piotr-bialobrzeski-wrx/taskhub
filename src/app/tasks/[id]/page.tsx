@@ -153,6 +153,8 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
+const KIND_LABEL: Record<string, string> = { text: "notatka", facts: "fakty", thread: "wątek", list: "lista", media: "pliki", link: "linki", mail: "mail", comment: "komentarz", table: "tabela", free: "treść", question: "pytanie" };
+
 function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null; company: string | null;
@@ -171,13 +173,22 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // karta publikacji zastępuje blok szkicu i rząd akcji: decyzja stoi przy miejscu docelowym i podglądzie
   const mode = cardModeOf(s);
   const shown = mode ? blocks.filter((b) => b.type !== "draft") : blocks;
+  // strefy: „Na podstawie” (klocki kontekstu) i „Odpowiedź” (karta publikacji); obok siebie, gdy panel jest szeroki (container query w CSS)
+  const kinds = [...new Set(shown.map((b) => KIND_LABEL[b.type] ?? b.type))].join(", ");
+  const answerNote = mode === "sent" ? "zapis wysyłki" : mode === "sending" ? "w toku" : mode === "parked" ? "odłożony szkic" : s.blocks?.some((b) => b.type === "draft") ? "szkic Claude" : "szkic";
+  const blocksNode = shown.length ? <BlocksView blocks={shown} form={s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined} /> : null;
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}`, s.needsApproval ? "wymaga zgody" : "bez zgody", deps ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
   return (
     <>
       <div className="pctx" title={`Zadanie: ${t.title}`}><span className="d" style={{ ["--c" as string]: ctx.color }} /><span><b>{t.title}</b> · {ctx.text}</span></div>
       <InlineText taskId={t.id} stepId={s.id} field="detail" value={s.detail} as="p" placeholder="Dodaj szczegóły: co dokładnie, gdzie, dla kogo…" />
-      {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} /> : null}
+      {mode ? (
+        <div className={"zones" + (shown.length ? " two" : "")}>
+          {shown.length ? <div className="zone src"><div className="lbl">Na podstawie<span className="n">{kinds}</span></div>{blocksNode}</div> : null}
+          <div className="zone ans"><div className="lbl">Odpowiedź<span className="n">{answerNote}</span></div><PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} /></div>
+        </div>
+      ) : null}
       {!mode || mode === "sent" ? (
         <div className="actions">
           {s.status === "todo" ? (<>
@@ -212,7 +223,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         </details>
       ) : null}
       {review?.summary ? <div><div className="lbl">Odbiór agenta</div><div className={"review" + (review.fits === false || review.warning ? " warn" : "")}>{review.warning ? <div><b>Uwaga:</b> {review.warning}</div> : null}<div>{review.summary}</div>{review.links?.length ? <div className="deps">{review.links.map((u) => <a key={u} className="chip" href={u} target="_blank" rel="noopener"><span>{u.replace(/^https?:\/\//, "").slice(0, 40)}</span></a>)}</div> : null}</div></div> : null}
-      {shown.length ? <BlocksView blocks={shown} form={s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined} /> : null}
+      {!mode && blocksNode ? <div className="zone src">{s.blocks?.length ? <div className="lbl">Na podstawie<span className="n">{kinds}</span></div> : null}{blocksNode}</div> : null}
       {s.status === "done" && s.report ? <div><div className="lbl">Raport</div><div className="note">{s.report}</div></div> : null}
       {s.status === "done" && s.output && !s.blocks?.length && mode !== "sent" ? <div><div className="lbl">Wynik</div><div className="note">{s.output}</div></div> : null}
       <details className="edit tech">
