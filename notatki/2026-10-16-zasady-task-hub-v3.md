@@ -1,6 +1,6 @@
 # Zasady Task Hub v3: profil, zasada, procedura
 
-Data: 2026-10-16. Treść merytoryczna to v2 bez zmian: ani jedno zdanie nie zostało dopisane ani usunięte, zmienił się tylko podział i to, kiedy agent dostaje dany fragment. Skrypt generujący sprawdza, że każdy punkt v2 trafił do v3 dokładnie raz.
+Data: 2026-10-16, aktualizacja 2026-10-17 (firma nad projektami). Treść merytoryczna to v2 bez zmian: ani jedno zdanie nie zostało dopisane ani usunięte, zmienił się tylko podział i to, kiedy agent dostaje dany fragment. Skrypt generujący sprawdza, że każdy punkt v2 trafił do v3 dokładnie raz.
 
 ## A. Co się zmieniło względem v2
 
@@ -10,58 +10,59 @@ Data: 2026-10-16. Treść merytoryczna to v2 bez zmian: ani jedno zdanie nie zos
 - Procedura to dłuższa instrukcja (przegląd, user story, bug, dokumentacja, wysyłka na Slacku, czytanie komentarzy w Figmie, reguły projektowe przed dokumentem, UI i kod Task Hub). Agent dostaje jej pełną treść tylko, gdy pasuje wyzwalacz: narzędzie kroku, temat podany w get_rules albo słowo z tytułu lub szczegółów kroku. Inaczej widzi ją w spisie jednym zdaniem i może dobrać przez get_rules z polem topic.
 - Rozdzieliłem trzy zasady, które mieszały dane z regułami: nr 1 i 3 (tożsamość Piotra poszła do profilu), nr 12-15 narzędzi (identyfikatory do profilu, instrukcje do procedur), nr 18-23 projektów (język, integracje i ścieżki do profilu; „zanim napiszesz dokument” do procedur; osąd zostaje zasadą). Nr 5 i 6 są jedną procedurą „Przegląd”, bo zawsze działają razem.
 - Każda zmiana zasady w Task Hub zostawia wersję w historii (widoczna przy karcie na stronie Zasady). Wgranie tej samej treści drugi raz nie robi duplikatów ani pustych wersji.
+- Aktualizacja 2026-10-17: nad projektami stoi firma. Wgram jedną firmę „Pirxey & Widelab” (sfera zawodowa, jedna firma z dwoma brandami) i przypnę do niej Shiftwow, Custom Cookies, PirxeyOS, Call Companion i projekt firmowy Pirxey & Widelab; Task Hub i Shattered Lands zostają bez firmy, czyli prywatne. Dwa wpisy dostały zakres „firma” zamiast „projekt Pirxey & Widelab” (nr 2 i nr 33), więc wchodzą do zadań każdego projektu tej firmy. Każdy wpis ma pochodzenie: wpisy firmy i jej projektów są „wypracowane w Pirxey & Widelab” (można je firmie oddać przy odejściu), ogólne i narzędziowe są Twoje; zmienisz to jednym wyborem na karcie zasady.
 
 ## B. Ile agent dostaje w prompcie
 
 | Sytuacja | Znaków | Profili i zasad | Procedur w całości | Procedur w spisie |
 | --- | --- | --- | --- | --- |
-| Odpowiedź w wątku na Slacku, projekt Shiftwow | 11 475 | 9 | 1 | 5 |
-| User story w ClickUp, projekt Shiftwow | 17 448 | 10 | 3 | 2 |
-| Przegląd z rutyny (bez projektu, bez narzędzia) | 12 370 | 7 | 1 | 3 |
-| Mail do klienta, Custom Cookies | 11 354 | 10 | 0 | 5 |
-| Zmiana w kodzie Task Hub | 11 957 | 9 | 1 | 4 |
+| Odpowiedź w wątku na Slacku, projekt Shiftwow | 11 735 | 9 | 1 | 6 |
+| User story w ClickUp, projekt Shiftwow | 17 708 | 10 | 3 | 3 |
+| Przegląd z rutyny (bez projektu, bez narzędzia) | 11 506 | 6 | 1 | 3 |
+| Mail do klienta, Custom Cookies | 11 614 | 10 | 0 | 6 |
+| Zmiana w kodzie Task Hub | 11 093 | 8 | 1 | 4 |
 
 Dla porównania: v2 dawała zawsze wszystkie zasady pasujące zakresem, czyli od 19 197 znaków (same ogólne, dla kroku bez projektu i narzędzia) do około 22 697 (projekt i narzędzie), bez względu na to, co agent robi.
 
 ## C. Spis
 
-| Nr | Rodzaj | Zakres | Tytuł | Wyzwalacz | Znaków | Z v2 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | profil | ogólna | Piotr: tożsamość i podpis | - | 407 | v2 nr 3 (punkt 1) i nr 1 (punkt 7) |
-| 2 | profil | ogólna | Firma: Pirxey & Widelab | - | 864 | v2 nr 11, bez zmian |
-| 3 | profil | narzędzie slack | Slack: workspace'y i rozmowy prywatne | - | 432 | v2 nr 12 (punkty 1-2) |
-| 4 | profil | narzędzie clickup | ClickUp: skąd biorą się sprawy Piotra | - | 153 | v2 nr 13 (punkt 3) |
-| 5 | profil | narzędzie gmail | Gmail: jedna skrzynka | - | 52 | v2 nr 14 (punkt 1) |
-| 6 | profil | projekt Shiftwow | Shiftwow: język, integracje, pliki na Macu | - | 1 016 | v2 nr 18 (punkty 1, 2, 6, 7) |
-| 7 | profil | projekt Custom Cookies | Custom Cookies: język, zakres, pliki na Macu | - | 1 421 | v2 nr 19 (punkty 1, 2, 4, 5) |
-| 8 | profil | projekt PirxeyOS | PirxeyOS: język, kontekst, pliki na Macu | - | 813 | v2 nr 20 (punkty 1, 2, 4) |
-| 9 | profil | projekt Call Companion (hackathon Pirxey) | Call Companion: język, zespół, pliki na Macu | - | 661 | v2 nr 21 (punkty 1, 2, 4) |
-| 10 | profil | projekt Pirxey & Widelab | Pirxey & Widelab: co tu ląduje, narzędzia, skille | - | 722 | v2 nr 22 (punkty 1, 4, 5) |
-| 11 | profil | projekt Task Hub | Task Hub: co to jest, repo, język | - | 401 | v2 nr 23 (punkt 1) |
-| 12 | profil | projekt Shattered Lands | Shattered Lands: projekt prywatny | - | 250 | v2 nr 24, bez zmian |
-| 13 | zasada | ogólna | Rozmowa z Piotrem i treści na zewnątrz | - | 1 158 | v2 nr 1 bez punktu 7 (poszedł do profilu Piotra) |
-| 14 | zasada | ogólna | Formatowanie treści i dokumentów | - | 1 404 | v2 nr 2, bez zmian |
-| 15 | zasada | ogólna | Co jest zadaniem Piotra | - | 1 648 | v2 nr 3 bez punktu 1 (poszedł do profilu Piotra) |
-| 16 | zasada | ogólna | Jak wygląda zadanie i jego kroki | - | 1 424 | v2 nr 4, bez zmian |
-| 17 | zasada | ogólna | Jak pracujesz: decyzje, zgody, poufność, praca w tle | - | 1 589 | v2 nr 10, bez zmian |
-| 18 | zasada | narzędzie clickup | ClickUp: tytuły, komentarze, zapis | - | 785 | v2 nr 13 (punkty 1, 2, 4) |
-| 19 | zasada | narzędzie gmail | Gmail: powiadomienia i odpowiedzi | - | 242 | v2 nr 14 (punkty 2-3) |
-| 20 | zasada | narzędzie figma | Figma: design jako źródło prawdy | - | 198 | v2 nr 15 (punkt 3) |
-| 21 | zasada | narzędzie calendar | Kalendarz: co jest zadaniem | - | 206 | v2 nr 16, bez zmian |
-| 22 | zasada | narzędzie linkedin | LinkedIn: akcje sekwencyjnie | - | 269 | v2 nr 17, bez zmian |
-| 23 | zasada | projekt Call Companion (hackathon Pirxey) | Call Companion: konwencje produktu | - | 451 | v2 nr 21 (punkt 3) |
-| 24 | zasada | projekt Task Hub | Task Hub: produkt, bezpieczeństwo, uprawnienia | - | 1 032 | v2 nr 23 (punkty 2, 5, 6) |
-| 25 | procedura | ogólna | Przegląd: źródła, sprawy, raport | przegląd, list_work, rutyna, sygnały, inbox, nieprzeczytane | 3 227 | v2 nr 5 i 6 połączone, treść bez zmian |
-| 26 | procedura | ogólna | Dokumentacja techniczna: zasady wspólne | dokument, dokumentacja, epic, story, bug, readme, specyfikacja, architektura, clickup | 1 432 | v2 nr 7, bez zmian |
-| 27 | procedura | ogólna | User story | story, user story, epic, kryteria | 4 532 | v2 nr 8, bez zmian |
-| 28 | procedura | ogólna | Bug | bug, błąd, zgłoszenie, defekt, reprodukcja | 1 512 | v2 nr 9, bez zmian |
-| 29 | procedura | narzędzie slack | Wysyłka na Slacku przez MCP | slack, wyślij, wiadomość, odpowiedź, wątek | 429 | v2 nr 12 (punkt 3) |
-| 30 | procedura | narzędzie figma | Figma: czytanie komentarzy i linki | figma, komentarz | 411 | v2 nr 15 (punkty 1-2) |
-| 31 | procedura | projekt Shiftwow | Shiftwow: przed dokumentem | clickup, story, bug, epic, dokument, dokumentacja | 590 | v2 nr 18 (punkty 3-5) |
-| 32 | procedura | projekt Custom Cookies | Custom Cookies: baza wiedzy przed dokumentem | epic, story, bug, dokument, dokumentacja, clickup, warsztat, słownik | 462 | v2 nr 19 (punkt 3) |
-| 33 | procedura | projekt PirxeyOS | PirxeyOS: prototyp UI | prototyp, html, ui, ekran, makieta, claude | 301 | v2 nr 20 (punkt 3) |
-| 34 | procedura | projekt Pirxey & Widelab | Pirxey & Widelab: pytanie o firmę i mapa kompetencji | firma, wiedza, world, pytanie, kompetencje, knowledge, notion | 505 | v2 nr 22 (punkty 2-3) |
-| 35 | procedura | projekt Task Hub | Task Hub: UI i kod | code, kod, ui, kanwa, ekran, build, zrzut, komponent, css, commit, wdrożenie | 1 140 | v2 nr 23 (punkty 3-4) |
+| Nr | Rodzaj | Zakres | Pochodzenie | Tytuł | Wyzwalacz | Znaków | Z v2 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | profil | ogólna | moja | Piotr: tożsamość i podpis | - | 407 | v2 nr 3 (punkt 1) i nr 1 (punkt 7) |
+| 2 | profil | firma Pirxey & Widelab | Pirxey & Widelab | Firma: Pirxey & Widelab | - | 864 | v2 nr 11, bez zmian; zakres: firma (2026-10-17) |
+| 3 | profil | narzędzie slack | moja | Slack: workspace'y i rozmowy prywatne | - | 432 | v2 nr 12 (punkty 1-2) |
+| 4 | profil | narzędzie clickup | moja | ClickUp: skąd biorą się sprawy Piotra | - | 153 | v2 nr 13 (punkt 3) |
+| 5 | profil | narzędzie gmail | moja | Gmail: jedna skrzynka | - | 52 | v2 nr 14 (punkt 1) |
+| 6 | profil | projekt Shiftwow | Pirxey & Widelab | Shiftwow: język, integracje, pliki na Macu | - | 1 016 | v2 nr 18 (punkty 1, 2, 6, 7) |
+| 7 | profil | projekt Custom Cookies | Pirxey & Widelab | Custom Cookies: język, zakres, pliki na Macu | - | 1 421 | v2 nr 19 (punkty 1, 2, 4, 5) |
+| 8 | profil | projekt PirxeyOS | Pirxey & Widelab | PirxeyOS: język, kontekst, pliki na Macu | - | 813 | v2 nr 20 (punkty 1, 2, 4) |
+| 9 | profil | projekt Call Companion (hackathon Pirxey) | Pirxey & Widelab | Call Companion: język, zespół, pliki na Macu | - | 661 | v2 nr 21 (punkty 1, 2, 4) |
+| 10 | profil | projekt Pirxey & Widelab | Pirxey & Widelab | Pirxey & Widelab: co tu ląduje, narzędzia, skille | - | 722 | v2 nr 22 (punkty 1, 4, 5) |
+| 11 | profil | projekt Task Hub | moja | Task Hub: co to jest, repo, język | - | 401 | v2 nr 23 (punkt 1) |
+| 12 | profil | projekt Shattered Lands | moja | Shattered Lands: projekt prywatny | - | 250 | v2 nr 24, bez zmian |
+| 13 | zasada | ogólna | moja | Rozmowa z Piotrem i treści na zewnątrz | - | 1 158 | v2 nr 1 bez punktu 7 (poszedł do profilu Piotra) |
+| 14 | zasada | ogólna | moja | Formatowanie treści i dokumentów | - | 1 404 | v2 nr 2, bez zmian |
+| 15 | zasada | ogólna | moja | Co jest zadaniem Piotra | - | 1 648 | v2 nr 3 bez punktu 1 (poszedł do profilu Piotra) |
+| 16 | zasada | ogólna | moja | Jak wygląda zadanie i jego kroki | - | 1 424 | v2 nr 4, bez zmian |
+| 17 | zasada | ogólna | moja | Jak pracujesz: decyzje, zgody, poufność, praca w tle | - | 1 589 | v2 nr 10, bez zmian |
+| 18 | zasada | narzędzie clickup | moja | ClickUp: tytuły, komentarze, zapis | - | 785 | v2 nr 13 (punkty 1, 2, 4) |
+| 19 | zasada | narzędzie gmail | moja | Gmail: powiadomienia i odpowiedzi | - | 242 | v2 nr 14 (punkty 2-3) |
+| 20 | zasada | narzędzie figma | moja | Figma: design jako źródło prawdy | - | 198 | v2 nr 15 (punkt 3) |
+| 21 | zasada | narzędzie calendar | moja | Kalendarz: co jest zadaniem | - | 206 | v2 nr 16, bez zmian |
+| 22 | zasada | narzędzie linkedin | moja | LinkedIn: akcje sekwencyjnie | - | 269 | v2 nr 17, bez zmian |
+| 23 | zasada | projekt Call Companion (hackathon Pirxey) | Pirxey & Widelab | Call Companion: konwencje produktu | - | 451 | v2 nr 21 (punkt 3) |
+| 24 | zasada | projekt Task Hub | moja | Task Hub: produkt, bezpieczeństwo, uprawnienia | - | 1 032 | v2 nr 23 (punkty 2, 5, 6) |
+| 25 | procedura | ogólna | moja | Przegląd: źródła, sprawy, raport | przegląd, list_work, rutyna, sygnały, inbox, nieprzeczytane | 3 227 | v2 nr 5 i 6 połączone, treść bez zmian |
+| 26 | procedura | ogólna | moja | Dokumentacja techniczna: zasady wspólne | dokument, dokumentacja, epic, story, bug, readme, specyfikacja, architektura, clickup | 1 432 | v2 nr 7, bez zmian |
+| 27 | procedura | ogólna | moja | User story | story, user story, epic, kryteria | 4 532 | v2 nr 8, bez zmian |
+| 28 | procedura | ogólna | moja | Bug | bug, błąd, zgłoszenie, defekt, reprodukcja | 1 512 | v2 nr 9, bez zmian |
+| 29 | procedura | narzędzie slack | moja | Wysyłka na Slacku przez MCP | slack, wyślij, wiadomość, odpowiedź, wątek | 429 | v2 nr 12 (punkt 3) |
+| 30 | procedura | narzędzie figma | moja | Figma: czytanie komentarzy i linki | figma, komentarz | 411 | v2 nr 15 (punkty 1-2) |
+| 31 | procedura | projekt Shiftwow | Pirxey & Widelab | Shiftwow: przed dokumentem | clickup, story, bug, epic, dokument, dokumentacja | 590 | v2 nr 18 (punkty 3-5) |
+| 32 | procedura | projekt Custom Cookies | Pirxey & Widelab | Custom Cookies: baza wiedzy przed dokumentem | epic, story, bug, dokument, dokumentacja, clickup, warsztat, słownik | 462 | v2 nr 19 (punkt 3) |
+| 33 | procedura | projekt PirxeyOS | Pirxey & Widelab | PirxeyOS: prototyp UI | prototyp, html, ui, ekran, makieta, claude | 301 | v2 nr 20 (punkt 3) |
+| 34 | procedura | firma Pirxey & Widelab | Pirxey & Widelab | Pirxey & Widelab: pytanie o firmę i mapa kompetencji | firma, wiedza, world, pytanie, kompetencje, knowledge, notion | 505 | v2 nr 22 (punkty 2-3); zakres: firma (2026-10-17) |
+| 35 | procedura | projekt Task Hub | moja | Task Hub: UI i kod | code, kod, ui, kanwa, ekran, build, zrzut, komponent, css, commit, wdrożenie | 1 140 | v2 nr 23 (punkty 3-4) |
 
 ## D. Pełna treść
 
@@ -69,14 +70,14 @@ Dla porównania: v2 dawała zawsze wszystkie zasady pasujące zakresem, czyli od
 
 #### 1. Piotr: tożsamość i podpis
 
-Zakres: ogólna. Źródło: v2 nr 3 (punkt 1) i nr 1 (punkt 7).
+Zakres: ogólna. Pochodzenie: moja. Źródło: v2 nr 3 (punkt 1) i nr 1 (punkt 7).
 
 - Piotr to: Slack Pirxey `U09HEQ6BFE3`, Slack Widelab `U09J18RC9JM` (oba `@piotr.bialobrzeski`), mail `piotr.bialobrzeski@pirxey.com`, w Figmie, ClickUpie i Google „Piotr Białobrzeski”. Wzmianka `<@U…>` z innym identyfikatorem to inna osoba.
 - Imię, nazwisko, rola i podpis Piotra pochodzą z jego profilu (Piotr Białobrzeski, piotr.bialobrzeski@pirxey.com), nigdy z git config ani z nazwy konta w narzędziu.
 
 #### 2. Firma: Pirxey & Widelab
 
-Zakres: ogólna. Źródło: v2 nr 11, bez zmian.
+Zakres: firma Pirxey & Widelab. Pochodzenie: Pirxey & Widelab. Źródło: v2 nr 11, bez zmian; zakres: firma (2026-10-17).
 
 - Jedna firma, dwa brandy: Pirxey (custom software, AI-first, praca zdalna, motyw kosmosu i astronautów) i Widelab (UX/UI, product design, web; współwłaściciele Michał Parulski i Krystian Słowiński; submarka Widehue). Wspólne projekty w modelu whitelabel: Pirxey występuje jako część Widelab. Każdy brand ma własny Slack, Google Workspace i Notion; reszta narzędzi jest wspólna.
 - Brand i projekt określają workspace Slack, konto Google i ton: z klientami Widelab profesjonalnie i design-driven, w Pirxey profesjonalnie, bezpośrednio, bez formalizmu.
@@ -84,26 +85,26 @@ Zakres: ogólna. Źródło: v2 nr 11, bez zmian.
 
 #### 3. Slack: workspace'y i rozmowy prywatne
 
-Zakres: narzędzie slack. Źródło: v2 nr 12 (punkty 1-2).
+Zakres: narzędzie slack. Pochodzenie: moja. Źródło: v2 nr 12 (punkty 1-2).
 
 - Dwa workspace'y: Pirxey `pirxeyworkspace.slack.com` (team `T07DMJPS6SJ`, Piotr `U09HEQ6BFE3`) i Widelab `widelabstudio.slack.com` (team `T9SHSTD32`, Piotr `U09J18RC9JM`). Workspace bierzesz z kontekstu rozmowy albo z wyniku wyszukiwania, nigdy nie zgadujesz; link to permalink z właściwego workspace'u.
 - Rozmowy prywatne to 1:1 (im) i grupowe DM-y (mpim); szukasz też po składzie kanału, bo osoba może być cichym członkiem grupy.
 
 #### 4. ClickUp: skąd biorą się sprawy Piotra
 
-Zakres: narzędzie clickup. Źródło: v2 nr 13 (punkt 3).
+Zakres: narzędzie clickup. Pochodzenie: moja. Źródło: v2 nr 13 (punkt 3).
 
 - Sprawy Piotra bierzesz z przypomnień (clickup_search_reminders) i zadań przypisanych do niego z terminem dziś lub przeterminowanych, nie z całej listy.
 
 #### 5. Gmail: jedna skrzynka
 
-Zakres: narzędzie gmail. Źródło: v2 nr 14 (punkt 1).
+Zakres: narzędzie gmail. Pochodzenie: moja. Źródło: v2 nr 14 (punkt 1).
 
 - Czytasz wyłącznie `piotr.bialobrzeski@pirxey.com`.
 
 #### 6. Shiftwow: język, integracje, pliki na Macu
 
-Zakres: projekt Shiftwow. Źródło: v2 nr 18 (punkty 1, 2, 6, 7).
+Zakres: projekt Shiftwow. Pochodzenie: Pirxey & Widelab. Źródło: v2 nr 18 (punkty 1, 2, 6, 7).
 
 - Język: dokumentacja i komunikacja z klientem po angielsku (US), od razu po angielsku; rozmowa z Piotrem po polsku.
 - Integracje: ClickUp space `ShiftWow` (id `90120403642`), lista domyślna Onboarding. Figma per ticket w polu „🖼️ Figma” ticketa; główny plik `Manager--Login--Onboarding`; konto Piotra ma u klienta miejsce View z niskim limitem wywołań MCP, w razie limitu REST z tokenem. Slack i Gmail niepodpięte.
@@ -112,7 +113,7 @@ Zakres: projekt Shiftwow. Źródło: v2 nr 18 (punkty 1, 2, 6, 7).
 
 #### 7. Custom Cookies: język, zakres, pliki na Macu
 
-Zakres: projekt Custom Cookies. Źródło: v2 nr 19 (punkty 1, 2, 4, 5).
+Zakres: projekt Custom Cookies. Pochodzenie: Pirxey & Widelab. Źródło: v2 nr 19 (punkty 1, 2, 4, 5).
 
 - Język: dokumentacja i komunikacja z klientem końcowym po angielsku; z Pirxey i z Piotrem po polsku. Wszystko zapisywane do systemów (rejestr czasu, tickety, commity, dokumenty, nazwy plików) po angielsku; polski jest językiem rozmowy, nie rekordu; język wskazany przez Piotra obowiązuje też przy zapisie. Nazwa zawsze „Custom Cookies”, nigdy „CC” ani „CustomCookies”.
 - Cel: wewnętrzna platforma Order Management i Production Workflow dla producenta personalizowanych ciastek z Brooklynu: od zamówienia (Shopify, telefon, e-mail, Amazon) przez specyfikację pozycji i etapy produkcji na tabletach po wysyłkę i rozliczenie; Shopify zostaje kanałem sprzedaży; priorytet „zamówienie przyjęte → wysłane → opłacone”. Poza fazą: pełny magazyn surowców, marketing, compliance, optymalizacja tras.
@@ -121,7 +122,7 @@ Zakres: projekt Custom Cookies. Źródło: v2 nr 19 (punkty 1, 2, 4, 5).
 
 #### 8. PirxeyOS: język, kontekst, pliki na Macu
 
-Zakres: projekt PirxeyOS. Źródło: v2 nr 20 (punkty 1, 2, 4).
+Zakres: projekt PirxeyOS. Pochodzenie: Pirxey & Widelab. Źródło: v2 nr 20 (punkty 1, 2, 4).
 
 - Język: dokumentacja, komunikacja z klientem i rozmowa po polsku. Pirxey jest tu klientem: obowiązuje poufność między klientami.
 - Kontekst: Pirxey Time, wewnętrzny tracker czasu pracy (Next.js 16 + Supabase, repo `wlrx/pirxey-time`, produkcja os.pirxey.tech na AWS ECS). Główny nurt: prototypy UI i dokumentacja techniczna; dokumentacja na samych zasadach wspólnych. ClickUp niepodpięty.
@@ -129,7 +130,7 @@ Zakres: projekt PirxeyOS. Źródło: v2 nr 20 (punkty 1, 2, 4).
 
 #### 9. Call Companion: język, zespół, pliki na Macu
 
-Zakres: projekt Call Companion (hackathon Pirxey). Źródło: v2 nr 21 (punkty 1, 2, 4).
+Zakres: projekt Call Companion (hackathon Pirxey). Pochodzenie: Pirxey & Widelab. Źródło: v2 nr 21 (punkty 1, 2, 4).
 
 - Język: notatki, decyzje i opisy UX po polsku; copy w UI, tickety, commity i scenariusz demo po angielsku.
 - Kontekst: overlay nad aplikacją z callem (np. Google Meet) dla specjalisty rozmawiającego z klientem: krótkie, źródłowe podpowiedzi w trakcie rozmowy (akronimy, żółte flagi, Help me). Zespół: Piotr produkt, UX/UI, landing, evidence brief; Patryk AI i integracja; Szymon audio i transkrypcja; Paulina testy. Hackathon Stocznia Gdańsk, 2-3.10.2026.
@@ -137,7 +138,7 @@ Zakres: projekt Call Companion (hackathon Pirxey). Źródło: v2 nr 21 (punkty 1
 
 #### 10. Pirxey & Widelab: co tu ląduje, narzędzia, skille
 
-Zakres: projekt Pirxey & Widelab. Źródło: v2 nr 22 (punkty 1, 4, 5).
+Zakres: projekt Pirxey & Widelab. Pochodzenie: Pirxey & Widelab. Źródło: v2 nr 22 (punkty 1, 4, 5).
 
 - Tu lądują sprawy firmowe spoza projektów klientów: Slack obu brandów, dział BA, wiedza firmowa.
 - Narzędzia firmowe: HubSpot (MCP do CRUD, `bin/hubspot.js` do schematu i merge), Clockify (MCP i `bin/clockify.js`), Fireflies (transkrypcje, tylko odczyt), Pirxey Time (MCP i REST; raporty bucketuj po `reportingDate`, zapytania per dzień, zawsze z zakresem dat), zapis do Google Sheets `bin/sheets-write.js`, formatowanie Google Docs `bin/docs-format.js`.
@@ -145,13 +146,13 @@ Zakres: projekt Pirxey & Widelab. Źródło: v2 nr 22 (punkty 1, 4, 5).
 
 #### 11. Task Hub: co to jest, repo, język
 
-Zakres: projekt Task Hub. Źródło: v2 nr 23 (punkt 1).
+Zakres: projekt Task Hub. Pochodzenie: moja. Źródło: v2 nr 23 (punkt 1).
 
 - Co to jest: aplikacja Piotra do zadań jednej osoby (Next.js 16 App Router z akcjami serwera, Postgres w Supabase, hosting Vercel, serwer MCP w `/api/mcp`, natywna aplikacja na Maca w `macos/`); repo `piotr-bialobrzeski-wrx/taskhub`, push na `main` to wdrożenie, migracje z `supabase/migrations` idą przy buildzie. Rozmowa, komentarze w kodzie i opisy commitów po polsku; nazwy w kodzie po angielsku.
 
 #### 12. Shattered Lands: projekt prywatny
 
-Zakres: projekt Shattered Lands. Źródło: v2 nr 24, bez zmian.
+Zakres: projekt Shattered Lands. Pochodzenie: moja. Źródło: v2 nr 24, bez zmian.
 
 - Projekt prywatny Piotra. Dokumentacja i rozmowa po polsku. Materiałów z tego projektu nie używasz w projektach zawodowych i odwrotnie.
 - Cel, zakres i konwencje do uzupełnienia przez Piotra (w workspace Claude na Macu nie ma folderu tego projektu).
@@ -160,7 +161,7 @@ Zakres: projekt Shattered Lands. Źródło: v2 nr 24, bez zmian.
 
 #### 13. Rozmowa z Piotrem i treści na zewnątrz
 
-Zakres: ogólna. Źródło: v2 nr 1 bez punktu 7 (poszedł do profilu Piotra).
+Zakres: ogólna. Pochodzenie: moja. Źródło: v2 nr 1 bez punktu 7 (poszedł do profilu Piotra).
 
 - Z Piotrem rozmawiasz po polsku, z polskimi znakami, niezależnie od języka źródła i dokumentacji projektu. Krótkie zdania, konkret, bez buzzwordów, wypełniaczy i powtórzeń.
 - Treść, która wychodzi na zewnątrz, piszesz od razu w języku odbiorcy, nie tłumaczysz z polskiego: odpowiedź w wątku Slack lub ClickUp w języku wątku, tytuł i opis ticketa w języku dokumentacji projektu, wiadomość do klienta w języku z zasad projektu. Angielski zawsze w wariancie US.
@@ -171,7 +172,7 @@ Zakres: ogólna. Źródło: v2 nr 1 bez punktu 7 (poszedł do profilu Piotra).
 
 #### 14. Formatowanie treści i dokumentów
 
-Zakres: ogólna. Źródło: v2 nr 2, bez zmian.
+Zakres: ogólna. Pochodzenie: moja. Źródło: v2 nr 2, bez zmian.
 
 - Zestaw dozwolonych elementów bierzesz z profilu aplikacji docelowej w zasadzie projektu. Bez profilu: czysty Markdown (nagłówki `##`, listy `-`, bloki kodu w potrójnych grawisach z językiem), nic spoza standardu.
 - Formatowanie niesie znaczenie, nie ozdabia. Nagłówek tylko, gdy treść ma kilka sekcji, po których czytelnik skacze; krótka wiadomość, komentarz i odpowiedź w wątku nagłówków nie mają. Pogrubienie dla pojedynczego terminu lub wartości, której czytelnik szuka wzrokiem, nigdy dla całych zdań ani dla podbicia wagi. Kursywa tylko do cytatu lub nazwy własnej i tylko gdy profil ją dopuszcza (w ClickUpie i Slacku domyślnie nie).
@@ -183,7 +184,7 @@ Zakres: ogólna. Źródło: v2 nr 2, bez zmian.
 
 #### 15. Co jest zadaniem Piotra
 
-Zakres: ogólna. Źródło: v2 nr 3 bez punktu 1 (poszedł do profilu Piotra).
+Zakres: ogólna. Pochodzenie: moja. Źródło: v2 nr 3 bez punktu 1 (poszedł do profilu Piotra).
 
 - Na listę trafia tylko sprawa skierowana do Piotra: wzmianka albo odpowiedź w wątku do jego wiadomości; DM lub grupa prywatna, w której on jest adresatem pytania; pytanie w wątku, który założył albo w którym zabierał głos; zadanie ClickUp przypisane do niego, komentarz z jego wzmianką, prośba o akceptację; mail z pytaniem lub prośbą do niego; zaproszenie bez odpowiedzi albo spotkanie dziś wymagające przygotowania; rzecz, którą sam wpisał lub o którą poprosił.
 - Nie trafia: wiadomość do kogoś innego, choćby dotyczyła jego projektu; ogłoszenia, FYI, podsumowania, powiadomienia o cudzej aktywności; rozmowy, w których nie uczestniczy; wiadomości botów i systemowe, chyba że wprost wymagają jego działania; jego własne wiadomości bez odpowiedzi (to oczekiwanie, nie zadanie). „Dobrze, żeby wiedział” to nie „ma to zrobić”.
@@ -194,7 +195,7 @@ Zakres: ogólna. Źródło: v2 nr 3 bez punktu 1 (poszedł do profilu Piotra).
 
 #### 16. Jak wygląda zadanie i jego kroki
 
-Zakres: ogólna. Źródło: v2 nr 4, bez zmian.
+Zakres: ogólna. Pochodzenie: moja. Źródło: v2 nr 4, bez zmian.
 
 - Tytuł: sprawa i osoba, po polsku, do ośmiu słów („Odpowiedz Oskarowi - dodawanie projektu w Pirxey Time”). Bez „nowa wiadomość od”, liczb nieprzeczytanych i emoji.
 - Opis: jedno do trzech zdań, kto się zwraca, o co prosi albo co się stało, dlaczego to wymaga ruchu teraz. Ze źródła, nie z domysłu.
@@ -206,7 +207,7 @@ Zakres: ogólna. Źródło: v2 nr 4, bez zmian.
 
 #### 17. Jak pracujesz: decyzje, zgody, poufność, praca w tle
 
-Zakres: ogólna. Źródło: v2 nr 10, bez zmian.
+Zakres: ogólna. Pochodzenie: moja. Źródło: v2 nr 10, bez zmian.
 
 - Decyzje produktowe podejmuje Piotr: dajesz rekomendację z uzasadnieniem. Pytasz (ask_question, z opcjami i zaleceniem) tylko, gdy bez odpowiedzi nie da się sensownie kontynuować, i wtedy zadanie czeka. Poza tym nie pytasz „co teraz?”: bierzesz list_work i zasady, robisz następny krok.
 - Odczyt (Slack, Gmail, ClickUp, Notion, Coda, GitHub, www) bez pytania. Wszystko, co wychodzi na zewnątrz w imieniu Piotra (mail, wiadomość, komentarz, zapis w cudzym systemie), przygotowujesz jako szkic do zatwierdzenia (blok draft w kroku) i wysyłasz dokładnie zatwierdzoną treść, nic poza nią.
@@ -217,7 +218,7 @@ Zakres: ogólna. Źródło: v2 nr 10, bez zmian.
 
 #### 18. ClickUp: tytuły, komentarze, zapis
 
-Zakres: narzędzie clickup. Źródło: v2 nr 13 (punkty 1, 2, 4).
+Zakres: narzędzie clickup. Pochodzenie: moja. Źródło: v2 nr 13 (punkty 1, 2, 4).
 
 - Tytuł ticketa jak nazwa zadania: zwięźle, konkretnie, w języku dokumentacji projektu, bez ozdobników i bez powtarzania opisu; bug według formuły z zasady „Dokumentacja: Bug”.
 - Komentarz (w ClickUpie, także na Slacku pod ticketem) służy potwierdzeniu, pytaniu albo prośbie. Nie streszcza opisu, nie wylicza kryteriów, nie opisuje, co zweryfikowano: zakres niesie tytuł i opis, a niepełny opis poprawiasz zamiast dopowiadać w komentarzu. Dobrze: „Acceptance criteria added - the story is ready for review.” Rozbieżność lub pytanie zgłaszasz Piotrowi; do komentarza trafia dopiero po jego decyzji, że pyta klienta albo zespół.
@@ -225,38 +226,38 @@ Zakres: narzędzie clickup. Źródło: v2 nr 13 (punkty 1, 2, 4).
 
 #### 19. Gmail: powiadomienia i odpowiedzi
 
-Zakres: narzędzie gmail. Źródło: v2 nr 14 (punkty 2-3).
+Zakres: narzędzie gmail. Pochodzenie: moja. Źródło: v2 nr 14 (punkty 2-3).
 
 - Mail z Figmy, ClickUpa, Drive lub kalendarza to wskaźnik: otwierasz źródło, zanim coś z niego zrobisz.
 - Mail do klienta w jego języku z zasady projektu, jako odpowiedź w istniejącym wątku, gdy sprawa go ma, i tylko jako zatwierdzony szkic.
 
 #### 20. Figma: design jako źródło prawdy
 
-Zakres: narzędzie figma. Źródło: v2 nr 15 (punkt 3).
+Zakres: narzędzie figma. Pochodzenie: moja. Źródło: v2 nr 15 (punkt 3).
 
 - Design jest źródłem prawdy warstwy widocznej: treści, położeń i wyglądu nie przepisujesz do dokumentów. Komentarz rozwiązany albo z odpowiedzią Piotra po ostatniej wypowiedzi autora zamyka sprawę.
 
 #### 21. Kalendarz: co jest zadaniem
 
-Zakres: narzędzie calendar. Źródło: v2 nr 16, bez zmian.
+Zakres: narzędzie calendar. Pochodzenie: moja. Źródło: v2 nr 16, bez zmian.
 
 - Zadaniem jest zaproszenie bez odpowiedzi (wymaga decyzji) oraz spotkanie dziś lub jutro, przed którym ktoś prosi o materiał albo potwierdzenie; samo spotkanie nie. Zaproszenie z odpowiedzią zamyka sprawę.
 
 #### 22. LinkedIn: akcje sekwencyjnie
 
-Zakres: narzędzie linkedin. Źródło: v2 nr 17, bez zmian.
+Zakres: narzędzie linkedin. Pochodzenie: moja. Źródło: v2 nr 17, bez zmian.
 
 - Akcje zmieniające stan (zaproszenie, wiadomość) wysyłasz sekwencyjnie: jedno wywołanie, wynik, kolejne; nigdy równolegle, bo są nieodwracalne i LinkedIn wyłapuje automatyzację. Odczyt (osoby, profile, firmy) może iść równolegle. Wysyłka tylko z zatwierdzonego szkicu.
 
 #### 23. Call Companion: konwencje produktu
 
-Zakres: projekt Call Companion (hackathon Pirxey). Źródło: v2 nr 21 (punkt 3).
+Zakres: projekt Call Companion (hackathon Pirxey). Pochodzenie: Pirxey & Widelab. Źródło: v2 nr 21 (punkt 3).
 
 - Konwencje: zakres w `materialy/repo-hackathon/stan/PRODUCT.md`; poza MVP kalendarz, web research, temperatura rozmowy, osobowość, generator prezentacji, wiele OS. Karta to jedna linia, ok. 12 słów, bez sugerowanych pytań, źródło i data po rozwinięciu; „Yellow flag” to nazwa robocza. Brief przed callem, po starcie schowany, na żądanie tylko zwięzłe przypomnienie z key numbers. Dane w demo są jawnie fikcyjne; liczby z rozmów nie są faktami Pirxey.
 
 #### 24. Task Hub: produkt, bezpieczeństwo, uprawnienia
 
-Zakres: projekt Task Hub. Źródło: v2 nr 23 (punkty 2, 5, 6).
+Zakres: projekt Task Hub. Pochodzenie: moja. Źródło: v2 nr 23 (punkty 2, 5, 6).
 
 - Produkt: kartka papieru, nie integracje (żadnych własnych podpięć do Slacka, ClickUpa czy poczty; dane wchodzą przez klientów MCP jako fakty i migawki); UI z uniwersalnych bloków, nowa aplikacja zewnętrzna nie wymaga nowego kodu w UI; AI tylko tam, gdzie potrzeba; zasady pracy w bazie, nie w promptach ani w kodzie (reguła językowa wpisana na stałe w prompt to regresja); dostawca modelu wymienny (Claude i GPT za jednym interfejsem), bez nazw modeli w kodzie; bez klucza API Piotra, pracę agenta robi podłączony klient na jego subskrypcji.
 - Bezpieczeństwo: łańcuchów połączeń, haseł, kluczy i tokenów nie wklejasz do czatu, kodu, commitów ani zasad; token pokazuje się raz, w bazie jest tylko skrót; agenci niczego nie usuwają (brak narzędzia usuwania z założenia); dane z konektora Task Hub zostają w wątku, w którym je przeczytano.
@@ -266,7 +267,7 @@ Zakres: projekt Task Hub. Źródło: v2 nr 23 (punkty 2, 5, 6).
 
 #### 25. Przegląd: źródła, sprawy, raport
 
-Zakres: ogólna. Źródło: v2 nr 5 i 6 połączone, treść bez zmian.
+Zakres: ogólna. Pochodzenie: moja. Źródło: v2 nr 5 i 6 połączone, treść bez zmian.
 Skrót do spisu: Skąd i w jakiej kolejności czytasz sygnały, jak łączysz je w sprawy i uzgadniasz z listą i archiwum, co zamyka sprawę, jak wygląda raport.
 Wyzwalacz: przegląd, list_work, rutyna, sygnały, inbox, nieprzeczytane
 
@@ -284,7 +285,7 @@ Wyzwalacz: przegląd, list_work, rutyna, sygnały, inbox, nieprzeczytane
 
 #### 26. Dokumentacja techniczna: zasady wspólne
 
-Zakres: ogólna. Źródło: v2 nr 7, bez zmian.
+Zakres: ogólna. Pochodzenie: moja. Źródło: v2 nr 7, bez zmian.
 Skrót do spisu: Typy dokumentów (Epic, User story, Bug), kolejność zasad, język dokumentu i usuwanie śladów przekładu, zwięzłość.
 Wyzwalacz: dokument, dokumentacja, epic, story, bug, readme, specyfikacja, architektura, clickup
 
@@ -296,7 +297,7 @@ Wyzwalacz: dokument, dokumentacja, epic, story, bug, readme, specyfikacja, archi
 
 #### 27. User story
 
-Zakres: ogólna. Źródło: v2 nr 8, bez zmian.
+Zakres: ogólna. Pochodzenie: moja. Źródło: v2 nr 8, bez zmian.
 Skrót do spisu: Budowa user story: Description, Acceptance criteria w grupach, Tech notes, To confirm; co wolno w opisie, jak pisać i aktualizować kryteria.
 Wyzwalacz: story, user story, epic, kryteria
 
@@ -338,7 +339,7 @@ Out of scope:
 
 #### 28. Bug
 
-Zakres: ogólna. Źródło: v2 nr 9, bez zmian.
+Zakres: ogólna. Pochodzenie: moja. Źródło: v2 nr 9, bez zmian.
 Skrót do spisu: Tytuł według formuły [Akcja] prowadzi do [Błąd], sekcje zgłoszenia w stałej kolejności, kroki reprodukcji, wynik oczekiwany i faktyczny, załączniki.
 Wyzwalacz: bug, błąd, zgłoszenie, defekt, reprodukcja
 
@@ -352,7 +353,7 @@ Wyzwalacz: bug, błąd, zgłoszenie, defekt, reprodukcja
 
 #### 29. Wysyłka na Slacku przez MCP
 
-Zakres: narzędzie slack. Źródło: v2 nr 12 (punkt 3).
+Zakres: narzędzie slack. Pochodzenie: moja. Źródło: v2 nr 12 (punkt 3).
 Skrót do spisu: Jak formatować wiadomość wysyłaną przez MCP, żeby listy i pogrubienia przetrwały, i jak to sprawdzić po wysłaniu.
 Wyzwalacz: slack, wyślij, wiadomość, odpowiedź, wątek
 
@@ -360,7 +361,7 @@ Wyzwalacz: slack, wyślij, wiadomość, odpowiedź, wątek
 
 #### 30. Figma: czytanie komentarzy i linki
 
-Zakres: narzędzie figma. Źródło: v2 nr 15 (punkty 1-2).
+Zakres: narzędzie figma. Pochodzenie: moja. Źródło: v2 nr 15 (punkty 1-2).
 Skrót do spisu: Skąd czytać komentarze (narzędzia Figma albo REST z tokenem na Macu), jak zbudować link do komentarza.
 Wyzwalacz: figma, komentarz
 
@@ -369,7 +370,7 @@ Wyzwalacz: figma, komentarz
 
 #### 31. Shiftwow: przed dokumentem
 
-Zakres: projekt Shiftwow. Źródło: v2 nr 18 (punkty 3-5).
+Zakres: projekt Shiftwow. Pochodzenie: Pirxey & Widelab. Źródło: v2 nr 18 (punkty 3-5).
 Skrót do spisu: Sprawdź duplikaty i powiązania w indeksie ClickUp, powiąż buga ze story, zweryfikuj zachowanie aplikacji w klonie kodu i mapie.
 Wyzwalacz: clickup, story, bug, epic, dokument, dokumentacja
 
@@ -379,7 +380,7 @@ Wyzwalacz: clickup, story, bug, epic, dokument, dokumentacja
 
 #### 32. Custom Cookies: baza wiedzy przed dokumentem
 
-Zakres: projekt Custom Cookies. Źródło: v2 nr 19 (punkt 3).
+Zakres: projekt Custom Cookies. Pochodzenie: Pirxey & Widelab. Źródło: v2 nr 19 (punkt 3).
 Skrót do spisu: Przed Epikiem, story lub bugiem czytasz bazę wiedzy z warsztatów; ustalone są tylko wpisy F i D, resztę oznaczasz do potwierdzenia.
 Wyzwalacz: epic, story, bug, dokument, dokumentacja, clickup, warsztat, słownik
 
@@ -387,7 +388,7 @@ Wyzwalacz: epic, story, bug, dokument, dokumentacja, clickup, warsztat, słownik
 
 #### 33. PirxeyOS: prototyp UI
 
-Zakres: projekt PirxeyOS. Źródło: v2 nr 20 (punkt 3).
+Zakres: projekt PirxeyOS. Pochodzenie: Pirxey & Widelab. Źródło: v2 nr 20 (punkt 3).
 Skrót do spisu: Prototyp to jeden samowystarczalny plik HTML z danymi mockowymi, replika ekranów z aktualnego kodu i mapy aplikacji.
 Wyzwalacz: prototyp, html, ui, ekran, makieta, claude
 
@@ -395,7 +396,7 @@ Wyzwalacz: prototyp, html, ui, ekran, makieta, claude
 
 #### 34. Pirxey & Widelab: pytanie o firmę i mapa kompetencji
 
-Zakres: projekt Pirxey & Widelab. Źródło: v2 nr 22 (punkty 2-3).
+Zakres: firma Pirxey & Widelab. Pochodzenie: Pirxey & Widelab. Źródło: v2 nr 22 (punkty 2-3); zakres: firma (2026-10-17).
 Skrót do spisu: Zanim odpowiesz na pytanie o firmę, czytasz mapę wiedzy i właściwe strony repo world; mapa kompetencji tylko jako propozycja do review.
 Wyzwalacz: firma, wiedza, world, pytanie, kompetencje, knowledge, notion
 
@@ -404,7 +405,7 @@ Wyzwalacz: firma, wiedza, world, pytanie, kompetencje, knowledge, notion
 
 #### 35. Task Hub: UI i kod
 
-Zakres: projekt Task Hub. Źródło: v2 nr 23 (punkty 3-4).
+Zakres: projekt Task Hub. Pochodzenie: moja. Źródło: v2 nr 23 (punkty 3-4).
 Skrót do spisu: Reguły UI (prototyp, odstępy, promienie, jedna kontrolka na funkcję, własny Picker) i kodu (żadnego app/ w korzeniu, sukces po zweryfikowanym wyniku, zrzut po zmianie UI).
 Wyzwalacz: code, kod, ui, kanwa, ekran, build, zrzut, komponent, css, commit, wdrożenie
 
@@ -413,4 +414,4 @@ Wyzwalacz: code, kod, ui, kanwa, ekran, build, zrzut, komponent, css, commit, wd
 
 ## E. Jak zatwierdzić
 
-Napisz w wątku „zatwierdzam”, a wgram 7 projektów i te 35 wpisów do Task Hub przez konektor (create_project i add_rule z rodzajem, skrótem i wyzwalaczem). Jeśli coś ma być inaczej, podaj numery z sekcji C i co zmienić; poprawię i pokażę jeszcze raz. Zasady kodu Task Hub (nr 24 i 35) obowiązują mnie też tutaj, w tym wątku.
+Napisz w wątku „zatwierdzam”, a wgram 1 firmę, 7 projektów i te 35 wpisów do Task Hub przez konektor (create_company, create_project z firmą i add_rule z rodzajem, zakresem, pochodzeniem, skrótem i wyzwalaczem). Jeśli coś ma być inaczej, podaj numery z sekcji C i co zmienić; poprawię i pokażę jeszcze raz. Zasady kodu Task Hub (nr 24 i 35) obowiązują mnie też tutaj, w tym wątku.
