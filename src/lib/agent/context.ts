@@ -1,5 +1,5 @@
 // Kontekst dla agenta: to samo dla agenta w aplikacji, dla klientów MCP i dla promptów hand-off.
-import { type Project, type Rule, type Task, type TimeSample, toolLabel } from "../schema";
+import { type Company, type Project, type Rule, type Task, type TimeSample, sphereOf, toolLabel } from "../schema";
 import { LEVELS, scoreOf, whyText, type Score } from "../priority";
 import { calibrationText, fmtMin, remainEst, taskSpent, todayISO } from "../time";
 import { rulesFor } from "../repo";
@@ -32,7 +32,8 @@ export function brief(s: Scored): string {
 
 // Zasady w prompcie w trzech sekcjach: PROFIL (dane o projekcie i narzędziach), ZASADY (zawsze) i PROCEDURY (pełna treść tylko tych, które
 // pasują do kroku; reszta w spisie samym skrótem). Bloki: linia z zakresem i tytułem, pod nią treść z zachowanymi punktami.
-export type RulesOpts = { topic?: string[]; text?: string };
+export type RulesOpts = { topic?: string[]; text?: string; companyId?: string | null };
+export const companyOf = (projectId: string | null | undefined, projects: Pick<Project, "id" | "companyId">[]): string | null => (projectId ? projects.find((p) => p.id === projectId)?.companyId ?? null : null);
 const fold = (s: string) => s.toLowerCase().replace(/ł/g, "l").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 export const triggerTokens = (trigger: string | null | undefined): string[] => (trigger ?? "").split(/[,;\n]/).map((t) => fold(t.trim())).filter(Boolean);
 // procedura pasuje, gdy słowo wyzwalacza to narzędzie kroku, podany temat albo fragment tekstu kroku; temat zawarty w tytule też ją włącza
@@ -43,13 +44,13 @@ export function procedureMatches(r: Rule, tools: string[], opts: RulesOpts = {})
   return triggerTokens(r.trigger).some((k) => toolSet.has(k) || topics.some((t) => t === k || t.includes(k)) || (text.length > 0 && text.includes(k)));
 }
 export function rulesText(rules: Rule[], projectId: string | null, tools: string[], opts: RulesOpts = {}): string {
-  const list = rulesFor(rules, projectId, tools);
+  const list = rulesFor(rules, projectId, tools, opts.companyId ?? null);
   if (!list.length) return "";
-  const scopeOf = (r: Rule) => r.scope === "global" ? "ogólna" : r.scope === "project" ? "projekt" : `narzędzie ${toolLabel(r.tool ?? "")}`;
+  const scopeOf = (r: Rule) => r.scope === "global" ? "ogólna" : r.scope === "company" ? "firma" : r.scope === "project" ? "projekt" : `narzędzie ${toolLabel(r.tool ?? "")}`;
   const block = (r: Rule) => `[${scopeOf(r)}] ${r.title}\n${r.body.trim()}`;
   const profiles = list.filter((r) => r.kind === "profile"), always = list.filter((r) => r.kind === "rule"), procs = list.filter((r) => r.kind === "procedure");
   const out: string[] = [];
-  if (profiles.length) out.push("PROFIL (fakty o projekcie i narzędziach; stosuj je jak dane):\n\n" + profiles.map(block).join("\n\n"));
+  if (profiles.length) out.push("PROFIL (fakty o firmie, projekcie i narzędziach; stosuj je jak dane):\n\n" + profiles.map(block).join("\n\n"));
   if (always.length) out.push("ZASADY PRACY (stosuj je zawsze):\n\n" + always.map(block).join("\n\n"));
   if (procs.length) {
     const on = procs.filter((r) => procedureMatches(r, tools, opts)), off = procs.filter((r) => !on.includes(r));
@@ -67,7 +68,7 @@ export function notesText(tasks: Task[]): string {
 }
 
 export type ContextInput = {
-  tasks: Task[]; projects: Project[]; rules: Rule[]; samples: TimeSample[];
+  tasks: Task[]; projects: Project[]; rules: Rule[]; samples: TimeSample[]; companies?: Company[];
   factPrefs?: string; currentTaskId?: string | null; now?: number;
 };
 
@@ -75,7 +76,9 @@ export type ContextInput = {
 export function contextText(c: ContextInput): string {
   const scored = scoreAll(c.tasks, c.projects, c.samples, c.now);
   const open = scored.filter((s) => !s.task.doneAt || (s.task.doneAt && new Date(s.task.doneAt).getTime() > new Date().setHours(0, 0, 0, 0)));
-  const head = `DZIŚ: ${todayISO(new Date(c.now ?? Date.now()))}. PROJEKTY (nazwa, ważność 1-5): ${c.projects.map((p) => `${p.name} ${p.weight}/5`).join(", ") || "(brak)"}.
+  const companies = c.companies ?? [];
+  const cname = (p: Project) => p.companyId ? companies.find((x) => x.id === p.companyId)?.name ?? null : null;
+  const head = `DZIŚ: ${todayISO(new Date(c.now ?? Date.now()))}. PROJEKTY (nazwa, ważność 1-5, firma albo prywatny): ${c.projects.map((p) => `${p.name} ${p.weight}/5 (${cname(p) ?? "prywatny"})`).join(", ") || "(brak)"}.
 ${calibrationText(c.samples, toolLabel)}
 ${c.factPrefs ?? ""}`.trim();
   const cur = c.currentTaskId ? scored.find((s) => s.task.id === c.currentTaskId) : null;
@@ -88,9 +91,9 @@ ${open.slice(0, 60).map(brief).join("\n") || "(brak zadań)"}${notesText(c.tasks
   }
   const t = cur.task, others = open.filter((s) => s.task.id !== t.id);
   return `${head}
-${rulesText(c.rules, t.projectId, t.steps.map((s) => s.tool), { topic: ["czat"], text: `${t.title} ${t.summary}` })}
+${rulesText(c.rules, t.projectId, t.steps.map((s) => s.tool), { topic: ["czat"], text: `${t.title} ${t.summary}`, companyId: cur.project?.companyId ?? null })}
 MIEJSCE: wnętrze zadania [${t.id}] "${t.title}". To jest domyślny kontekst wiadomości.
-OBECNE ZADANIE: priorytet ${t.level}/5 (${LEVELS[cur.score.eff]}${cur.score.why.length ? ", efektywny " + cur.score.eff + ": " + whyText(cur.score) : ""}), stan: ${taskState(t)}${t.due ? `, termin ${t.due}` : ""}${cur.project ? `, projekt ${cur.project.name}` : ""}
+OBECNE ZADANIE: priorytet ${t.level}/5 (${LEVELS[cur.score.eff]}${cur.score.why.length ? ", efektywny " + cur.score.eff + ": " + whyText(cur.score) : ""}), stan: ${taskState(t)}${t.due ? `, termin ${t.due}` : ""}${cur.project ? `, projekt ${cur.project.name}${cname(cur.project) ? ` (firma ${cname(cur.project)})` : ""}, sfera ${sphereOf(cur.project, companies) === "private" ? "prywatna" : "zawodowa"}` : ""}
 Podsumowanie: ${t.summary || "-"}
 Jak wpadło: ${(t.source || "-").slice(0, 800)}
 Kroki:

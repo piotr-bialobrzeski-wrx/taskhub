@@ -5,7 +5,7 @@ import { TS_LABEL, TS_SHORT } from "@/components/canvas/ui";
 import { fmtDate, taskStateOf } from "./canvas/vm";
 import { isArchivedDone, norm, type SearchItem } from "./search-core";
 
-const SCOPE: Record<string, string> = { global: "ogólna", project: "projektu", tool: "narzędzia" };
+const SCOPE: Record<string, string> = { global: "ogólna", company: "firmy", project: "projektu", tool: "narzędzia" };
 
 // miejsca w ustawieniach i menu; kotwica otwiera zwiniętą sekcję (PageBar → HashOpener)
 const STATIC: { title: string; href: string; sub: string; extra: string }[] = [
@@ -43,9 +43,11 @@ export function indexFrom(b: Bundle, now = Date.now()): SearchItem[] {
     for (const st of t.steps) out.push({ kind: "step", id: st.id, taskId: t.id, title: st.title, hay: norm(`${st.title} ${st.detail} ${toolLabel(st.tool)} ${t.title}`), href: `/tasks/${t.id}?step=${st.id}`, sub: t.title, tool: st.tool });
   }
   for (const t of all) if (t.deletedAt) out.push({ kind: "trash", id: t.id, title: t.title, hay: norm(`${t.title} ${t.summary} ${proj(t.projectId)?.name ?? ""}`), href: `/?view=trash&t=${t.id}`, sub: "w koszu", lvl: { base: t.level, eff: t.level } });
-  for (const p of b.projects) out.push({ kind: "project", id: p.id, title: p.name, hay: norm(p.name), href: `/?view=projects&p=${p.id}`, color: p.color });
+  const comp = (id: string | null) => (id ? b.companies.find((c) => c.id === id) ?? null : null);
+  for (const p of b.projects) out.push({ kind: "project", id: p.id, title: p.name, hay: norm(`${p.name} ${comp(p.companyId)?.name ?? "prywatny"}`), href: `/?view=projects&p=${p.id}`, color: p.color, sub: comp(p.companyId)?.name ?? undefined });
+  for (const c of b.companies) out.push({ kind: "project", id: "c-" + c.id, title: c.name, hay: norm(`${c.name} firma ${c.sphere === "private" ? "prywatna" : "zawodowa"}`), href: `/?view=projects&p=c-${c.id}`, sub: "firma" });
   for (const r of b.rules) {
-    const where = r.scope === "project" ? proj(r.projectId)?.name ?? "projekt" : r.scope === "tool" ? toolLabel(r.tool ?? "") : "ogólna";
+    const where = r.scope === "company" ? comp(r.companyId)?.name ?? "firma" : r.scope === "project" ? proj(r.projectId)?.name ?? "projekt" : r.scope === "tool" ? toolLabel(r.tool ?? "") : "ogólna";
     out.push({ kind: "rule", id: r.id, title: r.title, hay: norm(`${r.title} ${r.body} ${r.summary ?? ""} ${SCOPE[r.scope]} ${where}`), href: `/rules#rule-${r.id}`, sub: where });
   }
   STATIC.forEach((s, i) => out.push({ kind: "setting", id: "s" + i, title: s.title, hay: norm(`${s.title} ${s.sub} ${s.extra}`), href: s.href, sub: s.sub }));

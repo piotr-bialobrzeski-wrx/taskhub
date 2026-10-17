@@ -13,7 +13,26 @@ describe.skipIf(!DB)("repo", async () => {
     await sql()`delete from projects where owner_id = ${owner}`;
     await sql()`delete from rules where owner_id = ${owner}`;
     await sql()`delete from rule_versions where owner_id = ${owner}`;
+    await sql()`delete from companies where owner_id = ${owner}`;
     await sql()`delete from api_tokens where owner_id = ${owner}`;
+  });
+
+  it("firmy nad projektami: zasada firmy i pochodzenie; usunięcie firmy zostawia projekty jako prywatne, zabiera jej zasady", async () => {
+    const c = await repo.createCompany(owner, "Pirxey & Widelab", "work", "jedna firma, dwa brandy");
+    expect(await repo.findCompanyByName(owner, "pirxey & widelab")).toMatchObject({ id: c.id, sphere: "work", note: "jedna firma, dwa brandy" });
+    const p = await repo.createProject(owner, "Shiftwow", 4, c.id);
+    expect((await repo.listProjects(owner)).find((x) => x.id === p.id)?.companyId).toBe(c.id);
+    const r = await repo.upsertRule(owner, { kind: "profile", scope: "company", companyId: c.id, title: "Firma", body: "Dwa brandy", originCompanyId: c.id });
+    expect(await repo.findRule(owner, { scope: "company", companyId: c.id, title: "firma" })).toMatchObject({ id: r.id, companyId: c.id, originCompanyId: c.id });
+    expect(repo.rulesFor(await repo.listRules(owner), p.id, [], c.id).map((x) => x.id)).toContain(r.id);
+    expect(repo.rulesFor(await repo.listRules(owner), p.id, [], null).map((x) => x.id)).not.toContain(r.id);
+    await repo.updateCompany(owner, c.id, { sphere: "private", endedAt: new Date().toISOString() });
+    expect((await repo.listCompanies(owner)).find((x) => x.id === c.id)).toMatchObject({ sphere: "private" });
+    expect((await repo.listCompanies(owner)).find((x) => x.id === c.id)?.endedAt).not.toBeNull();
+    await repo.deleteCompany(owner, c.id);
+    expect((await repo.listProjects(owner)).find((x) => x.id === p.id)?.companyId).toBeNull();
+    expect((await repo.listRules(owner)).find((x) => x.id === r.id)).toBeUndefined();
+    await repo.deleteProject(owner, p.id);
   });
   afterAll(async () => { await sql().end({ timeout: 2 }); });
 

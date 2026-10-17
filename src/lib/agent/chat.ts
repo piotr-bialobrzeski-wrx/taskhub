@@ -50,10 +50,10 @@ export type ChatDeps = { ai: Ai; ownerId: string; taskId: string | null; images?
 export type Done = { label: string; taskId?: string };
 
 export async function runChat(text: string, deps: ChatDeps): Promise<{ reply: string; done: Done[]; result: ChatResult }> {
-  const [tasks, projects, rules, samples, factPrefs, hist] = await Promise.all([
-    repo.listTasks(deps.ownerId, { all: true }), repo.listProjects(deps.ownerId), repo.listRules(deps.ownerId), repo.listSamples(deps.ownerId), repo.factPreferencesText(deps.ownerId), repo.listChat(deps.ownerId, deps.taskId, 6),
+  const [tasks, projects, companies, rules, samples, factPrefs, hist] = await Promise.all([
+    repo.listTasks(deps.ownerId, { all: true }), repo.listProjects(deps.ownerId), repo.listCompanies(deps.ownerId), repo.listRules(deps.ownerId), repo.listSamples(deps.ownerId), repo.factPreferencesText(deps.ownerId), repo.listChat(deps.ownerId, deps.taskId, 6),
   ]);
-  const ctx = contextText({ tasks, projects, rules, samples, factPrefs, currentTaskId: deps.taskId });
+  const ctx = contextText({ tasks, projects, companies, rules, samples, factPrefs, currentTaskId: deps.taskId });
   const prompt = `${ctx}
 
 ${hist.length ? "OSTATNIA ROZMOWA W TYM MIEJSCU:\n" + hist.map((m) => `${m.role === "user" ? "Piotr" : "Agent"}: ${m.text.slice(0, 600)}`).join("\n") + "\n\n" : ""}${deps.images?.length ? `Dołączono ${deps.images.length} grafik(i).\n` : ""}WIADOMOŚĆ PIOTRA:

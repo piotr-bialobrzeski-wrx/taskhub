@@ -38,7 +38,7 @@ export function composeStatic(step: Step, facts: Fact[], attachments: repo.Attac
   return blocks;
 }
 
-export type ComposeDeps = { ai: Ai; rules: Rule[]; factPrefs: string; projectName?: string | null };
+export type ComposeDeps = { ai: Ai; rules: Rule[]; factPrefs: string; projectName?: string | null; companyId?: string | null };
 
 // pełna wersja: agent wybiera fakty z migawek i układa bloki; pamięta układ per źródło
 export async function composeStep(ownerId: string, task: Task, step: Step, deps: ComposeDeps): Promise<{ blocks: Block[]; usedAi: boolean }> {
@@ -52,7 +52,7 @@ export async function composeStep(ownerId: string, task: Task, step: Step, deps:
     return { blocks, usedAi: false };
   }
   const prev = task.steps.filter((s) => step.dependsOn.includes(s.id)).map((s) => `- ${s.title}: ${(s.report || s.output || "(brak)").slice(0, 1200)}`).join("\n");
-  const prompt = `${rulesText(deps.rules, task.projectId, [step.tool], { text: `${step.title} ${step.detail}` })}
+  const prompt = `${rulesText(deps.rules, task.projectId, [step.tool], { text: `${step.title} ${step.detail}`, companyId: deps.companyId ?? null })}
 ${deps.factPrefs}
 ZADANIE: ${task.title}${deps.projectName ? ` (projekt ${deps.projectName})` : ""}
 CEL: ${task.summary || "-"}

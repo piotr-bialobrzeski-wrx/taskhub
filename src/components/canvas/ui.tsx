@@ -26,7 +26,8 @@ export type StepTile = {
 };
 export type GroupVM = { id: string; name: string; color: number; x: number; y: number; w: number; h: number; members: string[]; auto: boolean };
 export type ProjectVM = { id: string; name: string; color: number };
-export type ProjectRow = ProjectVM & { weight: number; language: string };
+export type ProjectRow = ProjectVM & { weight: number; language: string; companyId: string | null };
+export type CompanyRow = { id: string; name: string; sphere: "work" | "private"; note: string | null; ended: boolean };
 // zadanie w widoku „Projekty”: stan, priorytet, termin, pozostały szacunek i zmierzony czas (minuty)
 export type ProjTask = { id: string; title: string; state: TaskStateKey; base: number; eff: number; due: TaskTile["due"]; remain: number; spent: number; projectId: string | null };
 
@@ -44,6 +45,7 @@ const PATHS: Record<string, string> = {
   claude: '<path d="M4 2.5h5l3 3v8H4z"/><path d="M9 2.5v3h3M6 9h4M6 11h3"/>',
   calendar: '<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>',
   manual: '<circle cx="8" cy="5.5" r="2.5"/><path d="M3.5 13.5a4.5 4.5 0 0 1 9 0"/>',
+  company: '<rect x="3" y="2.5" width="10" height="11" rx="1.5"/><path d="M6 5.5h1M9 5.5h1M6 8h1M9 8h1M7 13.5v-3h2v3"/>',
   claudeapp: '<path d="M8 2.5c3 0 5.5 2.2 5.5 5s-2.5 5-5.5 5c-.8 0-1.6-.2-2.3-.5L3 13.5l.7-2.6A4.8 4.8 0 0 1 2.5 7.5c0-2.8 2.5-5 5.5-5z"/><path d="M6 6.5l2 3 2-3"/>',
   code: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="m5 7 2 1.5L5 10M8.5 10h3"/>',
   github: '<circle cx="8" cy="8" r="5.5"/><path d="M6 13.5v-2c0-.6.2-1 .5-1.3C5 10 4 9.3 4 7.6c0-.6.2-1.1.5-1.5-.1-.3-.2-1 .1-1.6 0 0 .6 0 1.6.7a5.5 5.5 0 0 1 3.6 0c1-.7 1.6-.7 1.6-.7.3.6.2 1.3.1 1.6.3.4.5.9.5 1.5 0 1.7-1 2.4-2.5 2.6.3.3.5.7.5 1.3v2"/>',

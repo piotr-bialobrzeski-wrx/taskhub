@@ -4,11 +4,11 @@ import type { Rule, Step, Task } from "../schema";
 import { toolLabel } from "../schema";
 import { rulesText } from "./context";
 
-export function handoffPrompt(task: Task, step: Step, rules: Rule[], opts: { appUrl?: string; attachments?: { caption: string | null; analysis: string | null }[] } = {}): string {
+export function handoffPrompt(task: Task, step: Step, rules: Rule[], opts: { appUrl?: string; companyId?: string | null; attachments?: { caption: string | null; analysis: string | null }[] } = {}): string {
   const i = task.steps.indexOf(step) + 1;
   const prev = task.steps.filter((s) => step.dependsOn.includes(s.id)).map((d) => `- ${d.title}: ${(d.report || d.output || "(brak treści)").slice(0, 1200)}`).join("\n");
   const done = task.steps.filter((x) => x !== step && x.status === "done" && !step.dependsOn.includes(x.id)).map((x) => `- ${x.title}`).join("\n");
-  const rt = rulesText(rules, task.projectId, [step.tool], { text: `${step.title} ${step.detail}` });
+  const rt = rulesText(rules, task.projectId, [step.tool], { text: `${step.title} ${step.detail}`, companyId: opts.companyId ?? null });
   return `Pracujemy nad krokiem ${i} zadania „${task.title}” z mojej aplikacji Task Hub.
 
 CEL ZADANIA: ${task.summary || "-"}
@@ -23,8 +23,8 @@ export const claudeUrl = (prompt: string) => "https://claude.ai/new?q=" + encode
 export const codeCommand = (prompt: string) => `claude "${prompt.replace(/(["\\$`])/g, "\\$1")}"`;
 
 // Rozłożenie zadania na kroki w Claude z subskrypcji (bez klucza API w aplikacji): Claude zapisuje kroki przez add_steps.
-export function breakdownPrompt(task: Task, rules: Rule[], opts: { appUrl?: string; projectName?: string } = {}): string {
-  const rt = rulesText(rules, task.projectId, [], { topic: ["rozpisanie"], text: `${task.title} ${task.summary}` });
+export function breakdownPrompt(task: Task, rules: Rule[], opts: { appUrl?: string; projectName?: string; companyId?: string | null } = {}): string {
+  const rt = rulesText(rules, task.projectId, [], { topic: ["rozpisanie"], text: `${task.title} ${task.summary}`, companyId: opts.companyId ?? null });
   return `Rozłóż na kroki zadanie „${task.title}” z mojej aplikacji Task Hub (id zadania: ${task.id}).
 
 CEL: ${task.summary || "-"}

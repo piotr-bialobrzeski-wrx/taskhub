@@ -3,12 +3,12 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 import * as repo from "@/lib/repo";
-import { contextText, brief, scoreAll } from "@/lib/agent/context";
+import { companyOf, contextText, brief, scoreAll } from "@/lib/agent/context";
 import { rulesText } from "@/lib/agent/context";
 import { workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
-import { Blocks, Fact } from "@/lib/schema";
+import { Blocks, Fact, SPHERES, sphereOf } from "@/lib/schema";
 import { sql } from "@/lib/db";
 import { originOf, wwwAuthenticate } from "@/lib/oauth";
 import { externalLink as externalLinkOf } from "@/lib/links";
@@ -42,10 +42,10 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       title: "Zadanie z kontekstem", description: "Pełny kontekst jednego zadania: cel, jak wpadło, kroki z faktami i linkami, zasady pracy dla projektu i narzędzi, notatki.",
       inputSchema: z.object({ taskId: z.string() }),
     }, async ({ taskId }) => {
-      const [tasks, projects, rules, samples, factPrefs] = await Promise.all([repo.listTasks(ownerId, { all: true }), repo.listProjects(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId), repo.factPreferencesText(ownerId)]);
+      const [tasks, projects, companies, rules, samples, factPrefs] = await Promise.all([repo.listTasks(ownerId, { all: true }), repo.listProjects(ownerId), repo.listCompanies(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId), repo.factPreferencesText(ownerId)]);
       const t = tasks.find((x) => x.id === taskId); if (!t) return text("Nie ma takiego zadania.");
       const facts = await Promise.all(t.steps.map(async (s) => [s.id, await repo.listFacts({ stepId: s.id })] as const));
-      const ctx = contextText({ tasks, projects, rules, samples, factPrefs, currentTaskId: taskId });
+      const ctx = contextText({ tasks, projects, companies, rules, samples, factPrefs, currentTaskId: taskId });
       const fx = facts.filter(([, f]) => f.length).map(([id, f]) => `FAKTY KROKU ${id}:\n${f.filter((x) => !x.hidden).map((x) => `- ${x.label}: ${x.value}${x.source ? ` (${x.source.app}${x.source.url ? ", " + x.source.url : ""})` : ""}`).join("\n")}`).join("\n");
       const qs = await repo.listQuestions(ownerId, { taskId });
       const qx = qs.length ? "PYTANIA DO PIOTRA (zadane w aplikacji):\n" + qs.map((q) => `- [${q.id}]${q.stepId ? ` krok ${q.stepId}` : ""} ${q.text} → ${q.answer ? `ODPOWIEDŹ: ${q.answer}` : "(czeka na odpowiedź)"}`).join("\n") : "";
@@ -55,9 +55,12 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("get_rules", {
-      title: "Zasady pracy", description: "Zasady pracy w trzech sekcjach: PROFIL (dane o projekcie i narzędziach), ZASADY (zawsze) i PROCEDURY (pełna treść tych, które pasują do tools albo topic; reszta w spisie). projectId: projekt zadania; tools: narzędzia kroku (slack, gmail, clickup...); topic: tematy pracy albo nazwa procedury ze spisu, np. [\"rozpisanie\", \"story\", \"bug\", \"przegląd\"]; text: tytuł i szczegóły kroku (dopasowanie po słowach).",
-      inputSchema: z.object({ projectId: z.string().optional(), tools: z.array(z.string()).optional(), topic: z.array(z.string()).optional(), text: z.string().optional() }),
-    }, async ({ projectId, tools, topic, text: t }) => text(rulesText(await repo.listRules(ownerId), projectId ?? null, tools ?? [], { topic, text: t }) || "(brak zasad)"));
+      title: "Zasady pracy", description: "Zasady pracy w trzech sekcjach: PROFIL (dane o firmie, projekcie i narzędziach), ZASADY (zawsze) i PROCEDURY (pełna treść tych, które pasują do tools albo topic; reszta w spisie). projectId: projekt zadania (zasady jego firmy dochodzą same); companyId: firma, gdy nie ma projektu; tools: narzędzia kroku (slack, gmail, clickup...); topic: tematy pracy albo nazwa procedury ze spisu, np. [\"rozpisanie\", \"story\", \"bug\", \"przegląd\"]; text: tytuł i szczegóły kroku (dopasowanie po słowach).",
+      inputSchema: z.object({ projectId: z.string().optional(), companyId: z.string().optional(), tools: z.array(z.string()).optional(), topic: z.array(z.string()).optional(), text: z.string().optional() }),
+    }, async ({ projectId, companyId, tools, topic, text: t }) => {
+      const [rules, projects] = await Promise.all([repo.listRules(ownerId), repo.listProjects(ownerId)]);
+      return text(rulesText(rules, projectId ?? null, tools ?? [], { topic, text: t, companyId: companyOf(projectId, projects) ?? companyId ?? null }) || "(brak zasad)");
+    });
 
     server.registerTool("create_task", {
       title: "Nowe zadanie", description: "Tworzy zadanie z krokami. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool (slack, gmail, clickup, calendar, claude, claudeapp, code, manual...), est w minutach (wielokrotność 15), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub.",
@@ -211,53 +214,91 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       inputSchema: z.object({ attachmentId: z.string(), caption: z.string().max(120).optional(), analysis: z.string().max(4000).optional() }),
     }, async (a) => text((await repo.updateAttachment(ownerId, a.attachmentId, { caption: a.caption, analysis: a.analysis })) ? "Zapisano opis." : "Nie ma takiego załącznika."));
 
-    server.registerTool("list_projects", {
-      title: "Projekty", description: "Lista projektów: id, nazwa, ważność 1–5, język, w którym agent pisze (pl, en, de, uk, fr, es).",
+    // firma: nazwa albo id; brak = null (moja / prywatne)
+    const companyByRef = async (ref: string | undefined | null) => {
+      if (!ref?.trim()) return null;
+      const list = await repo.listCompanies(ownerId);
+      return list.find((c) => c.id === ref) ?? list.find((c) => c.name.toLowerCase() === ref.trim().toLowerCase()) ?? null;
+    };
+
+    server.registerTool("list_companies", {
+      title: "Firmy", description: "Firmy, dla których Piotr pracuje (i jego własne marki): id, nazwa, sfera (work = zawodowa, private = prywatna), notatka, data zakończenia współpracy, projekty. Projekt bez firmy jest prywatny.",
       inputSchema: z.object({}),
-    }, async () => json((await repo.listProjects(ownerId)).map((p) => ({ id: p.id, name: p.name, weight: p.weight, language: p.language }))));
+    }, async () => {
+      const [companies, projects] = await Promise.all([repo.listCompanies(ownerId), repo.listProjects(ownerId)]);
+      return json(companies.map((c) => ({ id: c.id, name: c.name, sphere: c.sphere, note: c.note, endedAt: c.endedAt, projects: projects.filter((p) => p.companyId === c.id).map((p) => p.name) })));
+    });
+
+    server.registerTool("create_company", {
+      title: "Nowa firma", description: "Tworzy firmę albo, gdy firma o tej nazwie już jest, uzupełnia sferę i notatkę. sphere: work (zawodowa, domyślnie) | private. Projekty przypina się do firmy przez create_project (pole company).",
+      inputSchema: z.object({ name: z.string().min(1).max(60), sphere: z.enum(SPHERES).optional(), note: z.string().max(2000).optional() }),
+    }, async (a) => {
+      const found = await repo.findCompanyByName(ownerId, a.name);
+      const c = found ?? (await repo.createCompany(ownerId, a.name, a.sphere ?? "work", a.note ?? null));
+      const patch = { ...(found && a.sphere && a.sphere !== c.sphere ? { sphere: a.sphere } : {}), ...(found && a.note !== undefined && a.note !== c.note ? { note: a.note } : {}) };
+      if (Object.keys(patch).length) await repo.updateCompany(ownerId, c.id, patch);
+      return json({ companyId: c.id, created: !found, name: c.name, sphere: patch.sphere ?? c.sphere });
+    });
+
+    server.registerTool("list_projects", {
+      title: "Projekty", description: "Lista projektów: id, nazwa, ważność 1–5, język, w którym agent pisze (pl, en, de, uk, fr, es), firma (null = prywatny) i sfera (work | private).",
+      inputSchema: z.object({}),
+    }, async () => {
+      const [projects, companies] = await Promise.all([repo.listProjects(ownerId), repo.listCompanies(ownerId)]);
+      return json(projects.map((p) => ({ id: p.id, name: p.name, weight: p.weight, language: p.language, company: companies.find((c) => c.id === p.companyId)?.name ?? null, sphere: sphereOf(p, companies) })));
+    });
 
     server.registerTool("create_project", {
-      title: "Nowy projekt", description: "Tworzy projekt albo, gdy projekt o tej nazwie już jest, uzupełnia jego ważność i język. weight: 1–5, language: pl | en | de | uk | fr | es.",
-      inputSchema: z.object({ name: z.string().min(1).max(60), weight: z.number().int().min(1).max(5).optional(), language: z.enum(["pl", "en", "de", "uk", "fr", "es"]).optional() }),
+      title: "Nowy projekt", description: "Tworzy projekt albo, gdy projekt o tej nazwie już jest, uzupełnia jego ważność, język i firmę. weight: 1–5, language: pl | en | de | uk | fr | es, company: nazwa firmy z list_companies (nowa nazwa tworzy firmę zawodową; pusty napis odpina: projekt prywatny).",
+      inputSchema: z.object({ name: z.string().min(1).max(60), weight: z.number().int().min(1).max(5).optional(), language: z.enum(["pl", "en", "de", "uk", "fr", "es"]).optional(), company: z.string().max(60).optional() }),
     }, async (a) => {
       const found = await repo.findProjectByName(ownerId, a.name);
       const p = found ?? (await repo.createProject(ownerId, a.name, a.weight));
-      const patch = { ...(a.weight !== undefined && a.weight !== p.weight ? { weight: a.weight } : {}), ...(a.language && a.language !== p.language ? { language: a.language } : {}) };
+      let companyId: string | null | undefined;
+      if (a.company !== undefined) companyId = a.company.trim() ? ((await companyByRef(a.company)) ?? (await repo.createCompany(ownerId, a.company))).id : null;
+      const patch = { ...(a.weight !== undefined && a.weight !== p.weight ? { weight: a.weight } : {}), ...(a.language && a.language !== p.language ? { language: a.language } : {}), ...(companyId !== undefined && companyId !== p.companyId ? { companyId } : {}) };
       if (Object.keys(patch).length) await repo.updateProject(ownerId, p.id, patch);
-      return json({ projectId: p.id, created: !found, name: p.name, weight: patch.weight ?? p.weight, language: patch.language ?? p.language });
+      return json({ projectId: p.id, created: !found, name: p.name, weight: patch.weight ?? p.weight, language: patch.language ?? p.language, companyId: companyId !== undefined ? companyId : p.companyId });
     });
 
     server.registerTool("list_rules", {
-      title: "Spis zasad", description: "Wszystkie zasady właściciela z id (do update_rule): kind, scope, projekt, narzędzie, tytuł, skrót, wyzwalacz.",
+      title: "Spis zasad", description: "Wszystkie zasady właściciela z id (do update_rule): kind, scope, firma, projekt, narzędzie, pochodzenie (origin: firma, w której wypracowana; null = moja), tytuł, skrót, wyzwalacz.",
       inputSchema: z.object({}),
     }, async () => {
-      const [rules, projects] = await Promise.all([repo.listRules(ownerId), repo.listProjects(ownerId)]);
+      const [rules, projects, companies] = await Promise.all([repo.listRules(ownerId), repo.listProjects(ownerId), repo.listCompanies(ownerId)]);
       const pname = (id: string | null) => projects.find((p) => p.id === id)?.name ?? null;
-      return json(rules.map((r) => ({ id: r.id, kind: r.kind, scope: r.scope, project: pname(r.projectId), tool: r.tool, title: r.title, summary: r.summary, trigger: r.trigger, chars: r.body.length })));
+      const cname = (id: string | null) => companies.find((c) => c.id === id)?.name ?? null;
+      return json(rules.map((r) => ({ id: r.id, kind: r.kind, scope: r.scope, company: cname(r.companyId), project: pname(r.projectId), tool: r.tool, origin: cname(r.originCompanyId), title: r.title, summary: r.summary, trigger: r.trigger, chars: r.body.length })));
     });
 
     const RuleKind = z.enum(["profile", "rule", "procedure"]);
     server.registerTool("add_rule", {
-      title: "Dodaj zasadę", description: "Dodaje zasadę pracy. kind: profile (dane o projekcie albo narzędziu: język, klient, kanały), rule (krótka reguła zawsze w prompcie; domyślnie), procedure (dłuższa instrukcja; wymaga summary = jedno zdanie do spisu i zwykle trigger = słowa wyzwalające po przecinku: narzędzia, tematy, słowa z tytułu kroku, np. \"slack, story, bug\"). scope global | project | tool: dla project podaj projectId albo project (nazwa); dla tool podaj tool (slack, gmail, clickup, calendar, figma...). Ta sama nazwa w tym samym zakresie = aktualizacja istniejącej zasady, bez duplikatu.",
-      inputSchema: z.object({ kind: RuleKind.optional(), scope: z.enum(["global", "project", "tool"]), title: z.string().min(1), body: z.string().min(1), summary: z.string().optional(), trigger: z.string().optional(), projectId: z.string().optional(), project: z.string().optional(), tool: z.string().optional() }),
-    }, async ({ project, ...a }) => {
+      title: "Dodaj zasadę", description: "Dodaje zasadę pracy. kind: profile (dane o firmie, projekcie albo narzędziu: język, klient, kanały), rule (krótka reguła zawsze w prompcie; domyślnie), procedure (dłuższa instrukcja; wymaga summary = jedno zdanie do spisu i zwykle trigger = słowa wyzwalające po przecinku: narzędzia, tematy, słowa z tytułu kroku, np. \"slack, story, bug\"). scope global | company | project | tool: dla company podaj company (nazwa albo id firmy); dla project podaj projectId albo project (nazwa); dla tool podaj tool (slack, gmail, clickup, calendar, figma...). origin: firma, w której zasada została wypracowana (nazwa albo id; pomiń dla własnych). Ta sama nazwa w tym samym zakresie = aktualizacja istniejącej zasady, bez duplikatu.",
+      inputSchema: z.object({ kind: RuleKind.optional(), scope: z.enum(["global", "company", "project", "tool"]), title: z.string().min(1), body: z.string().min(1), summary: z.string().optional(), trigger: z.string().optional(), company: z.string().optional(), projectId: z.string().optional(), project: z.string().optional(), tool: z.string().optional(), origin: z.string().optional() }),
+    }, async ({ project, company, origin, ...a }) => {
       let projectId = a.projectId;
       if (a.scope === "project" && !projectId && project) projectId = (await repo.findProjectByName(ownerId, project))?.id;
       if (a.scope === "project" && !projectId) throw new Error("Zasada projektu wymaga projectId albo nazwy istniejącego projektu (project).");
+      const companyId = a.scope === "company" ? (await companyByRef(company))?.id : null;
+      if (a.scope === "company" && !companyId) throw new Error("Zasada firmy wymaga company: nazwy albo id istniejącej firmy (list_companies).");
       if (a.scope === "tool" && !a.tool) throw new Error("Zasada narzędzia wymaga pola tool.");
       if (a.kind === "procedure" && !a.summary?.trim()) throw new Error("Procedura wymaga summary: jedno zdanie do spisu.");
-      const found = await repo.findRule(ownerId, { scope: a.scope, projectId: a.scope === "project" ? projectId : null, tool: a.scope === "tool" ? a.tool : null, title: a.title });
-      const r = await repo.upsertRule(ownerId, { ...a, id: found?.id, projectId: a.scope === "project" ? projectId : null, tool: a.scope === "tool" ? a.tool : null, visibility: found?.visibility });
+      const originCompanyId = origin ? (await companyByRef(origin))?.id ?? null : null;
+      if (origin && !originCompanyId) throw new Error("origin: nie ma takiej firmy (list_companies).");
+      const found = await repo.findRule(ownerId, { scope: a.scope, companyId, projectId: a.scope === "project" ? projectId : null, tool: a.scope === "tool" ? a.tool : null, title: a.title });
+      const r = await repo.upsertRule(ownerId, { ...a, id: found?.id, companyId, projectId: a.scope === "project" ? projectId : null, tool: a.scope === "tool" ? a.tool : null, originCompanyId: origin !== undefined ? originCompanyId : found?.originCompanyId ?? null, visibility: found?.visibility });
       return json({ ruleId: r.id, created: !found });
     });
 
     server.registerTool("update_rule", {
-      title: "Zmień zasadę", description: "Zmienia pola istniejącej zasady (id z list_rules): kind, title, body, summary, trigger. Pola pominięte zostają; każda zmiana zapisuje się w historii wersji.",
-      inputSchema: z.object({ ruleId: z.string(), kind: RuleKind.optional(), title: z.string().min(1).optional(), body: z.string().min(1).optional(), summary: z.string().optional(), trigger: z.string().optional() }),
+      title: "Zmień zasadę", description: "Zmienia pola istniejącej zasady (id z list_rules): kind, title, body, summary, trigger, origin (firma, w której wypracowana; pusty napis = moja). Pola pominięte zostają; każda zmiana zapisuje się w historii wersji.",
+      inputSchema: z.object({ ruleId: z.string(), kind: RuleKind.optional(), title: z.string().min(1).optional(), body: z.string().min(1).optional(), summary: z.string().optional(), trigger: z.string().optional(), origin: z.string().optional() }),
     }, async (a) => {
       const cur = (await repo.listRules(ownerId)).find((r) => r.id === a.ruleId);
       if (!cur) throw new Error("Nie ma takiej zasady.");
-      const next = { ...cur, kind: a.kind ?? cur.kind, title: a.title ?? cur.title, body: a.body ?? cur.body, summary: a.summary ?? cur.summary, trigger: a.trigger ?? cur.trigger };
+      const originCompanyId = a.origin === undefined ? cur.originCompanyId : a.origin.trim() ? (await companyByRef(a.origin))?.id ?? null : null;
+      if (a.origin?.trim() && !originCompanyId) throw new Error("origin: nie ma takiej firmy (list_companies).");
+      const next = { ...cur, kind: a.kind ?? cur.kind, title: a.title ?? cur.title, body: a.body ?? cur.body, summary: a.summary ?? cur.summary, trigger: a.trigger ?? cur.trigger, originCompanyId };
       if (next.kind === "procedure" && !next.summary?.trim()) throw new Error("Procedura wymaga summary: jedno zdanie do spisu.");
       const r = await repo.upsertRule(ownerId, next);
       return json({ ruleId: r.id, kind: r.kind });

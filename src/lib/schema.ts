@@ -147,14 +147,30 @@ export const Question = z.object({
 });
 export type Question = z.infer<typeof Question>;
 
+// Firma nad projektem: sfera zawodowa albo prywatna; projekt bez firmy jest prywatny. Firma po zakończeniu współpracy zostaje w archiwum (endedAt).
+export const SPHERES = ["work", "private"] as const;
+export type Sphere = (typeof SPHERES)[number];
+export const SPHERE_LABELS: Record<Sphere, string> = { work: "zawodowa", private: "prywatna" };
+export const Company = z.object({
+  id: z.string(),
+  name: z.string(),
+  sphere: z.enum(SPHERES),
+  note: z.string().nullable(),
+  endedAt: z.string().nullable(),
+});
+export type Company = z.infer<typeof Company>;
 export const Project = z.object({
   id: z.string(),
   name: z.string(),
   color: z.number().int(),
   weight: z.number().int().min(1).max(5),
   language: z.string(),
+  companyId: z.string().nullable(),
 });
 export type Project = z.infer<typeof Project>;
+// sfera projektu: z firmy; bez firmy = prywatna
+export const sphereOf = (project: Pick<Project, "companyId"> | null | undefined, companies: Company[]): Sphere =>
+  project?.companyId ? companies.find((c) => c.id === project.companyId)?.sphere ?? "work" : "private";
 
 export const Task = z.object({
   id: z.string(),
@@ -185,9 +201,11 @@ export const RULE_KIND_LABELS: Record<RuleKind, string> = { profile: "Profil", r
 export const Rule = z.object({
   id: z.string(),
   kind: z.enum(RULE_KINDS),
-  scope: z.enum(["global", "project", "tool"]),
+  scope: z.enum(["global", "company", "project", "tool"]),
+  companyId: z.string().nullable(),         // zakres „firma”
   projectId: z.string().nullable(),
   tool: z.string().nullable(),
+  originCompanyId: z.string().nullable(),   // gdzie wypracowana; null = moja
   title: z.string(),
   body: z.string(),
   trigger: z.string().nullable(),   // procedura: słowa wyzwalające po przecinku (slack, story, bug, przegląd)

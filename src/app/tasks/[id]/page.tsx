@@ -50,7 +50,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const tiles = t.steps.map((s) => stepTile(t, s, b.tasks));
   const stateOf = (s: Step) => tiles.find((x) => x.id === s.id)!.state;
   const waits = taskWaits(t, b.tasks);
-  const bp = !t.steps.length && !t.doneAt ? breakdownPrompt(t, b.rules, { appUrl: origin, projectName: cur.project?.name }) : null;
+  const bp = !t.steps.length && !t.doneAt ? breakdownPrompt(t, b.rules, { appUrl: origin, projectName: cur.project?.name, companyId: cur.project?.companyId ?? null }) : null;
 
   // ---------- pasek nad kanwą: tylko to, co wymaga uwagi (stan kroków widać po kolorach kafelków) ----------
   const runbar = waits.length ? <span className="rb-t"><b>Czeka na zadanie:</b> {waits.map((w) => w.title).join(", ")}</span>
@@ -134,7 +134,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
 
   // ---------- panele kroków ----------
   const panels: Record<string, React.ReactNode> = {};
-  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} />; });
+  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} />; });
 
   return (
     <TaskCanvas
@@ -147,9 +147,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
-function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits }: {
+function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
-  aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean;
+  aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null;
 }) {
   // szczegóły są już pod tytułem, więc blok tekstu z tą samą treścią odpada
   const blocks = (s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
@@ -158,7 +158,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const ext = EXTERNAL_TOOLS.has(s.tool);
   const runnable = s.tool !== "manual";
   const link = externalLink(s.link, origin);
-  const prompt = s.status === "handoff" ? handoffPrompt(t, s, rules, { appUrl: origin, attachments: attachments.filter((a) => a.analysis) }) : null;
+  const prompt = s.status === "handoff" ? handoffPrompt(t, s, rules, { appUrl: origin, companyId, attachments: attachments.filter((a) => a.analysis) }) : null;
   const review = s.review as { summary?: string; links?: string[]; fits?: boolean; warning?: string; pending?: boolean } | null;
   const linkLabel = ext ? "Otwórz wynik" : s.tool === "manual" || s.tool === "claude" ? "Otwórz link" : `Otwórz w ${toolLabel(s.tool)}`;
   const hasDraftBlock = !!s.blocks?.some((b) => b.type === "draft");

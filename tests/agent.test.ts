@@ -70,6 +70,21 @@ describe("prompt hand-off i kontekst", () => {
     expect(procedureMatches(rules[2], [], { topic: ["user story"] })).toBe(true);   // temat zawarty w tytule
     expect(procedureMatches(rules[2], [], { text: "Odpisać na maila" })).toBe(false);
   });
+  it("zasady firmy wchodzą tylko do zadań jej projektów; kontekst podaje firmę i sferę, projekt bez firmy jest prywatny", () => {
+    const rules = [rule({ kind: "profile", scope: "company", companyId: "c1", title: "Firma: Pirxey", body: "Dwa brandy: Pirxey i Widelab" }), rule({ title: "Ogólna", body: "Krótko." })];
+    expect(rulesText(rules, "p1", [], { companyId: "c1" })).toContain("Dwa brandy");
+    expect(rulesText(rules, "p1", [], { companyId: null })).not.toContain("Dwa brandy");
+    const companies = [{ id: "c1", name: "Pirxey", sphere: "work" as const, note: null, endedAt: null }];
+    const t = task({ projectId: "p1" });
+    const ctx = contextText({ tasks: [t], projects: [project({ companyId: "c1" })], companies, rules, samples: [], currentTaskId: t.id });
+    expect(ctx).toContain("Projekt 3/5 (Pirxey)");
+    expect(ctx).toContain("sfera zawodowa");
+    expect(ctx).toContain("Dwa brandy");
+    const priv = contextText({ tasks: [t], projects: [project()], companies, rules, samples: [], currentTaskId: t.id });
+    expect(priv).toContain("Projekt 3/5 (prywatny)");
+    expect(priv).toContain("sfera prywatna");
+    expect(priv).not.toContain("Dwa brandy");
+  });
 });
 
 const DB = !!process.env.TEST_DATABASE_URL;

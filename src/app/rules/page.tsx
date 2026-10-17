@@ -21,13 +21,14 @@ const when = (iso: string) => new Date(iso).toLocaleString("pl-PL", { timeZone: 
 export default async function Rules() {
   const o = await requireOwner();
   const [b, versions] = await Promise.all([bundle(o.id), repo.listRuleVersions(o.id)]);
-  const rules = b.rules, projects = b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color }));
+  const rules = b.rules, projects = b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color })), companies = b.companies.map((c) => ({ id: c.id, name: c.name }));
   const avail = availableProviders();
   const proj = (id: string | null) => projects.find((p) => p.id === id) ?? null;
+  const comp = (id: string | null) => companies.find((c) => c.id === id) ?? null;
   const history = new Map<string, repo.RuleVersion[]>();
   for (const v of versions) history.set(v.ruleId, [...(history.get(v.ruleId) ?? []), v]);
   const groups: { key: RuleKind; title: string; hint: string }[] = [
-    { key: "profile", title: "Profile", hint: "Fakty o projektach i narzędziach: język, klient, kanały. Agent dostaje je jako dane." },
+    { key: "profile", title: "Profile", hint: "Fakty o firmach, projektach i narzędziach: język, klient, kanały. Agent dostaje je jako dane." },
     { key: "rule", title: "Zasady", hint: "Krótkie reguły, zawsze w prompcie agenta. Im krócej, tym lepiej je stosuje." },
     { key: "procedure", title: "Procedury", hint: "Dłuższe instrukcje. Agent dostaje pełną treść, gdy pasuje wyzwalacz; inaczej tylko skrót w spisie." },
   ];
@@ -52,13 +53,15 @@ export default async function Rules() {
                       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                         <b>{r.title}</b>
                         {r.scope === "global" ? <span className="chip">ogólna</span> : null}
+                        {r.scope === "company" ? <span className="chip" title="Zasada firmy: wchodzi do każdego zadania jej projektów">firma: {comp(r.companyId)?.name ?? "firma usunięta"}</span> : null}
                         {r.scope === "project" ? <span className="chip">{pr ? <span className="pdot" style={{ ["--c" as string]: projColor(pr.color) }} /> : null}{pr?.name ?? "projekt usunięty"}</span> : null}
                         {r.scope === "tool" ? <span className="chip">{toolLabel(r.tool ?? "")}</span> : null}
                         {r.kind === "procedure" && r.trigger ? <span className="chip">gdy: {r.trigger}</span> : null}
+                        {r.originCompanyId ? <span className="chip" title="Wypracowana w tej firmie; można ją firmie oddać">z: {comp(r.originCompanyId)?.name ?? "firma usunięta"}</span> : null}
                       </div>
                       {r.kind === "procedure" && r.summary ? <p className="sub" style={{ marginTop: 4 }}>{r.summary}</p> : null}
                       <p>{r.body}</p>
-                      <details className="edit" style={{ marginTop: 8 }}><summary>Edytuj</summary><RuleForm r={r} projects={projects} action={saveRule} /></details>
+                      <details className="edit" style={{ marginTop: 8 }}><summary>Edytuj</summary><RuleForm r={r} projects={projects} companies={companies} action={saveRule} /></details>
                       {hist.length ? (
                         <details className="edit" style={{ marginTop: 4 }}><summary>Historia zmian ({hist.length})</summary>
                           <div className="stack" style={{ marginTop: 8 }}>
@@ -82,7 +85,7 @@ export default async function Rules() {
         );
       })}
       <h2 className="sec" id="new-rule">Nowa zasada</h2>
-      <div className="card"><RuleForm projects={projects} action={saveRule} /></div>
+      <div className="card"><RuleForm projects={projects} companies={companies} action={saveRule} /></div>
     </main>
   );
 }

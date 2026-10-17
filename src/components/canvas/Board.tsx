@@ -5,19 +5,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, TASK_SIZE } from "@/lib/canvas/layout";
-import { Icon, Lvl, ToolIcon, TS_LABEL, TS_SHORT, GCOL, plural, projColor, toolColor, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
+import { Icon, Lvl, ToolIcon, TS_LABEL, TS_SHORT, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
 import { Dock, Namer, PrioPicker, ProjectPicker, Toast, useToast } from "./widgets";
 import { AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import { Projects, type ProjectPatch } from "./Projects";
 import { matches, norm, tokens, type Screen, type SearchItem } from "@/lib/search-core";
-import { autoLayout, batchTasks, chat, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeProject, reopenLast, restoreLayout, restoreTask, saveTaskPositions, updateGroupAction, updateProjectAction } from "@/app/actions";
+import { autoLayout, batchTasks, chat, createCompanyAction, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeCompany, removeProject, reopenLast, restoreLayout, restoreTask, saveTaskPositions, updateCompanyAction, updateGroupAction, updateProjectAction } from "@/app/actions";
 
 export type ArchRow = { id: string; title: string; when: string; summary: string | null; base: number; eff: number; project: string | null };
 // parametry z adresu, którymi szukajka z innych ekranów otwiera właściwy widok (/?view=projects&p=…, /?view=done&t=…, /?focus=…)
 export type BoardInitial = { view?: string; p?: string; t?: string; focus?: string };
 export type BoardProps = {
-  tasks: TaskTile[]; groups: GroupVM[]; projects: ProjectRow[]; projTasks: ProjTask[]; index: SearchItem[]; initial: BoardInitial;
+  tasks: TaskTile[]; groups: GroupVM[]; projects: ProjectRow[]; companies: CompanyRow[]; projTasks: ProjTask[]; index: SearchItem[]; initial: BoardInitial;
   aiOn: boolean; agent: string; lastAgent: { id: string; text: string } | null;
   archive: { done: ArchRow[]; trash: ArchRow[]; trashDays: number };
 };
@@ -258,8 +258,10 @@ export function Board(p: BoardProps) {
       ) : null}
 
       {proj ? (
-        <Projects projects={p.projects} tasks={p.projTasks} focus={projFocus} onTask={open} onNew={(name) => run(() => createProjectAction(name), "Dodano projekt")}
-          onPatch={(id, patch: ProjectPatch) => run(() => updateProjectAction(id, patch))} onRemove={(id) => run(() => removeProject(id), "Usunięto projekt, zadania zostały")} />
+        <Projects projects={p.projects} companies={p.companies} tasks={p.projTasks} focus={projFocus} onTask={open} onNew={(name) => run(() => createProjectAction(name), "Dodano projekt")}
+          onPatch={(id, patch: ProjectPatch) => run(() => updateProjectAction(id, patch))} onRemove={(id) => run(() => removeProject(id), "Usunięto projekt, zadania zostały")}
+          onCompanyNew={(name) => run(() => createCompanyAction(name), "Dodano firmę")} onCompanyPatch={(id, patch) => run(() => updateCompanyAction(id, patch))}
+          onCompanyRemove={(id) => run(() => removeCompany(id), "Usunięto firmę, jej projekty są teraz prywatne")} />
       ) : null}
 
       <div className="pillbar">

@@ -12,8 +12,8 @@ export const task = (p: Partial<Task> = {}): Task => ({
   id: "t" + ++n, ownerId: "o", projectId: null, title: "Zadanie", summary: "", source: "", level: 3, due: null, doneAt: null, deletedAt: null,
   noteText: null, noteSummary: null, noteAt: null, pos: null, createdAt: new Date().toISOString(), dependsOn: [], steps: [step()], ...p,
 });
-export const rule = (p: Partial<Rule> = {}): Rule => ({ id: "r" + ++n, kind: "rule", scope: "global", projectId: null, tool: null, title: "Zasada", body: "Treść", trigger: null, summary: null, visibility: "private", ...p });
-export const project = (p: Partial<Project> = {}): Project => ({ id: "p1", name: "Projekt", color: 0, weight: 3, language: "pl", ...p });
+export const rule = (p: Partial<Rule> = {}): Rule => ({ id: "r" + ++n, kind: "rule", scope: "global", companyId: null, projectId: null, tool: null, originCompanyId: null, title: "Zasada", body: "Treść", trigger: null, summary: null, visibility: "private", ...p });
+export const project = (p: Partial<Project> = {}): Project => ({ id: "p1", name: "Projekt", color: 0, weight: 3, language: "pl", companyId: null, ...p });
 
 // sztuczny dostawca: zwraca kolejne odpowiedzi z kolejki, sprawdzone schematem jak u prawdziwego
 export class FakeProvider implements AiProvider {

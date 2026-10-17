@@ -10,7 +10,7 @@ import { aiFor, composeFlow, finishStep, prepareStep } from "@/lib/services";
 import { runChat } from "@/lib/agent/chat";
 import { newTaskText } from "@/lib/auto";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
-import type { Rule } from "@/lib/schema";
+import type { Rule, Sphere } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const num = (fd: FormData, k: string, def: number) => { const v = Number(str(fd, k)); return Number.isFinite(v) && str(fd, k) !== "" ? v : def; };
@@ -246,10 +246,11 @@ export async function factPref(taskId: string, factId: string, pref: { pinned?: 
 // ---------- zasady ----------
 export async function saveRule(fd: FormData) {
   const o = await requireOwner();
-  const scope = (str(fd, "scope") || "global") as Rule["scope"];
+  const scope = (["global", "company", "project", "tool"].includes(str(fd, "scope")) ? str(fd, "scope") : "global") as Rule["scope"];
   const kind = (["profile", "rule", "procedure"].includes(str(fd, "kind")) ? str(fd, "kind") : "rule") as Rule["kind"];
   const title = str(fd, "title"), body = str(fd, "body"); if (!title || !body) return;
-  await repo.upsertRule(o.id, { id: str(fd, "id") || undefined, kind, scope, title, body, projectId: scope === "project" ? str(fd, "projectId") || null : null, tool: scope === "tool" ? str(fd, "tool") || null : null, summary: kind === "procedure" ? str(fd, "summary") || null : null, trigger: kind === "procedure" ? str(fd, "trigger") || null : null, visibility: (str(fd, "visibility") || "private") as Rule["visibility"] });
+  const companyId = scope === "company" ? str(fd, "companyId") || null : null; if (scope === "company" && !companyId) return;
+  await repo.upsertRule(o.id, { id: str(fd, "id") || undefined, kind, scope, title, body, companyId, projectId: scope === "project" ? str(fd, "projectId") || null : null, tool: scope === "tool" ? str(fd, "tool") || null : null, originCompanyId: str(fd, "originCompanyId") || null, summary: kind === "procedure" ? str(fd, "summary") || null : null, trigger: kind === "procedure" ? str(fd, "trigger") || null : null, visibility: (str(fd, "visibility") || "private") as Rule["visibility"] });
   revalidatePath("/rules");
 }
 export async function removeRule(id: string) {
@@ -268,9 +269,10 @@ export async function createProjectAction(name: string): Promise<string> {
   refresh();
   return p.id;
 }
-export async function updateProjectAction(id: string, patch: { name?: string; weight?: number; language?: string; color?: number }) {
+export async function updateProjectAction(id: string, patch: { name?: string; weight?: number; language?: string; color?: number; companyId?: string | null }) {
   const o = await requireOwner();
   const p: typeof patch = {};
+  if (patch.companyId !== undefined) p.companyId = patch.companyId || null;
   if (patch.name !== undefined) { const n = patch.name.trim().slice(0, 60); if (n) p.name = n; }
   if (patch.weight !== undefined) p.weight = Math.min(5, Math.max(1, Math.round(patch.weight)));
   if (patch.language !== undefined) p.language = patch.language.trim().slice(0, 8) || "pl";
@@ -282,6 +284,31 @@ export async function removeProject(id: string) {
   const o = await requireOwner();
   await repo.deleteProject(o.id, id);   // zadania zostają, tracą tylko etykietę
   refresh();
+}
+
+// ---------- firmy ----------
+// firma stoi nad projektami: jej sfera (zawodowa / prywatna) przechodzi na projekty; projekt bez firmy jest prywatny
+export async function createCompanyAction(name: string, sphere: Sphere = "work"): Promise<string> {
+  const o = await requireOwner();
+  const n = name.trim().slice(0, 60); if (!n) throw new Error("Podaj nazwę firmy");
+  const c = (await repo.findCompanyByName(o.id, n)) ?? (await repo.createCompany(o.id, n, sphere));
+  refresh(); revalidatePath("/rules");
+  return c.id;
+}
+export async function updateCompanyAction(id: string, patch: { name?: string; sphere?: Sphere; note?: string | null; ended?: boolean }) {
+  const o = await requireOwner();
+  const p: Parameters<typeof repo.updateCompany>[2] = {};
+  if (patch.name !== undefined) { const n = patch.name.trim().slice(0, 60); if (n) p.name = n; }
+  if (patch.sphere !== undefined) p.sphere = patch.sphere === "private" ? "private" : "work";
+  if (patch.note !== undefined) p.note = patch.note?.trim() || null;
+  if (patch.ended !== undefined) p.endedAt = patch.ended ? new Date().toISOString() : null;
+  await repo.updateCompany(o.id, id, p);
+  refresh(); revalidatePath("/rules");
+}
+export async function removeCompany(id: string) {
+  const o = await requireOwner();
+  await repo.deleteCompany(o.id, id);   // projekty zostają (stają się prywatne), zasady firmy znikają
+  refresh(); revalidatePath("/rules");
 }
 export async function saveSettings(fd: FormData) {
   const o = await requireOwner();

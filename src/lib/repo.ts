@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "./db";
-import { Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample } from "./schema";
+import { type Company, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample } from "./schema";
 import { spentMin } from "./time";
 
 type Row = Record<string, unknown>;
@@ -39,23 +39,50 @@ export async function ownerForToken(token: string): Promise<string | null> {
   return (await tokenForSecret(token))?.ownerId ?? null;
 }
 
+// ---------- firmy ----------
+const rowToCompany = (r: Row): Company => ({ id: r.id as string, name: r.name as string, sphere: (r.sphere as Company["sphere"]) ?? "work", note: (r.note as string) ?? null, endedAt: iso(r.endedAt) });
+export async function listCompanies(ownerId: string): Promise<Company[]> {
+  const rows = await sql()`select * from companies where owner_id = ${ownerId} order by created_at`;
+  return rows.map(rowToCompany);
+}
+export async function createCompany(ownerId: string, name: string, sphere: Company["sphere"] = "work", note: string | null = null): Promise<Company> {
+  const [r] = await sql()`insert into companies (owner_id, name, sphere, note) values (${ownerId}, ${name.trim().slice(0, 60)}, ${sphere}, ${note}) returning *`;
+  return rowToCompany(r);
+}
+export async function updateCompany(ownerId: string, id: string, patch: Partial<Pick<Company, "name" | "sphere" | "note" | "endedAt">>): Promise<void> {
+  const p: Row = {};
+  if (patch.name !== undefined) p.name = patch.name.trim().slice(0, 60);
+  if (patch.sphere !== undefined) p.sphere = patch.sphere;
+  if (patch.note !== undefined) p.note = patch.note;
+  if (patch.endedAt !== undefined) p.ended_at = patch.endedAt;
+  if (!Object.keys(p).length) return;
+  await sql()`update companies set ${sql()(p)} where id = ${id} and owner_id = ${ownerId}`;
+}
+// projekty zostają (tracą firmę), zasady o zakresie „firma” znikają razem z nią, pochodzenie zasad pustoszeje
+export async function deleteCompany(ownerId: string, id: string): Promise<void> { await sql()`delete from companies where id = ${id} and owner_id = ${ownerId}`; }
+export async function findCompanyByName(ownerId: string, name: string): Promise<Company | null> {
+  const [r] = await sql()`select * from companies where owner_id = ${ownerId} and lower(name) = lower(${name.trim()}) limit 1`;
+  return r ? rowToCompany(r) : null;
+}
+
 // ---------- projekty ----------
-const rowToProject = (r: Row): Project => ({ id: r.id as string, name: r.name as string, color: Number(r.color), weight: Number(r.weight), language: r.language as string });
+const rowToProject = (r: Row): Project => ({ id: r.id as string, name: r.name as string, color: Number(r.color), weight: Number(r.weight), language: r.language as string, companyId: (r.companyId as string) ?? null });
 export async function listProjects(ownerId: string): Promise<Project[]> {
   const rows = await sql()`select * from projects where owner_id = ${ownerId} and archived_at is null order by created_at`;
   return rows.map(rowToProject);
 }
-export async function createProject(ownerId: string, name: string, weight = 3): Promise<Project> {
+export async function createProject(ownerId: string, name: string, weight = 3, companyId: string | null = null): Promise<Project> {
   const [{ n }] = await sql()`select count(*)::int as n from projects where owner_id = ${ownerId}`;
-  const [r] = await sql()`insert into projects (owner_id, name, color, weight) values (${ownerId}, ${name.slice(0, 60)}, ${Number(n) % 8}, ${weight}) returning *`;
+  const [r] = await sql()`insert into projects (owner_id, name, color, weight, company_id) values (${ownerId}, ${name.slice(0, 60)}, ${Number(n) % 8}, ${weight}, ${companyId}) returning *`;
   return rowToProject(r);
 }
-export async function updateProject(ownerId: string, id: string, patch: Partial<Pick<Project, "name" | "weight" | "language" | "color">>): Promise<void> {
+export async function updateProject(ownerId: string, id: string, patch: Partial<Pick<Project, "name" | "weight" | "language" | "color" | "companyId">>): Promise<void> {
   const p: Row = {};
   if (patch.name !== undefined) p.name = patch.name.slice(0, 60);
   if (patch.weight !== undefined) p.weight = patch.weight;
   if (patch.language !== undefined) p.language = patch.language;
   if (patch.color !== undefined) p.color = patch.color;
+  if (patch.companyId !== undefined) p.company_id = patch.companyId;
   if (!Object.keys(p).length) return;
   await sql()`update projects set ${sql()(p)} where id = ${id} and owner_id = ${ownerId}`;
 }
@@ -323,31 +350,32 @@ export async function countAttachments(taskIds: string[]): Promise<Record<string
 }
 
 // ---------- zasady ----------
-const rowToRule = (r: Row): Rule => ({ id: r.id as string, kind: ((r.kind as Rule["kind"]) ?? "rule"), scope: r.scope as Rule["scope"], projectId: (r.projectId as string) ?? null, tool: (r.tool as string) ?? null, title: r.title as string, body: r.body as string, trigger: (r.trigger as string) ?? null, summary: (r.summary as string) ?? null, visibility: r.visibility as Rule["visibility"] });
+const rowToRule = (r: Row): Rule => ({ id: r.id as string, kind: ((r.kind as Rule["kind"]) ?? "rule"), scope: r.scope as Rule["scope"], companyId: (r.companyId as string) ?? null, projectId: (r.projectId as string) ?? null, tool: (r.tool as string) ?? null, originCompanyId: (r.originCompanyId as string) ?? null, title: r.title as string, body: r.body as string, trigger: (r.trigger as string) ?? null, summary: (r.summary as string) ?? null, visibility: r.visibility as Rule["visibility"] });
 export async function listRules(ownerId: string): Promise<Rule[]> {
   const rows = await sql()`select * from rules where owner_id = ${ownerId} order by scope, position, created_at`;
   return rows.map(rowToRule);
 }
-// zasady pasujące do zadania: ogólne + projektu + narzędzi użytych w krokach
-export function rulesFor(rules: Rule[], projectId: string | null, tools: string[]): Rule[] {
-  return rules.filter((r) => r.scope === "global" || (r.scope === "project" && r.projectId === projectId) || (r.scope === "tool" && r.tool && tools.includes(r.tool)));
+// zasady pasujące do zadania: ogólne + firmy projektu + projektu + narzędzi użytych w krokach; projekt prywatny nie widzi niczego firmowego
+export function rulesFor(rules: Rule[], projectId: string | null, tools: string[], companyId: string | null = null): Rule[] {
+  return rules.filter((r) => r.scope === "global" || (r.scope === "company" && !!companyId && r.companyId === companyId) || (r.scope === "project" && r.projectId === projectId) || (r.scope === "tool" && r.tool && tools.includes(r.tool)));
 }
 // ta sama nazwa w tym samym zakresie (i dla tego samego projektu albo narzędzia) = ta sama zasada; dzięki temu ponowne wgranie nie robi duplikatów
-export async function findRule(ownerId: string, w: { scope: Rule["scope"]; projectId?: string | null; tool?: string | null; title: string }): Promise<Rule | null> {
-  const rows = await sql()`select * from rules where owner_id = ${ownerId} and scope = ${w.scope} and project_id is not distinct from ${w.projectId ?? null} and tool is not distinct from ${w.tool ?? null} and lower(title) = lower(${w.title.trim()}) limit 1`;
+export async function findRule(ownerId: string, w: { scope: Rule["scope"]; companyId?: string | null; projectId?: string | null; tool?: string | null; title: string }): Promise<Rule | null> {
+  const rows = await sql()`select * from rules where owner_id = ${ownerId} and scope = ${w.scope} and company_id is not distinct from ${w.companyId ?? null} and project_id is not distinct from ${w.projectId ?? null} and tool is not distinct from ${w.tool ?? null} and lower(title) = lower(${w.title.trim()}) limit 1`;
   return rows.length ? rowToRule(rows[0]) : null;
 }
 export type RuleInput = Partial<Rule> & { title: string; body: string; scope: Rule["scope"] };
 // każdy zapis zostawia migawkę w rule_versions (historia brzmienia zasady)
 export async function upsertRule(ownerId: string, rule: RuleInput): Promise<Rule> {
   const kind = rule.kind ?? "rule", trigger = rule.trigger?.trim() || null, summary = rule.summary?.trim() || null, title = rule.title.trim(), body = rule.body.trim();
+  const companyId = rule.scope === "company" ? rule.companyId ?? null : null, projectId = rule.scope === "project" ? rule.projectId ?? null : null, tool = rule.scope === "tool" ? rule.tool ?? null : null, origin = rule.originCompanyId ?? null;
   if (rule.id) {   // zapis bez zmian (np. ponowne wgranie tych samych zasad) nie zostawia pustej wersji w historii
     const [cur] = await sql()`select * from rules where id = ${rule.id} and owner_id = ${ownerId}`;
-    if (cur && cur.kind === kind && cur.title === title && cur.body === body && cur.scope === rule.scope && (cur.projectId ?? null) === (rule.projectId ?? null) && (cur.tool ?? null) === (rule.tool ?? null) && (cur.trigger ?? null) === trigger && (cur.summary ?? null) === summary && cur.visibility === (rule.visibility ?? "private")) return rowToRule(cur);
+    if (cur && cur.kind === kind && cur.title === title && cur.body === body && cur.scope === rule.scope && (cur.companyId ?? null) === companyId && (cur.projectId ?? null) === projectId && (cur.tool ?? null) === tool && (cur.originCompanyId ?? null) === origin && (cur.trigger ?? null) === trigger && (cur.summary ?? null) === summary && cur.visibility === (rule.visibility ?? "private")) return rowToRule(cur);
   }
   const rows = rule.id
-    ? await sql()`update rules set kind = ${kind}, title = ${title}, body = ${body}, scope = ${rule.scope}, project_id = ${rule.projectId ?? null}, tool = ${rule.tool ?? null}, trigger = ${trigger}, summary = ${summary}, visibility = ${rule.visibility ?? "private"}, updated_at = now() where id = ${rule.id} and owner_id = ${ownerId} returning *`
-    : await sql()`insert into rules (owner_id, kind, scope, project_id, tool, title, body, trigger, summary, visibility) values (${ownerId}, ${kind}, ${rule.scope}, ${rule.projectId ?? null}, ${rule.tool ?? null}, ${title}, ${body}, ${trigger}, ${summary}, ${rule.visibility ?? "private"}) returning *`;
+    ? await sql()`update rules set kind = ${kind}, title = ${title}, body = ${body}, scope = ${rule.scope}, company_id = ${companyId}, project_id = ${projectId}, tool = ${tool}, origin_company_id = ${origin}, trigger = ${trigger}, summary = ${summary}, visibility = ${rule.visibility ?? "private"}, updated_at = now() where id = ${rule.id} and owner_id = ${ownerId} returning *`
+    : await sql()`insert into rules (owner_id, kind, scope, company_id, project_id, tool, origin_company_id, title, body, trigger, summary, visibility) values (${ownerId}, ${kind}, ${rule.scope}, ${companyId}, ${projectId}, ${tool}, ${origin}, ${title}, ${body}, ${trigger}, ${summary}, ${rule.visibility ?? "private"}) returning *`;
   const r = rows[0];
   if (!r) throw new Error("Nie ma takiej zasady.");
   await snapshotRule(ownerId, r, rule.id ? "updated" : "created");
@@ -360,8 +388,8 @@ export async function deleteRule(ownerId: string, id: string): Promise<void> {
 export type RuleChange = "created" | "updated" | "deleted";
 export type RuleVersion = { id: string; ruleId: string; change: RuleChange; kind: Rule["kind"]; scope: Rule["scope"]; title: string; body: string; trigger: string | null; summary: string | null; changedAt: string };
 async function snapshotRule(ownerId: string, r: Row, change: RuleChange): Promise<void> {
-  await sql()`insert into rule_versions (rule_id, owner_id, change, kind, scope, project_id, tool, title, body, trigger, summary)
-    values (${r.id as string}, ${ownerId}, ${change}, ${(r.kind as string) ?? "rule"}, ${r.scope as string}, ${(r.projectId as string) ?? null}, ${(r.tool as string) ?? null}, ${r.title as string}, ${r.body as string}, ${(r.trigger as string) ?? null}, ${(r.summary as string) ?? null})`;
+  await sql()`insert into rule_versions (rule_id, owner_id, change, kind, scope, company_id, project_id, tool, origin_company_id, title, body, trigger, summary)
+    values (${r.id as string}, ${ownerId}, ${change}, ${(r.kind as string) ?? "rule"}, ${r.scope as string}, ${(r.companyId as string) ?? null}, ${(r.projectId as string) ?? null}, ${(r.tool as string) ?? null}, ${(r.originCompanyId as string) ?? null}, ${r.title as string}, ${r.body as string}, ${(r.trigger as string) ?? null}, ${(r.summary as string) ?? null})`;
 }
 // historia: najnowsza migawka pierwsza; bez ruleId = wszystkie zasady właściciela (strona zasad pokazuje je przy kartach)
 export async function listRuleVersions(ownerId: string, ruleId?: string, limit = 500): Promise<RuleVersion[]> {
