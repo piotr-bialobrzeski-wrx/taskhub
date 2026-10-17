@@ -14,7 +14,37 @@ describe.skipIf(!DB)("repo", async () => {
     await sql()`delete from rules where owner_id = ${owner}`;
     await sql()`delete from rule_versions where owner_id = ${owner}`;
     await sql()`delete from companies where owner_id = ${owner}`;
+    await sql()`delete from connections where owner_id = ${owner}`;
     await sql()`delete from api_tokens where owner_id = ${owner}`;
+  });
+
+  it("rejestr połączeń: mostek dopisuje swoje konektory, przejmuje firmę z ręcznego wpisu, gasi te, których już nie widzi; krok wskazuje połączenie", async () => {
+    const c = await repo.createCompany(owner, "Firma X");
+    const manual = await repo.createConnection(owner, { label: "Slack", account: "firma-x.slack.com", companyId: c.id, provider: "claude" });
+    expect(manual).toMatchObject({ app: "slack", sphere: "work", source: "manual", state: "active", kind: "mcp" });
+    const r1 = await repo.upsertBridgeConnections(owner, "MacBook", [{ name: "slack", url: "https://mcp.slack.com/mcp", transport: "HTTP", ok: true }, { name: "gmail", ok: false, status: "Needs authentication" }, { name: "task-hub", url: "https://taskhub.example/api/mcp", ok: true }]);
+    expect(r1).toEqual({ added: 2, updated: 0, off: 0 });
+    let list = await repo.listConnections(owner);
+    const bslack = list.find((x) => x.source === "bridge" && x.app === "slack")!, bgmail = list.find((x) => x.source === "bridge" && x.app === "gmail")!;
+    expect(bslack).toMatchObject({ companyId: c.id, sphere: "work", provider: "claude-code", host: "MacBook", state: "active", url: "https://mcp.slack.com/mcp" });   // firma z ręcznego wpisu o tej samej nazwie
+    expect(bgmail).toMatchObject({ state: "expired", companyId: null });
+    expect(list.some((x) => x.app === "taskhub")).toBe(false);   // własny konektor nie jest „połączeniem”
+    const r2 = await repo.upsertBridgeConnections(owner, "MacBook", [{ name: "gmail", ok: true }]);
+    expect(r2).toEqual({ added: 0, updated: 1, off: 1 });
+    list = await repo.listConnections(owner);
+    expect(list.find((x) => x.id === bslack.id)?.state).toBe("off");
+    expect(list.find((x) => x.id === bgmail.id)?.state).toBe("active");
+    expect((await repo.findConnection(owner, "SLACK"))?.id).toBe(manual.id);   // nazwa bez wielkości liter; działające przed wygaszonymi
+    expect((await repo.findConnection(owner, bslack.id))?.id).toBe(bslack.id);
+    const t = await repo.createTask(owner, { title: "Z połączeniem", steps: [{ title: "Napisz na Slacku", tool: "slack", connectionId: manual.id }] });
+    expect(t.steps[0].connectionId).toBe(manual.id);
+    await repo.updateStep(t.steps[0].id, { connectionId: null });
+    expect((await repo.getTask(owner, t.id))!.steps[0].connectionId).toBeNull();
+    await repo.updateStep(t.steps[0].id, { connectionId: bgmail.id });
+    await repo.deleteConnection(owner, bgmail.id);   // krok zostaje, traci wskazanie
+    expect((await repo.getTask(owner, t.id))!.steps[0].connectionId).toBeNull();
+    await repo.purgeTask(owner, t.id);
+    await repo.deleteCompany(owner, c.id);
   });
 
   it("firmy nad projektami: zasada firmy i pochodzenie; usunięcie firmy zostawia projekty jako prywatne, zabiera jej zasady", async () => {

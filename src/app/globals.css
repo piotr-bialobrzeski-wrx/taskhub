@@ -545,3 +545,22 @@ body:has(> main.page) { background: radial-gradient(560px 380px at 8% -8%, var(-
 .node.handoff.sel { animation: none; }
 @keyframes work { 0%, 100% { box-shadow: 0 2px 10px var(--shadow), 0 0 0 1.5px var(--t-claude); } 50% { box-shadow: 0 2px 10px var(--shadow), 0 0 0 4px color-mix(in srgb, var(--t-claude) 40%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .node.handoff, .pulse, .st.handoff::before { animation: none; } }
+
+/* ---------- rejestr połączeń (ustawienia) ---------- */
+.set-sub { margin: var(--s-2) 0 0; font-size: 13px; font-weight: 650; }
+table.t.conn td { white-space: nowrap; }
+table.t.conn tr.dim td { color: var(--sub); }
+table.t.conn tr.dim .conn-l .il-t { color: var(--sub); }
+.conn-app { display: inline-flex; align-items: center; gap: var(--s-3); min-width: 0; }
+.conn-l { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.conn-l .sub { font-size: 11px; }
+.il.cell { border: 0; background: transparent; font: inherit; color: inherit; text-align: left; margin: 0; padding: 2px 6px; }
+.il.cell .il-t { white-space: nowrap; }
+.il.cell.blank .il-t { color: var(--sub); }
+.il.cell svg { opacity: 0; }
+.il.cell:hover svg { opacity: 1; }
+table.t.conn .in { width: 180px; height: 30px; }
+.conn-new { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-4); padding: var(--s-4); border-radius: var(--r-md); background: var(--surface-2); }
+.conn-new .wide { grid-column: 1 / -1; }
+.conn-new .actions { display: flex; gap: var(--s-3); align-items: center; }
+@media (max-width: 860px) { .conn-new { grid-template-columns: 1fr; } table.t.conn { display: block; overflow-x: auto; } }

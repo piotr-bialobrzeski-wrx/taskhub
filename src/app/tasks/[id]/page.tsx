@@ -6,7 +6,7 @@ import * as repo from "@/lib/repo";
 import { bundle } from "@/lib/services";
 import { composeStatic } from "@/lib/agent/compose";
 import { breakdownPrompt, handoffPrompt, claudeUrl } from "@/lib/agent/handoff";
-import { EXTERNAL_TOOLS, toolLabel, type Question, type Step, type Task } from "@/lib/schema";
+import { EXTERNAL_TOOLS, sphereOf, toolLabel, type Question, type Step, type Task } from "@/lib/schema";
 import { calEst, calibrationFor, estOf, fmtMin, spentMin, taskEst, taskSpent, todayISO } from "@/lib/time";
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
@@ -134,7 +134,10 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
 
   // ---------- panele kroków ----------
   const panels: Record<string, React.ReactNode> = {};
-  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} />; });
+  // połączenia do wyboru w kroku: tylko z tej sfery co zadanie (zadanie prywatne nie dostaje Slacka firmy); nazwa firmy do etykiety
+  const sphere = sphereOf(cur.project, b.companies);
+  const connections = b.connections.filter((c) => c.sphere === sphere).map((c) => ({ id: c.id, label: c.label, app: c.app, account: c.account, company: c.companyId ? b.companies.find((x) => x.id === c.companyId)?.name ?? null : null, sphere: c.sphere, active: c.state === "active" }));
+  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} connections={connections} />; });
 
   return (
     <TaskCanvas
@@ -147,9 +150,10 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
-function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId }: {
+function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, connections }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null;
+  connections: Parameters<typeof StepMeta>[0]["connections"];
 }) {
   // szczegóły są już pod tytułem, więc blok tekstu z tą samą treścią odpada
   const blocks = (s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
@@ -187,8 +191,9 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         {link ? <a className="btn ico" href={link} target="_blank" rel="noopener" title={link}>{linkLabel}<Icon k="ext" size={13} sw={1.6} /></a> : null}
       </div>
       <StepMeta taskId={t.id}
-        step={{ id: s.id, tool: s.tool, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null }}
+        step={{ id: s.id, tool: s.tool, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null, connectionId: s.connectionId }}
         steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title, done: x.status === "done" }))}
+        connections={connections}
         calText={calOn && cal ? `Z Twoich czasów (${cal.scope === "tool" ? toolLabel(s.tool) : "ogólnie"}, ${cal.n} ${plural(cal.n, "krok", "kroki", "kroków")}): takie kroki trwają zwykle ×${String(cal.k).replace(".", ",")}.` : null} />
       <InlineText taskId={t.id} stepId={s.id} field="link" value={s.link ?? ""} as="small" placeholder="Dodaj link do wyniku (ticket, wydarzenie, mail)…" shown={s.link ? "Link: " + s.link.replace(/^https?:\/\//, "").slice(0, 70) : undefined} />
       {state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}

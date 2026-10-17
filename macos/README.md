@@ -9,6 +9,8 @@ Natywna aplikacja (Swift, AppKit + WebKit + SwiftUI), odpowiednik Claude Code Qu
   bierze bieg (`POST /api/bridge/run`) i uruchamia `claude -p … --permission-mode bypassPermissions --mcp-config …` na subskrypcji
   (ANTHROPIC_API_KEY celowo nieustawione), przekazuje użycia narzędzi jako postęp i zgłasza wynik (`PATCH /api/bridge/run/:id`),
 - **Ustawienia** (⌘,): adres, token mostka, ścieżka do Claude Code, model, start po zalogowaniu (SMAppService), dziennik,
+- **rejestr połączeń**: po starcie i co 6 godzin (albo po „Sprawdź teraz”) wysyła do Task Hub listę serwerów MCP z `claude mcp list`
+  (`POST /api/bridge/connections`: nazwy, adresy i stan, nigdy tokeny), więc agent wie, czym dysponuje z tego Maca
 - **samoaktualizacja**: co 6 godzin pyta GitHub o najnowsze wydanie, pobiera `.zip` z aplikacją (bez kwarantanny, więc bez Gatekeepera),
   podmienia `/Applications/Task Hub.app` (stara wersja do Kosza) i uruchamia się ponownie, gdy okna są zamknięte i mostek nie pracuje
   (inaczej pyta). Bez prawa zapisu w /Applications otwiera instalator `.pkg`. Wyłączalna w Ustawieniach,

@@ -12,13 +12,14 @@ import { PendingButton } from "@/components/Pending";
 import { TokenForm } from "@/components/TokenForm";
 import { CopyButton } from "@/components/CopyButton";
 import { ClientGuide, ProviderPicker } from "@/components/SettingsBits";
+import { ConnectionsPanel } from "@/components/ConnectionsPanel";
 import { HashOpener, PageBar } from "@/components/PageBar";
 import { Icon } from "@/components/canvas/ui";
 import { createBridgeToken, createToken, revokeToken, saveSettings } from "../actions";
 
 export const dynamic = "force-dynamic";
 
-const TOOLS = "list_tasks, get_task, get_rules, create_task, update_task, add_steps, update_step, set_blocks, complete_step, add_facts, add_snapshot, list_work, ask_question, get_attachment, describe_attachment, list_companies, create_company, list_projects, create_project, list_rules, add_rule, update_rule";
+const TOOLS = "list_tasks, get_task, get_rules, create_task, update_task, add_steps, update_step, set_blocks, complete_step, add_facts, add_snapshot, list_work, ask_question, get_attachment, describe_attachment, list_connections, list_companies, create_company, list_projects, create_project, list_rules, add_rule, update_rule";
 const OUTCOME: Record<string, string> = { done: "zrobione", error: "błąd", limit: "limit Claude", auth: "wylogowany", stale: "wygasł" };
 
 function More({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
@@ -43,7 +44,7 @@ function bridgeLine(b: repo.BridgeStatus): string {
 
 export default async function Settings() {
   const o = await requireOwner();
-  const [tokens, index, bridge, runs] = await Promise.all([repo.listApiTokens(o.id), searchIndex(o.id), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.listBridgeRuns(o.id, 6)]);
+  const [tokens, index, bridge, runs, connections, companies] = await Promise.all([repo.listApiTokens(o.id), searchIndex(o.id), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.listBridgeRuns(o.id, 6), repo.listConnections(o.id), repo.listCompanies(o.id)]);
   const avail = availableProviders();
   const pref = (o.settings as { aiProvider?: string }).aiProvider ?? "";
   const origin = appUrl();
@@ -101,11 +102,12 @@ export default async function Settings() {
 
       <section className="set" id="connections">
         <header className="set-h">
-          <div><h2>Połączenia</h2><p>Claude, Claude Code i ChatGPT łączą się z Task Hub przez konektor MCP i działają na Twoich zadaniach.</p></div>
-          <span className={"st" + (tokens.length ? " active" : "")}>{tokens.length ? `${tokens.length} ${tokens.length === 1 ? "połączenie" : tokens.length < 5 ? "połączenia" : "połączeń"}` : "nic nie podłączono"}</span>
+          <div><h2>Połączenia</h2><p>Kto jest podłączony do Task Hub (Claude, Claude Code, ChatGPT przez konektor MCP) i do czego agent ma dostęp: rejestr aplikacji, kont i firm.</p></div>
+          <span className={"st" + (tokens.length ? " active" : "")}>{tokens.length ? `${tokens.length} ${tokens.length === 1 ? "klient" : tokens.length < 5 ? "klienci" : "klientów"}` : "nic nie podłączono"}</span>
         </header>
         <div className="set-b">
           <div className="kv"><span className="k">Adres konektora</span><code className="v">{mcp}</code><CopyButton text={mcp} /></div>
+          <h3 className="set-sub">Klienci Task Hub</h3>
           {tokens.length ? (
             <table className="t">
               <thead><tr><th>Klient</th><th>Podłączony</th><th>Ostatnio użyty</th><th /></tr></thead>
@@ -124,6 +126,8 @@ export default async function Settings() {
           <More id="tools" title="Co potrafi konektor">
             <p className="sub" style={{ margin: 0 }}>Narzędzia: {TOOLS}. Podłączony klient czyta i zmienia Twoje zadania, kroki, fakty, załączniki i zasady; nigdy nie usuwa zadań.</p>
           </More>
+          <h3 className="set-sub" id="registry-h">Do czego agent ma dostęp</h3>
+          <ConnectionsPanel connections={connections} companies={companies} mcp={mcp} />
         </div>
       </section>
     </main>

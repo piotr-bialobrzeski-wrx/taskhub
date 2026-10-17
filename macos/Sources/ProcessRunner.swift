@@ -15,6 +15,7 @@ final class ProcessRunner {
     private let maxSeconds: Double
     private let stallSeconds: Double
     private let json: Bool
+    private let maxText: Int   // ile znaków wyjścia zwrócić bez stream-json (wersja: koniec; lista konektorów: całość)
 
     private let queue = DispatchQueue(label: "taskhub.process")
     private let proc = Process()
@@ -32,9 +33,9 @@ final class ProcessRunner {
     private var timer: DispatchSourceTimer? = nil
     private var done: ((ProcessResult) -> Void)? = nil
 
-    init(bin: String, args: [String], cwd: String, env: [String: String], maxSeconds: Double, stallSeconds: Double = 600, json: Bool = true) {
+    init(bin: String, args: [String], cwd: String, env: [String: String], maxSeconds: Double, stallSeconds: Double = 600, json: Bool = true, maxText: Int = 600) {
         self.bin = bin; self.args = args; self.cwd = cwd; self.env = env
-        self.maxSeconds = maxSeconds; self.stallSeconds = stallSeconds; self.json = json
+        self.maxSeconds = maxSeconds; self.stallSeconds = stallSeconds; self.json = json; self.maxText = maxText
     }
 
     func kill(_ why: String = "przerwany") {
@@ -145,7 +146,7 @@ final class ProcessRunner {
         let tail = String((errText.isEmpty ? outText : errText).suffix(400)).trimmingCharacters(in: .whitespacesAndNewlines)
         if code != 0 { done(ProcessResult(ok: false, text: "claude zakończył się kodem \(code): \(tail.isEmpty ? "(bez komunikatu)" : tail)")); return }
         if json { done(ProcessResult(ok: false, text: "brak wyniku z claude: \(tail)")) }
-        else { done(ProcessResult(ok: true, text: String(outText.trimmingCharacters(in: .whitespacesAndNewlines).suffix(600)))) }
+        else { done(ProcessResult(ok: true, text: String(outText.trimmingCharacters(in: .whitespacesAndNewlines).suffix(maxText)))) }
     }
 
     // linie stream-json: użycia narzędzi → postęp, zdarzenie result → wynik

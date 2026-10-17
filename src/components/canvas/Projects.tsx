@@ -2,11 +2,10 @@
 // Widok „Projekty” (z menu): firmy nad projektami. Każda firma ma wiersz nagłówka (nazwa, sfera, stan współpracy, statystyki) i pod nim swoje projekty;
 // projekty bez firmy są prywatne i stoją w osobnej sekcji. Wiersz projektu: kolor, nazwa, firma, ważność, język, statystyki; pod nim lista zadań.
 // Nowy projekt i nową firmę dodaje się w tej samej linii co tytuł widoku; usunięcie potwierdza się w dymku pod ikoną, więc wiersz się nie rozjeżdża.
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useState } from "react";
 import { fmtMin } from "@/lib/time";
 import { Icon, Lvl, TS_LABEL, GCOL, plural, projColor, type CompanyRow, type ProjTask, type ProjectRow } from "./ui";
-import { Picker } from "./widgets";
+import { Picker, RemovePop as Remove } from "./widgets";
 
 export const LANGS: Record<string, string> = { pl: "polski", en: "angielski", de: "niemiecki", uk: "ukraiński", fr: "francuski", es: "hiszpański" };
 const WEIGHTS: Record<number, string> = { 5: "najwyższa", 4: "wysoka", 3: "zwykła", 2: "niska", 1: "najniższa" };
@@ -31,35 +30,6 @@ function Name({ name, label, onRename }: { name: string; label: string; onRename
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); done(e.currentTarget.value); } else if (e.key === "Escape") { e.preventDefault(); setEdit(false); } }}
         onBlur={(e) => done(e.currentTarget.value)} />
     </span>
-  );
-}
-
-// potwierdzenie usunięcia w dymku pod ikoną kosza (portal: lista ma własny scroll)
-function Remove({ label, question, onYes }: { label: string; question: string; onYes: () => void }) {
-  const [open, setOpen] = useState(false);
-  const btn = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState({ left: 0, top: 0 });
-  useEffect(() => {
-    if (!open) return;
-    const r = btn.current!.getBoundingClientRect();
-    setPos({ left: Math.min(r.right - 260, window.innerWidth - 276), top: r.bottom + 6 });
-    const close = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".ppmenu")) setOpen(false); };
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("pointerdown", close); document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", key); };
-  }, [open]);
-  return (
-    <>
-      <button ref={btn} className="icobtn" type="button" aria-label={label} title={label} aria-expanded={open} onClick={() => setOpen((o) => !o)}><Icon k="trash" size={14} sw={1.7} /></button>
-      {open ? createPortal(
-        <div className="ppmenu glass pop" role="dialog" aria-label={label} style={{ position: "fixed", left: pos.left, top: pos.top, width: 260 }} onPointerDown={(e) => e.stopPropagation()}>
-          <span className="sub">{question}</span>
-          <div className="row" style={{ gap: "var(--s-2)", justifyContent: "flex-end" }}>
-            <button className="btn" type="button" onClick={() => setOpen(false)}>Anuluj</button>
-            <button className="btn danger" type="button" onClick={() => { setOpen(false); onYes(); }}>Tak, usuń</button>
-          </div>
-        </div>, document.body) : null}
-    </>
   );
 }
 

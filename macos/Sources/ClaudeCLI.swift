@@ -57,6 +57,50 @@ enum ClaudeCLI {
         return r.ok ? r.text : nil
     }
 
+    // ---------- lista konektorów tego komputera (rejestr połączeń w Task Hub) ----------
+    struct McpServer {
+        var name: String
+        var target: String      // adres (http/sse) albo polecenie (stdio)
+        var transport: String   // http, sse, stdio
+        var ok: Bool
+        var status: String
+    }
+
+    // `claude mcp list` pokazuje serwery MCP skonfigurowane w Claude Code na tym Macu, po jednym w linii:
+    // „slack: https://mcp.slack.com/mcp (HTTP) - ✓ Connected” albo „clickup: … (HTTP) - ✗ Needs authentication”. Bez tokenów: tylko nazwy, adresy i stan.
+    static func mcpList(_ bin: String) async -> [McpServer]? {
+        let runner = ProcessRunner(bin: bin, args: ["mcp", "list"], cwd: Store.workDir.path, env: env(), maxSeconds: 120, stallSeconds: 120, json: false, maxText: 40_000)
+        let r = await runner.run { _ in }
+        return r.ok ? parseMcpList(r.text) : nil
+    }
+
+    static func parseMcpList(_ text: String) -> [McpServer] {
+        var out: [McpServer] = []
+        for raw in text.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, !name.contains(" "), !name.hasPrefix("http") else { continue }   // „Checking MCP server health...” i podobne odpadają
+            var rest = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            var status = ""
+            if let dash = rest.range(of: " - ", options: .backwards) {
+                status = String(rest[dash.upperBound...]).trimmingCharacters(in: .whitespaces)
+                rest = String(rest[..<dash.lowerBound]).trimmingCharacters(in: .whitespaces)
+            }
+            var transport = ""
+            if rest.hasSuffix(")"), let open = rest.range(of: "(", options: .backwards) {
+                transport = String(rest[rest.index(after: open.lowerBound)...].dropLast()).trimmingCharacters(in: .whitespaces).lowercased()
+                rest = String(rest[..<open.lowerBound]).trimmingCharacters(in: .whitespaces)
+            }
+            guard !rest.isEmpty else { continue }
+            let ok = status.contains("✓") || status.lowercased().hasPrefix("connected")
+            let clean = status.replacingOccurrences(of: "✓", with: "").replacingOccurrences(of: "✗", with: "").replacingOccurrences(of: "⚠", with: "").trimmingCharacters(in: .whitespaces)
+            if transport.isEmpty { transport = rest.hasPrefix("http") ? "http" : "stdio" }
+            out.append(McpServer(name: name, target: rest, transport: transport, ok: ok, status: clean))
+        }
+        return out
+    }
+
     static let limitPattern = "usage limit|rate limit|limit reached|too many requests|quota|resource[_ ]?exhausted|overloaded"
     static let authPattern = "not logged in|please run /login|run /login|invalid api key|authentication[_ ]?error|failed to authenticate|unauthorized|oauth token (has )?expired|refresh token is no longer valid|could not be refreshed|session expired"
     static func isLimit(_ t: String) -> Bool { t.range(of: limitPattern, options: [.regularExpression, .caseInsensitive]) != nil }

@@ -15,6 +15,7 @@ const STATIC: { title: string; href: string; sub: string; extra: string }[] = [
   { title: "Jak włączyć agenta wbudowanego", href: "/settings#agent-key", sub: "Ustawienia › Agent", extra: "klucz api anthropic openai vercel zmienna środowiskowa płatny tokeny" },
   { title: "Połączenia", href: "/settings#connections", sub: "Ustawienia", extra: "konektor mcp podłączone klienty claude claude code chatgpt unieważnij" },
   { title: "Adres konektora", href: "/settings#connections", sub: "Ustawienia › Połączenia", extra: "mcp url adres kopiuj" },
+  { title: "Rejestr połączeń", href: "/settings#registry", sub: "Ustawienia › Połączenia", extra: "do czego agent ma dostęp konta firmy sfera konektory nowe połączenie konfiguracja dla nowego silnika" },
   { title: "Jak podłączyć klienta", href: "/settings#connect", sub: "Ustawienia › Połączenia", extra: "instrukcja aplikacja claude claude code chatgpt custom connector add" },
   { title: "Token dla klienta bez logowania", href: "/settings#token", sub: "Ustawienia › Połączenia", extra: "klucz skrypt serwer api token nowy" },
   { title: "Co potrafi konektor", href: "/settings#tools", sub: "Ustawienia › Połączenia", extra: "narzędzia list_tasks get_task create_task add_steps uprawnienia" },
@@ -50,6 +51,7 @@ export function indexFrom(b: Bundle, now = Date.now()): SearchItem[] {
     const where = r.scope === "company" ? comp(r.companyId)?.name ?? "firma" : r.scope === "project" ? proj(r.projectId)?.name ?? "projekt" : r.scope === "tool" ? toolLabel(r.tool ?? "") : "ogólna";
     out.push({ kind: "rule", id: r.id, title: r.title, hay: norm(`${r.title} ${r.body} ${r.summary ?? ""} ${SCOPE[r.scope]} ${where}`), href: `/rules#rule-${r.id}`, sub: where });
   }
+  for (const c of b.connections) out.push({ kind: "setting", id: "conn-" + c.id, title: c.label, hay: norm(`${c.label} ${toolLabel(c.app)} ${c.account ?? ""} ${comp(c.companyId)?.name ?? ""} połączenie konektor ${c.sphere === "private" ? "prywatne" : "zawodowe"}`), href: "/settings#registry", sub: `połączenie · ${comp(c.companyId)?.name ?? (c.sphere === "private" ? "prywatne" : "zawodowe")}` });
   STATIC.forEach((s, i) => out.push({ kind: "setting", id: "s" + i, title: s.title, hay: norm(`${s.title} ${s.sub} ${s.extra}`), href: s.href, sub: s.sub }));
   return out;
 }

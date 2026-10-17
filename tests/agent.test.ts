@@ -5,6 +5,7 @@ import { FakeProvider, project, rule, step, task } from "./helpers";
 import { handoffPrompt } from "@/lib/agent/handoff";
 import { contextText, procedureMatches, rulesText } from "@/lib/agent/context";
 import { z } from "zod";
+import type { Connection } from "@/lib/schema";
 
 describe("warstwa modelu niezależna od dostawcy", () => {
   it("wybrany dostawca dostaje schemat, a gdy zawiedzie przejściowo, odpowiada drugi", async () => {
@@ -84,6 +85,24 @@ describe("prompt hand-off i kontekst", () => {
     expect(priv).toContain("Projekt 3/5 (prywatny)");
     expect(priv).toContain("sfera prywatna");
     expect(priv).not.toContain("Dwa brandy");
+  });
+  it("połączenia w kontekście: zadanie widzi tylko swoją sferę, krok podaje wskazane połączenie, wygasłe jest oznaczone", () => {
+    const companies = [{ id: "c1", name: "Pirxey", sphere: "work" as const, note: null, endedAt: null }];
+    const conn = (p: Partial<Connection>): Connection => ({ id: "k1", app: "slack", label: "Slack Pirxey", account: null, companyId: "c1", sphere: "work", provider: "claude-code", kind: "mcp", state: "active", source: "bridge", host: "Mac", url: null, meta: {}, seenAt: null, ...p });
+    const connections = [conn({}), conn({ id: "k2", label: "Gmail prywatny", app: "gmail", companyId: null, sphere: "private", provider: "claude", state: "expired" }), conn({ id: "k3", label: "Poczta domowa", app: "gmail", account: "ja@dom.pl", companyId: null, sphere: "private", provider: "claude" })];
+    const t = task({ projectId: "p1", steps: [step({ tool: "slack", connectionId: "k1" })] });
+    const ctx = contextText({ tasks: [t], projects: [project({ companyId: "c1" })], companies, connections, rules: [], samples: [], currentTaskId: t.id });
+    expect(ctx).toContain("POŁĄCZENIA");
+    expect(ctx).toContain("Slack Pirxey | Pirxey | Claude Code na komputerze");
+    expect(ctx).not.toContain("Gmail prywatny");
+    expect(ctx).toContain("| połączenie: Slack Pirxey");
+    const priv = contextText({ tasks: [t], projects: [project()], companies, connections, rules: [], samples: [], currentTaskId: t.id });
+    expect(priv).toContain("Gmail prywatny | prywatne | Claude | WYGASŁO");
+    expect(priv).toContain("Poczta domowa (E-mail) ja@dom.pl | prywatne | Claude");
+    expect(priv).not.toContain("Slack Pirxey |");
+    const all = contextText({ tasks: [t], projects: [project()], companies, connections, rules: [], samples: [] });
+    expect(all).toContain("Slack Pirxey");
+    expect(all).toContain("Gmail prywatny");
   });
 });
 

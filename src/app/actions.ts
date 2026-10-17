@@ -10,7 +10,7 @@ import { aiFor, composeFlow, finishStep, prepareStep } from "@/lib/services";
 import { runChat } from "@/lib/agent/chat";
 import { newTaskText } from "@/lib/auto";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
-import type { Rule, Sphere } from "@/lib/schema";
+import type { Connection, Rule, Sphere } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const num = (fd: FormData, k: string, def: number) => { const v = Number(str(fd, k)); return Number.isFinite(v) && str(fd, k) !== "" ? v : def; };
@@ -152,7 +152,7 @@ export async function addStepForm(fd: FormData) {
   refresh(taskId);
 }
 // edycja w miejscu: jedno pole naraz, tam gdzie je widać w panelu kroku
-export async function patchStep(taskId: string, stepId: string, patch: { title?: string; detail?: string; tool?: string; estMin?: number; spentMin?: number; link?: string; needsApproval?: boolean }) {
+export async function patchStep(taskId: string, stepId: string, patch: { title?: string; detail?: string; tool?: string; estMin?: number; spentMin?: number; link?: string; needsApproval?: boolean; connectionId?: string | null }) {
   const o = await requireOwner();
   const { step } = await stepOf(o.id, taskId, stepId);
   const p: repo.StepPatch = {};
@@ -163,6 +163,7 @@ export async function patchStep(taskId: string, stepId: string, patch: { title?:
   if (patch.spentMin !== undefined && Number.isFinite(patch.spentMin) && patch.spentMin >= 0) { p.spentSec = Math.round(patch.spentMin * 60); p.spentManual = true; }
   if (patch.link !== undefined) p.link = patch.link.trim() ? url(patch.link.trim()) : null;
   if (patch.needsApproval !== undefined) p.needsApproval = patch.needsApproval;
+  if (patch.connectionId !== undefined) p.connectionId = patch.connectionId || null;
   if (Object.keys(p).length) await repo.updateStep(step.id, p);
   refresh(taskId);
 }
@@ -309,6 +310,29 @@ export async function removeCompany(id: string) {
   const o = await requireOwner();
   await repo.deleteCompany(o.id, id);   // projekty zostają (stają się prywatne), zasady firmy znikają
   refresh(); revalidatePath("/rules");
+}
+// ---------- połączenia ----------
+// rejestr mówi, do czego agent ma dostęp i przez co; wpisy mostka odświeża sam mostek, ręczne opisują resztę (Claude w chmurze, kalendarze)
+export type ConnectionPatch = Partial<Pick<Connection, "app" | "label" | "account" | "companyId" | "sphere" | "provider" | "kind" | "state" | "url">>;
+export async function createConnectionAction(input: ConnectionPatch & { label: string }): Promise<string> {
+  const o = await requireOwner();
+  const label = input.label.trim().slice(0, 80); if (!label) throw new Error("Podaj nazwę połączenia");
+  const c = await repo.createConnection(o.id, { ...input, label, url: input.url ? url(input.url) ?? null : null });
+  revalidatePath("/settings"); refresh();
+  return c.id;
+}
+export async function updateConnectionAction(id: string, patch: ConnectionPatch) {
+  const o = await requireOwner();
+  const p: Partial<repo.ConnectionInput> = { ...patch };
+  if (patch.label !== undefined) { const l = patch.label.trim().slice(0, 80); if (l) p.label = l; else delete p.label; }
+  if (patch.url !== undefined) p.url = patch.url ? url(patch.url) ?? null : null;
+  await repo.updateConnection(o.id, id, p);
+  revalidatePath("/settings"); refresh();
+}
+export async function removeConnection(id: string) {
+  const o = await requireOwner();
+  await repo.deleteConnection(o.id, id);   // kroki zostają, tracą tylko wskazanie połączenia
+  revalidatePath("/settings"); refresh();
 }
 export async function saveSettings(fd: FormData) {
   const o = await requireOwner();

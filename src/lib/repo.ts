@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "./db";
-import { type Company, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample } from "./schema";
+import { type Company, type Connection, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample, appOfLabel } from "./schema";
 import { spentMin } from "./time";
 
 type Row = Record<string, unknown>;
@@ -95,6 +95,83 @@ export async function findProjectByName(ownerId: string, name: string): Promise<
   return r ? rowToProject(r) : null;
 }
 
+// ---------- połączenia ----------
+// Rura, nie klucz: rejestr mówi, do czego agent ma dostęp i przez co; żadnych sekretów cudzych usług.
+const rowToConnection = (r: Row): Connection => ({
+  id: r.id as string, app: r.app as string, label: r.label as string, account: (r.account as string) ?? null, companyId: (r.companyId as string) ?? null,
+  sphere: (r.sphere as Connection["sphere"]) ?? "work", provider: (r.provider as Connection["provider"]) ?? "claude", kind: (r.kind as Connection["kind"]) ?? "mcp",
+  state: (r.state as Connection["state"]) ?? "active", source: (r.source as Connection["source"]) ?? "manual", host: (r.host as string) ?? null, url: (r.url as string) ?? null,
+  meta: (r.meta as Record<string, unknown>) ?? {}, seenAt: iso(r.seenAt),
+});
+export async function listConnections(ownerId: string): Promise<Connection[]> {
+  const rows = await sql()`select * from connections where owner_id = ${ownerId} order by (state = 'active') desc, app, label`;
+  return rows.map(rowToConnection);
+}
+export type ConnectionInput = { app?: string; label: string; account?: string | null; companyId?: string | null; sphere?: Connection["sphere"]; provider?: Connection["provider"]; kind?: Connection["kind"]; state?: Connection["state"]; url?: string | null; meta?: Record<string, unknown> };
+export async function createConnection(ownerId: string, input: ConnectionInput): Promise<Connection> {
+  const label = input.label.trim().slice(0, 80);
+  const [r] = await sql()`insert into connections (owner_id, app, label, account, company_id, sphere, provider, kind, state, source, url, meta)
+    values (${ownerId}, ${(input.app ?? appOfLabel(label)).slice(0, 30)}, ${label}, ${input.account?.trim().slice(0, 120) || null}, ${input.companyId ?? null}, ${input.sphere ?? (input.companyId ? "work" : "private")},
+      ${input.provider ?? "claude"}, ${input.kind ?? "mcp"}, ${input.state ?? "active"}, 'manual', ${input.url?.trim().slice(0, 500) || null}, ${sql().json((input.meta ?? {}) as never)}) returning *`;
+  return rowToConnection(r);
+}
+export async function updateConnection(ownerId: string, id: string, patch: Partial<ConnectionInput>): Promise<void> {
+  const p: Row = {};
+  if (patch.app !== undefined) p.app = patch.app.slice(0, 30);
+  if (patch.label !== undefined) p.label = patch.label.trim().slice(0, 80);
+  if (patch.account !== undefined) p.account = patch.account?.trim().slice(0, 120) || null;
+  if (patch.companyId !== undefined) p.company_id = patch.companyId;
+  if (patch.sphere !== undefined) p.sphere = patch.sphere;
+  if (patch.provider !== undefined) p.provider = patch.provider;
+  if (patch.kind !== undefined) p.kind = patch.kind;
+  if (patch.state !== undefined) p.state = patch.state;
+  if (patch.url !== undefined) p.url = patch.url?.trim().slice(0, 500) || null;
+  if (patch.meta !== undefined) p.meta = sql().json(patch.meta as never);
+  if (!Object.keys(p).length) return;
+  p.updated_at = new Date();
+  await sql()`update connections set ${sql()(p)} where id = ${id} and owner_id = ${ownerId}`;
+}
+export async function deleteConnection(ownerId: string, id: string): Promise<void> { await sql()`delete from connections where id = ${id} and owner_id = ${ownerId}`; }
+// połączenie po id albo nazwie (bez wielkości liter); nazwa niejednoznaczna → pierwsze działające
+export async function findConnection(ownerId: string, ref: string): Promise<Connection | null> {
+  const q = ref.trim();
+  if (!q) return null;
+  const rows = await sql()`select * from connections where owner_id = ${ownerId} and (id::text = ${q} or lower(label) = lower(${q}) or (lower(app) = lower(${q}) and state = 'active')) order by (id::text = ${q}) desc, (lower(label) = lower(${q})) desc, (state = 'active') desc limit 1`;
+  return rows[0] ? rowToConnection(rows[0]) : null;
+}
+// zgłoszenie mostka: lista serwerów MCP, które widzi Claude Code na tym komputerze. Wpisy tego komputera, których nie ma na liście, gasną (off);
+// serwer bez połączenia = wygasły; nowe wpisy dostają sferę i firmę z istniejącego wpisu o tej samej nazwie (ręcznie przypisanych nie nadpisujemy).
+export type BridgeServer = { name: string; url?: string | null; command?: string | null; transport?: string | null; ok: boolean; status?: string | null };
+export async function upsertBridgeConnections(ownerId: string, host: string, servers: BridgeServer[]): Promise<{ added: number; updated: number; off: number }> {
+  const h = host.trim().slice(0, 80) || "komputer";
+  const keep = servers.filter((s) => s.name && !/^task[-_ ]?hub$/i.test(s.name.trim()));
+  const existing = (await sql()`select * from connections where owner_id = ${ownerId} and source = 'bridge' and host = ${h}`).map(rowToConnection);
+  const all = (await sql()`select * from connections where owner_id = ${ownerId}`).map(rowToConnection);
+  let added = 0, updated = 0;
+  for (const srv of keep) {
+    const label = srv.name.trim().slice(0, 80);
+    const state: Connection["state"] = srv.ok ? "active" : "expired";
+    const url = (srv.url ?? srv.command ?? null)?.trim().slice(0, 500) || null;
+    const meta = { transport: srv.transport ?? null, status: srv.status ?? null };
+    const mine = existing.find((c) => c.label.toLowerCase() === label.toLowerCase());
+    if (mine) {
+      await sql()`update connections set state = ${state}, url = ${url}, meta = meta || ${sql().json(meta as never)}, seen_at = now(), updated_at = now() where id = ${mine.id}`;
+      updated++;
+    } else {
+      // ten sam konektor znany skądinąd (ręczny wpis albo inny komputer) podpowiada firmę i sferę
+      const twin = all.find((c) => c.label.toLowerCase() === label.toLowerCase() || c.app === appOfLabel(label));
+      await sql()`insert into connections (owner_id, app, label, account, company_id, sphere, provider, kind, state, source, host, url, meta, seen_at)
+        values (${ownerId}, ${appOfLabel(label)}, ${label}, ${twin?.account ?? null}, ${twin?.companyId ?? null}, ${twin?.sphere ?? "work"}, 'claude-code', 'mcp', ${state}, 'bridge', ${h}, ${url}, ${sql().json(meta as never)}, now())
+        on conflict (owner_id, host, lower(label)) where source = 'bridge' do update set state = excluded.state, url = excluded.url, meta = connections.meta || excluded.meta, seen_at = now(), updated_at = now()`;
+      added++;
+    }
+  }
+  const names = new Set(keep.map((s) => s.name.trim().toLowerCase()));
+  const gone = existing.filter((c) => !names.has(c.label.toLowerCase()) && c.state !== "off");
+  if (gone.length) await sql()`update connections set state = 'off', updated_at = now() where id in ${sql()(gone.map((c) => c.id))}`;
+  return { added, updated, off: gone.length };
+}
+
 // ---------- zadania ----------
 function rowToStep(r: Row, deps: string[]): Step {
   const blocks = r.blocks ? Blocks.safeParse(r.blocks) : null;
@@ -104,7 +181,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     estMin: Number(r.estMin), spentSec: Number(r.spentSec), spentManual: !!r.spentManual, link: (r.link as string) ?? null,
     handoffAt: iso(r.handoffAt), report: (r.report as string) ?? null, output: (r.output as string) ?? "",
     review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), logged: !!r.logged,
-    pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps,
+    pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, connectionId: (r.connectionId as string) ?? null,
   };
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
@@ -141,7 +218,7 @@ export async function getTask(ownerId: string, id: string): Promise<Task | null>
   const rows = await sql()`select * from tasks where owner_id = ${ownerId} and id = ${id}`;
   return (await hydrate(rows))[0] ?? null;
 }
-export type NewStep = { title: string; detail?: string; tool?: string; needsApproval?: boolean; estMin?: number; link?: string; dependsOn?: string[] /* indeksy lub id */ };
+export type NewStep = { title: string; detail?: string; tool?: string; needsApproval?: boolean; estMin?: number; link?: string; dependsOn?: string[] /* indeksy lub id */; connectionId?: string | null };
 export type NewTask = { title: string; summary?: string; source?: string; level?: number; due?: string | null; projectId?: string | null; steps?: NewStep[]; dependsOn?: string[] };
 
 export async function createTask(ownerId: string, input: NewTask): Promise<Task> {
@@ -157,8 +234,8 @@ export async function addSteps(taskId: string, steps: NewStep[]): Promise<Step[]
   let pos = Number(n);
   const created: { id: string }[] = [];
   for (const s of steps) {
-    const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link)
-      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${s.tool ?? "manual"}, ${!!s.needsApproval}, ${Math.max(15, Math.round((s.estMin ?? 15) / 15) * 15)}, ${s.link ?? null}) returning id`;
+    const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id)
+      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${s.tool ?? "manual"}, ${!!s.needsApproval}, ${Math.max(15, Math.round((s.estMin ?? 15) / 15) * 15)}, ${s.link ?? null}, ${s.connectionId ?? null}) returning id`;
     created.push({ id: r.id as string });
   }
   // zależności: "n2" / indeks w tej paczce albo id istniejącego kroku
@@ -200,7 +277,7 @@ export async function purgeTask(ownerId: string, id: string): Promise<void> {
   await sql()`delete from tasks where id = ${id} and owner_id = ${ownerId}`;
 }
 
-export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null }>;
+export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null }>;
 export async function updateStep(id: string, patch: StepPatch): Promise<void> {
   const p: Row = {};
   if (patch.title !== undefined) p.title = patch.title.slice(0, 200);
@@ -221,6 +298,7 @@ export async function updateStep(id: string, patch: StepPatch): Promise<void> {
   if (patch.pos !== undefined) p.pos = patch.pos === null ? null : sql().json(patch.pos);
   if (patch.position !== undefined) p.position = patch.position;
   if (patch.logged !== undefined) p.logged = patch.logged;
+  if (patch.connectionId !== undefined) p.connection_id = patch.connectionId;
   if (!Object.keys(p).length) return;
   await sql()`update steps set ${sql()(p)} where id = ${id}`;
 }

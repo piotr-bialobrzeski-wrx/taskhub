@@ -40,15 +40,20 @@ function NumChip({ value, stepBy, min, label, onSave }: { value: number; stepBy:
   return <button type="button" className="chip il" style={{ height: 34, padding: "0 14px" }} title={label + ": kliknij, aby zmienić"} onClick={() => setEdit(true)}>{fmtMin(value)}<Icon k="pen" size={11} sw={1.8} /></button>;
 }
 
-export function StepMeta({ taskId, step, steps, calText }: {
+export function StepMeta({ taskId, step, steps, calText, connections = [] }: {
   taskId: string;
-  step: { id: string; tool: string; estMin: number; spentMin: number; needsApproval: boolean; dependsOn: string[]; estHint?: string | null };
+  step: { id: string; tool: string; estMin: number; spentMin: number; needsApproval: boolean; dependsOn: string[]; estHint?: string | null; connectionId?: string | null };
   steps: { id: string; title: string; done: boolean }[]; calText?: string | null;
+  connections?: { id: string; label: string; app: string; account: string | null; company: string | null; sphere: "work" | "private"; active: boolean }[];
 }) {
   const [, start] = useTransition();
   const patch = (p: Patch) => start(() => patchStep(taskId, step.id, p));
   const tools = [...Object.entries(TOOL_LABELS), ...(TOOL_LABELS[step.tool] ? [] : [[step.tool, step.tool] as [string, string]])];
   const free = steps.filter((x) => !step.dependsOn.includes(x.id));
+  // do wyboru: połączenia tej aplikacji co narzędzie kroku (Slack → konta Slacka), a gdy takich nie ma, wszystkie działające
+  const same = connections.filter((c) => c.app === step.tool || (step.tool === "gmail" && c.app === "gmail"));
+  const conns = (same.length ? same : connections).filter((c) => c.active || c.id === step.connectionId);
+  const cur = connections.find((c) => c.id === step.connectionId) ?? null;
   return (
     <>
       <div className="time-row">
@@ -60,6 +65,9 @@ export function StepMeta({ taskId, step, steps, calText }: {
         <div><div className="lbl">Zgoda</div>
           <Picker cls="boxed" title="Czy krok wysyła coś na zewnątrz i czeka na Twoją zgodę" trigger={<span className="pp-t">{step.needsApproval ? "wymaga zgody" : "bez zgody"}</span>} onPick={(k) => patch({ needsApproval: k === "1" })}
             options={[{ key: "1", on: step.needsApproval, node: <span>wymaga zgody: wysyła coś na zewnątrz</span> }, { key: "0", on: !step.needsApproval, node: <span>bez zgody: Claude robi od razu</span> }]} /></div>
+        {conns.length ? <div><div className="lbl">Połączenie</div>
+          <Picker cls="boxed" title="Którym kontem zrobić ten krok (z rejestru połączeń w ustawieniach)" trigger={<span className="pp-t">{cur ? `${cur.label}${cur.company ? ` · ${cur.company}` : cur.sphere === "private" ? " · prywatne" : ""}` : "agent wybierze"}</span>} onPick={(k) => patch({ connectionId: k || null })}
+            options={[{ key: "", on: !step.connectionId, node: <span>agent wybierze (według firmy zadania)</span> }, ...conns.map((c) => ({ key: c.id, on: c.id === step.connectionId, node: <span>{c.label}{c.account ? ` (${c.account})` : ""}{c.company ? ` · ${c.company}` : c.sphere === "private" ? " · prywatne" : ""}{c.active ? "" : " · nie działa"}</span> }))]} /></div> : null}
       </div>
       {calText ? <div className="calib">{calText}</div> : null}
       <div><div className="lbl">Czeka na</div>

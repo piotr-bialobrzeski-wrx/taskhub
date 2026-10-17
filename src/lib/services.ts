@@ -13,10 +13,10 @@ export async function aiFor(ownerId: string): Promise<Ai> {
   return new Ai(pref);
 }
 
-export type Bundle = { tasks: Task[]; scored: Scored[]; projects: Awaited<ReturnType<typeof repo.listProjects>>; companies: Awaited<ReturnType<typeof repo.listCompanies>>; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>> };
+export type Bundle = { tasks: Task[]; scored: Scored[]; projects: Awaited<ReturnType<typeof repo.listProjects>>; companies: Awaited<ReturnType<typeof repo.listCompanies>>; connections: Awaited<ReturnType<typeof repo.listConnections>>; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>> };
 export async function bundle(ownerId: string): Promise<Bundle> {
-  const [tasks, projects, companies, rules, samples] = await Promise.all([repo.listTasks(ownerId, { all: true }), repo.listProjects(ownerId), repo.listCompanies(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId)]);
-  return { tasks, projects, companies, rules, samples, scored: scoreAll(tasks, projects, samples) };
+  const [tasks, projects, companies, connections, rules, samples] = await Promise.all([repo.listTasks(ownerId, { all: true }), repo.listProjects(ownerId), repo.listCompanies(ownerId), repo.listConnections(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId)]);
+  return { tasks, projects, companies, connections, rules, samples, scored: scoreAll(tasks, projects, samples) };
 }
 
 // krok gotowy: zapis, uczenie z czasu, odbiór raportu, notatka końcowa gdy to był ostatni krok

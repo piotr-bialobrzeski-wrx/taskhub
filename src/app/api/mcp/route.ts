@@ -28,6 +28,8 @@ async function ownedStep(ownerId: string, stepId: string): Promise<string | null
 }
 
 function buildHandler(ownerId: string, kind: repo.TokenKind) {
+  // nazwa albo id połączenia z rejestru → id; pusty napis albo brak = null (agent wybiera sam)
+  const connectionIdOf = async (ref: string | undefined): Promise<string | null> => (ref?.trim() ? (await repo.findConnection(ownerId, ref))?.id ?? null : null);
   return createMcpHandler((server) => {
     server.registerTool("list_tasks", {
       title: "Lista zadań", description: "Otwarte zadania z priorytetem efektywnym, stanem, szacunkami i terminami. Opcjonalnie szukaj po tekście.",
@@ -42,10 +44,10 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       title: "Zadanie z kontekstem", description: "Pełny kontekst jednego zadania: cel, jak wpadło, kroki z faktami i linkami, zasady pracy dla projektu i narzędzi, notatki.",
       inputSchema: z.object({ taskId: z.string() }),
     }, async ({ taskId }) => {
-      const [tasks, projects, companies, rules, samples, factPrefs] = await Promise.all([repo.listTasks(ownerId, { all: true }), repo.listProjects(ownerId), repo.listCompanies(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId), repo.factPreferencesText(ownerId)]);
+      const [tasks, projects, companies, connections, rules, samples, factPrefs] = await Promise.all([repo.listTasks(ownerId, { all: true }), repo.listProjects(ownerId), repo.listCompanies(ownerId), repo.listConnections(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId), repo.factPreferencesText(ownerId)]);
       const t = tasks.find((x) => x.id === taskId); if (!t) return text("Nie ma takiego zadania.");
       const facts = await Promise.all(t.steps.map(async (s) => [s.id, await repo.listFacts({ stepId: s.id })] as const));
-      const ctx = contextText({ tasks, projects, companies, rules, samples, factPrefs, currentTaskId: taskId });
+      const ctx = contextText({ tasks, projects, companies, connections, rules, samples, factPrefs, currentTaskId: taskId });
       const fx = facts.filter(([, f]) => f.length).map(([id, f]) => `FAKTY KROKU ${id}:\n${f.filter((x) => !x.hidden).map((x) => `- ${x.label}: ${x.value}${x.source ? ` (${x.source.app}${x.source.url ? ", " + x.source.url : ""})` : ""}`).join("\n")}`).join("\n");
       const qs = await repo.listQuestions(ownerId, { taskId });
       const qx = qs.length ? "PYTANIA DO PIOTRA (zadane w aplikacji):\n" + qs.map((q) => `- [${q.id}]${q.stepId ? ` krok ${q.stepId}` : ""} ${q.text} → ${q.answer ? `ODPOWIEDŹ: ${q.answer}` : "(czeka na odpowiedź)"}`).join("\n") : "";
@@ -63,15 +65,15 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("create_task", {
-      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool (slack, gmail, clickup, calendar, claude, claudeapp, code, manual...), est w minutach (wielokrotność 15), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub.",
+      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool (slack, gmail, clickup, calendar, claude, claudeapp, code, manual...), est w minutach (wielokrotność 15), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
       inputSchema: z.object({
         title: z.string(), summary: z.string().optional(), source: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().optional(), project: z.string().optional(),
-        steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional() })).optional(),
+        steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })).optional(),
       }),
     }, async (a) => {
       let projectId: string | null = null;
       if (a.project) projectId = ((await repo.findProjectByName(ownerId, a.project)) ?? (await repo.createProject(ownerId, a.project))).id;
-      const t = await repo.createTask(ownerId, { title: a.title, summary: a.summary, source: a.source, level: a.level, due: a.due ?? null, projectId, steps: (a.steps ?? []).map((s) => ({ ...s, link: externalLink(s.link), estMin: s.est })) });
+      const t = await repo.createTask(ownerId, { title: a.title, summary: a.summary, source: a.source, level: a.level, due: a.due ?? null, projectId, steps: await Promise.all((a.steps ?? []).map(async (s) => ({ ...s, link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection) }))) });
       return json({ taskId: t.id, steps: t.steps.map((s) => ({ id: s.id, title: s.title })) });
     });
 
@@ -87,20 +89,22 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
 
     server.registerTool("add_steps", {
       title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. Termin zadania ustaw osobno przez update_task(due).",
-      inputSchema: z.object({ taskId: z.string(), steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional() })) }),
+      inputSchema: z.object({ taskId: z.string(), steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })) }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
-      const steps = await repo.addSteps(t.id, a.steps.map((s) => ({ ...s, link: externalLink(s.link), estMin: s.est })));
+      const steps = await repo.addSteps(t.id, await Promise.all(a.steps.map(async (s) => ({ ...s, link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection) }))));
       await repo.addChat(ownerId, t.id, "agent", `Rozpisałem ${steps.length} ${steps.length === 1 ? "krok" : steps.length < 5 ? "kroki" : "kroków"}: ${steps.map((s) => s.title).join(", ")}.`);
       return json(steps.map((s) => ({ id: s.id, title: s.title })));
     });
 
     server.registerTool("update_step", {
-      title: "Zmień krok", description: "Zmienia tytuł, opis, szacunek albo link kroku (link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket).",
-      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), est: z.number().int().optional(), link: z.string().optional() }),
+      title: "Zmień krok", description: "Zmienia tytuł, opis, szacunek, link albo połączenie kroku (link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket; connection = nazwa z list_connections, pusty napis zdejmuje).",
+      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional() }),
     }, async (a) => {
       if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
-      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null }); return text("Zmieniono.");
+      const connectionId = a.connection === undefined ? undefined : await connectionIdOf(a.connection);
+      if (a.connection?.trim() && !connectionId) return text("Nie ma takiego połączenia (list_connections).");
+      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null, connectionId }); return text("Zmieniono.");
     });
 
     server.registerTool("set_blocks", {
@@ -227,6 +231,14 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     }, async () => {
       const [companies, projects] = await Promise.all([repo.listCompanies(ownerId), repo.listProjects(ownerId)]);
       return json(companies.map((c) => ({ id: c.id, name: c.name, sphere: c.sphere, note: c.note, endedAt: c.endedAt, projects: projects.filter((p) => p.companyId === c.id).map((p) => p.name) })));
+    });
+
+    server.registerTool("list_connections", {
+      title: "Połączenia", description: "Rejestr połączeń: do jakich aplikacji agent ma dostęp, przez co (claude = konektor w Claude, claude-code = Claude Code na komputerze Piotra przez mostek, taskhub = sam Task Hub), na jakim koncie, dla której firmy albo sfery (work | private) i czy działa (active | expired | off). Krok może wskazać połączenie przez pole connection (nazwa); bez wskazania wybierz połączenie pasujące do firmy zadania. Żadnych sekretów: połączenie to rura, nie klucz.",
+      inputSchema: z.object({}),
+    }, async () => {
+      const [connections, companies] = await Promise.all([repo.listConnections(ownerId), repo.listCompanies(ownerId)]);
+      return json(connections.map((c) => ({ id: c.id, label: c.label, app: c.app, account: c.account, company: companies.find((x) => x.id === c.companyId)?.name ?? null, sphere: c.sphere, provider: c.provider, kind: c.kind, state: c.state, host: c.host, seenAt: c.seenAt })));
     });
 
     server.registerTool("create_company", {

@@ -26,6 +26,8 @@ final class Bridge: ObservableObject {
     private var loopTask: Task<Void, Never>? = nil
     private var sleeper: Task<Void, Never>? = nil
     private var current: ProcessRunner? = nil
+    private var lastReport: Date? = nil              // kiedy ostatnio zgłoszono listę konektorów do rejestru połączeń
+    private let reportEvery: Double = 6 * 3600
 
     init(store: Store) { self.store = store }
 
@@ -76,7 +78,33 @@ final class Bridge: ObservableObject {
         guard running else { return }
         if state == .limit || state == .auth || state == .error || state == .offline { state = .idle }
         until = nil
+        lastReport = nil   // „Sprawdź teraz” odświeża też rejestr połączeń
         sleeper?.cancel()
+    }
+
+    // Rejestr połączeń w Task Hub: po starcie i co kilka godzin wysyła listę serwerów MCP, które widzi Claude Code na tym Macu
+    // (nazwy, adresy, stan; żadnych tokenów). Dzięki temu agent wie, czym dysponuje z tego komputera, a Task Hub ma gotową konfigurację dla nowego silnika.
+    private func reportConnections() async {
+        if let l = lastReport, Date().timeIntervalSince(l) < reportEvery { return }
+        guard let bin = ClaudeCLI.find(store.cfg.claude) else { return }
+        lastReport = Date()
+        guard let servers = await ClaudeCLI.mcpList(bin) else { Log.write("rejestr połączeń: claude mcp list nie odpowiedział"); return }
+        let list: [[String: Any]] = servers.map { s in
+            var d: [String: Any] = ["name": s.name, "transport": s.transport, "ok": s.ok, "status": s.status]
+            if s.target.hasPrefix("http") { d["url"] = s.target } else { d["command"] = s.target }
+            return d
+        }
+        do {
+            let (code, j) = try await request("POST", "/api/bridge/connections", body: ["host": store.cfg.name, "servers": list])
+            if code == 200 {
+                let n = { (k: String) -> Int in (j[k] as? Int) ?? 0 }
+                Log.write("rejestr połączeń: \(servers.count) konektorów (nowe \(n("added")), odświeżone \(n("updated")), wyłączone \(n("off")))")
+            } else {
+                Log.write("rejestr połączeń: HTTP \(code)")
+            }
+        } catch {
+            Log.write("rejestr połączeń: \(error.localizedDescription)")
+        }
     }
 
     // ---------- pętla ----------
@@ -102,6 +130,7 @@ final class Bridge: ObservableObject {
                 if w.pollMs > 0 { wait = Double(w.pollMs) / 1000 }
                 lastErr = ""
                 if state == .offline { state = .idle }
+                await reportConnections()
                 if w.pending > 0 && w.runBridge == nil && until == nil {
                     let o = await runOnce()
                     if o == .done && !Task.isCancelled { continue }   // od razu sprawdź, czy coś jeszcze czeka

@@ -229,3 +229,33 @@ export function useToast() {
   return { toast, show, run };
 }
 export const Toast = ({ text }: { text: string | null }) => (text ? <div className="toast glass" role="status">{text}</div> : null);
+
+// ---------- usuwanie z pytaniem w dymku pod ikoną kosza (wiersz się nie rozjeżdża, bez okna systemowego) ----------
+// potwierdzenie usunięcia w dymku pod ikoną kosza (portal: lista ma własny scroll)
+export function RemovePop({ label, question, onYes }: { label: string; question: string; onYes: () => void }) {
+  const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ left: 0, top: 0 });
+  useEffect(() => {
+    if (!open) return;
+    const r = btn.current!.getBoundingClientRect();
+    setPos({ left: Math.min(r.right - 260, window.innerWidth - 276), top: r.bottom + 6 });
+    const close = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".ppmenu")) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", close); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", key); };
+  }, [open]);
+  return (
+    <>
+      <button ref={btn} className="icobtn" type="button" aria-label={label} title={label} aria-expanded={open} onClick={() => setOpen((o) => !o)}><Icon k="trash" size={14} sw={1.7} /></button>
+      {open ? createPortal(
+        <div className="ppmenu glass pop" role="dialog" aria-label={label} style={{ position: "fixed", left: pos.left, top: pos.top, width: 260 }} onPointerDown={(e) => e.stopPropagation()}>
+          <span className="sub">{question}</span>
+          <div className="row" style={{ gap: "var(--s-2)", justifyContent: "flex-end" }}>
+            <button className="btn" type="button" onClick={() => setOpen(false)}>Anuluj</button>
+            <button className="btn danger" type="button" onClick={() => { setOpen(false); onYes(); }}>Tak, usuń</button>
+          </div>
+        </div>, document.body) : null}
+    </>
+  );
+}

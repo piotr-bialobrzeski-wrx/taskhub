@@ -129,6 +129,7 @@ export const Step = z.object({
   logged: z.boolean(),
   pos: z.object({ x: z.number(), y: z.number() }).nullable(),
   dependsOn: z.array(z.string()),
+  connectionId: z.string().nullable(),   // przez które połączenie (konto, firma) zrobić ten krok; null = agent wybiera
 });
 export type Step = z.infer<typeof Step>;
 
@@ -171,6 +172,42 @@ export type Project = z.infer<typeof Project>;
 // sfera projektu: z firmy; bez firmy = prywatna
 export const sphereOf = (project: Pick<Project, "companyId"> | null | undefined, companies: Company[]): Sphere =>
   project?.companyId ? companies.find((c) => c.id === project.companyId)?.sphere ?? "work" : "private";
+
+// Połączenie: aplikacja, do której agent ma dostęp, przez co (Claude w chmurze, Claude Code na komputerze, sam Task Hub),
+// na jakim koncie i dla której firmy. Rura, nie klucz: bez tokenów cudzych usług. Mostek zgłasza swoje konektory sam (source bridge).
+export const CONNECTION_PROVIDERS = ["claude", "claude-code", "taskhub"] as const;
+export type ConnectionProvider = (typeof CONNECTION_PROVIDERS)[number];
+export const CONNECTION_PROVIDER_LABELS: Record<ConnectionProvider, string> = { claude: "Claude", "claude-code": "Claude Code na komputerze", taskhub: "Task Hub" };
+export const CONNECTION_KINDS = ["app", "mcp", "ical", "imap"] as const;
+export type ConnectionKind = (typeof CONNECTION_KINDS)[number];
+export const CONNECTION_KIND_LABELS: Record<ConnectionKind, string> = { app: "aplikacja", mcp: "konektor MCP", ical: "kalendarz iCal", imap: "skrzynka IMAP" };
+export const CONNECTION_STATES = ["active", "expired", "off"] as const;
+export type ConnectionState = (typeof CONNECTION_STATES)[number];
+export const CONNECTION_STATE_LABELS: Record<ConnectionState, string> = { active: "działa", expired: "wygasło", off: "wyłączone" };
+export const Connection = z.object({
+  id: z.string(),
+  app: z.string(),
+  label: z.string(),
+  account: z.string().nullable(),
+  companyId: z.string().nullable(),
+  sphere: z.enum(SPHERES),
+  provider: z.enum(CONNECTION_PROVIDERS),
+  kind: z.enum(CONNECTION_KINDS),
+  state: z.enum(CONNECTION_STATES),
+  source: z.enum(["manual", "bridge"]),
+  host: z.string().nullable(),
+  url: z.string().nullable(),
+  meta: z.record(z.string(), z.unknown()),
+  seenAt: z.string().nullable(),
+});
+export type Connection = z.infer<typeof Connection>;
+// aplikacja z nazwy konektora: "slack" → slack, "gmail-pirxey" → gmail, "Mail" → gmail, "clickup" → clickup; nieznana → nazwa w małych literach
+const APP_ALIASES: [RegExp, string][] = [
+  [/slack/i, "slack"], [/gmail|\bmail|poczta|outlook/i, "gmail"], [/clickup/i, "clickup"], [/calendar|kalendarz/i, "calendar"],
+  [/figma/i, "figma"], [/github/i, "github"], [/notion/i, "notion"], [/hubspot/i, "hubspot"], [/clockify/i, "clockify"],
+  [/fireflies/i, "fireflies"], [/drive/i, "drive"], [/linkedin/i, "linkedin"], [/jira/i, "jira"], [/task[-_ ]?hub/i, "taskhub"],
+];
+export const appOfLabel = (label: string) => APP_ALIASES.find(([re]) => re.test(label))?.[1] ?? label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
 
 export const Task = z.object({
   id: z.string(),

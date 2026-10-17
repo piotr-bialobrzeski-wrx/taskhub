@@ -1,5 +1,5 @@
 // Kontekst dla agenta: to samo dla agenta w aplikacji, dla klientów MCP i dla promptów hand-off.
-import { type Company, type Project, type Rule, type Task, type TimeSample, sphereOf, toolLabel } from "../schema";
+import { type Company, type Connection, type Project, type Rule, type Sphere, type Task, type TimeSample, CONNECTION_PROVIDER_LABELS, CONNECTION_STATE_LABELS, sphereOf, toolLabel } from "../schema";
 import { LEVELS, scoreOf, whyText, type Score } from "../priority";
 import { calibrationText, fmtMin, remainEst, taskSpent, todayISO } from "../time";
 import { rulesFor } from "../repo";
@@ -62,13 +62,25 @@ export function rulesText(rules: Rule[], projectId: string | null, tools: string
   return out.join("\n\n");
 }
 
+// Połączenia: do czego agent ma dostęp i przez co. W zadaniu pokazujemy tylko połączenia z jego sfery (prywatne zadanie nie widzi Slacka firmy),
+// żeby agent nie wysłał czegoś z niewłaściwego konta. Wygasłe i wyłączone są w spisie, bo agent ma wiedzieć, czego nie zrobi.
+export function connectionsText(connections: Connection[], companies: Company[], sphere: Sphere | null): string {
+  const list = sphere ? connections.filter((c) => c.sphere === sphere || c.provider === "taskhub") : connections;
+  if (!list.length) return "";
+  const cname = (id: string | null) => (id ? companies.find((x) => x.id === id)?.name ?? null : null);
+  const named = (c: Connection) => { const l = c.label.toLowerCase(); return l.includes(c.app) || l.includes(toolLabel(c.app).toLowerCase()); };   // „Slack Pirxey” nie potrzebuje dopisku (Slack)
+  const line = (c: Connection) => `${c.label}${named(c) ? "" : ` (${toolLabel(c.app)})`}${c.account ? ` ${c.account}` : ""} | ${cname(c.companyId) ?? (c.sphere === "private" ? "prywatne" : "zawodowe")} | ${CONNECTION_PROVIDER_LABELS[c.provider]}${c.state !== "active" ? ` | ${CONNECTION_STATE_LABELS[c.state].toUpperCase()}` : ""}`;
+  return `POŁĄCZENIA (do czego masz dostęp, na jakim koncie, przez co${sphere ? `; tylko sfera ${sphere === "private" ? "prywatna" : "zawodowa"}` : ""}; krok z polem „połączenie” rób tym połączeniem, inaczej wybierz pasujące do firmy zadania):\n${list.map((c) => "- " + line(c)).join("\n")}`;
+}
+const connLabel = (id: string | null, connections?: Connection[]) => { const c = id ? connections?.find((x) => x.id === id) : null; return c ? ` | połączenie: ${c.label}${c.account ? ` (${c.account})` : ""}` : ""; };
+
 export function notesText(tasks: Task[]): string {
   const done = tasks.filter((x) => !x.deletedAt && x.doneAt && x.noteText).sort((a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? "")).slice(0, 20);
   return done.length ? `\nUKOŃCZONE WCZEŚNIEJ, notatki końcowe (sięgaj po nie tylko, gdy wiadomość ich dotyczy):\n${done.map((x) => `- [${x.id}] ${x.title} (${(x.doneAt ?? "").slice(0, 10)}): ${(x.noteText ?? "").slice(0, 240)}`).join("\n")}` : "";
 }
 
 export type ContextInput = {
-  tasks: Task[]; projects: Project[]; rules: Rule[]; samples: TimeSample[]; companies?: Company[];
+  tasks: Task[]; projects: Project[]; rules: Rule[]; samples: TimeSample[]; companies?: Company[]; connections?: Connection[];
   factPrefs?: string; currentTaskId?: string | null; now?: number;
 };
 
@@ -78,10 +90,11 @@ export function contextText(c: ContextInput): string {
   const open = scored.filter((s) => !s.task.doneAt || (s.task.doneAt && new Date(s.task.doneAt).getTime() > new Date().setHours(0, 0, 0, 0)));
   const companies = c.companies ?? [];
   const cname = (p: Project) => p.companyId ? companies.find((x) => x.id === p.companyId)?.name ?? null : null;
-  const head = `DZIŚ: ${todayISO(new Date(c.now ?? Date.now()))}. PROJEKTY (nazwa, ważność 1-5, firma albo prywatny): ${c.projects.map((p) => `${p.name} ${p.weight}/5 (${cname(p) ?? "prywatny"})`).join(", ") || "(brak)"}.
-${calibrationText(c.samples, toolLabel)}
-${c.factPrefs ?? ""}`.trim();
   const cur = c.currentTaskId ? scored.find((s) => s.task.id === c.currentTaskId) : null;
+  const head = `DZIŚ: ${todayISO(new Date(c.now ?? Date.now()))}. PROJEKTY (nazwa, ważność 1-5, firma albo prywatny): ${c.projects.map((p) => `${p.name} ${p.weight}/5 (${cname(p) ?? "prywatny"})`).join(", ") || "(brak)"}.
+${connectionsText(c.connections ?? [], companies, cur ? sphereOf(cur.project, companies) : null)}
+${calibrationText(c.samples, toolLabel)}
+${c.factPrefs ?? ""}`.replace(/\n{2,}/g, "\n").trim();
   if (!cur) {
     return `${head}
 ${rulesText(c.rules, null, [], { topic: ["czat"] })}
@@ -97,7 +110,7 @@ OBECNE ZADANIE: priorytet ${t.level}/5 (${LEVELS[cur.score.eff]}${cur.score.why.
 Podsumowanie: ${t.summary || "-"}
 Jak wpadło: ${(t.source || "-").slice(0, 800)}
 Kroki:
-${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolLabel(s.tool)} | stan: ${s.status} | po: ${s.dependsOn.join(", ") || "-"} | szacunek ${s.estMin} min${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + s.output.slice(0, 300) : ""}`).join("\n") || "(brak kroków)"}
+${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolLabel(s.tool)} | stan: ${s.status} | po: ${s.dependsOn.join(", ") || "-"} | szacunek ${s.estMin} min${connLabel(s.connectionId, c.connections)}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + s.output.slice(0, 300) : ""}`).join("\n") || "(brak kroków)"}
 INNE ZADANIA NA GŁÓWNEJ KANWIE (${others.length}):
 ${others.slice(0, 40).map(brief).join("\n") || "(brak)"}${notesText(c.tasks)}`;
 }
