@@ -3,10 +3,10 @@ name: task-hub-companies-layer
 description: Task Hub companies over projects (shipped da40d64, 2026-10-17): sphere work/private derived from company, rule scope "company" and rule origin, Projects view grouped by company, MCP list_companies/create_company, add_rule company+origin
 metadata:
   type: project
-  modified: 2026-10-17T16:18:13.080Z
+  modified: 2026-10-17T16:21:56.702Z
 ---
 
-Shipped in commit da40d64 (deployed 2026-10-17 16:16Z, diag green) as phase 1 of the vision in [[task-hub-integrations-verdict-2026-10-17]].
+Shipped in commit da40d64 (deployed 2026-10-17 16:16Z, diag green) as phase 1 of the vision in [[task-hub-vision-2026-10-17]] (status: [[task-hub-architecture-status-2026-10-17]]).
 
 Data: migration 0008 adds `companies` (name, sphere work|private, note, ended_at), `projects.company_id`, `rules.company_id` (new scope `company`), `rules.origin_company_id` (where the rule was developed; null = mine). Sphere is derived, never stored on a project: project with company → company sphere; project without company → private. Deleting a company unpins its projects (they become private) and deletes its company-scoped rules.
 
