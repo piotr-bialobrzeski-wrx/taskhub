@@ -29,8 +29,10 @@ describe.skipIf(!DB)("repo", async () => {
     expect(bslack).toMatchObject({ companyId: c.id, sphere: "work", provider: "claude-code", host: "MacBook", state: "active", url: "https://mcp.slack.com/mcp" });   // firma z ręcznego wpisu o tej samej nazwie
     expect(bgmail).toMatchObject({ state: "expired", companyId: null });
     expect(list.some((x) => x.app === "taskhub")).toBe(false);   // własny konektor nie jest „połączeniem”
+    await repo.updateConnection(owner, bgmail.id, { label: "Gmail firmowy", account: "piotr@firma-x.pl" });   // etykieta zmieniona ręcznie zostaje, mostek dopasowuje po nazwie serwera
     const r2 = await repo.upsertBridgeConnections(owner, "MacBook", [{ name: "gmail", ok: true }]);
     expect(r2).toEqual({ added: 0, updated: 1, off: 1 });
+    expect((await repo.listConnections(owner)).find((x) => x.id === bgmail.id)).toMatchObject({ label: "Gmail firmowy", account: "piotr@firma-x.pl", state: "active" });
     list = await repo.listConnections(owner);
     expect(list.find((x) => x.id === bslack.id)?.state).toBe("off");
     expect(list.find((x) => x.id === bgmail.id)?.state).toBe("active");

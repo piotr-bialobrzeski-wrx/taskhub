@@ -152,14 +152,15 @@ export async function upsertBridgeConnections(ownerId: string, host: string, ser
     const label = srv.name.trim().slice(0, 80);
     const state: Connection["state"] = srv.ok ? "active" : "expired";
     const url = (srv.url ?? srv.command ?? null)?.trim().slice(0, 500) || null;
-    const meta = { transport: srv.transport ?? null, status: srv.status ?? null };
-    const mine = existing.find((c) => c.label.toLowerCase() === label.toLowerCase());
+    const meta = { server: label, transport: srv.transport ?? null, status: srv.status ?? null };
+    // dopasowanie po nazwie serwera zapamiętanej w meta (etykietę Piotr może zmienić), awaryjnie po etykiecie
+    const mine = existing.find((c) => String(c.meta.server ?? c.label).toLowerCase() === label.toLowerCase());
     if (mine) {
       await sql()`update connections set state = ${state}, url = ${url}, meta = meta || ${sql().json(meta as never)}, seen_at = now(), updated_at = now() where id = ${mine.id}`;
       updated++;
     } else {
-      // ten sam konektor znany skądinąd (ręczny wpis albo inny komputer) podpowiada firmę i sferę
-      const twin = all.find((c) => c.label.toLowerCase() === label.toLowerCase() || c.app === appOfLabel(label));
+      // ten sam konektor znany skądinąd (ręczny wpis o tej nazwie albo inny komputer) podpowiada konto, firmę i sferę; sama aplikacja to za mało (Gmail firmowy i prywatny)
+      const twin = all.find((c) => c.label.toLowerCase() === label.toLowerCase() || String(c.meta.server ?? "").toLowerCase() === label.toLowerCase());
       await sql()`insert into connections (owner_id, app, label, account, company_id, sphere, provider, kind, state, source, host, url, meta, seen_at)
         values (${ownerId}, ${appOfLabel(label)}, ${label}, ${twin?.account ?? null}, ${twin?.companyId ?? null}, ${twin?.sphere ?? "work"}, 'claude-code', 'mcp', ${state}, 'bridge', ${h}, ${url}, ${sql().json(meta as never)}, now())
         on conflict (owner_id, host, lower(label)) where source = 'bridge' do update set state = excluded.state, url = excluded.url, meta = connections.meta || excluded.meta, seen_at = now(), updated_at = now()`;
@@ -167,7 +168,7 @@ export async function upsertBridgeConnections(ownerId: string, host: string, ser
     }
   }
   const names = new Set(keep.map((s) => s.name.trim().toLowerCase()));
-  const gone = existing.filter((c) => !names.has(c.label.toLowerCase()) && c.state !== "off");
+  const gone = existing.filter((c) => !names.has(String(c.meta.server ?? c.label).toLowerCase()) && c.state !== "off");
   if (gone.length) await sql()`update connections set state = 'off', updated_at = now() where id in ${sql()(gone.map((c) => c.id))}`;
   return { added, updated, off: gone.length };
 }

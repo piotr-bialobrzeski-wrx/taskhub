@@ -259,3 +259,18 @@ export function RemovePop({ label, question, onYes }: { label: string; question:
     </>
   );
 }
+
+// ---------- nazwa w wierszu: klik → pole w tym samym miejscu (Enter zapisuje, Esc cofa) ----------
+export function InlineName({ name, label, onRename }: { name: string; label: string; onRename: (n: string) => void }) {
+  const [edit, setEdit] = useState(false);
+  if (!edit) return <button type="button" className="a-title p-name" title="Kliknij, aby zmienić nazwę" onClick={() => setEdit(true)}><span className="ct">{name}</span><Icon k="pen" size={12} sw={1.8} /></button>;
+  const done = (v: string) => { setEdit(false); const n = v.trim(); if (n && n !== name) onRename(n); };
+  // pole zajmuje dokładnie miejsce nazwy (ta sama szerokość i wysokość), więc reszta nagłówka stoi w miejscu
+  return (
+    <span className="a-title p-name edit">
+      <input className="p-input" defaultValue={name} aria-label={label} autoFocus onFocus={(e) => e.currentTarget.select()}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); done(e.currentTarget.value); } else if (e.key === "Escape") { e.preventDefault(); setEdit(false); } }}
+        onBlur={(e) => done(e.currentTarget.value)} />
+    </span>
+  );
+}

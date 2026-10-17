@@ -31,13 +31,13 @@ export function InlineText({ taskId, stepId, field, value, as, placeholder, show
   return <p className={cls} title="Kliknij, aby zmienić" onClick={() => setEdit(true)}>{body}</p>;
 }
 
-// żeton z liczbą minut: klik → pole liczbowe
+// liczba minut w pigułce takiej jak wybory obok (pióro zamiast strzałki): klik → pole liczbowe w tym samym miejscu
 function NumChip({ value, stepBy, min, label, onSave }: { value: number; stepBy: number; min: number; label: string; onSave: (v: number) => void }) {
   const [edit, setEdit] = useState(false);
   const done = (raw: string) => { setEdit(false); const v = Number(raw); if (Number.isFinite(v) && v !== value && raw !== "") onSave(Math.max(min, v)); };
   if (edit) return <input className="in num" type="number" min={min} step={stepBy} defaultValue={value} aria-label={label} autoFocus onFocus={(e) => e.currentTarget.select()} onBlur={(e) => done(e.currentTarget.value)}
     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); done(e.currentTarget.value); } else if (e.key === "Escape") { e.preventDefault(); setEdit(false); } }} />;
-  return <button type="button" className="chip il" style={{ height: 34, padding: "0 14px" }} title={label + ": kliknij, aby zmienić"} onClick={() => setEdit(true)}>{fmtMin(value)}<Icon k="pen" size={11} sw={1.8} /></button>;
+  return <button type="button" className="pp boxed num" title={label + ": kliknij, aby zmienić"} onClick={() => setEdit(true)}><span className="pp-t">{fmtMin(value)}</span><Icon k="pen" size={11} sw={1.8} /></button>;
 }
 
 export function StepMeta({ taskId, step, steps, calText, connections = [] }: {

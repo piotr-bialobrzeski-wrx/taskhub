@@ -12,7 +12,7 @@ import { PendingButton } from "@/components/Pending";
 import { TokenForm } from "@/components/TokenForm";
 import { CopyButton } from "@/components/CopyButton";
 import { ClientGuide, ProviderPicker } from "@/components/SettingsBits";
-import { ConnectionsPanel } from "@/components/ConnectionsPanel";
+import { ConnectionsPanel, EngineConfig } from "@/components/ConnectionsPanel";
 import { HashOpener, PageBar } from "@/components/PageBar";
 import { Icon } from "@/components/canvas/ui";
 import { createBridgeToken, createToken, revokeToken, saveSettings } from "../actions";
@@ -126,8 +126,10 @@ export default async function Settings() {
           <More id="tools" title="Co potrafi konektor">
             <p className="sub" style={{ margin: 0 }}>Narzędzia: {TOOLS}. Podłączony klient czyta i zmienia Twoje zadania, kroki, fakty, załączniki i zasady; nigdy nie usuwa zadań.</p>
           </More>
-          <h3 className="set-sub" id="registry-h">Do czego agent ma dostęp</h3>
-          <ConnectionsPanel connections={connections} companies={companies} mcp={mcp} />
+          <ConnectionsPanel connections={connections} companies={companies} />
+          <More id="engine" title="Konfiguracja dla nowego silnika (Claude Code na innym komputerze albo koncie)">
+            <EngineConfig connections={connections} mcp={mcp} />
+          </More>
         </div>
       </section>
     </main>
