@@ -1,0 +1,20 @@
+---
+name: task-hub-blank-sheet-design
+description: Piotr's approved (2026-10-15) "blank sheet" design for the real Task Hub app and the state of the built code: MCP-only integrations, facts with provenance, universal UI blocks, AI only where needed; app deployed on Vercel+Supabase, no API key by Piotr's choice, agent work via subscription Claude through OAuth MCP connector
+metadata:
+  type: project
+---
+
+Piotr approved on 2026-10-15 (thread "Architektura aplikacji Task Hub") the design for the real app and said "zacznij budować":
+- **No own integrations.** Task Hub talks to Slack/ClickUp/Gmail/etc. only through MCP connectors of the agents; agents discover fields at runtime. Apps without a connector: browser agent later (open question).
+- **Data = note + facts.** A step holds text, facts {label, value, source app/ref/url, fetched_at, pinned, hidden}, attachments, links, and raw snapshots (JSON with fetched_at). Agent picks which facts surface; user pin/hide becomes a preference the agent follows.
+- **UI = universal blocks**: text, facts, thread, draft (with target app/where/action), list, media, link, question. Layout memory per source app. No app-typed tasks, but provenance dots/labels per fact and action.
+- **AI only where needed**: a plain step composes without a model call; the model runs only for snapshots, drafts, report review, closing notes.
+- **Rules** live in the DB at three levels (global, project, tool) with visibility; delivered via MCP context or hand-off prompts. Clients keep only tool config.
+
+**Built code (pushed to piotr-bialobrzeski-wrx/taskhub main; copy under /mnt/project-files/task-hub/):** Next.js 16 App Router + server actions, Postgres via `postgres` driver (Supabase pooler, prepare:false), zod, Anthropic/OpenAI SDKs behind one `AiProvider` interface with fallback, `mcp-handler` MCP server at `/api/mcp` (tools: list_tasks, get_task, get_rules, create_task, update_task, add_steps, update_step, set_blocks, complete_step, add_facts, add_snapshot, add_rule). Views: board by effective priority, task page with step panels and actions, rules, settings (projects, MCP connections/tokens), password login. Migrations run at Vercel build (`supabase/migrations`, 0002 pgvector optional, 0003 oauth). 29 vitest tests + Playwright smoke script.
+
+**Deployed 2026-10-15:** Supabase (Frankfurt, Transaction pooler) + Vercel (Hobby, account piotrbsecondary@gmail.com, region fra1); production domain **https://taskhub-lac.vercel.app** (MCP connector: https://taskhub-lac.vercel.app/api/mcp; the generated *-git-main-* and hash URLs are protected by Vercel login, do not use them); /api/health returned db ok. **Piotr does NOT want to pay for API tokens** (decision 2026-10-15): no ANTHROPIC_API_KEY, the in-app agent stays off, and agent work runs in his subscription Claude (app / Claude Code) through the Task Hub MCP connector. For that the app has OAuth 2.1 for connectors (DCR at /api/oauth/register, consent page /oauth/authorize with app password, PKCE, token = api_tokens row visible in Settings), a "Rozłóż na kroki w Claude" button on tasks without steps, and hand-off prompts that tell Claude to write back via add_steps/add_facts/set_blocks/complete_step. Connector OAuth supports DCR and CIMD (Claude's published identity). Next: Piotr connects the Claude app (Connectors → Add custom connector → https://taskhub-lac.vercel.app/api/mcp, Sign in now) and Claude Code (`claude mcp add --transport http task-hub <domain>/api/mcp`, then /mcp login).
+
+**Why:** Piotr dislikes rigid per-app fields (Project Hub hardcodes ClickUp fields); he wants an "AI-native" app that scales to many apps without maintaining per-app UI, and he does not want pay-per-use model billing on top of his subscription.
+**How to apply:** never add app-specific schemas or screens; add blocks, facts and rules instead. Keep every agent feature usable from a subscription client via MCP; the API-key path is optional. See [[task-hub-architecture]], [[task-hub-push-permission]], [[task-hub-prototype-ui]], [[task-hub-projects-time-due]], [[task-hub-no-duplicate-controls]].
