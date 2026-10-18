@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Ai, AiError } from "@/lib/ai";
 import { FakeProvider, project, rule, step, task } from "./helpers";
 import { handoffPrompt } from "@/lib/agent/handoff";
-import { contextText, procedureMatches, rulesText } from "@/lib/agent/context";
+import { contextText, draftsText, procedureMatches, rulesText } from "@/lib/agent/context";
 import { z } from "zod";
 import type { Connection } from "@/lib/schema";
 
@@ -165,3 +165,29 @@ describe("treść zadania w kontekście", () => {
   });
 });
 
+
+describe("get_task: szkice kroków w pełnej treści", () => {
+  const draft = (status: "proposed" | "approved" | "sent", extra: Record<string, unknown> = {}) => ({ type: "draft" as const, target: { app: "slack", where: "#releases", action: "send" as const }, body: "Linia 1\n\n- punkt **pogrubiony**\n" + "x".repeat(3000), status, ...extra });
+  it("zatwierdzony szkic kroku w drodze do wysyłki: pełna treść bez skracania i polecenie wysyłki", () => {
+    const out = draftsText([{ id: "s1", title: "Wyślij release notes", status: "handoff", blocks: [draft("approved", { subject: "Nowa wersja" })] }]);
+    expect(out).toContain("SZKIC KROKU s1 „Wyślij release notes” (ZATWIERDZONY: wyślij dokładnie tę treść)");
+    expect(out).toContain("- dokąd: slack · #releases · akcja send");
+    expect(out).toContain("- temat: Nowa wersja");
+    expect(out).toContain("---\nLinia 1\n\n- punkt **pogrubiony**\n" + "x".repeat(3000) + "\n---");
+  });
+  it("szkic czekający, odłożony, nieaktualny i wysłany są oznaczone, żeby ich nie wysłać; kroki bez szkicu nic nie dodają", () => {
+    const out = draftsText([
+      { id: "a", title: "A", status: "draft", blocks: [draft("proposed")] },
+      { id: "b", title: "B", status: "todo", blocks: [draft("approved")] },
+      { id: "c", title: "C", status: "todo", blocks: [draft("proposed", { stale: true })] },
+      { id: "d", title: "D", status: "done", blocks: [draft("sent")] },
+      { id: "e", title: "E", status: "todo", blocks: [{ type: "text", text: "notatka" } as never] },
+    ]);
+    expect(out).toContain("SZKIC KROKU a „A” (czeka na zatwierdzenie Piotra: nie wysyłaj)");
+    expect(out).toContain("SZKIC KROKU b „B” (zatwierdzony, ale krok nie czeka na wysyłkę: nie wysyłaj)");
+    expect(out).toContain("SZKIC KROKU c „C” (NIEAKTUALNY: przygotuj od nowa, nie wysyłaj)");
+    expect(out).toContain("SZKIC KROKU d „D” (wysłany)");
+    expect(out).not.toContain("SZKIC KROKU e");
+    expect(draftsText([{ id: "z", title: "Z", status: "todo", blocks: null as never }])).toBe("");
+  });
+});

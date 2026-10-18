@@ -1,5 +1,5 @@
 // Kontekst dla agenta: to samo dla agenta w aplikacji, dla klientów MCP i dla promptów hand-off.
-import { type Company, type Connection, type Project, type Rule, type Sphere, type Task, type TimeSample, CONNECTION_PROVIDER_LABELS, CONNECTION_STATE_LABELS, sphereOf, toolLabel } from "../schema";
+import { type Company, type Connection, type Project, type Rule, type Sphere, type Step, type Task, type TimeSample, CONNECTION_PROVIDER_LABELS, CONNECTION_STATE_LABELS, sphereOf, toolLabel } from "../schema";
 import { LEVELS, scoreOf, whyText, type Score } from "../priority";
 import { calibrationText, fmtMin, remainEst, taskSpent, todayISO } from "../time";
 import { rulesFor } from "../repo";
@@ -124,4 +124,29 @@ Kroki:
 ${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status} | po: ${s.dependsOn.join(", ") || "-"} | szacunek ${s.estMin} min${connLabel(s.connectionId, c.connections)}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + s.output.slice(0, 300) : ""}`).join("\n") || "(brak kroków)"}
 INNE ZADANIA NA GŁÓWNEJ KANWIE (${others.length}):
 ${others.slice(0, 40).map(brief).join("\n") || "(brak)"}${notesText(c.tasks)}`;
+}
+
+// get_task: szkice kroków w pełnym brzmieniu. Zatwierdzony szkic (ZATWIERDZONE SZKICE DO WYSŁANIA w list_work) agent wysyła dokładnie w tej treści,
+// więc body, temat, pola i wiersze idą bez skracania; odłożony szkic (krok wrócił do todo) i nieaktualny są oznaczone, żeby ich nie wysłać.
+export function draftsText(steps: Pick<Step, "id" | "title" | "status" | "blocks">[]): string {
+  const out: string[] = [];
+  for (const s of steps) {
+    for (const b of s.blocks ?? []) {
+      if (b.type !== "draft") continue;
+      const state = b.stale ? "NIEAKTUALNY: przygotuj od nowa, nie wysyłaj"
+        : b.status === "sent" ? "wysłany"
+        : b.status === "approved" && s.status === "handoff" ? "ZATWIERDZONY: wyślij dokładnie tę treść"
+        : b.status === "approved" ? "zatwierdzony, ale krok nie czeka na wysyłkę: nie wysyłaj"
+        : s.status === "draft" ? "czeka na zatwierdzenie Piotra: nie wysyłaj"
+        : "odłożony: nie wysyłaj";
+      const t = b.target;
+      const lines = [`SZKIC KROKU ${s.id} „${s.title}” (${state})`, `- dokąd: ${t.app}${t.where ? ` · ${t.where}` : ""} · akcja ${t.action}`];
+      if (b.subject) lines.push(`- temat: ${b.subject}`);
+      if (b.fields?.length) lines.push(`- pola: ${b.fields.map((f) => `${f.label} = ${f.value}`).join("; ")}`);
+      if (b.columns?.length) lines.push(`- wiersze (${b.columns.join(" | ")}):\n${(b.rows ?? []).map((r) => `  ${r.join(" | ")}`).join("\n")}`);
+      if (b.body) lines.push(`- treść (dokładnie, między liniami ---):\n---\n${b.body}\n---`);
+      out.push(lines.join("\n"));
+    }
+  }
+  return out.join("\n");
 }
