@@ -12,13 +12,14 @@ import { SearchPill } from "./SearchPill";
 import { Projects, type ProjectPatch } from "./Projects";
 import { matches, norm, tokens, type Screen, type SearchItem } from "@/lib/search-core";
 import { autoLayout, batchTasks, chat, createCompanyAction, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeCompany, removeProject, reopenLast, restoreLayout, restoreTask, saveTaskPositions, updateCompanyAction, updateGroupAction, updateProjectAction } from "@/app/actions";
+import { Activity } from "@/components/Activity";
 
 export type ArchRow = { id: string; title: string; when: string; summary: string | null; base: number; eff: number; project: string | null };
 // parametry z adresu, którymi szukajka z innych ekranów otwiera właściwy widok (/?view=projects&p=…, /?view=done&t=…, /?focus=…)
 export type BoardInitial = { view?: string; p?: string; t?: string; focus?: string };
 export type BoardProps = {
   tasks: TaskTile[]; groups: GroupVM[]; projects: ProjectRow[]; companies: CompanyRow[]; projTasks: ProjTask[]; index: SearchItem[]; initial: BoardInitial;
-  aiOn: boolean; agent: string; lastAgent: { id: string; text: string } | null;
+  aiOn: boolean; agent: string; lastAgent: { id: string; text: string; link?: string | null } | null;
   archive: { done: ArchRow[]; trash: ArchRow[]; trashDays: number };
 };
 type LayoutSnap = { items: { id: string; x: number; y: number }[]; groups: { id: string; x: number; y: number; w: number; h: number; auto: boolean }[] };
@@ -44,13 +45,17 @@ export function TaskTileView({ t }: { t: TaskTile }) {
         {t.due ? <span className={"st due " + t.due.cls} title={"Termin: " + t.due.iso}>{t.due.text}</span> : null}
         <span className={"st " + t.state} title={TS_LABEL[t.state]}>{TS_SHORT[t.state]}</span>
       </span>
-      <span className="t-row">
-        <span className="bar"><b style={{ width: pct + "%" }} /></span>
-        <span className="cnt" style={{ fontVariantNumeric: "tabular-nums" }} title={`Kroki ${t.progress.done}/${t.progress.all} · ${t.estText}`}>{cnt}</span>
-        {t.drafts ? <span className="st draft" title={`${t.drafts} do zatwierdzenia`}>{t.drafts} szkic{t.drafts === 1 ? "" : t.drafts < 5 ? "e" : "ów"}</span> : null}
-        {t.handed ? <span className="st handoff" title={`${t.handed} w Claude`}>{t.handed} w Claude</span> : null}
-        {t.questions ? <span className="st draft" style={{ display: "inline-flex", gap: 3 }} title="Pytania od agenta czekają na Twoją odpowiedź"><Icon k="question" size={12} sw={1.8} />{t.questions}</span> : null}
-      </span>
+      {t.activity ? (
+        <span className="t-row"><Activity text={t.activity.text} detail={t.activity.detail} since={t.activity.since} who="Claude" /></span>
+      ) : (
+        <span className="t-row">
+          <span className="bar"><b style={{ width: pct + "%" }} /></span>
+          <span className="cnt" style={{ fontVariantNumeric: "tabular-nums" }} title={`Kroki ${t.progress.done}/${t.progress.all} · ${t.estText}`}>{cnt}</span>
+          {t.drafts ? <span className="st draft" title={`${t.drafts} do zatwierdzenia`}>{t.drafts} szkic{t.drafts === 1 ? "" : t.drafts < 5 ? "e" : "ów"}</span> : null}
+          {t.handed ? <span className="st handoff" title={`${t.handed} w Claude`}>{t.handed} w Claude</span> : null}
+          {t.questions ? <span className="st draft" style={{ display: "inline-flex", gap: 3 }} title="Pytania od agenta czekają na Twoją odpowiedź"><Icon k="question" size={12} sw={1.8} />{t.questions}</span> : null}
+        </span>
+      )}
     </>
   );
 }
@@ -320,6 +325,7 @@ export function Board(p: BoardProps) {
       {!off && p.lastAgent && !answerOff && !n && !group ? (
         <div className="answer plain glass" role="status" aria-live="polite">
           <div className="ans-text">{p.lastAgent.text}</div>
+          {p.lastAgent.link ? <div className="ans-acts"><a className="btn ico" href={p.lastAgent.link} target="_blank" rel="noopener" title={p.lastAgent.link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a></div> : null}
           <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans", p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button>
         </div>
       ) : null}

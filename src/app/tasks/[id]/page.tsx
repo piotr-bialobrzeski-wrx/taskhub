@@ -11,8 +11,12 @@ import { calEst, calibrationFor, estOf, fmtMin, spentMin, taskEst, taskSpent, to
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
-import { stepsHint } from "@/lib/auto";
+import { busyWith, noStepsWho, type Worker } from "@/lib/auto";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
+import { liveActivity, liveKey } from "@/lib/live";
+import { LivePoll } from "@/components/LivePoll";
+import { Activity } from "@/components/Activity";
+import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepTile, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
@@ -38,26 +42,35 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const cur = b.scored.find((s) => s.task.id === id);
   if (!cur) notFound();
   const t = cur.task;
-  const [factsPerStep, attachments, chatLog, groups, questions, bridge] = await Promise.all([
+  const [factsPerStep, attachments, chatLog, groups, questions, bridge, stamp] = await Promise.all([
     Promise.all(t.steps.map((s) => repo.listFacts({ stepId: s.id }))),
     repo.listAttachments({ taskId: t.id }),
     repo.listChat(o.id, t.id, 2),
     repo.listGroups(o.id, t.id),
     repo.listQuestions(o.id, { taskId: t.id, open: true }),
     repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS),
+    repo.changeStamp(o.id, id),
   ]);
   const providers = availableProviders(), aiOn = providers.length > 0;
   const lastAgent = [...chatLog].reverse().find((m) => m.role === "agent");
+  const acts = (lastAgent?.actions ?? null) as { stepId?: string; link?: string } | null;
   const origin = appUrl();
-  const tiles = t.steps.map((s) => stepTile(t, s, b.tasks));
+  // kto pracuje teraz (mostek na komputerze z bieżącym biegiem albo automat o pełnej godzinie) i nad czym
+  const w: Worker = { alive: bridge.alive, name: bridge.name, run: liveActivity(bridge.run) };
+  const busy = busyWith(w.run, b.tasks);
+  const tiles = t.steps.map((s) => stepTile(t, s, b.tasks, w.run));
   const stateOf = (s: Step) => tiles.find((x) => x.id === s.id)!.state;
   const waits = taskWaits(t, b.tasks);
   const bp = !t.steps.length && !t.doneAt ? breakdownPrompt(t, b.rules, { appUrl: origin, projectName: cur.project?.name, companyId: cur.project?.companyId ?? null }) : null;
 
   // ---------- pasek nad kanwą: tylko to, co wymaga uwagi (stan kroków widać po kolorach kafelków) ----------
-  const runbar = waits.length ? <span className="rb-t"><b>Czeka na zadanie:</b> {waits.map((w) => w.title).join(", ")}</span>
-    : bp ? <span className="rb-t"><b>Bez kroków.</b> {aiOn ? "Napisz w doku, co ma zrobić agent." : "Claude rozpisze je i zacznie pracę."}</span>
+  // zadanie bez kroków: kto je rozpisze i kiedy; gdy mostek właśnie to robi, pasek pulsuje jak krok w toku
+  const who = bp ? noStepsWho(w, t.id, busy) : null;
+  const runbar = waits.length ? <span className="rb-t"><b>Czeka na zadanie:</b> {waits.map((x) => x.title).join(", ")}</span>
+    : who && who.kind === "decomposing" && w.run ? <Activity text="rozpisuje kroki" detail={w.run.detail} since={w.run.since} who={who.who} big />
+    : who ? <span className="rb-t"><b>Bez kroków.</b> {aiOn ? "Napisz w doku, co ma zrobić agent." : who.text}</span>
     : null;
+  const runAction = who && who.kind !== "decomposing" && !aiOn ? { label: "Rozpisz teraz", anchor: "rozpisz" } : null;
 
   // ---------- karta pytań agenta ----------
   const q: Question | undefined = questions[0];
@@ -95,7 +108,12 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
           {t.noteText && t.noteText !== t.noteSummary ? <details className="edit" style={{ marginTop: 6 }}><summary>Notatka dla agentów</summary><div className="an">{t.noteText}</div></details> : null}
         </div>
       ) : null}
-      {t.source ? <div><div className="lbl">Jak wpadło</div><div className="note">{t.source}</div></div> : null}
+      {t.source || (t.titleOriginal && t.titleOriginal !== t.title) ? (
+        <div><div className="lbl">Jak wpadło</div>
+          {t.source ? <div className="note">{t.source}</div> : null}
+          {t.titleOriginal && t.titleOriginal !== t.title ? <div className="note sub" title="Claude przeredagował tytuł zadania; tak brzmiał na początku">Pierwotny tytuł: {t.titleOriginal}</div> : null}
+        </div>
+      ) : null}
       {attachments.length ? (
         <div><div className="lbl">Grafiki i pliki</div>
           <div className="gal">{attachments.map((a) => (
@@ -109,14 +127,14 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       {t.dependsOn.length ? (
         <div><div className="lbl">Zaczyna się po zadaniach</div>
           <div className="deps">{t.dependsOn.map((d) => { const x = b.tasks.find((y) => y.id === d); return x ? (
-            <form key={d} action={linkTasks.bind(null, d, t.id, false)}><button className="chip" type="submit" title="Usuń tę zależność"><span className="d" style={{ ["--c" as string]: isComplete(x) ? "var(--ok)" : "var(--sub)" }} />{x.title}<span className="x">×</span></button></form>
+            <form key={d} action={linkTasks.bind(null, d, t.id, false)}><button className="chip" type="submit" title="Usuń tę zależność"><span className="d" style={{ ["--c" as string]: isComplete(x) ? "var(--ok)" : "var(--sub)" }} /><span>{x.title}</span><span className="x">×</span></button></form>
           ) : null; })}</div>
         </div>
       ) : null}
-      {bp && !aiOn ? (
+      {bp && !aiOn && who ? (
         <div><div className="lbl">Kroki</div>
-          <p>{stepsHint(bridge.alive)} Gdy się spieszysz, zrób to ręcznie w Claude (poniżej gotowy prompt).</p>
-          <details className="edit" style={{ marginTop: 8 }}><summary>Rozpisz ręcznie w Claude</summary><PromptBox text={bp} openUrl={claudeUrl(bp)} /></details>
+          <p>{who.text} Gdy się spieszysz, zrób to ręcznie w Claude (poniżej gotowy prompt).</p>
+          <details id="rozpisz" className="edit" style={{ marginTop: 8 }}><summary>Rozpisz ręcznie w Claude</summary><PromptBox text={bp} openUrl={claudeUrl(bp)} /></details>
         </div>
       ) : null}
       <details className="edit">
@@ -140,25 +158,28 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const connections = b.connections.filter((c) => c.sphere === sphere).map((c) => ({ id: c.id, label: c.label, app: c.app, account: c.account, company: c.companyId ? b.companies.find((x) => x.id === c.companyId)?.name ?? null : null, sphere: c.sphere, active: c.state === "active" }));
   const company = cur.project?.companyId ? b.companies.find((x) => x.id === cur.project!.companyId)?.name ?? null : null;
   const ctx = { color: cur.project ? projColor(cur.project.color) : "var(--sub)", text: [cur.project?.name ?? "bez projektu", company ?? (sphere === "private" ? "prywatne" : "zawodowe")].join(" · ") };
-  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} />; });
+  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} />; });
 
   return (
+    <>
+    <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || t.steps.some((s) => s.status === "handoff") || (!!bp && !t.doneAt)} />
     <TaskCanvas
       task={{ id: t.id, title: t.title, base: cur.score.base, eff: cur.score.eff, why: cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; "), state: taskStateOf(t, b.tasks), progress: { done: t.steps.filter((s) => s.status === "done").length, all: t.steps.length }, estText: estTextOf(t) }}
       steps={tiles}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
       aiOn={aiOn} agent={agentLabel(providers)} index={indexFrom(b)}
-      lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text } : null}
-      focus={focus ?? null} runbar={runbar} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} />
+      lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text, stepId: acts?.stepId ?? null, link: acts?.link ?? null } : null}
+      focus={focus ?? null} runbar={runbar} runAction={runAction} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} />
+    </>
   );
 }
 
 const KIND_LABEL: Record<string, string> = { text: "notatka", facts: "fakty", thread: "wątek", list: "lista", media: "pliki", link: "linki", mail: "mail", comment: "komentarz", table: "tabela", free: "treść", question: "pytanie" };
 
-function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName }: {
+function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null; company: string | null;
-  connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string;
+  connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null;
 }) {
   // szczegóły są już pod tytułem, więc blok tekstu z tą samą treścią odpada
   const blocks = (s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
@@ -186,7 +207,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {mode ? (
         <div className={"zones" + (shown.length ? " two" : "")}>
           {shown.length ? <div className="zone src"><div className="lbl">Na podstawie<span className="n">{kinds}</span></div>{blocksNode}</div> : null}
-          <div className="zone ans"><div className="lbl">Odpowiedź<span className="n">{answerNote}</span></div><PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} /></div>
+          <div className="zone ans"><div className="lbl">Odpowiedź<span className="n">{answerNote}</span></div><PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} /></div>
         </div>
       ) : null}
       {!mode || mode === "sent" ? (
@@ -199,7 +220,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
             <form action={markDone.bind(null, t.id, s.id)}><PendingButton className={"btn" + (!runnable ? " primary" : "")}>Gotowe</PendingButton></form>
           </>) : null}
           {s.status === "handoff" ? (<>
-            <span className="working" title={prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />Claude pracuje{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>
+            {activity ? <Activity text={activity.text} detail={activity.detail} since={activity.since} who="Claude" big />
+              : <span className="working" title={prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />Claude pracuje{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>}
             <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Wróć do kroków gotowych; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form>
           </>) : null}
           {s.status === "done" ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Cofnij gotowe</PendingButton></form> : null}

@@ -23,9 +23,9 @@ export function InlineText({ taskId, stepId, field, value, as, placeholder, show
   if (edit) {
     return as === "p"
       ? <GrowTextarea className="in" minRows={2} defaultValue={value} placeholder={placeholder} aria-label={placeholder} autoFocus onBlur={(e) => save(e.currentTarget.value)} onKeyDown={key} />
-      : <input className={"in" + (as === "h3" ? " h3" : as === "bar" ? " bar" : "")} defaultValue={value} placeholder={placeholder} aria-label={placeholder} autoFocus onFocus={(e) => e.currentTarget.select()} onBlur={(e) => save(e.currentTarget.value)} onKeyDown={key} />;
+      : <input className={"in" + (as === "h3" ? " h3" : as === "bar" ? " ttl" : "")} defaultValue={value} placeholder={placeholder} aria-label={placeholder} autoFocus onFocus={(e) => e.currentTarget.select()} onBlur={(e) => save(e.currentTarget.value)} onKeyDown={key} />;
   }
-  const cls = "il " + as + (value ? "" : " blank") + (pending ? " busy" : "");
+  const cls = "il " + (as === "bar" ? "ttl" : as) + (value ? "" : " blank") + (pending ? " busy" : "");   // „ttl”, nie „bar”: .bar to pasek postępu kafelka
   const body = <><span className="il-t">{value ? shown ?? value : placeholder}</span><Icon k="pen" size={12} sw={1.8} /></>;
   if (as === "h3" || as === "bar") return <h3 className={cls} title="Kliknij, aby zmienić" onClick={() => setEdit(true)}>{body}</h3>;
   return <p className={cls} title="Kliknij, aby zmienić" onClick={() => setEdit(true)}>{body}</p>;
@@ -89,7 +89,7 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
       <div><div className="lbl">Czeka na</div>
         <div className="deps">
           {step.dependsOn.map((d) => { const x = steps.find((s) => s.id === d); return x ? (
-            <button key={d} type="button" className="chip" title="Usuń tę zależność" onClick={() => start(() => linkSteps(taskId, d, step.id, false))}><span className="d" style={{ ["--c" as string]: x.done ? "var(--ok)" : "var(--sub)" }} />{x.title}<span className="x">×</span></button>
+            <button key={d} type="button" className="chip" title="Usuń tę zależność" onClick={() => start(() => linkSteps(taskId, d, step.id, false))}><span className="d" style={{ ["--c" as string]: x.done ? "var(--ok)" : "var(--sub)" }} /><span>{x.title}</span><span className="x">×</span></button>
           ) : null; })}
           {!step.dependsOn.length ? <span className="chip ghost">zaczyna od razu</span> : null}
           {free.length ? <Picker cls="add" title="Dodaj krok, po którym ten ma się zacząć" trigger={<span>+ po kroku</span>} onPick={(k) => start(() => linkSteps(taskId, k, step.id, true))}

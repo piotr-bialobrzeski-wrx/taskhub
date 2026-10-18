@@ -110,6 +110,23 @@ describe.skipIf(!DB)("mostek: serwer", async () => {
     expect((await workSummary(owner, { peek: true })).counts.answered).toBe(0);  // list_work oznaczył
     await sql()`delete from tasks where id = ${t.id}`;
   });
+  it("wiadomość Piotra w zadaniu to praca na początku listy; odpowiedź agenta w aplikacji nie czeka; stempel zmian rośnie", async () => {
+    const t = await repo.createTask(owner, { title: "Mostek test: wiadomość", steps: [{ title: "Krok" }] });
+    const s0 = await repo.changeStamp(owner, t.id);
+    await repo.addChat(owner, t.id, "user", "Dodaj jeszcze ship date z godziną");
+    await repo.addChat(owner, t.id, "agent", "Przekazałem mostkowi.");
+    const w = await workSummary(owner, { peek: true });
+    expect(w.counts.chat).toBe(1);
+    expect(w.text.startsWith("WIADOMOŚCI PIOTRA")).toBe(true);                // przed krokami i zadaniami bez kroków
+    expect(w.text).toContain("ship date");
+    expect((await repo.listUnseenChat(owner)).map((m) => m.taskTitle)).toContain("Mostek test: wiadomość");
+    await workSummary(owner);                                                  // list_work bez peek oznacza jako przeczytane
+    expect((await workSummary(owner, { peek: true })).counts.chat).toBe(0);
+    await repo.addChat(owner, t.id, "user", "Dzięki", undefined, { seen: true });  // agent w aplikacji odpowiedział od razu
+    expect((await workSummary(owner, { peek: true })).counts.chat).toBe(0);
+    expect(await repo.changeStamp(owner, t.id)).not.toBe(s0);
+    await sql()`delete from tasks where id = ${t.id}`;
+  });
   it("punkty wejścia mostka: 401 bez tokenu mostka, puls + liczba pracy, bieg na wyłączność, zakończenie", async () => {
     await sql()`delete from bridge_runs where owner_id = ${owner}`;
     const t = await repo.createApiToken(owner, "Mac mini", "bridge");

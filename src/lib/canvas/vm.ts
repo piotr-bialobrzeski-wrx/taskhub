@@ -5,8 +5,9 @@ import { estOf, fmtMin, spentMin, taskEst, taskSpent } from "../time";
 import { toolLabel, type Step, type Task } from "../schema";
 import type { StepStateKey, StepTile, TaskStateKey, TaskTile } from "@/components/canvas/ui";
 
-export const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("pl-PL", { day: "numeric", month: "short" });
-export const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+export { fmtDate, fmtTime } from "../clock";   // zawsze czas polski (serwer liczy w UTC)
+import { fmtDate, fmtTime } from "../clock";
+import type { LiveActivity } from "../live";
 
 export function dueOf(due: string | null, now = Date.now()): TaskTile["due"] {
   if (!due) return null;
@@ -34,9 +35,12 @@ export function stepStateOf(t: Task, s: Step, all: Task[]): StepStateKey {
 
 export const estText = (t: Task) => (t.steps.length ? `~${fmtMin(taskEst(t))}${taskSpent(t) ? ` / ${fmtMin(taskSpent(t))}` : ""}` : "bez kroków");
 
-export function taskTile(s: Scored, all: Task[], questions: number): TaskTile {
+// activity: co mostek robi teraz, gdy pracuje nad tym zadaniem (kafelek pokazuje to zamiast licznika)
+export function taskTile(s: Scored, all: Task[], questions: number, live: LiveActivity | null = null): TaskTile {
   const t = s.task, state = taskStateOf(t, all);
+  const mine = live && (live.taskId === t.id || (!live.taskId && !live.stepId && !t.steps.length && false));
   return {
+    activity: mine ? { text: live!.text, detail: live!.detail, since: live!.since } : null,
     id: t.id, title: t.title, summary: state === "done" && t.noteSummary ? t.noteSummary : t.summary, state,
     base: s.score.base, eff: s.score.eff, why: whyText(s.score),
     project: s.project ? { id: s.project.id, name: s.project.name, color: s.project.color } : null,
@@ -51,11 +55,13 @@ export function taskTile(s: Scored, all: Task[], questions: number): TaskTile {
   };
 }
 
-export function stepTile(t: Task, s: Step, all: Task[]): StepTile & { toolName: string } {
+export function stepTile(t: Task, s: Step, all: Task[], live: LiveActivity | null = null): StepTile & { toolName: string } {
   const state = stepStateOf(t, s, all);
+  // bieg mostka związany z tym krokiem (start_step), albo jedyny krok w toku w zadaniu, nad którym mostek pracuje
+  const mine = !!live && state === "handoff" && (live.stepId === s.id || (!live.stepId && live.taskId === t.id && t.steps.filter((x) => x.status === "handoff").length === 1));
   const deps = s.dependsOn.map((d) => t.steps.findIndex((x) => x.id === d) + 1).filter((n) => n > 0);
   const meta = state === "handoff" && s.handoffAt
     ? `Pracuje od ${fmtTime(s.handoffAt)}`
     : `${deps.length ? "Po kroku " + deps.join(", ") : "Start od razu"} · ${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}${s.needsApproval ? " · zatw." : ""}`;
-  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, meta, pos: s.pos, dependsOn: s.dependsOn };
+  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, meta, pos: s.pos, dependsOn: s.dependsOn, activity: mine ? { text: live!.text, detail: live!.detail, since: live!.since } : null };
 }

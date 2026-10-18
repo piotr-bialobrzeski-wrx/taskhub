@@ -1,6 +1,7 @@
 "use client";
 // Drobne kontrolki kanwy: wybór priorytetu/projektu w menu, termin, dok czatu, pole nazwy, toast.
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { dayKey, fmtDateLong, fmtTime } from "@/lib/clock";
 import { createPortal, useFormStatus } from "react-dom";
 import { LEVELS } from "@/lib/priority";
 import { loadChat } from "@/app/actions";
@@ -85,12 +86,13 @@ async function shrinkImage(file: File): Promise<File> {
 // ---------- historia rozmowy: szkło nad kanwą, dok zostaje widoczny i działa; wpisy dosunięte do dołu (najnowsze przy polu), starsze wyżej ----------
 type Msg = { id: string; role: "user" | "agent"; text: string; createdAt: string };
 const CHAT_PAGE = 50;   // tyle wpisów na stronę zwraca loadChat
-const dayOf = (iso: string) => new Date(iso).toLocaleDateString("pl-PL", { day: "numeric", month: "long", year: "numeric" });
+// dni i godziny w czasie polskim (zegar w src/lib/clock), żeby „Dziś” i „11:26” zgadzały się z tym, co Piotr widzi na komputerze
+const dayOf = (iso: string) => dayKey(iso);
 const dayLabel = (iso: string) => {
-  const d = new Date(iso), t = new Date(); const y = new Date(t); y.setDate(t.getDate() - 1);
-  return d.toDateString() === t.toDateString() ? "Dziś" : d.toDateString() === y.toDateString() ? "Wczoraj" : dayOf(iso);
+  const now = new Date(), d = dayOf(iso);
+  return d === dayKey(now) ? "Dziś" : d === dayKey(new Date(now.getTime() - 864e5)) ? "Wczoraj" : fmtDateLong(iso);
 };
-const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+const timeOf = (iso: string) => fmtTime(iso);
 
 // zamykanie: X u góry, ikona w doku (ta sama, która otworzyła), klik obok kolumny, Esc
 export function ChatHistory({ taskId, title, onClose }: { taskId: string | null; title: string; onClose: () => void }) {
@@ -98,12 +100,21 @@ export function ChatHistory({ taskId, title, onClose }: { taskId: string | null;
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const list = useRef<HTMLDivElement>(null);
+  // przewinięcie po wczytaniu: na sam dół (pierwsze otwarcie) albo tak, żeby starsze wpisy nie przesunęły tego, co było widać;
+  // ustawiane w useLayoutEffect, zanim przeglądarka pokaże nową listę (requestAnimationFrame bywało za późno i historia otwierała się na górze)
+  const pend = useRef<{ keep: number | null } | null>(null);
+  useLayoutEffect(() => {
+    const p = pend.current, e = list.current; if (!p || !e) return;
+    pend.current = null;
+    e.scrollTop = p.keep != null ? e.scrollHeight - p.keep : e.scrollHeight;
+  }, [msgs]);
   const load = async (before: string | null) => {
     setBusy(true);
     try {
-      const el = list.current, keep = el ? el.scrollHeight - el.scrollTop : 0;
-      const r = await loadChat(taskId, before); setMsgs((m) => (before ? [...r, ...(m ?? [])] : r)); setMore(r.length >= CHAT_PAGE);
-      requestAnimationFrame(() => { const e = list.current; if (!e) return; e.scrollTop = before ? e.scrollHeight - keep : e.scrollHeight; });
+      const el = list.current, keep = before && el ? el.scrollHeight - el.scrollTop : null;
+      const r = await loadChat(taskId, before);
+      pend.current = { keep };
+      setMsgs((m) => (before ? [...r, ...(m ?? [])] : r)); setMore(r.length >= CHAT_PAGE);
     } finally { setBusy(false); }
   };
   useEffect(() => { void load(null); }, [taskId]);   // eslint-disable-line react-hooks/exhaustive-deps

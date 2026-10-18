@@ -48,7 +48,7 @@ export const ThreadBlock = z.object({
 export const DraftTarget = z.object({
   app: z.string(),                         // gdzie poleci
   where: z.string().optional(),            // '#dev', 'anna@firma.pl', 'lista Backlog'
-  action: z.enum(["send", "reply", "create", "update", "comment", "other"]).default("send"),
+  action: z.enum(["send", "reply", "create", "update", "comment", "commit", "push", "other"]).default("send"),   // commit/push: zmiany w kodzie do opublikowania
 });
 export const DraftBlock = z.object({
   type: z.literal("draft"),
@@ -60,6 +60,23 @@ export const DraftBlock = z.object({
   columns: z.array(z.string()).max(12).optional(), // wiersze do dopisania (arkusz, tabela): nagłówki i wiersze zamiast body
   rows: z.array(z.array(z.string())).max(50).optional(),
   status: z.enum(["proposed", "approved", "sent"]).default("proposed"),
+  stale: z.boolean().optional(),           // zakres pracy zmienił się po napisaniu szkicu (nowe kroki przed publikacją); agent przygotuje go od nowa
+});
+// zmiany w kodzie (krok Claude Code): pliki z diffem do rozwinięcia, podgląd (adres albo plik), repozytorium i gałąź
+export const ChangedFile = z.object({
+  path: z.string().max(400),
+  status: z.enum(["added", "modified", "deleted", "renamed"]).optional(),
+  diff: z.string().max(30000).optional(),  // unified diff tego pliku
+  note: z.string().max(300).optional(),    // jedno zdanie, co się zmieniło
+});
+export const ChangesBlock = z.object({
+  type: z.literal("changes"),
+  title: z.string().optional(),
+  repo: z.string().optional(),             // „wlrx/custom-cookies”
+  branch: z.string().optional(),
+  preview: z.string().optional(),          // adres podglądu: http(s) albo file://
+  summary: z.string().max(2000).optional(), // co zostało zrobione i jak sprawdzone
+  files: z.array(ChangedFile).max(60),
 });
 // ---------- klocki kontekstu: mail (koperta), komentarz (dymek z miejscem), tabela (wiersze), wolna treść (markdown) ----------
 export const MailMessage = z.object({
@@ -135,12 +152,12 @@ export const QuestionBlock = z.object({
   answer: z.string().optional(),
 });
 export const Block = z.discriminatedUnion("type", [
-  TextBlock, FactsBlock, ThreadBlock, DraftBlock, ListBlock, MediaBlock, LinkBlock, QuestionBlock, MailBlock, CommentBlock, TableBlock, FreeBlock,
+  TextBlock, FactsBlock, ThreadBlock, DraftBlock, ListBlock, MediaBlock, LinkBlock, QuestionBlock, MailBlock, CommentBlock, TableBlock, FreeBlock, ChangesBlock,
 ]);
 export type Block = z.infer<typeof Block>;
 export const Blocks = z.array(Block).max(12);
 // klocki kontekstu (to, na czym Piotr pracuje) kontra odpowiedź (blok draft) i pytanie
-export const CONTEXT_BLOCK_TYPES = new Set(["text", "facts", "thread", "list", "media", "link", "mail", "comment", "table", "free"]);
+export const CONTEXT_BLOCK_TYPES = new Set(["text", "facts", "thread", "list", "media", "link", "mail", "comment", "table", "free", "changes"]);
 
 // ---------- rekordy z bazy (kształt używany w aplikacji) ----------
 export const StepStatus = z.enum(["todo", "draft", "done", "handoff"]);
@@ -254,6 +271,7 @@ export const Task = z.object({
   ownerId: z.string(),
   projectId: z.string().nullable(),
   title: z.string(),
+  titleOriginal: z.string().nullable(),  // tytuł sprzed przepisania przez agenta; null = tytuł jest Piotra
   summary: z.string(),
   source: z.string(),
   level: z.number().int().min(1).max(5),

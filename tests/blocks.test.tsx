@@ -58,6 +58,15 @@ describe("biała kartka: nowe klocki, markdown, tryb karty, kontekst kroku w cza
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain('<pre class="code">kod</pre>');
   });
+  it("blok zmian w kodzie i szkic commit/push: schemat, nieaktualny szkic", () => {
+    const ok = Blocks.safeParse([
+      { type: "changes", repo: "wlrx/custom-cookies", branch: "draft/177", preview: "file:///Users/x/dist/index.html", summary: "Etykieta i pole daty.", files: [{ path: "src/intake.jsx", status: "modified", diff: "@@ -1 +1 @@\n-a\n+b", note: "etykieta" }] },
+      { type: "draft", target: { app: "github", where: "wlrx/custom-cookies · main", action: "push" }, subject: "Intake: daty", body: "Treść commita", status: "proposed", stale: true },
+    ]);
+    expect(ok.success).toBe(true);
+    expect(Blocks.safeParse([{ type: "changes", files: [{ path: "a", status: "exploded" }] }]).success).toBe(false);
+    expect(Blocks.safeParse([{ type: "draft", target: { app: "github", action: "merge" }, body: "x", status: "proposed" }]).success).toBe(false);
+  });
   it("tryb karty publikacji wynika ze stanu kroku i bloku draft", () => {
     const d = { type: "draft" as const, target: { app: "slack", action: "send" as const }, body: "x", status: "proposed" as const };
     expect(cardModeOf(step({ status: "draft" }))).toBe("proposed");

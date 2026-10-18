@@ -8,7 +8,8 @@ import { requireOwner } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { aiFor, composeFlow, finishStep, prepareStep } from "@/lib/services";
 import { runChat } from "@/lib/agent/chat";
-import { newTaskText } from "@/lib/auto";
+import { busyWith, chatWho, newTaskText, noStepsWho, type Worker } from "@/lib/auto";
+import { liveActivity } from "@/lib/live";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import type { Connection, Rule, Sphere } from "@/lib/schema";
 
@@ -61,8 +62,14 @@ export async function chat(fd: FormData) {
     // bez klucza modelu: na kanwie tekst staje się zadaniem, w zadaniu zostaje jako notatka rozmowy; pliki trafiają do zadania
     await repo.addChat(o.id, taskId, "user", text + (typed && files.length ? ` (załączniki: ${files.map((f) => f.name).join(", ")})` : ""));
     // komunikaty mówią, co z tego ma Piotr, nie jak działa mechanizm
-    if (taskId) { await attachFiles(taskId, files); await repo.addChat(o.id, taskId, "agent", files.length ? `Dopisałem to do zadania razem z ${files.length === 1 ? "załącznikiem" : "załącznikami"}. Claude weźmie to pod uwagę przy kolejnych krokach.` : "Dopisałem to do zadania. Claude weźmie to pod uwagę przy kolejnych krokach."); }
-    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files); await repo.addChat(o.id, null, "agent", newTaskText(t.title, (await repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS)).alive)); goTo = t.id; }
+    // kto przeczyta wiadomość i kiedy: mostek (teraz / po bieżącej pracy / w ciągu minuty) albo automat o pełnej godzinie; bez obietnic „weźmie pod uwagę”
+    const worker = async (): Promise<{ w: Worker; busy: string | null }> => {
+      const [st, tasks] = await Promise.all([repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.listTasks(o.id)]);
+      const w: Worker = { alive: st.alive, name: st.name, run: liveActivity(st.run) };
+      return { w, busy: busyWith(w.run, tasks) };
+    };
+    if (taskId) { await attachFiles(taskId, files); const { w, busy } = await worker(); await repo.addChat(o.id, taskId, "agent", chatWho(w, taskId, busy)); }
+    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files); const { w, busy } = await worker(); await repo.addChat(o.id, null, "agent", newTaskText(t.title, noStepsWho(w, t.id, busy))); goTo = t.id; }
   } else {
     try {
       const images = await Promise.all(files.filter((f) => IMAGE_TYPES.has(f.type)).map(async (f) => ({ mediaType: f.type as "image/png", base64: Buffer.from(await f.arrayBuffer()).toString("base64") })));

@@ -26,11 +26,14 @@ export function SrcHead({ s, title, meta }: { s?: Provenance; title?: string; me
 }
 const SHOW_LAST = 3;   // długi wątek: ostatnie wiadomości od razu, wcześniejsze po rozwinięciu
 
+// chip źródła: jedna linia, długie miejsce (ścieżka pliku, nazwa kanału) ucina się wielokropkiem, pełna treść w dymku
 export function Source({ s }: { s?: Provenance }) {
   if (!s) return null;
-  const inner = <><span className="tool-dot" style={{ ["--c" as string]: toolColor(s.app) }} /> {toolLabel(s.app)}{s.ref ? ` · ${s.ref}` : ""}</>;
-  return s.url ? <a className="src chip" href={s.url} target="_blank" rel="noopener">{inner}</a> : <span className="src chip">{inner}</span>;
+  const label = `${toolLabel(s.app)}${s.ref ? ` · ${s.ref}` : ""}`;
+  const inner = <><span className="tool-dot" style={{ ["--c" as string]: toolColor(s.app) }} /><span>{label}</span></>;
+  return s.url ? <a className="src chip" href={s.url} target="_blank" rel="noopener" title={label}>{inner}</a> : <span className="src chip" title={label}>{inner}</span>;
 }
+const FILE_STATUS: Record<string, string> = { added: "nowy", modified: "zmieniony", deleted: "usunięty", renamed: "przeniesiony" };
 
 export function Facts({ facts }: { facts: Fact[] }) {
   const shown = facts.filter((f) => !f.hidden);
@@ -129,7 +132,7 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
           <div className="media">
             {b.items.map((m, i) => (
               <div key={i}>
-                {m.kind === "image" ? <a href={m.url} target="_blank" rel="noopener"><img src={m.url} alt={m.caption ?? m.name ?? ""} /></a> : <a className="chip" href={m.url} target="_blank" rel="noopener">{m.kind === "file" ? "📎" : "🔗"} {m.name ?? m.url}</a>}
+                {m.kind === "image" ? <a href={m.url} target="_blank" rel="noopener"><img src={m.url} alt={m.caption ?? m.name ?? ""} /></a> : <a className="chip" href={m.url} target="_blank" rel="noopener" title={m.name ?? m.url}><span>{m.kind === "file" ? "📎" : "🔗"} {m.name ?? m.url}</span></a>}
                 {m.caption ? <div className="cap">{m.caption}</div> : null}
                 {m.analysis ? <details><summary className="sub">Analiza agenta</summary><p className="sub" style={{ whiteSpace: "pre-wrap" }}>{m.analysis}</p></details> : null}
               </div>
@@ -139,6 +142,26 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
       );
     case "link":
       return <div className="links">{b.links.map((l, i) => <a key={i} className="btn" href={l.url} target="_blank" rel="noopener">{l.source ? <span className="tool-dot" style={{ ["--c" as string]: toolColor(l.source.app) }} /> : null}{l.title ?? l.url} ↗</a>)}</div>;
+    case "changes": {
+      // zmiany w kodzie: repozytorium i gałąź, podgląd, lista plików z diffem po rozwinięciu (karta publikacji prowadzi tu przez „Zobacz zmiany”)
+      const n = b.files.length, http = b.preview && /^https?:\/\//.test(b.preview) ? b.preview : undefined;
+      const place = [b.repo, b.branch].filter(Boolean).join(" · ") || undefined;
+      return (
+        <div className="block kctx" id={form ? "zm-" + form.stepId : undefined}>
+          <SrcHead s={{ app: "github", ref: place, url: http }} title={b.title ?? "Zmiany w kodzie"} meta={`${n} ${plural(n, "plik", "pliki", "plików")}`} />
+          {b.summary ? <p>{b.summary}</p> : null}
+          {b.preview && !http ? <p className="sub">Podgląd: <code>{b.preview}</code></p> : null}
+          {n ? (
+            <div className="files">{b.files.map((f, i) => (
+              <details key={i} className="file">
+                <summary><span className={"fst " + (f.status ?? "modified")}>{FILE_STATUS[f.status ?? "modified"]}</span><code title={f.path}>{f.path}</code>{f.note ? <span className="sub">{f.note}</span> : null}</summary>
+                {f.diff ? <pre className="code diff">{f.diff}</pre> : <p className="sub">Bez diffu.</p>}
+              </details>
+            ))}</div>
+          ) : null}
+        </div>
+      );
+    }
     case "question":
       if (b.answer || !form) {
         return (

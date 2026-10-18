@@ -8,7 +8,8 @@ import { rulesText } from "@/lib/agent/context";
 import { workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
-import { Blocks, Fact, SPHERES, sphereOf } from "@/lib/schema";
+import { Blocks, ChangedFile, Fact, SPHERES, sphereOf, type Block } from "@/lib/schema";
+import { shortTitle } from "@/lib/auto";
 import { sql } from "@/lib/db";
 import { originOf, wwwAuthenticate } from "@/lib/oauth";
 import { externalLink as externalLinkOf } from "@/lib/links";
@@ -53,7 +54,10 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       const qx = qs.length ? "PYTANIA DO PIOTRA (zadane w aplikacji):\n" + qs.map((q) => `- [${q.id}]${q.stepId ? ` krok ${q.stepId}` : ""} ${q.text} → ${q.answer ? `ODPOWIEDŹ: ${q.answer}` : "(czeka na odpowiedź)"}`).join("\n") : "";
       const att = await repo.listAttachments({ taskId });
       const ax = att.length ? "ZAŁĄCZNIKI ZADANIA (grafikę albo plik tekstowy pokaże get_attachment; opis zapisz przez describe_attachment):\n" + att.map((a) => `- [${a.id}] ${a.kind} „${a.name ?? a.url ?? ""}”${a.mime ? ` (${a.mime})` : ""}${a.caption ? ` · ${a.caption}` : ""}${a.analysis ? `: ${a.analysis.slice(0, 400)}` : ""}`).join("\n") : "";
-      return text(ctx + (fx ? "\n" + fx : "") + (qx ? "\n" + qx : "") + (ax ? "\n" + ax : ""));
+      // rozmowa w zadaniu: Piotr dopisuje tu wymagania i pytania; NOWE = jeszcze bez odpowiedzi agenta
+      const chat = await repo.listChat(ownerId, taskId, 12);
+      const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy; NOWE = Piotr napisał, nikt nie odpowiedział: odpowiedz przez reply_chat, a gdy prośba zmienia zakres, najpierw add_steps z before):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${m.role === "user" && !m.seenAt ? " NOWE" : ""}: ${m.text.slice(0, 1200)}`).join("\n") : "";
+      return text(ctx + (fx ? "\n" + fx : "") + (qx ? "\n" + qx : "") + (ax ? "\n" + ax : "") + (cx ? "\n" + cx : ""));
     });
 
     server.registerTool("get_rules", {
@@ -81,20 +85,31 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       title: "Zmień zadanie", description: "Zmienia tytuł, cel, priorytet, termin albo projekt zadania.",
       inputSchema: z.object({ taskId: z.string(), title: z.string().optional(), summary: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().nullable().optional(), project: z.string().nullable().optional() }),
     }, async (a) => {
+      const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
       let projectId: string | null | undefined;
       if (a.project !== undefined) projectId = a.project ? ((await repo.findProjectByName(ownerId, a.project)) ?? (await repo.createProject(ownerId, a.project))).id : null;
-      await repo.updateTask(ownerId, a.taskId, { title: a.title, summary: a.summary, level: a.level, due: a.due, projectId });
+      // agent poprawił tytuł: pierwotne brzmienie zostaje w zadaniu („Jak wpadło”), Piotr widzi, że to przeredagowane
+      const renamed = !!a.title?.trim() && a.title.trim() !== t.title;
+      await repo.updateTask(ownerId, a.taskId, { title: a.title, summary: a.summary, level: a.level, due: a.due, projectId, ...(renamed && !t.titleOriginal ? { titleOriginal: t.title } : {}) });
       return text("Zmieniono.");
     });
 
     server.registerTool("add_steps", {
-      title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. Termin zadania ustaw osobno przez update_task(due).",
-      inputSchema: z.object({ taskId: z.string(), steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })) }),
+      title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. before: id kroku, przed którym nowe kroki mają wejść (np. krok publikacji, wysyłki, commitu): dziedziczą jego zależności, on zaczyna zależeć od nich, a jego szkic (gdy czekał na zgodę) staje się nieaktualny i krok wraca do gotowych. Bez before kroki idą na koniec. Termin zadania ustaw osobno przez update_task(due).",
+      inputSchema: z.object({ taskId: z.string(), steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })), before: z.string().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
-      const steps = await repo.addSteps(t.id, await Promise.all(a.steps.map(async (s) => ({ ...s, link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection) }))));
-      await repo.addChat(ownerId, t.id, "agent", `Rozpisałem ${steps.length} ${steps.length === 1 ? "krok" : steps.length < 5 ? "kroki" : "kroków"}: ${steps.map((s) => s.title).join(", ")}.`);
-      return json(steps.map((s) => ({ id: s.id, title: s.title })));
+      const bef = a.before ? t.steps.find((s) => s.id === a.before) ?? null : null;
+      if (a.before && !bef) return text("Nie ma takiego kroku (before) w tym zadaniu.");
+      const fresh = t.steps.length === 0;
+      const steps = await repo.addSteps(t.id, await Promise.all(a.steps.map(async (s) => ({ ...s, link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection) }))), { before: bef?.id ?? null });
+      // przed krokiem ze szkicem weszła nowa praca: szkic jest nieaktualny, krok wraca do gotowych i dostanie nowy szkic po nowych krokach
+      if (bef && bef.status === "draft") await repo.updateStep(bef.id, { status: "todo", prevStatus: null, handoffAt: null, blocks: (bef.blocks ?? []).map((b): Block => (b.type === "draft" ? { ...b, stale: true } : b)) });
+      // w rozmowie tylko fakt: ile kroków i gdzie; tytuły, gdy jest ich mało (szczegóły są na kafelkach)
+      const n = steps.length, word = n === 1 ? "krok" : n < 5 ? "kroki" : "kroków";
+      const list = n <= 4 ? ": " + steps.map((s) => `„${shortTitle(s.title, 40)}”`).join(", ") : "";
+      await repo.addChat(ownerId, t.id, "agent", `${fresh ? "Rozpisałem" : "Dodałem"} ${n} ${word}${bef ? ` przed „${shortTitle(bef.title, 40)}”` : ""}${list}.`, { stepId: steps[0]?.id });
+      return json({ steps: steps.map((s) => ({ id: s.id, title: s.title })), ...(bef ? { before: { id: bef.id, title: bef.title, draftReset: bef.status === "draft" } } : {}) });
     });
 
     server.registerTool("update_step", {
@@ -118,21 +133,27 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId);
       if (st && st.status !== "done" && st.status !== "draft" && a.blocks.some((b) => b.type === "draft" && b.status === "proposed")) {
         await repo.updateStep(st.id, { status: "draft", prevStatus: st.status === "handoff" ? st.prevStatus : st.status, handoffAt: null });
-        await repo.addChat(ownerId, taskId, "agent", `Szkic do zatwierdzenia: „${st.title}”. Zatwierdź w panelu kroku, a wyślę dokładnie tę treść.`);
+        await repo.addChat(ownerId, taskId, "agent", `Szkic do zatwierdzenia: „${shortTitle(st.title, 70)}”.`, { stepId: st.id });
         return text("Panel zapisany, krok czeka na zatwierdzenie Piotra.");
       }
       return text("Panel zapisany.");
     });
 
     server.registerTool("complete_step", {
-      title: "Krok gotowy", description: "Zgłasza wynik kroku: krótkie podsumowanie, link do wyniku, opcjonalnie czas w minutach. Gdy to ostatni krok, zadanie się kończy i agent pisze notatkę końcową.",
-      inputSchema: z.object({ stepId: z.string(), summary: z.string(), link: z.string().optional(), spentMin: z.number().int().optional() }),
+      title: "Krok gotowy", description: "Zgłasza wynik kroku: summary = 1–2 zdania o efekcie (Piotr czyta je w raporcie kroku; w rozmowie zobaczy tylko „Gotowe: tytuł kroku”), link do wyniku, opcjonalnie czas w minutach. Krok z kodem: changes = zmienione pliki (path, status, diff, note), repo, branch, preview = adres podglądu (http albo file://); trafiają na kartkę kroku jako blok zmian. Gdy to ostatni krok, zadanie się kończy i agent pisze notatkę końcową.",
+      inputSchema: z.object({ stepId: z.string(), summary: z.string().max(4000), link: z.string().optional(), spentMin: z.number().int().optional(), repo: z.string().max(200).optional(), branch: z.string().max(200).optional(), preview: z.string().max(1000).optional(), changes: z.array(ChangedFile).max(60).optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId);
       if (!taskId) return text("Nie ma takiego kroku.");
       const r = await finishStep(ownerId, taskId, a.stepId, { report: a.summary, link: a.link, addSpentSec: a.spentMin ? a.spentMin * 60 : 0 });
-      const title = r.task.steps.find((x) => x.id === a.stepId)?.title ?? "";
-      await repo.addChat(ownerId, taskId, "agent", `Gotowe: „${title}”. ${a.summary}${a.link ? ` ${a.link}` : ""}${r.closed ? " To był ostatni krok, zadanie ukończone." : ""}`);
+      const st = r.task.steps.find((x) => x.id === a.stepId);
+      // zmiany w kodzie na kartce kroku: jeden blok changes (zastępuje poprzedni), reszta klocków zostaje
+      if (st && (a.changes?.length || a.preview)) {
+        const rest = (st.blocks ?? []).filter((b) => b.type !== "changes").slice(0, 11);
+        await repo.updateStep(st.id, { blocks: [...rest, { type: "changes", repo: a.repo, branch: a.branch, preview: a.preview, summary: a.summary.slice(0, 2000), files: a.changes ?? [] }] });
+      }
+      // w rozmowie tylko fakt; opis, pliki i adresy są na kartce kroku („Otwórz krok”)
+      await repo.addChat(ownerId, taskId, "agent", `Gotowe: „${shortTitle(st?.title ?? "", 70)}”.${r.closed ? " Zadanie ukończone." : ""}`, { stepId: a.stepId, link: externalLink(a.link) ?? undefined });
       return text(r.closed ? "Krok zapisany, zadanie ukończone." : "Krok zapisany.");
     });
 
@@ -155,7 +176,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
       if (st.status === "done") return text("Ten krok jest już zrobiony.");
       if (st.status === "handoff") await repo.updateStep(st.id, { status: st.prevStatus === "draft" ? "draft" : "todo", prevStatus: null, handoffAt: null });
-      await repo.addChat(ownerId, taskId, "agent", `Nie zrobiłem kroku „${st.title}”: ${a.reason}`);
+      await repo.addChat(ownerId, taskId, "agent", `Nie zrobiłem kroku „${shortTitle(st.title, 70)}”: ${a.reason}`, { stepId: st.id });
       return text("Krok oddany.");
     });
 
@@ -196,6 +217,17 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
       const q = await repo.askQuestion(ownerId, { taskId: a.taskId, stepId: a.stepId ?? null, text: a.text, options: a.options, recommended: a.recommended ?? null });
       return json({ questionId: q.id });
+    });
+
+    server.registerTool("reply_chat", {
+      title: "Odpowiedz w rozmowie zadania", description: "Odpowiada Piotrowi w rozmowie zadania (1–3 zdania: co dopisałeś, numery i tytuły kroków, albo odpowiedź na pytanie; bez raportu z postępu). Oznacza jego wiadomości w tym zadaniu jako przeczytane. stepId: krok, którego odpowiedź dotyczy (karta w rozmowie dostanie „Otwórz krok”); link: adres wyniku w zewnętrznej aplikacji.",
+      inputSchema: z.object({ taskId: z.string(), text: z.string().min(1).max(1200), stepId: z.string().optional(), link: z.string().optional() }),
+    }, async (a) => {
+      const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
+      const stepId = a.stepId && t.steps.some((s) => s.id === a.stepId) ? a.stepId : undefined;
+      await repo.addChat(ownerId, t.id, "agent", a.text.trim(), { stepId, link: externalLink(a.link) ?? undefined });
+      await repo.markChatSeen(ownerId, { taskId: t.id });
+      return text("Odpowiedź zapisana.");
     });
 
     server.registerTool("get_attachment", {

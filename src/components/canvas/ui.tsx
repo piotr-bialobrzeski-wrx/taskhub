@@ -19,10 +19,14 @@ export type TaskTile = {
   progress: { done: number; all: number };
   estText: string; drafts: number; handed: number; questions: number;
   tool: string; pos: Pos | null; dependsOn: string[];
+  activity: TileActivity | null;
 };
+// co mostek robi teraz na tym kafelku (pasek z kropkami): czynność, szczegół (np. polecenie), od kiedy trwa bieg
+export type TileActivity = { text: string; detail: string | null; since: string };
 export type StepTile = {
   id: string; idx: number; title: string; tool: string; state: StepStateKey; meta: string;
   pos: Pos | null; dependsOn: string[];
+  activity: TileActivity | null;
 };
 export type GroupVM = { id: string; name: string; color: number; x: number; y: number; w: number; h: number; members: string[]; auto: boolean };
 export type ProjectVM = { id: string; name: string; color: number };

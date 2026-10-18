@@ -187,7 +187,7 @@ function rowToStep(r: Row, deps: string[]): Step {
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
   return {
-    id: r.id as string, ownerId: r.ownerId as string, projectId: (r.projectId as string) ?? null, title: r.title as string, summary: (r.summary as string) ?? "",
+    id: r.id as string, ownerId: r.ownerId as string, projectId: (r.projectId as string) ?? null, title: r.title as string, titleOriginal: (r.titleOriginal as string) ?? null, summary: (r.summary as string) ?? "",
     source: (r.source as string) ?? "", level: Number(r.level), due: dateStr(r.due), doneAt: iso(r.doneAt), deletedAt: iso(r.deletedAt),
     noteText: (r.noteText as string) ?? null, noteSummary: (r.noteSummary as string) ?? null, noteAt: iso(r.noteAt),
     pos: (r.pos as { x: number; y: number }) ?? null, createdAt: iso(r.createdAt) as string, dependsOn: deps, steps,
@@ -230,9 +230,13 @@ export async function createTask(ownerId: string, input: NewTask): Promise<Task>
   if (input.steps?.length) await addSteps(id, input.steps);
   return (await getTask(ownerId, id))!;
 }
-export async function addSteps(taskId: string, steps: NewStep[]): Promise<Step[]> {
+// before: id kroku, przed którym nowe kroki mają wejść (np. przed publikacją): dostają jego miejsce w kolejności, dziedziczą jego zależności
+// (gdy nie podały własnych), a on zaczyna czekać na nie; kroki za nim przesuwają się dalej
+export async function addSteps(taskId: string, steps: NewStep[], opts: { before?: string | null } = {}): Promise<Step[]> {
+  const [bef] = opts.before ? await sql()`select id, position from steps where id = ${opts.before} and task_id = ${taskId}` : [];
+  if (bef) await sql()`update steps set position = position + ${steps.length} where task_id = ${taskId} and position >= ${Number(bef.position)}`;
   const [{ n }] = await sql()`select coalesce(max(position), -1) + 1 as n from steps where task_id = ${taskId}`;
-  let pos = Number(n);
+  let pos = bef ? Number(bef.position) : Number(n);
   const created: { id: string }[] = [];
   for (const s of steps) {
     const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id)
@@ -248,14 +252,25 @@ export async function addSteps(taskId: string, steps: NewStep[]): Promise<Step[]
     if (target && target !== created[i].id) links.push({ step_id: created[i].id, depends_on_id: target });
   }));
   if (links.length) await sql()`insert into step_dependencies ${sql()(links)} on conflict do nothing`;
+  if (bef) {
+    // dziedziczenie: nowy krok bez własnych zależności czeka na to, na co czekał krok „before”; „before” czeka na ostatnie z nowych (te, na które żaden nowy nie czeka)
+    const inherited = (await sql()`select depends_on_id from step_dependencies where step_id = ${bef.id as string}`).map((r) => r.dependsOnId as string);
+    const own = new Set(links.map((l) => l.step_id));
+    const inh = created.filter((c) => !own.has(c.id)).flatMap((c) => inherited.map((d) => ({ step_id: c.id, depends_on_id: d })));
+    const needed = new Set(links.map((l) => l.depends_on_id));
+    const tails = created.filter((c) => !needed.has(c.id)).map((c) => ({ step_id: bef.id as string, depends_on_id: c.id }));
+    const extra = [...inh, ...tails];
+    if (extra.length) await sql()`insert into step_dependencies ${sql()(extra)} on conflict do nothing`;
+  }
   const rows = await sql()`select * from steps where id in ${sql()(created.map((c) => c.id))} order by position`;
   const deps = await sql()`select * from step_dependencies where step_id in ${sql()(created.map((c) => c.id))}`;
   return rows.map((r) => rowToStep(r, deps.filter((d) => d.stepId === r.id).map((d) => d.dependsOnId as string)));
 }
-export type TaskPatch = Partial<{ title: string; summary: string; source: string; level: number; due: string | null; projectId: string | null; pos: { x: number; y: number } | null; deletedAt: string | null; noteText: string | null; noteSummary: string | null }>;
+export type TaskPatch = Partial<{ title: string; titleOriginal: string | null; summary: string; source: string; level: number; due: string | null; projectId: string | null; pos: { x: number; y: number } | null; deletedAt: string | null; noteText: string | null; noteSummary: string | null }>;
 export async function updateTask(ownerId: string, id: string, patch: TaskPatch): Promise<void> {
   const p: Row = {};
   if (patch.title !== undefined) p.title = patch.title.slice(0, 200);
+  if (patch.titleOriginal !== undefined) p.title_original = patch.titleOriginal === null ? null : patch.titleOriginal.slice(0, 200);
   if (patch.summary !== undefined) p.summary = patch.summary;
   if (patch.source !== undefined) p.source = patch.source;
   if (patch.level !== undefined) p.level = patch.level;
@@ -487,17 +502,50 @@ export async function listSamples(ownerId: string): Promise<TimeSample[]> {
 }
 
 // ---------- czat ----------
-export type ChatMessage = { id: string; role: "user" | "agent"; text: string; actions: unknown; createdAt: string };
+export type ChatMessage = { id: string; role: "user" | "agent"; text: string; actions: unknown; createdAt: string; seenAt: string | null };
+const rowToChat = (r: Row): ChatMessage => ({ id: r.id as string, role: r.role as "user" | "agent", text: r.text as string, actions: r.actions, createdAt: iso(r.createdAt) as string, seenAt: iso(r.seenAt) });
 // before: kursor (created_at) do wczytywania starszych wpisów w historii rozmowy
 export async function listChat(ownerId: string, taskId: string | null, limit = 20, before: string | null = null): Promise<ChatMessage[]> {
   const cut = before ?? "9999-12-31T00:00:00Z";
   const rows = taskId
     ? await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and created_at < ${cut} order by created_at desc limit ${limit}`
     : await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id is null and created_at < ${cut} order by created_at desc limit ${limit}`;
-  return rows.reverse().map((r) => ({ id: r.id as string, role: r.role as "user" | "agent", text: r.text as string, actions: r.actions, createdAt: iso(r.createdAt) as string }));
+  return rows.reverse().map(rowToChat);
 }
-export async function addChat(ownerId: string, taskId: string | null, role: "user" | "agent", text: string, actions?: unknown): Promise<void> {
-  await sql()`insert into chat_messages (owner_id, task_id, role, text, actions) values (${ownerId}, ${taskId}, ${role}, ${text}, ${actions ? sql().json(actions as never) : null})`;
+// seen: wiadomość Piotra już obsłużona (agent w aplikacji odpowiedział od razu); bez tego czeka na mostek albo automat jako praca
+export async function addChat(ownerId: string, taskId: string | null, role: "user" | "agent", text: string, actions?: unknown, opts: { seen?: boolean } = {}): Promise<string> {
+  const seen = role === "agent" || opts.seen ? new Date() : null;
+  const [r] = await sql()`insert into chat_messages (owner_id, task_id, role, text, actions, seen_at) values (${ownerId}, ${taskId}, ${role}, ${text}, ${actions ? sql().json(actions as never) : null}, ${seen}) returning id`;
+  return r.id as string;
+}
+// wiadomości Piotra w zadaniach, których agent jeszcze nie przeczytał (praca dla mostka: odpowiedzieć, dopisać kroki, poprawić szkic)
+export async function listUnseenChat(ownerId: string, limit = 30): Promise<(ChatMessage & { taskId: string; taskTitle: string })[]> {
+  const rows = await sql()`select c.*, t.title as task_title from chat_messages c join tasks t on t.id = c.task_id
+    where c.owner_id = ${ownerId} and c.role = 'user' and c.seen_at is null and c.task_id is not null and t.deleted_at is null and t.done_at is null
+    order by c.created_at limit ${limit}`;
+  return rows.map((r) => ({ ...rowToChat(r), taskId: r.taskId as string, taskTitle: r.taskTitle as string }));
+}
+export async function markChatSeen(ownerId: string, where: { ids?: string[]; taskId?: string }): Promise<void> {
+  if (where.ids) { if (where.ids.length) await sql()`update chat_messages set seen_at = now() where owner_id = ${ownerId} and id in ${sql()(where.ids)} and seen_at is null`; }
+  else if (where.taskId) await sql()`update chat_messages set seen_at = now() where owner_id = ${ownerId} and task_id = ${where.taskId} and role = 'user' and seen_at is null`;
+}
+// stempel zmian dla pulsu przeglądarki: ostatnia zmiana zadania, kroków, rozmowy i pytań (jednego zadania albo wszystkich)
+export async function changeStamp(ownerId: string, taskId: string | null): Promise<string> {
+  const [r] = taskId
+    ? await sql()`select greatest(
+        (select max(updated_at) from tasks where id = ${taskId} and owner_id = ${ownerId}),
+        (select max(updated_at) from steps where task_id = ${taskId}),
+        (select max(created_at) from chat_messages where owner_id = ${ownerId} and task_id = ${taskId}),
+        (select max(greatest(asked_at, coalesce(answered_at, asked_at))) from questions where task_id = ${taskId}),
+        (select max(coalesce(fetched_at, '1970-01-01')) from facts where task_id = ${taskId} or step_id in (select id from steps where task_id = ${taskId}))
+      ) as at`
+    : await sql()`select greatest(
+        (select max(updated_at) from tasks where owner_id = ${ownerId}),
+        (select max(s.updated_at) from steps s join tasks t on t.id = s.task_id where t.owner_id = ${ownerId}),
+        (select max(created_at) from chat_messages where owner_id = ${ownerId}),
+        (select max(greatest(asked_at, coalesce(answered_at, asked_at))) from questions where owner_id = ${ownerId})
+      ) as at`;
+  return iso(r?.at) ?? "0";
 }
 
 // ---------- pamięć układu ----------
@@ -576,8 +624,8 @@ export async function setUserSettings(ownerId: string, patch: Record<string, unk
 // ---------- mostek na komputerze ----------
 // Puls: token rodzaju "bridge" ma seen_at i meta (komputer, silnik, stan). Bieg: jeden otwarty na właściciela (unikalny indeks częściowy),
 // więc dwa komputery nie wykonają tej samej pracy; bieg bez sygnału wygasa.
-export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null };
-const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null });
+export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null };
+const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null });
 export type BridgeStatus = { alive: boolean; seenAt: string | null; name: string | null; meta: Record<string, unknown>; run: BridgeRun | null };
 
 export async function bridgeSeen(tokenId: string, meta: Record<string, unknown>): Promise<void> {
@@ -597,10 +645,18 @@ export async function startBridgeRun(ownerId: string, tokenId: string | null, br
   const [r] = await sql()`insert into bridge_runs (owner_id, token_id, bridge) values (${ownerId}, ${tokenId}, ${bridge.slice(0, 80)}) on conflict (owner_id) where ended_at is null do nothing returning *`;
   return r ? rowToRun(r) : null;
 }
-export async function touchBridgeRun(ownerId: string, id: string, note?: string): Promise<boolean> {
-  const rows = note === undefined
-    ? await sql()`update bridge_runs set touched_at = now() where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id`
-    : await sql()`update bridge_runs set touched_at = now(), note = ${note.slice(0, 200)} where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id`;
+// note: co mostek robi teraz („start_step: id”, „Bash: npm test”); link: z którym zadaniem albo krokiem bieg jest związany (krok ustala też zadanie)
+export async function touchBridgeRun(ownerId: string, id: string, note?: string, link: { taskId?: string; stepId?: string } = {}): Promise<boolean> {
+  const p: Row = { touched_at: new Date() };
+  if (note !== undefined) p.note = note.slice(0, 200);
+  if (link.stepId) {
+    const [s] = await sql()`select s.id, s.task_id from steps s join tasks t on t.id = s.task_id where s.id = ${link.stepId} and t.owner_id = ${ownerId}`;
+    if (s) { p.step_id = s.id; p.task_id = s.taskId; }
+  } else if (link.taskId) {
+    const [t] = await sql()`select id from tasks where id = ${link.taskId} and owner_id = ${ownerId}`;
+    if (t) { p.task_id = t.id; p.step_id = null; }
+  }
+  const rows = await sql()`update bridge_runs set ${sql()(p)} where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id`;
   return rows.length > 0;
 }
 export async function endBridgeRun(ownerId: string, id: string, outcome: string, note?: string): Promise<boolean> {

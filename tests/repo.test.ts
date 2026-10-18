@@ -98,6 +98,24 @@ describe.skipIf(!DB)("repo", async () => {
     expect(more[0].position).toBe(3);
   });
 
+  it("add_steps z before: nowe kroki wchodzą przed wskazany, dziedziczą jego zależności, a on zaczyna zależeć od nich; pierwotny tytuł zostaje", async () => {
+    const t = await repo.createTask(owner, { title: "Poprawić ekran", steps: [
+      { title: "Analiza" }, { title: "Zmiany w kodzie", dependsOn: ["n1"] }, { title: "Zatwierdź publikację", needsApproval: true, dependsOn: ["n2"] },
+    ] });
+    const pub = t.steps[2];
+    const added = await repo.addSteps(t.id, [{ title: "Adres jednym polem" }, { title: "Ship date", dependsOn: ["n1"] }], { before: pub.id });
+    const fresh = (await repo.getTask(owner, t.id))!;
+    expect(fresh.steps.map((s) => s.title)).toEqual(["Analiza", "Zmiany w kodzie", "Adres jednym polem", "Ship date", "Zatwierdź publikację"]);
+    expect(fresh.steps.map((s) => s.position)).toEqual([0, 1, 2, 3, 4]);
+    expect(added[0].dependsOn).toEqual([t.steps[1].id]);              // bez własnych zależności: dziedziczy zależności kroku publikacji
+    expect(added[1].dependsOn).toEqual([added[0].id]);                // własne zależności (n1 w paczce) zostają
+    expect(fresh.steps[4].dependsOn).toContain(added[1].id);          // publikacja czeka na ostatni z nowych („ogon”)
+    expect(fresh.steps[4].dependsOn).not.toContain(added[0].id);      // nie na ten, na który i tak czeka ogon
+    await repo.updateTask(owner, t.id, { title: "Poprawić ekran Intake w prototypie", titleOriginal: t.title });
+    const r = (await repo.getTask(owner, t.id))!;
+    expect(r.title).toBe("Poprawić ekran Intake w prototypie"); expect(r.titleOriginal).toBe("Poprawić ekran");
+  });
+
   it("załącznik z danymi: adres /api/files/<id>, lista bez danych, plik tylko dla właściciela", async () => {
     const t = await repo.createTask(owner, { title: "Z załącznikiem" });
     const png = Buffer.from("89504e470d0a1a0a", "hex");

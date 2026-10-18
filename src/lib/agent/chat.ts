@@ -61,7 +61,7 @@ ${hist.length ? "OSTATNIA ROZMOWA W TYM MIEJSCU:\n" + hist.map((m) => `${m.role 
 ${text}`;
   const result = await deps.ai.json({ system: SYSTEM, prompt, schema: ChatResult, images: deps.images, effort: "medium" });
   const done = await applyActions(result, { ...deps, tasks });
-  await repo.addChat(deps.ownerId, deps.taskId, "user", text);
+  await repo.addChat(deps.ownerId, deps.taskId, "user", text, undefined, { seen: true });
   await repo.addChat(deps.ownerId, deps.taskId, "agent", result.reply, result.actions);
   return { reply: result.reply, done, result };
 }

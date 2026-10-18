@@ -9,6 +9,8 @@ import { Facts, Table } from "@/components/BlockRenderer";
 import { PendingButton } from "@/components/Pending";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { ConnectionHead, type StepConnection } from "@/components/StepFields";
+import { Activity } from "@/components/Activity";
+import type { TileActivity } from "@/components/canvas/ui";
 import { approveStep, backToTodo, markDone, prepare, saveOutput } from "@/app/actions";
 
 export type CardMode = "proposed" | "parked" | "sending" | "sent";
@@ -24,33 +26,38 @@ export function cardModeOf(s: Step): CardMode | null {
   return null;
 }
 
-const ACTION: Record<string, string> = { send: "wyśle", reply: "odpowie", create: "utworzy", update: "zaktualizuje", comment: "skomentuje", other: "wykona" };
+const ACTION: Record<string, string> = { send: "wyśle", reply: "odpowie", create: "utworzy", update: "zaktualizuje", comment: "skomentuje", commit: "zapisze commit", push: "wypchnie", other: "wykona" };
 // etykieta głównego przycisku: mówi, co się stanie po zatwierdzeniu
-const VERB: Record<string, string> = { send: "wyślij", reply: "wyślij", create: "utwórz", update: "dopisz", comment: "dodaj komentarz", other: "wykonaj" };
+const VERB: Record<string, string> = { send: "wyślij", reply: "wyślij", create: "utwórz", update: "dopisz", comment: "dodaj komentarz", commit: "zapisz commit", push: "opublikuj", other: "wykonaj" };
 const PROMPT_APPS = new Set(["claudeapp", "code", "claude"]);
 const COMMENT_APPS = new Set(["figma", "github", "clickup"]);
 
-export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, company }: {
-  t: Task; s: Step; mode: CardMode; aiOn: boolean; ownerName: string; link: string | null; connections: StepConnection[]; company: string | null;
+export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, company, activity }: {
+  t: Task; s: Step; mode: CardMode; aiOn: boolean; ownerName: string; link: string | null; connections: StepConnection[]; company: string | null; activity?: TileActivity | null;
 }) {
   const d = (s.blocks?.find((b) => b.type === "draft") ?? null) as Draft | null;
+  const changes = (s.blocks?.find((b) => b.type === "changes") ?? null) as Extract<Block, { type: "changes" }> | null;
   const app = d?.target.app ?? s.tool, name = toolLabel(app), where = d?.target.where ?? null;
   const conn = connections.find((c) => c.id === s.connectionId) ?? null;
   const account = conn ? `${conn.label}${conn.account ? ` · ${conn.account}` : ""}` : null;
   const stays = !s.needsApproval && mode !== "sent";   // szkic bez zgody nigdzie nie leci: zatwierdzenie kończy krok
   const me = ownerName;
   const action = d?.target.action ?? "send";
-  const isPrompt = PROMPT_APPS.has(app), isRows = !!d?.rows?.length, isComment = action === "comment" || (COMMENT_APPS.has(app) && action !== "create");
+  // komentarz: wprost (action comment) albo odpowiedź/wysyłka w aplikacji, gdzie treść ląduje jako komentarz; commit i push to zapis kodu, nie komentarz
+  const isCommit = action === "commit" || action === "push";
+  const isPrompt = PROMPT_APPS.has(app), isRows = !!d?.rows?.length, isComment = action === "comment" || (COMMENT_APPS.has(app) && (action === "reply" || action === "send"));
+  const stale = !!d?.stale;
   const mainLabel = stays ? "Zatwierdź" : isPrompt ? "Zatwierdź i uruchom" : `Zatwierdź i ${isRows && action !== "create" ? "dopisz" : VERB[action] ?? "wyślij"}`;
-  const head = mode === "sent" ? <><b>{isPrompt ? "Wykonano" : "Wysłano"}</b> · {name}{where ? ` · ${where}` : ""}</>
-    : mode === "sending" ? <><b>{isPrompt ? "Claude pracuje" : "Claude wysyła"}</b> · {name}{where ? ` · ${where}` : ""}</>
+  const head = mode === "sent" ? <><b>{isPrompt ? "Wykonano" : isCommit ? "Opublikowano" : "Wysłano"}</b> · {name}{where ? ` · ${where}` : ""}</>
+    : mode === "sending" ? <><b>{isPrompt || isCommit ? "Claude pracuje" : "Claude wysyła"}</b> · {name}{where ? ` · ${where}` : ""}</>
     : stays ? <><b>Szkic</b> · zostaje w zadaniu</>
-    : mode === "parked" ? <><b>Odłożony szkic</b> · {name}{where ? ` · ${where}` : ""}</>
+    : mode === "parked" ? <><b>{stale ? "Nieaktualny szkic" : "Odłożony szkic"}</b> · {name}{where ? ` · ${where}` : ""}</>
     : <><b>{name}</b>{where ? ` · ${where}` : ""}{isPrompt ? " · uruchomi" : d && d.target.action !== "send" ? ` · ${ACTION[d.target.action] ?? d.target.action}` : ""}</>;
 
   // podgląd: jak to będzie wyglądać po drugiej stronie (wiadomość w wątku, e-mail z nadawcą i tematem, komentarz/ticket)
   const body = d?.body ?? s.output;
   const who = app === "gmail" ? `Od: ${conn?.account ?? "Twoje konto"} · Do: ${where ?? "adresat z treści"}`
+    : isCommit ? `${where ?? changes?.repo ?? name}${changes?.branch && !where?.includes(changes.branch) ? ` · ${changes.branch}` : ""} · ${action === "push" ? "push" : "commit"} · jako ${me}`
     : isComment ? `Komentarz w: ${where ?? name} · jako ${me}`
     : app === "clickup" ? `${where ?? "ClickUp"} · ${action === "update" ? "zmiana" : "nowe zadanie"} · jako ${me}`
     : app === "slack" || app === "whatsapp" ? `${me} · ${mode === "sent" ? "wysłano" : "teraz"}`
@@ -59,7 +66,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   // podgląd według rodzaju odpowiedzi: wiersze do arkusza jako tabela, prompt jako ramka kodu, reszta jako wiadomość „moja”
   const preview = isRows && d ? (
     <div className="thread"><div className="msg mine rows"><div className="who">{who}</div><Table columns={d.columns ?? d.rows![0].map((_, i) => `Kolumna ${i + 1}`)} rows={d.rows!} highlightFrom={0} />{body ? <p className="sub">{body}</p> : null}</div></div>
-  ) : isPrompt && (d || mode !== "proposed") ? (
+  ) : (isPrompt || isCommit) && (d || mode !== "proposed") ? (
     <div className="thread"><div className="msg mine"><div className="who">{who}</div>{d?.subject ? <h4>{d.subject}</h4> : null}<pre className="code">{body || "Brak treści."}</pre></div></div>
   ) : d || mode !== "proposed" ? (
     <div className="thread"><div className="msg mine">
@@ -86,6 +93,13 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
           : account ? <span className="pub-acc">{account}</span> : null}
         {mode === "sent" && link ? <a className="btn ico" href={link} target="_blank" rel="noopener" title={link}>Otwórz w {name}<Icon k="ext" size={13} sw={1.6} /></a> : null}
       </div>
+      {stale ? <div className="note warn">Szkic sprzed zmiany zakresu: przed tym krokiem weszły nowe kroki, Claude przygotuje go od nowa, gdy je zrobi.</div> : null}
+      {changes ? (
+        <div className="actions">
+          <a className="btn" href={"#zm-" + s.id} title="Pliki i diffy na kartce kroku">Zobacz zmiany ({changes.files.length})</a>
+          {changes.preview ? <a className="btn ico" href={changes.preview} target="_blank" rel="noopener" title={changes.preview}>Otwórz podgląd<Icon k="ext" size={13} sw={1.6} /></a> : null}
+        </div>
+      ) : null}
       {preview}
       {mode === "proposed" ? (
         <div className="actions">
@@ -101,7 +115,8 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
         </div>
       ) : mode === "sending" ? (
         <div className="actions">
-          <span className="working" title="Claude wysyła zatwierdzoną treść przez konektor; krok zamknie się sam"><span className="pulse" />Claude wysyła{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>
+          {activity ? <Activity text={activity.text} detail={activity.detail} since={activity.since} who="Claude" big />
+            : <span className="working" title="Claude wysyła zatwierdzoną treść przez konektor; krok zamknie się sam"><span className="pulse" />Claude {isPrompt || isCommit ? "pracuje" : "wysyła"}{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>}
           <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Wstrzymaj wysyłkę; szkic zostaje" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form>
         </div>
       ) : null}

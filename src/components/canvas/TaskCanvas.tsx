@@ -11,15 +11,17 @@ import { SearchPill } from "./SearchPill";
 import type { SearchItem } from "@/lib/search-core";
 import { Dock, Namer, Toast, useToast } from "./widgets";
 import { InlineText } from "@/components/StepFields";
+import { Activity } from "@/components/Activity";
 import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, linkSteps, saveStepPositions, updateGroupAction } from "@/app/actions";
 
 export type TaskCanvasProps = {
   task: { id: string; title: string; base: number; eff: number; why: string; state: TaskStateKey; progress: { done: number; all: number }; estText: string };
   steps: (StepTile & { toolName: string })[];
   groups: GroupVM[]; index: SearchItem[];
-  aiOn: boolean; agent: string; lastAgent: { id: string; text: string } | null;
+  aiOn: boolean; agent: string; lastAgent: { id: string; text: string; stepId?: string | null; link?: string | null } | null;
   focus: string | null;
   runbar: ReactNode;                       // treść paska stanu nad kanwą
+  runAction?: { label: string; anchor: string } | null;   // przycisk w pasku: otwiera panel zadania i rozwija wskazaną sekcję
   taskBar: ReactNode; taskBody: ReactNode; // panel zadania
   panels: Record<string, ReactNode>;       // panele kroków, klucz = id kroku
   questions: ReactNode | null;             // karta pytań agenta
@@ -42,12 +44,24 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const [namer, setNamer] = useState<"tile" | "group" | null>(null);
   // kontekst pola czatu: domyślnie to, co jest otwarte (krok w panelu, inaczej zadanie); X zawęża o poziom wyżej (krok → zadanie → wszystkie zadania)
   const [ctxLevel, setCtxLevel] = useState<"auto" | "task" | "global">("auto");
-  const [dw, setDw] = useState(520);
+  // szerokość panelu: dwa tryby (wąski do 600 px, szeroki do 1200 px) zapamiętane jako wybór, a uchwyt nadpisuje je dokładną szerokością
+  const [wide, setWide] = useState(false);
+  const [gripW, setGripW] = useState<number | null>(null);
+  const [ww, setWw] = useState(1280);
   const [gripOn, setGripOn] = useState(false);
   const [answerOff, setAnswerOff] = useState(true);
   const grip = useRef<{ x: number; w: number } | null>(null);
+  const maxW = Math.max(360, ww - 32);
+  const dw = clamp(gripW ?? (wide ? Math.min(1200, ww - 64) : Math.min(600, ww - 32)), 360, maxW);
+  const cramped = ww - dw < 420;   // szeroki panel zostawia za mało miejsca: pasek stanu i karta odpowiedzi chowają się do czasu zwężenia
 
-  useEffect(() => { try { const w = Number(localStorage.getItem("th-dw")); if (w) setDw(clamp(w, 360, 1200)); } catch { /* brak storage */ } }, []);
+  useEffect(() => {
+    try { setWide(localStorage.getItem("th-wide") === "1"); const w = Number(localStorage.getItem("th-dw")); if (w) setGripW(w); } catch { /* brak storage */ }
+    const size = () => setWw(window.innerWidth); size();
+    window.addEventListener("resize", size); return () => window.removeEventListener("resize", size);
+  }, []);
+  // przycisk w pasku („Rozpisz teraz”): panel zadania i rozwinięta sekcja, do której prowadzi
+  const runAct = (anchor: string) => { setSel(new Set()); setPanel("__task"); setTimeout(() => { const el = document.getElementById(anchor); if (el instanceof HTMLDetailsElement) el.open = true; el?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, 80); };
   useEffect(() => { try { setAnswerOff(!p.lastAgent || sessionStorage.getItem("th-ans-" + p.task.id) === p.lastAgent.id); } catch { setAnswerOff(!p.lastAgent); } }, [p.lastAgent, p.task.id]);
   useEffect(() => {
     setSel((s) => { const n = new Set([...s].filter((id) => p.steps.some((x) => x.id === id))); return n.size === s.size ? s : n; });
@@ -82,9 +96,9 @@ export function TaskCanvas(p: TaskCanvasProps) {
     <><span className="n-num">{pad(s.idx)}</span><InlineText taskId={t.id} stepId={s.id} field="title" value={s.title} as="bar" placeholder="Tytuł kroku" /><span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span></>
   );
   const onGrip = (e: React.PointerEvent) => { e.preventDefault(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); grip.current = { x: e.clientX, w: dw }; setGripOn(true); };
-  const onGripMove = (e: React.PointerEvent) => { const g = grip.current; if (!g) return; setDw(clamp(g.w + (g.x - e.clientX), 360, window.innerWidth - 80)); };
+  const onGripMove = (e: React.PointerEvent) => { const g = grip.current; if (!g) return; setGripW(clamp(g.w + (g.x - e.clientX), 360, window.innerWidth - 32)); };
   const endGrip = () => { if (!grip.current) return; grip.current = null; setGripOn(false); try { localStorage.setItem("th-dw", String(dw)); } catch { /* brak storage */ } };
-  const widen = () => { const w = dw < 700 ? 760 : 520; setDw(w); try { localStorage.setItem("th-dw", String(w)); } catch { /* brak storage */ } };
+  const widen = () => { const w = !wide; setWide(w); setGripW(null); try { localStorage.setItem("th-wide", w ? "1" : "0"); localStorage.removeItem("th-dw"); } catch { /* brak storage */ } };
   const cur = panel && panel !== "__task" ? byId.get(panel) ?? null : null;
   useEffect(() => { setCtxLevel("auto"); }, [panel]);
   const ctxGlobal = ctxLevel === "global";
@@ -97,13 +111,13 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const layoutNow = () => { undoL.remember(layoutSnapshot(api.current, p.steps.map((s) => s.id), p.groups)); run(() => autoLayout(t.id), "Ułożono"); };
 
   return (
-    <div className="app" style={panel ? { ["--dw" as string]: dw + "px" } : undefined}>
+    <div className={"app" + (panel && cramped ? " cramped" : "")} style={panel ? { ["--dw" as string]: dw + "px" } : undefined}>
       {view === "canvas" ? (
         <Canvas zoomKey={"task"} apiRef={api} items={items} size={STEP_SIZE} groups={groups} render={(id) => { const s = byId.get(id)!; return (
             <>
               <span className="n-top"><span className="n-num">{pad(s.idx)}</span><span className="chip tool" style={{ ["--c" as string]: toolColor(s.tool) }}>{s.toolName}</span><span className={"st " + s.state}>{ST_LABEL[s.state]}</span></span>
               <span className="n-title">{s.title}</span>
-              <span className="n-meta">{s.meta}</span>
+              <span className="n-meta">{s.activity ? <Activity text={s.activity.text} detail={s.activity.detail} since={s.activity.since} /> : s.meta}</span>
             </>); }}
           origin={{ cls: "task " + t.state, node: (
             <>
@@ -143,7 +157,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
       </div>
       {view === "canvas" ? <MakePill tileTitle={after ? "Nowy krok po zaznaczonym" : "Nowy krok"} groupTitle={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onTile={() => setNamer(namer === "tile" ? null : "tile")} onGroup={() => setNamer(namer === "group" ? null : "group")} /> : null}
 
-      {p.runbar ? <div className={"runbar glass" + (panel ? " withpanel" : "")}>{p.runbar}</div> : null}
+      {p.runbar ? <div className={"runbar glass" + (panel ? " withpanel" : "")}>{p.runbar}{p.runAction ? <button className="btn" type="button" onClick={() => runAct(p.runAction!.anchor)}>{p.runAction.label}</button> : null}</div> : null}
 
       {namer === "tile" ? <Namer label="Nazwa nowego kroku" placeholder={after ? "Nazwa kroku (po zaznaczonym)" : "Nazwa kroku"} onClose={() => setNamer(null)} onSubmit={(name) => { setNamer(null); run(() => addStepQuick(t.id, name, after), "Dodano krok"); }} /> : null}
       {namer === "group" ? <Namer label="Nazwa grupy" placeholder={n ? `Nazwa grupy dla ${n} ${word}` : "Nazwa grupy"} onClose={() => setNamer(null)} onSubmit={(name) => { const members = ids; const rect = groupRect(members); setNamer(null); setSel(new Set()); setPanel(null); run(async () => { await freeze(members); const id = await createGroupAction(t.id, name, members, rect); setSelGroup(id); }); }} /> : null}
@@ -173,8 +187,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
           <div className={"grip" + (gripOn ? " on" : "")} title="Przeciągnij, aby zmienić szerokość" onPointerDown={onGrip} onPointerMove={onGripMove} onPointerUp={endGrip} onPointerCancel={endGrip} />
           <div className="d-bar">
             {panel === "__task" ? p.taskBar : cur ? stepBar(cur) : null}
-            <span className="sp" />
-            <button className="icobtn" type="button" aria-label="Szerzej / węziej" title="Szerzej / węziej" onClick={widen}><Icon k="widen" size={14} sw={1.6} /></button>
+            <button className={"icobtn" + (wide && gripW == null ? " on" : "")} type="button" aria-label={wide ? "Węziej" : "Szerzej"} title={wide ? "Węziej" : "Szerzej (kartka obok siebie)"} aria-pressed={wide} onClick={widen}><Icon k="widen" size={14} sw={1.6} /></button>
             <button className="icobtn" type="button" aria-label="Zamknij" onClick={() => { setPanel(null); setSel(new Set()); }}><Icon k="x" size={12} sw={2} /></button>
           </div>
           <div className="d-body" key={panel}>{panel === "__task" ? p.taskBody : p.panels[panel]}</div>
@@ -185,6 +198,12 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {!p.questions && p.lastAgent && !answerOff && !n && !group ? (
         <div className={"answer plain glass" + (panel ? " withpanel" : "")} role="status" aria-live="polite">
           <div className="ans-text">{p.lastAgent.text}</div>
+          {(p.lastAgent.stepId && byId.has(p.lastAgent.stepId)) || p.lastAgent.link ? (
+            <div className="ans-acts">
+              {p.lastAgent.stepId && byId.has(p.lastAgent.stepId) ? <button className="btn" type="button" onClick={() => openStep(p.lastAgent!.stepId!)}>Otwórz krok {pad(byId.get(p.lastAgent.stepId)!.idx)}</button> : null}
+              {p.lastAgent.link ? <a className="btn ico" href={p.lastAgent.link} target="_blank" rel="noopener" title={p.lastAgent.link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a> : null}
+            </div>
+          ) : null}
           <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans-" + t.id, p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button>
         </div>
       ) : null}

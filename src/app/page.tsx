@@ -10,6 +10,9 @@ import type { ProjTask } from "@/components/canvas/ui";
 import { Board, type ArchRow, type BoardInitial } from "@/components/canvas/Board";
 import { agentLabel, indexFrom } from "@/lib/search";
 import { isArchivedDone } from "@/lib/search-core";
+import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
+import { liveActivity, liveKey } from "@/lib/live";
+import { LivePoll } from "@/components/LivePoll";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +21,8 @@ const DAY = 864e5;
 export default async function Home({ searchParams }: { searchParams: Promise<BoardInitial> }) {
   const initial = await searchParams;
   const o = await requireOwner();
-  const [b, chatLog, groups, questions] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 2), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true })]);
+  const [b, chatLog, groups, questions, bridge, stamp] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 2), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null)]);
+  const run = liveActivity(bridge.run);
   const now = Date.now();
   const live = sortByPriority(b.scored.filter((s) => !s.task.deletedAt));
   // ukończone zostają na kanwie do końca dnia, potem idą do archiwum (ta sama reguła co w indeksie szukajki)
@@ -36,9 +40,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
   // widok „Projekty”: wszystkie żywe zadania (także ukończone) z pozostałym szacunkiem i zmierzonym czasem
   const projTasks: ProjTask[] = live.map((s) => ({ id: s.task.id, title: s.task.title, state: taskStateOf(s.task, all), base: s.score.base, eff: s.score.eff, due: dueOf(s.task.due), remain: remainEst(s.task), spent: taskSpent(s.task), projectId: s.task.projectId }));
 
+  const acts = (lastAgent?.actions ?? null) as { link?: string } | null;
   return (
+    <>
+    <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run} />
     <Board
-      tasks={onBoard.map((s) => taskTile(s, all, qCount.get(s.task.id) ?? 0))}
+      tasks={onBoard.map((s) => taskTile(s, all, qCount.get(s.task.id) ?? 0, run))}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
       projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color, weight: p.weight, language: p.language, companyId: p.companyId }))}
       companies={b.companies.map((c) => ({ id: c.id, name: c.name, sphere: c.sphere, note: c.note, ended: !!c.endedAt }))}
@@ -46,12 +53,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
       index={indexFrom(b, now)} initial={{ view: initial.view, p: initial.p, t: initial.t, focus: initial.focus }}
       aiOn={providers.length > 0}
       agent={agentLabel(providers)}
-      lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text } : null}
+      lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text, link: acts?.link ?? null } : null}
       archive={{
         done: doneArch.map((s) => row(s, `ukończone ${fmtDate(s.task.doneAt!)}`)),
         trash: trash.map((s) => row(s, `w koszu, zniknie za ${Math.max(1, Math.ceil((new Date(s.task.deletedAt!).getTime() + repo.TRASH_DAYS * DAY - Date.now()) / DAY))} dni`)),
         trashDays: repo.TRASH_DAYS,
       }}
     />
+    </>
   );
 }

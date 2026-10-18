@@ -9,7 +9,7 @@ export const step = (p: Partial<Step> = {}): Step => ({
   estMin: 15, spentSec: 0, spentManual: false, link: null, handoffAt: null, report: null, output: "", review: null, blocks: null, blocksAt: null, logged: false, pos: null, dependsOn: [], connectionId: null, ...p,
 });
 export const task = (p: Partial<Task> = {}): Task => ({
-  id: "t" + ++n, ownerId: "o", projectId: null, title: "Zadanie", summary: "", source: "", level: 3, due: null, doneAt: null, deletedAt: null,
+  id: "t" + ++n, ownerId: "o", projectId: null, title: "Zadanie", titleOriginal: null, summary: "", source: "", level: 3, due: null, doneAt: null, deletedAt: null,
   noteText: null, noteSummary: null, noteAt: null, pos: null, createdAt: new Date().toISOString(), dependsOn: [], steps: [step()], ...p,
 });
 export const rule = (p: Partial<Rule> = {}): Rule => ({ id: "r" + ++n, kind: "rule", scope: "global", companyId: null, projectId: null, tool: null, originCompanyId: null, title: "Zasada", body: "Treść", trigger: null, summary: null, visibility: "private", ...p });
