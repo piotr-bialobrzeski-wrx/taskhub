@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Ai } from "../ai";
 import * as repo from "../repo";
 import { Fact, type Rule, type Step, type Task, toolLabel } from "../schema";
-import { rulesText } from "./context";
+import { capText, rulesText } from "./context";
 
 const LINK_RE = /https?:\/\/[^\s<>"')\]]+/g;
 export const linksIn = (txt: string | null | undefined) => [...new Set(String(txt ?? "").match(LINK_RE) ?? [])].slice(0, 8);
@@ -17,7 +17,7 @@ export async function closingNote(ai: Ai, ownerId: string, task: Task): Promise<
 2. "note": NOTATKA KOŃCOWA dla agentów, 2-4 zdania samych faktów: co zrobiono, wynik, z kim, decyzje, linki.
 Zadanie: ${task.title}
 Cel: ${task.summary || "-"}
-Jak wpadło: ${(task.source || "-").slice(0, 1500)}
+Jak wpadło: ${capText(task.source) || "-"}
 Kroki:
 ${task.steps.map((s, i) => `${i + 1}. ${s.title} (${toolLabel(s.tool)})${s.detail ? ": " + s.detail.slice(0, 200) : ""}${s.output ? " | wynik: " + s.output.slice(0, 500) : ""}${s.link ? " | link: " + s.link : ""}`).join("\n")}`,
     schema: z.object({ summary: z.string(), note: z.string() }), effort: "low",

@@ -2,7 +2,7 @@
 // Zasada: Task Hub prowadzi, Claude wykonuje. Wynik wraca przez MCP (complete_step) albo wklejony raport.
 import type { Rule, Step, Task } from "../schema";
 import { toolLabel } from "../schema";
-import { rulesText } from "./context";
+import { capText, rulesText } from "./context";
 
 export function handoffPrompt(task: Task, step: Step, rules: Rule[], opts: { appUrl?: string; companyId?: string | null; attachments?: { caption: string | null; analysis: string | null }[] } = {}): string {
   const i = task.steps.indexOf(step) + 1;
@@ -12,7 +12,7 @@ export function handoffPrompt(task: Task, step: Step, rules: Rule[], opts: { app
   return `Pracujemy nad krokiem ${i} zadania „${task.title}” z mojej aplikacji Task Hub.
 
 CEL ZADANIA: ${task.summary || "-"}
-JAK TO WPADŁO: ${(task.source || "-").slice(0, 1500)}
+JAK TO WPADŁO: ${capText(task.source) || "-"}
 ${(opts.attachments ?? []).length ? `GRAFIKI (analiza):\n${opts.attachments!.map((a, k) => `- ${k + 1}. ${a.caption ?? ""}: ${(a.analysis ?? "").slice(0, 1200)}`).join("\n")}\n` : ""}${task.noteText ? `NOTATKA: ${task.noteText}\n` : ""}${rt ? rt + "\n" : ""}
 TEN KROK (${toolLabel(step.tool)}): ${step.title}
 ${step.detail ? `SZCZEGÓŁY: ${step.detail}\n` : ""}${prev ? `WYNIKI WCZEŚNIEJSZYCH KROKÓW:\n${prev}\n` : ""}${done ? `INNE ZROBIONE KROKI:\n${done}\n` : ""}
@@ -28,7 +28,7 @@ export function breakdownPrompt(task: Task, rules: Rule[], opts: { appUrl?: stri
   return `Rozłóż na kroki zadanie „${task.title}” z mojej aplikacji Task Hub (id zadania: ${task.id}).
 
 CEL: ${task.summary || "-"}
-JAK TO WPADŁO: ${(task.source || "-").slice(0, 2500)}
+JAK TO WPADŁO: ${capText(task.source) || "-"}
 ${opts.projectName ? `PROJEKT: ${opts.projectName}\n` : ""}${task.due ? `TERMIN: ${task.due}\n` : ""}${rt ? rt + "\n" : ""}
 Jeśli masz podłączony konektor Task Hub: wywołaj get_task dla tego zadania (pełny kontekst) i get_rules z topic ["rozpisanie"], a potem od razu zapisz kroki przez add_steps, bez pytania mnie o zgodę. Nie dopytuj: przyjmij rozsądne założenia i wpisz je w detail kroku. Gdy bez jakiejś informacji nie da się ułożyć kroków, zapisz kroki, które się da, i zadaj jedno pytanie przez ask_question (odpowiem w aplikacji). Gdy w treści jest termin, ustaw go przez update_task(due: YYYY-MM-DD). Każdy krok: title (co zrobić, od czasownika), tool (slack, gmail, clickup, calendar, claude, claudeapp, code, manual albo inna aplikacja), detail (co dokładnie, gdzie, dla kogo), est w minutach (wielokrotność 15), needsApproval true, gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 dla kroków, które muszą poczekać na wcześniejsze; link tylko gdy krok ma swój element w zewnętrznej aplikacji (nigdy adres Task Hub). 2-7 kroków, bez kroków pustych. Jeśli konektora nie masz, wypisz kroki w tym układzie jako listę, a ja wkleję je do Task Hub.${opts.appUrl ? `\nZadanie w Task Hub: ${opts.appUrl}/tasks/${task.id}` : ""}`;
 }

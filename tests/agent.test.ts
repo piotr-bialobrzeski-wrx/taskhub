@@ -152,3 +152,16 @@ describe.skipIf(!DB)("czat z agentem na bazie", async () => {
     expect(g[0]).toMatchObject({ name: "Na 1,5 h", members: [t.id] });
   });
 });
+
+describe("treść zadania w kontekście", () => {
+  it("idzie w całości; dopiero ponad 50 tys. znaków jest ucięta z jawnym dopiskiem", () => {
+    const long = "wymaganie ".repeat(600).trim();   // 6 tys. znaków: dawniej cięte do 800
+    const t = task({ source: long });
+    expect(contextText({ tasks: [t], projects: [project()], rules: [], samples: [], currentTaskId: t.id })).toContain(long);
+    const t2 = task({ source: "x".repeat(60_000) });
+    const ctx = contextText({ tasks: [t2], projects: [project()], rules: [], samples: [], currentTaskId: t2.id });
+    expect(ctx).toContain("[ucięto po 50000 znakach; całość ma 60000 znaków]");
+    expect(ctx).not.toContain("x".repeat(50_001));
+  });
+});
+

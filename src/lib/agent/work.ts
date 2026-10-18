@@ -1,6 +1,8 @@
 // Co czeka na agenta: jedna funkcja dla list_work (tekst dla Claude) i dla mostka na komputerze (same liczby, bez skutków ubocznych).
 import * as repo from "@/lib/repo";
 import { brief, scoreAll } from "./context";
+// list_work pokazuje początek wiadomości; całość (do 50 tys. znaków) jest w get_task
+const preview = (x: string, n = 600) => (x.length > n ? x.slice(0, n) + "… (całość w get_task)" : x);
 
 export type WorkCounts = { chat: number; going: number; approved: number; noSteps: number; answered: number; ready: number; approval: number };
 export type WorkSummary = { text: string; counts: WorkCounts; total: number };
@@ -31,7 +33,7 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean } = {}
   const counts: WorkCounts = { chat: chat.length, going: going.length, approved: approved.length, noSteps: noSteps.length, answered: answered.length, ready: ready.length, approval: approval.length };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const out = [
-    chat.length ? "WIADOMOŚCI PIOTRA W ZADANIACH (najpierw to: get_task, potem zrób, o co prosi: gdy zmienia zakres pracy, dodaj kroki przez add_steps z polem before = id kroku publikacji albo wysyłki, przed którym mają wejść; gdy prosi o poprawkę szkicu, popraw go przez set_blocks; gdy pyta, odpowiedz. Zawsze zakończ reply_chat w tym zadaniu: co dopisałeś (numery i tytuły kroków) albo odpowiedź. Nigdy „wezmę pod uwagę” bez kroku):\n" + chat.map((m) => `- zadanie [${m.taskId}] „${m.taskTitle}” (${m.createdAt.slice(0, 16).replace("T", " ")} UTC): ${m.text.replace(/\s+/g, " ").slice(0, 600)}`).join("\n") : "",
+    chat.length ? "WIADOMOŚCI PIOTRA W ZADANIACH (najpierw to: get_task, potem zrób, o co prosi: gdy zmienia zakres pracy, dodaj kroki przez add_steps z polem before = id kroku publikacji albo wysyłki, przed którym mają wejść; gdy prosi o poprawkę szkicu, popraw go przez set_blocks; gdy pyta, odpowiedz. Zawsze zakończ reply_chat w tym zadaniu: co dopisałeś (numery i tytuły kroków) albo odpowiedź. Nigdy „wezmę pod uwagę” bez kroku):\n" + chat.map((m) => `- zadanie [${m.taskId}] „${m.taskTitle}” (${m.createdAt.slice(0, 16).replace("T", " ")} UTC): ${preview(m.text.replace(/\s+/g, " "))}`).join("\n") : "",
     going.length ? "KROKI W TOKU (zaczęte przez Piotra albo poprzedni przebieg; zrób je teraz i zgłoś complete_step, a gdy nie możesz: leave_step z powodem):\n" + going.join("\n") : "",
     approved.length ? "ZATWIERDZONE SZKICE DO WYSŁANIA (wyślij dokładnie treść z bloku draft w get_task, bez zmian, potem complete_step z linkiem):\n" + approved.join("\n") : "",
     noSteps.length ? "ZADANIA BEZ KROKÓW (get_task, get_rules z topic „rozpisanie”, potem add_steps bez pytań, gdy da się przyjąć rozsądne założenia; w razie potrzeby ask_question):\n" + noSteps.map((s) => brief(s) + (attN[s.task.id] ? ` | załączniki: ${attN[s.task.id]} (get_task, potem get_attachment)` : "")).join("\n") : "",

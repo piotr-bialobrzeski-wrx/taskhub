@@ -3,7 +3,7 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 import * as repo from "@/lib/repo";
-import { companyOf, contextText, brief, scoreAll } from "@/lib/agent/context";
+import { companyOf, contextText, brief, scoreAll, capText } from "@/lib/agent/context";
 import { rulesText } from "@/lib/agent/context";
 import { workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago } from "@/lib/bridge";
@@ -56,7 +56,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       const ax = att.length ? "ZAŁĄCZNIKI ZADANIA (grafikę albo plik tekstowy pokaże get_attachment; opis zapisz przez describe_attachment):\n" + att.map((a) => `- [${a.id}] ${a.kind} „${a.name ?? a.url ?? ""}”${a.mime ? ` (${a.mime})` : ""}${a.caption ? ` · ${a.caption}` : ""}${a.analysis ? `: ${a.analysis.slice(0, 400)}` : ""}`).join("\n") : "";
       // rozmowa w zadaniu: Piotr dopisuje tu wymagania i pytania; NOWE = jeszcze bez odpowiedzi agenta
       const chat = await repo.listChat(ownerId, taskId, 12);
-      const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy; NOWE = Piotr napisał, nikt nie odpowiedział: odpowiedz przez reply_chat, a gdy prośba zmienia zakres, najpierw add_steps z before):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${m.role === "user" && !m.seenAt ? " NOWE" : ""}: ${m.text.slice(0, 1200)}`).join("\n") : "";
+      const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy; NOWE = Piotr napisał, nikt nie odpowiedział: odpowiedz przez reply_chat, a gdy prośba zmienia zakres, najpierw add_steps z before):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${m.role === "user" && !m.seenAt ? " NOWE" : ""}: ${capText(m.text)}`).join("\n") : "";
       return text(ctx + (fx ? "\n" + fx : "") + (qx ? "\n" + qx : "") + (ax ? "\n" + ax : "") + (cx ? "\n" + cx : ""));
     });
 

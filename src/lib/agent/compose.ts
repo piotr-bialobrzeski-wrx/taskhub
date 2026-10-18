@@ -4,7 +4,7 @@ import { z } from "zod";
 import { Blocks, Fact, type Block, type Rule, type Step, type Task, toolLabel, EXTERNAL_TOOLS } from "../schema";
 import { Ai } from "../ai";
 import * as repo from "../repo";
-import { rulesText } from "./context";
+import { capText, rulesText } from "./context";
 
 export const ComposeResult = z.object({
   blocks: Blocks,
@@ -58,7 +58,7 @@ export async function composeStep(ownerId: string, task: Task, step: Step, deps:
 ${deps.factPrefs}
 ZADANIE: ${task.title}${deps.projectName ? ` (projekt ${deps.projectName})` : ""}
 CEL: ${task.summary || "-"}
-JAK WPADŁO: ${(task.source || "-").slice(0, 1500)}
+JAK WPADŁO: ${capText(task.source) || "-"}
 KROK (${toolLabel(step.tool)}): ${step.title}
 SZCZEGÓŁY: ${step.detail || "-"}
 ${step.needsApproval ? "Ten krok wysyła coś na zewnątrz: przygotuj blok draft.\n" : ""}${prev ? `WYNIKI WCZEŚNIEJSZYCH KROKÓW:\n${prev}\n` : ""}${facts.length ? `FAKTY ZAPISANE WCZEŚNIEJ (pinned = zawsze pokazuj, hidden = nie pokazuj):\n${JSON.stringify(facts).slice(0, 4000)}\n` : ""}${snapshots.map((s) => `MIGAWKA z ${s.app} (${s.fetchedAt}${s.url ? ", " + s.url : ""}):\n${JSON.stringify(s.raw).slice(0, 12000)}`).join("\n")}

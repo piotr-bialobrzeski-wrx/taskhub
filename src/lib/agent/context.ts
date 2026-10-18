@@ -88,6 +88,14 @@ export type ContextInput = {
 // krok w kontekście: klucz narzędzia i etykieta, żeby agent kopiował klucz („code”), nie etykietę („Claude Code”)
 const toolKey = (t: string) => (toolLabel(t) === t ? t : `${t} (${toolLabel(t)})`);
 
+// Pełna treść zadania i wiadomości w kontekście (Piotr 2026-10-18: bez limitu 800 znaków, który ciął długie prompty i dawał połowiczne rozpisanie).
+// Sufit bezpieczeństwa 50 tys. znaków = próg, od którego Claude Code zapisuje wynik narzędzia do pliku; ucięcie zawsze z jawnym dopiskiem.
+export const TEXT_CAP = 50_000;
+export function capText(text: string | null | undefined, cap = TEXT_CAP): string {
+  const t = text ?? "";
+  return t.length <= cap ? t : `${t.slice(0, cap)}\n[ucięto po ${cap} znakach; całość ma ${t.length} znaków]`;
+}
+
 export function contextText(c: ContextInput): string {
   const scored = scoreAll(c.tasks, c.projects, c.samples, c.now);
   const open = scored.filter((s) => !s.task.doneAt || (s.task.doneAt && new Date(s.task.doneAt).getTime() > new Date().setHours(0, 0, 0, 0)));
@@ -111,7 +119,7 @@ ${rulesText(c.rules, t.projectId, t.steps.map((s) => s.tool), { topic: ["czat"],
 MIEJSCE: wnętrze zadania [${t.id}] "${t.title}". To jest domyślny kontekst wiadomości.
 OBECNE ZADANIE: priorytet ${t.level}/5 (${LEVELS[cur.score.eff]}${cur.score.why.length ? ", efektywny " + cur.score.eff + ": " + whyText(cur.score) : ""}), stan: ${taskState(t)}${t.due ? `, termin ${t.due}` : ""}${cur.project ? `, projekt ${cur.project.name}${cname(cur.project) ? ` (firma ${cname(cur.project)})` : ""}, sfera ${sphereOf(cur.project, companies) === "private" ? "prywatna" : "zawodowa"}` : ""}
 Podsumowanie: ${t.summary || "-"}
-Jak wpadło: ${(t.source || "-").slice(0, 800)}
+Jak wpadło: ${capText(t.source) || "-"}
 Kroki:
 ${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status} | po: ${s.dependsOn.join(", ") || "-"} | szacunek ${s.estMin} min${connLabel(s.connectionId, c.connections)}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + s.output.slice(0, 300) : ""}`).join("\n") || "(brak kroków)"}
 INNE ZADANIA NA GŁÓWNEJ KANWIE (${others.length}):
