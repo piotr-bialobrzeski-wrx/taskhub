@@ -42,7 +42,29 @@ echo "== archiwum do samoaktualizacji"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/Task-Hub-$VERSION.zip"
 
 echo "== instalator"
-pkgbuild --component "$APP" --install-location /Applications --identifier com.taskhub.app --version "$VERSION" "$OUT/Task-Hub-$VERSION.pkg"
+# Pakiet zawsze wgrywa aplikację do /Applications i nadpisuje to, co tam jest: bez szukania innych kopii po dysku (relokacja)
+# i bez porównywania wersji. Z domyślnymi ustawieniami pkgbuild Instalator, widząc gdzie indziej kopię w tej samej albo nowszej
+# wersji (np. rozpakowaną przez samoaktualizację), pomijał aplikację i kończył błędem „nie ma żadnego programu do zainstalowania”.
+STAGE="$OUT/stage"
+rm -rf "$STAGE" && mkdir -p "$STAGE"
+ditto "$APP" "$STAGE/Task Hub.app"
+cat > "$OUT/component.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+  <dict>
+    <key>RootRelativeBundlePath</key><string>Task Hub.app</string>
+    <key>BundleIsRelocatable</key><false/>
+    <key>BundleIsVersionChecked</key><false/>
+    <key>BundleHasStrictIdentifier</key><true/>
+    <key>BundleOverwriteAction</key><string>upgrade</string>
+  </dict>
+</array>
+</plist>
+PLIST
+pkgbuild --root "$STAGE" --component-plist "$OUT/component.plist" --install-location /Applications --identifier com.taskhub.app --version "$VERSION" "$OUT/Task-Hub-$VERSION.pkg"
+rm -rf "$STAGE"
 hdiutil create -volname "Task Hub" -srcfolder "$APP" -ov -format UDZO "$OUT/Task-Hub-$VERSION.dmg" >/dev/null
 ls -la "$OUT"
 echo "== gotowe: $APP, $OUT/Task-Hub-$VERSION.pkg, $OUT/Task-Hub-$VERSION.dmg, $OUT/Task-Hub-$VERSION.zip"

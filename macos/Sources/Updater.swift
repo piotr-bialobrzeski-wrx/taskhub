@@ -120,6 +120,7 @@ final class Updater: ObservableObject {
             try fm.moveItem(at: newApp, to: target)
         } catch {
             Log.write("aktualizacja: podmiana nie powiodła się (\(error.localizedDescription)), otwieram instalator")
+            try? fm.removeItem(at: newApp)   // rozpakowana kopia zostawiona obok myliła Instalator: widział już „zainstalowaną” nową wersję
             if let pkg = pkg { try await openPkg(pkg, dir: dir); return }
             throw error
         }
