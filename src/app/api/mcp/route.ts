@@ -69,7 +69,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("create_task", {
-      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool (slack, gmail, clickup, calendar, claude, claudeapp, code, manual...), est w minutach (wielokrotność 15), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
+      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, whatsapp, sheets, docs, est w minutach (wielokrotność 15), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
       inputSchema: z.object({
         title: z.string(), summary: z.string().optional(), source: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().optional(), project: z.string().optional(),
         steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })).optional(),
@@ -113,13 +113,13 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("update_step", {
-      title: "Zmień krok", description: "Zmienia tytuł, opis, szacunek, link albo połączenie kroku (link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket; connection = nazwa z list_connections, pusty napis zdejmuje).",
-      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional() }),
+      title: "Zmień krok", description: "Zmienia tytuł, opis, narzędzie, szacunek, link albo połączenie kroku (tool = klucz jak w create_task; link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket; connection = nazwa z list_connections, pusty napis zdejmuje).",
+      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), tool: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional() }),
     }, async (a) => {
       if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
       const connectionId = a.connection === undefined ? undefined : await connectionIdOf(a.connection);
       if (a.connection?.trim() && !connectionId) return text("Nie ma takiego połączenia (list_connections).");
-      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null, connectionId }); return text("Zmieniono.");
+      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, tool: a.tool, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null, connectionId }); return text("Zmieniono.");
     });
 
     server.registerTool("set_blocks", {

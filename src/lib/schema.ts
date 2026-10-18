@@ -319,5 +319,24 @@ export const TOOL_LABELS: Record<string, string> = {
   whatsapp: "WhatsApp", sheets: "Arkusz Google", docs: "Dokument Google",
 };
 export const toolLabel = (tool: string) => TOOL_LABELS[tool] ?? tool;
+export const TOOL_KEYS = Object.keys(TOOL_LABELS);
+// Klucz narzędzia przy zapisie: agent i formularze podają czasem etykietę („Claude Code”, „Ty”) albo alias (claude-code, e-mail);
+// bez tego ten sam agent liczył się jako dwa narzędzia, a chip kroku był szary. Nieznany napis zostaje (małymi literami).
+const TOOL_ALIASES: Record<string, string> = {
+  "claude-code": "code", "claude_code": "code", "claudecode": "code", "kod": "code",
+  piotr: "manual", me: "manual", ja: "manual", "ręcznie": "manual", recznie: "manual", human: "manual",
+  email: "gmail", mail: "gmail", poczta: "gmail", outlook: "gmail",
+  "google calendar": "calendar", gcal: "calendar",
+  document: "claude", "claude app": "claudeapp", "claude.ai": "claudeapp", "aplikacja claude": "claudeapp",
+  "przegladarka": "browser", web: "browser",
+  arkusz: "sheets", "google sheets": "sheets", "google docs": "docs",
+  git: "github",
+};
+const LABEL_KEYS: Record<string, string> = Object.fromEntries(Object.entries(TOOL_LABELS).map(([k, l]) => [l.toLowerCase(), k]));
+export function normalizeTool(input: string | null | undefined, fallback = "manual"): string {
+  const raw = (input ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!raw) return fallback;
+  return TOOL_LABELS[raw] ? raw : TOOL_ALIASES[raw] ?? LABEL_KEYS[raw] ?? raw;
+}
 // kroki robione poza aplikacją (hand-off do Claude / Claude Code)
 export const EXTERNAL_TOOLS = new Set(["claudeapp", "code"]);

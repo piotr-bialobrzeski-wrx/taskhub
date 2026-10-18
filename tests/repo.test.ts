@@ -229,4 +229,13 @@ describe.skipIf(!DB)("repo", async () => {
     expect(fresh.steps[1].pos).toBeNull();
   });
 
+  it("klucz narzędzia: etykieta albo alias z konektora zapisuje się jako klucz (create_task, add_steps, update_step)", async () => {
+    const t = await repo.createTask(owner, { title: "Klucze narzędzi", steps: [{ title: "a", tool: "Claude Code" }, { title: "b", tool: "Ty" }, { title: "c" }] });
+    expect(t.steps.map((s) => s.tool)).toEqual(["code", "manual", "manual"]);
+    const [more] = await repo.addSteps(t.id, [{ title: "d", tool: "E-mail" }]);
+    expect(more.tool).toBe("gmail");
+    await repo.updateStep(more.id, { tool: "git" });
+    expect((await repo.getTask(owner, t.id))!.steps.find((s) => s.id === more.id)?.tool).toBe("github");
+  });
+
 });

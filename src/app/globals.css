@@ -40,6 +40,9 @@ a { color: var(--accent); }
 .app { position: fixed; inset: 0; overflow: hidden; --side: 16px; --mk-h: 0px;   /* --side: margines doku z boków (w wąskim oknie robi miejsce pigułkom zoomu i Kafelek/Grupa); --mk-h: ile pigułka Kafelek/Grupa zajmuje nad dokiem na telefonie */
   background: radial-gradient(560px 380px at 8% -8%, var(--glow-1), transparent 62%), radial-gradient(640px 420px at 96% 4%, var(--glow-2), transparent 60%), var(--bg); }
 .page { max-width: 1080px; margin: 0 auto; padding: var(--s-6) var(--s-5) 60px; min-height: 100%; }
+/* ZASADA: każda półprzezroczysta warstwa nad treścią (pigułka, menu, lista, karta, dok, panel) ma .glass, czyli rozmycie tego, co pod nią.
+   NIGDY .glass wewnątrz .glass: element z backdrop-filter jest „korzeniem tła” dla potomków, więc rozmycie dziecka widzi tylko rodzica,
+   a nie kanwę pod spodem (lista szukania do 2026-10-18 była ostra). Rozwijane listy i menu renderuj obok (opakowanie bez szkła) albo przez portal. */
 .glass { background: var(--glass); backdrop-filter: blur(22px) saturate(160%);   /* tylko bez prefiksu: z dopisanym -webkit- minifikator gubił wersję dla Chrome */
   box-shadow: 0 8px 28px var(--shadow), inset 0 0 0 1px var(--glass-edge), 0 0 0 1px var(--line); }
 
@@ -389,12 +392,13 @@ table.t th { color: var(--sub); font-weight: 600; font-size: 11.5px; }
 
 /* ---------- szukajka w pasku (pasujące kafelki zostają, reszta blednie) ---------- */
 .pillbar .sp { flex: 1; pointer-events: none; }
-.srch { position: relative; width: clamp(160px, calc(50vw - 290px), 440px); padding: var(--s-2) var(--s-2) var(--s-2) var(--s-4); gap: var(--s-2); color: var(--sub); }   /* szerokie jak lista trafień; przy wąskim oknie ustępuje środkowej pigułce */
+.srchw { position: relative; flex: 0 1 auto; min-width: 0; width: clamp(160px, calc(50vw - 290px), 440px); }   /* opakowanie bez szkła: pigułka i lista wyników obok siebie, nie jedna w drugiej; szerokie jak lista trafień, przy wąskim oknie ustępuje środkowej pigułce */
+.srch { padding: var(--s-2) var(--s-2) var(--s-2) var(--s-4); gap: var(--s-2); color: var(--sub); }
 .srch input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; height: 32px; font-size: 13px; color: var(--text); }
 .srch input::placeholder { color: var(--sub); }
 .srch.on, .srch:focus-within { color: var(--text); box-shadow: 0 8px 28px var(--shadow), inset 0 0 0 1.5px var(--accent), 0 0 0 1px var(--line); }
 .icobtn.sm { width: 24px; height: 24px; }
-.sres { position: absolute; top: calc(100% + 6px); left: 0; right: 0; max-width: calc(100vw - 32px); border-radius: var(--r-lg); padding: var(--s-2); display: flex; flex-direction: column; gap: 2px; z-index: 13; }   /* promień 20 = wiersz 14 + odstęp 6 */
+.sres { position: absolute; top: calc(100% + 6px); left: 0; right: 0; max-width: calc(100vw - 32px); border-radius: var(--r-lg); padding: var(--s-2); display: flex; flex-direction: column; gap: 2px; z-index: 13; pointer-events: auto; }   /* promień 20 = wiersz 14 + odstęp 6 */
 .sr { display: flex; align-items: center; gap: var(--s-3); border: 0; background: transparent; border-radius: var(--r-md); padding: 7px 10px; text-align: left; color: var(--text); font: inherit; cursor: pointer; }
 .sr:hover, .sr:focus-visible { background: var(--accent-soft); outline: none; }
 .sr .n-title { flex: 1; min-width: 0; -webkit-line-clamp: 1; font-size: 13px; }
@@ -505,7 +509,7 @@ body:has(> main.page) { background: radial-gradient(560px 380px at 8% -8%, var(-
   .p-head { flex-wrap: wrap; }
   .p-new .in { width: 160px; }
   .icobtn.mk { width: 32px; padding: 0; gap: 0; font-size: 0; }
-  .srch { flex: 1; width: auto; min-width: 0; }
+  .srchw { flex: 1; width: auto; min-width: 0; }
   .sres { width: calc(100vw - 32px); right: auto; }
   .p-tasks { padding-left: 0; }
   .detail { top: auto; left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: auto; max-width: none; height: 62%; }

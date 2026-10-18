@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "./db";
-import { type Company, type Connection, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample, appOfLabel } from "./schema";
+import { type Company, type Connection, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample, appOfLabel, normalizeTool } from "./schema";
 import { spentMin } from "./time";
 
 type Row = Record<string, unknown>;
@@ -240,7 +240,7 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
   const created: { id: string }[] = [];
   for (const s of steps) {
     const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id)
-      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${s.tool ?? "manual"}, ${!!s.needsApproval}, ${Math.max(15, Math.round((s.estMin ?? 15) / 15) * 15)}, ${s.link ?? null}, ${s.connectionId ?? null}) returning id`;
+      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval}, ${Math.max(15, Math.round((s.estMin ?? 15) / 15) * 15)}, ${s.link ?? null}, ${s.connectionId ?? null}) returning id`;
     created.push({ id: r.id as string });
   }
   // zależności: "n2" / indeks w tej paczce albo id istniejącego kroku
@@ -298,7 +298,7 @@ export async function updateStep(id: string, patch: StepPatch): Promise<void> {
   const p: Row = {};
   if (patch.title !== undefined) p.title = patch.title.slice(0, 200);
   if (patch.detail !== undefined) p.detail = patch.detail;
-  if (patch.tool !== undefined) p.tool = patch.tool;
+  if (patch.tool !== undefined) p.tool = normalizeTool(patch.tool);
   if (patch.status !== undefined) p.status = patch.status;
   if (patch.prevStatus !== undefined) p.prev_status = patch.prevStatus;
   if (patch.needsApproval !== undefined) p.needs_approval = patch.needsApproval;

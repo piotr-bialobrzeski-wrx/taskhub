@@ -64,12 +64,15 @@ export function SearchPill({ index, screen, here, value, onChange, onPick }: Pro
   );
 
   return (
-    <div className={"gpill glass srch" + (q ? " on" : "")} role="search">
-      <Icon k="search" size={15} sw={1.8} />
-      <input ref={ref} type="text" value={q} placeholder="Szukaj… (/)" aria-label="Szukaj" autoComplete="off" spellCheck={false}
-        onChange={(e) => { setQ(e.currentTarget.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
-        onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); setQ(""); e.currentTarget.blur(); } else if (e.key === "Enter" && first) { e.preventDefault(); pick(first); } }} />
-      {q ? <button className="icobtn sm" type="button" aria-label="Wyczyść" onClick={() => { setQ(""); ref.current?.focus(); }}><Icon k="x" size={11} sw={2.2} /></button> : null}
+    <div className="srchw">
+      <div className={"gpill glass srch" + (q ? " on" : "")} role="search">
+        <Icon k="search" size={15} sw={1.8} />
+        <input ref={ref} type="text" value={q} placeholder="Szukaj… (/)" aria-label="Szukaj" autoComplete="off" spellCheck={false}
+          onChange={(e) => { setQ(e.currentTarget.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); setQ(""); e.currentTarget.blur(); } else if (e.key === "Enter" && first) { e.preventDefault(); pick(first); } }} />
+        {q ? <button className="icobtn sm" type="button" aria-label="Wyczyść" onClick={() => { setQ(""); ref.current?.focus(); }}><Icon k="x" size={11} sw={2.2} /></button> : null}
+      </div>
+      {/* lista wyników leży POZA pigułką: rozmycie elementu zagnieżdżonego w innym backdrop-filter widzi tylko rodzica, nie kanwę pod spodem */}
       {open && words.length ? (
         <div className="sres glass" role="listbox" aria-label="Wyniki szukania">
           {secs.length ? secs.map((s) => (
