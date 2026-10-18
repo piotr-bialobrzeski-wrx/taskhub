@@ -35,12 +35,11 @@ export function stepStateOf(t: Task, s: Step, all: Task[]): StepStateKey {
 
 export const estText = (t: Task) => (t.steps.length ? `~${fmtMin(taskEst(t))}${taskSpent(t) ? ` / ${fmtMin(taskSpent(t))}` : ""}` : "bez kroków");
 
-// activity: co mostek robi teraz, gdy pracuje nad tym zadaniem (kafelek pokazuje to zamiast licznika)
-export function taskTile(s: Scored, all: Task[], questions: number, live: LiveActivity | null = null): TaskTile {
+// activity: co mostek robi teraz, gdy pracuje nad tym zadaniem (kafelek pokazuje to zamiast licznika); pending: wiadomości Piotra bez odpowiedzi
+export function taskTile(s: Scored, all: Task[], questions: number, live: LiveActivity | null = null, pending = 0): TaskTile {
   const t = s.task, state = taskStateOf(t, all);
-  const mine = live && (live.taskId === t.id || (!live.taskId && !live.stepId && !t.steps.length && false));
   return {
-    activity: mine ? { text: live!.text, detail: live!.detail, since: live!.since } : null,
+    activity: taskActivity(t.id, live), pending,
     id: t.id, title: t.title, summary: state === "done" && t.noteSummary ? t.noteSummary : t.summary, state,
     base: s.score.base, eff: s.score.eff, why: whyText(s.score),
     project: s.project ? { id: s.project.id, name: s.project.name, color: s.project.color } : null,
@@ -54,6 +53,9 @@ export function taskTile(s: Scored, all: Task[], questions: number, live: LiveAc
     pos: t.pos, dependsOn: t.dependsOn,
   };
 }
+
+// bieg mostka związany z tym zadaniem: wiersz czynności na kafelku zadania (kanwa główna i kafelek zadania na kanwie kroków)
+export const taskActivity = (taskId: string, live: LiveActivity | null): TaskTile["activity"] => (live && live.taskId === taskId ? { text: live.text, detail: live.detail, since: live.since } : null);
 
 export function stepTile(t: Task, s: Step, all: Task[], live: LiveActivity | null = null): StepTile & { toolName: string } {
   const state = stepStateOf(t, s, all);

@@ -56,7 +56,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       const ax = att.length ? "ZAŁĄCZNIKI ZADANIA (grafikę albo plik tekstowy pokaże get_attachment; opis zapisz przez describe_attachment):\n" + att.map((a) => `- [${a.id}] ${a.kind} „${a.name ?? a.url ?? ""}”${a.mime ? ` (${a.mime})` : ""}${a.caption ? ` · ${a.caption}` : ""}${a.analysis ? `: ${a.analysis.slice(0, 400)}` : ""}`).join("\n") : "";
       // rozmowa w zadaniu: Piotr dopisuje tu wymagania i pytania; NOWE = jeszcze bez odpowiedzi agenta
       const chat = await repo.listChat(ownerId, taskId, 12);
-      const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy; NOWE = Piotr napisał, nikt nie odpowiedział: odpowiedz przez reply_chat, a gdy prośba zmienia zakres, najpierw add_steps z before):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${m.role === "user" && !m.seenAt ? " NOWE" : ""}: ${capText(m.text)}`).join("\n") : "";
+      const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy; NOWE [id] = Piotr napisał, nikt nie odpowiedział: zrób, o co prosi, i odpowiedz przez reply_chat z messageIds = [id] tej wiadomości, osobno po każdej załatwionej prośbie; gdy prośba zmienia zakres, najpierw add_steps z before):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${m.role === "user" && !m.answeredAt ? ` NOWE [${m.id}]` : ""}: ${capText(m.text)}`).join("\n") : "";
       return text(ctx + (fx ? "\n" + fx : "") + (qx ? "\n" + qx : "") + (ax ? "\n" + ax : "") + (cx ? "\n" + cx : ""));
     });
 
@@ -220,14 +220,18 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("reply_chat", {
-      title: "Odpowiedz w rozmowie zadania", description: "Odpowiada Piotrowi w rozmowie zadania (1–3 zdania: co dopisałeś, numery i tytuły kroków, albo odpowiedź na pytanie; bez raportu z postępu). Oznacza jego wiadomości w tym zadaniu jako przeczytane. stepId: krok, którego odpowiedź dotyczy (karta w rozmowie dostanie „Otwórz krok”); link: adres wyniku w zewnętrznej aplikacji.",
-      inputSchema: z.object({ taskId: z.string(), text: z.string().min(1).max(1200), stepId: z.string().optional(), link: z.string().optional() }),
+      title: "Odpowiedz w rozmowie zadania", description: "Odpowiada Piotrowi w rozmowie zadania (1–3 zdania: co dopisałeś, numery i tytuły kroków, albo odpowiedź na pytanie; bez raportu z postępu). messageIds: id wiadomości Piotra, które ta odpowiedź załatwia (z get_task, przy NOWE); bez nich załatwia wszystkie dotychczasowe w zadaniu. Odpowiadaj osobno po każdej załatwionej prośbie, żeby Piotr widział, co już jest zrobione. stepId: krok, którego odpowiedź dotyczy (karta w rozmowie dostanie „Otwórz krok”); link: adres wyniku w zewnętrznej aplikacji. Gdy wszystkie kroki są gotowe i nic już nie czeka na odpowiedź, zadanie kończy się samo.",
+      inputSchema: z.object({ taskId: z.string(), text: z.string().min(1).max(1200), messageIds: z.array(z.string()).max(50).optional(), stepId: z.string().optional(), link: z.string().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
       const stepId = a.stepId && t.steps.some((s) => s.id === a.stepId) ? a.stepId : undefined;
-      await repo.addChat(ownerId, t.id, "agent", a.text.trim(), { stepId, link: externalLink(a.link) ?? undefined });
-      await repo.markChatSeen(ownerId, { taskId: t.id });
-      return text("Odpowiedź zapisana.");
+      const answers = await repo.markChatAnswered(ownerId, t.id, a.messageIds);
+      await repo.addChat(ownerId, t.id, "agent", a.text.trim(), { stepId, link: externalLink(a.link) ?? undefined, answers });
+      // ostatni krok gotowy czekał tylko na tę odpowiedź: zadanie kończy się teraz
+      const closed = await repo.closeIfDone(ownerId, t.id);
+      if (closed) await repo.addChat(ownerId, t.id, "agent", "Wszystkie kroki gotowe, zadanie ukończone.");
+      const left = (await repo.listPendingChat(ownerId, t.id)).length;
+      return text(`Odpowiedź zapisana${answers.length ? ` (załatwione wiadomości: ${answers.length})` : ""}.${left ? ` Bez odpowiedzi zostało: ${left}.` : ""}${closed ? " Zadanie ukończone." : ""}`);
     });
 
     server.registerTool("get_attachment", {

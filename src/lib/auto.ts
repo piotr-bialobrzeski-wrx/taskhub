@@ -15,7 +15,7 @@ export const shortTitle = (title: string, max = 60) => { const t = title.replace
 // kto może pracować: mostek (żywy? jak się nazywa? co robi teraz?) albo automat co godzinę
 export type Worker = { alive: boolean; name: string | null; run: LiveActivity | null };
 export type Who = { kind: "decomposing" | "busy" | "soon" | "auto"; who: string; text: string };   // who = krótka etykieta do paska, text = pełne zdanie
-const bridgeLabel = (w: Worker) => (w.name ? `Mostek (${w.name})` : "Mostek na Twoim komputerze");
+export const bridgeLabel = (w: Pick<Worker, "name">) => (w.name ? `Mostek (${w.name})` : "Mostek na Twoim komputerze");
 
 // nad czym mostek pracuje teraz: tytuł kroku, a gdy nie wiadomo, tytuł zadania albo sama czynność
 export function busyWith(run: LiveActivity | null, tasks: Pick<Task, "id" | "title" | "steps">[]): string | null {
@@ -45,3 +45,24 @@ export function chatWho(w: Worker, taskId: string, busy: string | null = null, n
 }
 // komunikat po dodaniu zadania z doku: to samo zdanie, co pasek nad kanwą zadania
 export const newTaskText = (title: string, who: Who) => `Dodałem zadanie „${shortTitle(title)}”. ${who.text}`;
+
+// ---------- kolejka wiadomości Piotra w zadaniu (paczka 2, punkt 1) ----------
+// odmiana: „1 wiadomość”, „2 wiadomości”, „5 wiadomości”; „Twoją wiadomość” / „Twoje 2 wiadomości”
+export const msgCount = (n: number) => `${n} ${n === 1 ? "wiadomość" : "wiadomości"}`;
+export const yourMsgs = (n: number) => (n === 1 ? "Twoją wiadomość" : `Twoje ${n} wiadomości`);          // biernik: „odpowie na …”
+export const yourMsgsNom = (n: number) => (n === 1 ? "Twoja wiadomość" : `${n} Twoje wiadomości`);        // mianownik: dopisek w pasku
+const overMsgs = (n: number) => (n === 1 ? "Twoją wiadomością" : `Twoimi ${n} wiadomościami`);            // narzędnik: „pracuje nad …”
+const waiting = (n: number) => (n === 1 ? "1 wiadomość czeka" : `${n} wiadomości czekają`);
+// stan kolejki: kto zajmie się wiadomościami bez odpowiedzi i kiedy. text = linia na karcie nad dokiem i w pasku nad kanwą (z czynnością mostka obok, gdy pracuje),
+// short = linia pod dymkiem w historii; activity = bieg mostka nad tym zadaniem (kropki i minuty)
+export type Queue = { n: number; kind: "working" | "busy" | "soon" | "auto"; who: string; text: string; short: string; activity: LiveActivity | null };
+export function queueWho(w: Worker, taskId: string, n: number, busy: string | null = null, now = new Date()): Queue {
+  const b = bridgeLabel(w);
+  if (w.run && w.run.taskId === taskId) return { n, kind: "working", who: b, text: `${b} pracuje nad ${overMsgs(n)}`, short: "Mostek pracuje nad tym", activity: w.run };
+  if (w.run) return { n, kind: "busy", who: b, text: `${b} kończy${busy ? `: ${busy}` : " inną pracę"}, potem przeczyta ${yourMsgs(n)}`, short: `Czeka: mostek kończy${busy ? ` „${shortTitle(busy, 40)}”` : " inną pracę"}`, activity: null };
+  if (w.alive) return { n, kind: "soon", who: b, text: `${waiting(n)} na mostek · weźmie ${n === 1 ? "ją" : "je"} w ciągu minuty`, short: "Czeka na mostek · weźmie w ciągu minuty", activity: null };
+  const a = nextAutoAt(now);
+  return { n, kind: "auto", who: `Claude ${a.text}`, text: `${waiting(n)} na Claude · zajrzy ${a.text} (automat ${AUTO_EVERY})`, short: `Czeka na Claude ${a.text}`, activity: null };
+}
+// wszystkie kroki gotowe, ale zadanie nie zamyka się, dopóki agent nie odpowie na wiadomości
+export const allDoneWaitText = (q: Queue) => `Wszystkie kroki gotowe; czekam, aż ${q.kind === "auto" ? "Claude" : "mostek"} odpowie na ${yourMsgs(q.n)}.`;

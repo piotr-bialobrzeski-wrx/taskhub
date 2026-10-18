@@ -6,9 +6,9 @@ import { redirect } from "next/navigation";
 import { SESSION_COOKIE, checkPassword, sessionValue } from "@/lib/auth";
 import { requireOwner } from "@/lib/session";
 import * as repo from "@/lib/repo";
-import { aiFor, composeFlow, finishStep, prepareStep } from "@/lib/services";
+import { aiFor, composeFlow, finishStep, prepareStep, taskQueue } from "@/lib/services";
 import { runChat } from "@/lib/agent/chat";
-import { busyWith, chatWho, newTaskText, noStepsWho, type Worker } from "@/lib/auto";
+import { busyWith, newTaskText, noStepsWho, type Queue, type Worker } from "@/lib/auto";
 import { liveActivity } from "@/lib/live";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import type { Connection, Rule, Sphere } from "@/lib/schema";
@@ -62,14 +62,16 @@ export async function chat(fd: FormData) {
     // bez klucza modelu: na kanwie tekst staje się zadaniem, w zadaniu zostaje jako notatka rozmowy; pliki trafiają do zadania
     await repo.addChat(o.id, taskId, "user", text + (typed && files.length ? ` (załączniki: ${files.map((f) => f.name).join(", ")})` : ""));
     // komunikaty mówią, co z tego ma Piotr, nie jak działa mechanizm
-    // kto przeczyta wiadomość i kiedy: mostek (teraz / po bieżącej pracy / w ciągu minuty) albo automat o pełnej godzinie; bez obietnic „weźmie pod uwagę”
-    const worker = async (): Promise<{ w: Worker; busy: string | null }> => {
+    // w zadaniu wiadomość czeka w kolejce: jej stan (kto ją weźmie i kiedy, w pracy, odpowiedziano) liczy się na bieżąco pod dymkiem i na karcie nad dokiem,
+    // bez dopisywania do rozmowy zapowiedzi „przeczyta za chwilę” przy każdej wiadomości
+    if (taskId) { await attachFiles(taskId, files); }
+    else {
+      // nowe zadanie z kanwy: kto je rozpisze i kiedy (mostek teraz / po bieżącej pracy / w ciągu minuty, albo automat o pełnej godzinie)
+      const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files);
       const [st, tasks] = await Promise.all([repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.listTasks(o.id)]);
       const w: Worker = { alive: st.alive, name: st.name, run: liveActivity(st.run) };
-      return { w, busy: busyWith(w.run, tasks) };
-    };
-    if (taskId) { await attachFiles(taskId, files); const { w, busy } = await worker(); await repo.addChat(o.id, taskId, "agent", chatWho(w, taskId, busy)); }
-    else { const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files); const { w, busy } = await worker(); await repo.addChat(o.id, null, "agent", newTaskText(t.title, noStepsWho(w, t.id, busy))); goTo = t.id; }
+      await repo.addChat(o.id, null, "agent", newTaskText(t.title, noStepsWho(w, t.id, busyWith(w.run, tasks)))); goTo = t.id;
+    }
   } else {
     try {
       const images = await Promise.all(files.filter((f) => IMAGE_TYPES.has(f.type)).map(async (f) => ({ mediaType: f.type as "image/png", base64: Buffer.from(await f.arrayBuffer()).toString("base64") })));
@@ -432,11 +434,18 @@ export async function batchSteps(taskId: string, ids: string[], op: { done?: boo
   }
   refresh(taskId);
 }
-// historia rozmowy (dok → ikona zegara): strona po 50 wpisów, od najstarszego; before = kursor na starsze
+// historia rozmowy (dok → ikona zegara): strona po 50 wpisów, od najstarszego; before = kursor na starsze.
+// Wiadomość Piotra niesie swój stan (wzięta, odpowiedziano), odpowiedź agenta listę wiadomości, które załatwia; queue = stan kolejki zadania (null, gdy nic nie czeka)
 const CHAT_PAGE = 50;
-export async function loadChat(taskId: string | null, before: string | null): Promise<{ id: string; role: "user" | "agent"; text: string; createdAt: string }[]> {
+export type ChatVM = { id: string; role: "user" | "agent"; text: string; createdAt: string; seenAt: string | null; answeredAt: string | null; answers: string[] | null; stepId: string | null; link: string | null };
+export async function loadChat(taskId: string | null, before: string | null): Promise<{ msgs: ChatVM[]; queue: Queue | null }> {
   const o = await requireOwner();
-  return (await repo.listChat(o.id, taskId, CHAT_PAGE, before)).map((m) => ({ id: m.id, role: m.role, text: m.text, createdAt: m.createdAt }));
+  const [rows, queue] = await Promise.all([repo.listChat(o.id, taskId, CHAT_PAGE, before), taskId ? taskQueue(o.id, taskId) : Promise.resolve(null)]);
+  const msgs = rows.map((m) => {
+    const a = (m.actions ?? null) as { answers?: string[]; stepId?: string; link?: string } | null;
+    return { id: m.id, role: m.role, text: m.text, createdAt: m.createdAt, seenAt: m.seenAt, answeredAt: m.answeredAt, answers: a?.answers ?? null, stepId: a?.stepId ?? null, link: a?.link ?? null };
+  });
+  return { msgs, queue };
 }
 export async function setTaskField(taskId: string, patch: { due?: string | null; level?: number; projectId?: string | null }) {
   const o = await requireOwner();

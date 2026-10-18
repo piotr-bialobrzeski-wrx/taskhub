@@ -18,6 +18,7 @@ export type TaskTile = {
   due: { text: string; cls: "" | "soon" | "late"; iso: string } | null;
   progress: { done: number; all: number };
   estText: string; drafts: number; handed: number; questions: number;
+  pending: number;   // wiadomości Piotra w zadaniu bez odpowiedzi agenta (chip „2 wiadomości”)
   tool: string; pos: Pos | null; dependsOn: string[];
   activity: TileActivity | null;
 };

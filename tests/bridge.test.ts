@@ -127,6 +127,45 @@ describe.skipIf(!DB)("mostek: serwer", async () => {
     expect(await repo.changeStamp(owner, t.id)).not.toBe(s0);
     await sql()`delete from tasks where id = ${t.id}`;
   });
+  it("stany wiadomości: czeka → wzięta w biegu → odpowiedziano; bieg bez odpowiedzi oddaje ją do kolejki; wzięta dawno temu liczy się jako nowa", async () => {
+    await sql()`delete from bridge_runs where owner_id = ${owner}`;
+    const t = await repo.createTask(owner, { title: "Mostek test: stany", steps: [{ title: "Krok" }] });
+    const m1 = await repo.addChat(owner, t.id, "user", "Dodaj ship date");
+    const m2 = await repo.addChat(owner, t.id, "user", "I numer partii");
+    expect((await repo.listPendingChat(owner, t.id)).map((m) => m.id)).toEqual([m1, m2]);
+    expect((await repo.countPendingChat(owner)).get(t.id)).toBe(2);
+    const r = await repo.startBridgeRun(owner, null, "Mac");
+    const w = await workSummary(owner);                                         // list_work: obie wzięte do opracowania w tym biegu
+    expect(w.text).toContain(`wiadomość [${m1}]`);
+    expect((await repo.listUnseenChat(owner)).length).toBe(0);                 // dla następnego list_work już nie są nowe…
+    expect((await repo.listPendingChat(owner, t.id)).length).toBe(2);          // …ale wciąż czekają na odpowiedź
+    expect(await repo.markChatAnswered(owner, t.id, [m1])).toEqual([m1]);      // reply_chat z messageIds załatwia jedną
+    expect((await repo.listPendingChat(owner, t.id)).map((m) => m.id)).toEqual([m2]);
+    await repo.endBridgeRun(owner, r!.id, "done");                            // bieg skończył się bez odpowiedzi na drugą: wraca do kolejki
+    expect((await repo.listUnseenChat(owner)).map((m) => m.id)).toEqual([m2]);
+    await sql()`update chat_messages set seen_at = now() - interval '100 minutes' where id = ${m2}`;   // wzięta dawno, bez odpowiedzi (bieg padł bez sygnału)
+    expect((await repo.listUnseenChat(owner)).map((m) => m.id)).toEqual([m2]);
+    await sql()`update chat_messages set seen_at = now() - interval '10 minutes' where id = ${m2}`;
+    expect((await repo.listUnseenChat(owner)).length).toBe(0);
+    expect(await repo.markChatAnswered(owner, t.id)).toEqual([m2]);          // reply_chat bez messageIds: wszystkie dotychczasowe
+    expect(await repo.markChatAnswered(owner, t.id)).toEqual([]);
+    expect((await repo.countPendingChat(owner)).has(t.id)).toBe(false);
+    await sql()`delete from tasks where id = ${t.id}`;
+  });
+  it("zadanie nie zamyka się samo, dopóki wiadomość Piotra czeka na odpowiedź; po reply_chat zamyka się", async () => {
+    const t = await repo.createTask(owner, { title: "Mostek test: zamknięcie", steps: [{ title: "Jedyny krok" }] });
+    await repo.addChat(owner, t.id, "user", "Jeszcze jedno");
+    const full = (await repo.getTask(owner, t.id))!;
+    await repo.completeStep(owner, full, full.steps[0], { report: "zrobione" });
+    expect((await repo.getTask(owner, t.id))!.doneAt).toBeNull();            // ostatni krok gotowy, ale prośba bez odpowiedzi
+    expect((await workSummary(owner, { peek: true })).text).toContain("Jeszcze jedno");   // zadanie z wiadomością nie wypada z listy pracy
+    expect(await repo.closeIfDone(owner, t.id)).toBe(false);
+    await repo.markChatAnswered(owner, t.id);
+    expect(await repo.closeIfDone(owner, t.id)).toBe(true);
+    expect((await repo.getTask(owner, t.id))!.doneAt).not.toBeNull();
+    expect(await repo.closeIfDone(owner, t.id)).toBe(false);                  // już zamknięte
+    await sql()`delete from tasks where id = ${t.id}`;
+  });
   it("punkty wejścia mostka: 401 bez tokenu mostka, puls + liczba pracy, bieg na wyłączność, zakończenie", async () => {
     await sql()`delete from bridge_runs where owner_id = ${owner}`;
     const t = await repo.createApiToken(owner, "Mac mini", "bridge");

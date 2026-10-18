@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, STEP_SIZE } from "@/lib/canvas/layout";
-import { Icon, Lvl, ST_LABEL, TS_LABEL, plural, toolColor, type GroupVM, type StepTile, type TaskStateKey } from "./ui";
+import { Icon, Lvl, ST_LABEL, TS_LABEL, plural, toolColor, type GroupVM, type StepTile, type TaskStateKey, type TileActivity } from "./ui";
+import { msgCount, type Queue } from "@/lib/auto";
 import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
 import { AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
@@ -15,7 +16,8 @@ import { Activity } from "@/components/Activity";
 import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, saveStepPositions, updateGroupAction } from "@/app/actions";
 
 export type TaskCanvasProps = {
-  task: { id: string; title: string; base: number; eff: number; why: string; state: TaskStateKey; progress: { done: number; all: number }; estText: string };
+  task: { id: string; title: string; base: number; eff: number; why: string; state: TaskStateKey; progress: { done: number; all: number }; estText: string; activity: TileActivity | null; pending: number };
+  queue: Queue | null;                     // wiadomości Piotra bez odpowiedzi: kto je weźmie i kiedy (karta nad dokiem, historia rozmowy)
   steps: (StepTile & { toolName: string })[];
   groups: GroupVM[]; index: SearchItem[];
   aiOn: boolean; agent: string; lastAgent: { id: string; text: string; stepId?: string | null; link?: string | null } | null;
@@ -122,9 +124,10 @@ export function TaskCanvas(p: TaskCanvasProps) {
             </>); }}
           origin={{ cls: "task " + t.state, node: (
             <>
-              <span className="n-top"><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="st" style={{ marginLeft: "auto", background: "rgba(255,255,255,.2)", color: "#fff" }}>{TS_LABEL[t.state]}</span></span>
+              <span className="n-top"><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="st" style={{ marginLeft: "auto", background: "rgba(255,255,255,.2)", color: "#fff" }}>{TS_LABEL[t.state]}</span>
+                {t.pending ? <span className="st" style={{ background: "rgba(255,255,255,.2)", color: "#fff" }} title="Twoje wiadomości czekają na odpowiedź agenta">{msgCount(t.pending)}</span> : null}</span>
               <span className="n-title" style={{ WebkitLineClamp: 3 }}>{t.title}</span>
-              <span className="n-meta">{t.progress.done}/{t.progress.all} kroków · {t.estText}</span>
+              <span className="n-meta">{t.activity ? <Activity text={t.activity.text} detail={t.activity.detail} since={t.activity.since} who="Mostek" /> : `${t.progress.done}/${t.progress.all} kroków · ${t.estText}`}</span>
             </>) }}
           selected={sel} onSelect={(s) => { setSel(s); setConfirm(false); if (!s.size) setPanel(null); }} selectedGroup={selGroup} onSelectGroup={setSelGroup} renaming={renaming} onRename={(id, name) => setRenaming(name == null ? null : id)}
           onOpen={(id) => { if (id) openStep(id); else setPanel("__task"); }} onClickTile={(id) => { if (id === "__origin") { setSel(new Set()); setPanel("__task"); } else openStep(id); }}
@@ -204,20 +207,25 @@ export function TaskCanvas(p: TaskCanvasProps) {
       ) : null}
 
       {p.questions && !n && !group ? <div className={"answer glass" + (panel ? " withpanel" : "")} aria-live="polite">{p.questions}</div> : null}
-      {!p.questions && p.lastAgent && !answerOff && !n && !group ? (
-        <div className={"answer plain glass" + (panel ? " withpanel" : "")} role="status" aria-live="polite">
-          <div className="ans-text">{p.lastAgent.text}</div>
-          {(p.lastAgent.stepId && byId.has(p.lastAgent.stepId)) || p.lastAgent.link ? (
-            <div className="ans-acts">
-              {p.lastAgent.stepId && byId.has(p.lastAgent.stepId) ? <button className="btn" type="button" onClick={() => openStep(p.lastAgent!.stepId!)}>Otwórz krok {pad(byId.get(p.lastAgent.stepId)!.idx)}</button> : null}
-              {p.lastAgent.link ? <a className="btn ico" href={p.lastAgent.link} target="_blank" rel="noopener" title={p.lastAgent.link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a> : null}
-            </div>
-          ) : null}
-          <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans-" + t.id, p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button>
+      {/* karta nad dokiem: najpierw stan kolejki wiadomości (znika sam po odpowiedzi), pod nim ostatni komunikat agenta (X zamyka tylko komunikat) */}
+      {!p.questions && (p.queue || (p.lastAgent && !answerOff)) && !n && !group ? (
+        <div className={"answer plain glass" + (panel ? " withpanel" : "") + (p.queue && !(p.lastAgent && !answerOff) ? " qonly" : "")} role="status" aria-live="polite">
+          {p.queue ? <div className="ans-q">{p.queue.activity ? <Activity text={p.queue.activity.text} detail={p.queue.activity.detail} since={p.queue.activity.since} who={p.queue.text + " ·"} /> : <><i className="pulse" aria-hidden="true" /><span>{p.queue.text}</span></>}</div> : null}
+          {p.lastAgent && !answerOff ? (<>
+            <div className="ans-text">{p.lastAgent.text}</div>
+            {(p.lastAgent.stepId && byId.has(p.lastAgent.stepId)) || p.lastAgent.link ? (
+              <div className="ans-acts">
+                {p.lastAgent.stepId && byId.has(p.lastAgent.stepId) ? <button className="btn" type="button" onClick={() => openStep(p.lastAgent!.stepId!)}>Otwórz krok {pad(byId.get(p.lastAgent.stepId)!.idx)}</button> : null}
+                {p.lastAgent.link ? <a className="btn ico" href={p.lastAgent.link} target="_blank" rel="noopener" title={p.lastAgent.link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a> : null}
+              </div>
+            ) : null}
+            <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans-" + t.id, p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button>
+          </>) : null}
         </div>
       ) : null}
 
       <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
+        queue={ctxGlobal ? null : p.queue} version={`${p.lastAgent?.id ?? ""}|${p.queue?.n ?? 0}|${p.queue?.kind ?? ""}|${p.queue?.activity?.text ?? ""}`}
         placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : ctxStep ? "Napisz, co dalej z tym krokiem: popraw szkic, dopisz, zapytaj…" : "Napisz, co dalej z tym zadaniem, albo dopisz notatkę…"}
         context={ctxGlobal
           ? <span className="ctx"><span className="k">Kontekst: wszystkie zadania</span><button type="button" aria-label="Wróć do kontekstu zadania" title="Wróć do kontekstu zadania" onClick={() => setCtxLevel("auto")}><Icon k="undo" size={12} sw={1.9} /></button></span>

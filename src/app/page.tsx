@@ -21,7 +21,7 @@ const DAY = 864e5;
 export default async function Home({ searchParams }: { searchParams: Promise<BoardInitial> }) {
   const initial = await searchParams;
   const o = await requireOwner();
-  const [b, chatLog, groups, questions, bridge, stamp] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 2), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null)]);
+  const [b, chatLog, groups, questions, bridge, stamp, pending] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 2), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null), repo.countPendingChat(o.id)]);
   const run = liveActivity(bridge.run);
   const now = Date.now();
   const live = sortByPriority(b.scored.filter((s) => !s.task.deletedAt));
@@ -43,9 +43,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
   const acts = (lastAgent?.actions ?? null) as { link?: string } | null;
   return (
     <>
-    <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run} />
+    <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run || pending.size > 0} />
     <Board
-      tasks={onBoard.map((s) => taskTile(s, all, qCount.get(s.task.id) ?? 0, run))}
+      tasks={onBoard.map((s) => taskTile(s, all, qCount.get(s.task.id) ?? 0, run, pending.get(s.task.id) ?? 0))}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
       projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color, weight: p.weight, language: p.language, companyId: p.companyId }))}
       companies={b.companies.map((c) => ({ id: c.id, name: c.name, sphere: c.sphere, note: c.note, ended: !!c.endedAt }))}

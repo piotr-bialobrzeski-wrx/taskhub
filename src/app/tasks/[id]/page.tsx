@@ -11,13 +11,13 @@ import { calEst, calibrationFor, estOf, fmtMin, spentMin, taskEst, taskSpent, to
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
-import { busyWith, noStepsWho, type Worker } from "@/lib/auto";
+import { allDoneWaitText, bridgeLabel, busyWith, noStepsWho, queueWho, yourMsgsNom, type Worker } from "@/lib/auto";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
 import { Activity } from "@/components/Activity";
 import type { TileActivity } from "@/components/canvas/ui";
-import { fmtDate, fmtTime, stepTile, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
+import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, type CardState } from "@/lib/stepcard";
@@ -43,7 +43,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const cur = b.scored.find((s) => s.task.id === id);
   if (!cur) notFound();
   const t = cur.task;
-  const [factsPerStep, attachments, chatLog, groups, questions, bridge, stamp] = await Promise.all([
+  const [factsPerStep, attachments, chatLog, groups, questions, bridge, stamp, pending] = await Promise.all([
     Promise.all(t.steps.map((s) => repo.listFacts({ stepId: s.id }))),
     repo.listAttachments({ taskId: t.id }),
     repo.listChat(o.id, t.id, 2),
@@ -51,6 +51,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     repo.listQuestions(o.id, { taskId: t.id, open: true }),
     repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS),
     repo.changeStamp(o.id, id),
+    repo.listPendingChat(o.id, t.id),
   ]);
   const providers = availableProviders(), aiOn = providers.length > 0;
   const lastAgent = [...chatLog].reverse().find((m) => m.role === "agent");
@@ -65,10 +66,18 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const bp = !t.steps.length && !t.doneAt ? breakdownPrompt(t, b.rules, { appUrl: origin, projectName: cur.project?.name, companyId: cur.project?.companyId ?? null }) : null;
 
   // ---------- pasek nad kanwą: tylko to, co wymaga uwagi (stan kroków widać po kolorach kafelków) ----------
-  // zadanie bez kroków: kto je rozpisze i kiedy; gdy mostek właśnie to robi, pasek pulsuje jak krok w toku
+  // zadanie bez kroków: kto je rozpisze i kiedy; gdy mostek właśnie to robi, pasek pulsuje jak krok w toku.
+  // Bieg mostka związany z tym zadaniem pokazuje się tu zawsze (czyta zadanie, analizuje wiadomości, układa kartkę), nie tylko bez kroków;
+  // wiadomości Piotra bez odpowiedzi: kto je weźmie i kiedy, a po ostatnim kroku „czekam, aż mostek odpowie”
   const who = bp ? noStepsWho(w, t.id, busy) : null;
+  const queue = pending.length ? queueWho(w, t.id, pending.length, busy) : null;
+  const bridgeAct = w.run && w.run.taskId === t.id ? w.run : null;
+  const allDone = t.steps.length > 0 && t.steps.every((s) => s.status === "done");
   const runbar = waits.length ? <span className="rb-t"><b>Czeka na zadanie:</b> {waits.map((x) => x.title).join(", ")}</span>
     : who && who.kind === "decomposing" && w.run ? <Activity text="rozpisuje kroki" detail={w.run.detail} since={w.run.since} who={who.who} big />
+    : bridgeAct ? <><Activity text={bridgeAct.text} detail={bridgeAct.detail} since={bridgeAct.since} who={bridgeLabel(w)} big />{queue ? <span className="rb-t">· {yourMsgsNom(queue.n)}</span> : null}</>
+    : queue && allDone && !t.doneAt ? <span className="rb-t">{allDoneWaitText(queue)}</span>
+    : queue ? <span className="rb-t">{queue.text}</span>
     : who ? <span className="rb-t"><b>Bez kroków.</b> {aiOn ? "Napisz w doku, co ma zrobić agent." : who.text}</span>
     : null;
   const runAction = who && who.kind !== "decomposing" && !aiOn ? { label: "Rozpisz teraz", anchor: "rozpisz" } : null;
@@ -163,9 +172,10 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
 
   return (
     <>
-    <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || t.steps.some((s) => s.status === "handoff") || (!!bp && !t.doneAt)} />
+    <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || pending.length > 0 || t.steps.some((s) => s.status === "handoff") || (!!bp && !t.doneAt)} />
     <TaskCanvas
-      task={{ id: t.id, title: t.title, base: cur.score.base, eff: cur.score.eff, why: cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; "), state: taskStateOf(t, b.tasks), progress: { done: t.steps.filter((s) => s.status === "done").length, all: t.steps.length }, estText: estTextOf(t) }}
+      task={{ id: t.id, title: t.title, base: cur.score.base, eff: cur.score.eff, why: cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; "), state: taskStateOf(t, b.tasks), progress: { done: t.steps.filter((s) => s.status === "done").length, all: t.steps.length }, estText: estTextOf(t), activity: taskActivity(t.id, w.run), pending: pending.length }}
+      queue={queue}
       steps={tiles}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
       aiOn={aiOn} agent={agentLabel(providers)} index={indexFrom(b)}

@@ -7,6 +7,7 @@ import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Can
 import { GHEAD, GPAD, TASK_SIZE } from "@/lib/canvas/layout";
 import { Icon, Lvl, ToolIcon, TS_LABEL, TS_SHORT, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
 import { Dock, Namer, PrioPicker, ProjectPicker, TileMenu, Toast, useToast } from "./widgets";
+import { msgCount } from "@/lib/auto";
 import { AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import { Projects, type ProjectPatch } from "./Projects";
@@ -28,7 +29,7 @@ const UNDO_MS = 8000;   // tyle „Cofnij” zostaje po „Ułóż”
 export function TaskTileView({ t }: { t: TaskTile }) {
   const pct = t.progress.all ? (100 * t.progress.done) / t.progress.all : 0;
   // przy dwóch i więcej plakietkach licznik skraca się do „zrobione/wszystkie”, żeby nic nie było ucięte
-  const badges = (t.drafts ? 1 : 0) + (t.handed ? 1 : 0) + (t.questions ? 1 : 0);
+  const badges = (t.drafts ? 1 : 0) + (t.handed ? 1 : 0) + (t.questions ? 1 : 0) + (t.pending ? 1 : 0);
   const cnt = !t.progress.all ? t.estText : badges >= 2 ? `${t.progress.done}/${t.progress.all}` : `${t.progress.done}/${t.progress.all} · ${t.estText}`;
   return (
     <>
@@ -54,6 +55,7 @@ export function TaskTileView({ t }: { t: TaskTile }) {
           {t.drafts ? <span className="st draft" title={`${t.drafts} do zatwierdzenia`}>{t.drafts} szkic{t.drafts === 1 ? "" : t.drafts < 5 ? "e" : "ów"}</span> : null}
           {t.handed ? <span className="st handoff" title={`${t.handed} w Claude`}>{t.handed} w Claude</span> : null}
           {t.questions ? <span className="st draft" style={{ display: "inline-flex", gap: 3 }} title="Pytania od agenta czekają na Twoją odpowiedź"><Icon k="question" size={12} sw={1.8} />{t.questions}</span> : null}
+          {t.pending ? <span className="st handoff" title="Twoje wiadomości w zadaniu czekają na odpowiedź agenta">{msgCount(t.pending)}</span> : null}
         </span>
       )}
     </>

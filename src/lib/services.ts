@@ -6,6 +6,9 @@ import { closingNote, draftStep, reviewReport } from "./agent/notes";
 import { scoreAll, type Scored } from "./agent/context";
 import { calibrationFor } from "./time";
 import { type Step, type Task } from "./schema";
+import { busyWith, queueWho, type Queue, type Worker } from "./auto";
+import { BRIDGE_ALIVE_MS } from "./bridge";
+import { liveActivity } from "./live";
 
 export async function aiFor(ownerId: string): Promise<Ai> {
   const [u] = await (await import("./db")).sql()`select settings from users where id = ${ownerId}`;
@@ -17,6 +20,14 @@ export type Bundle = { tasks: Task[]; scored: Scored[]; projects: Awaited<Return
 export async function bundle(ownerId: string): Promise<Bundle> {
   const [tasks, projects, companies, connections, rules, samples] = await Promise.all([repo.listTasks(ownerId, { all: true }), repo.listProjects(ownerId), repo.listCompanies(ownerId), repo.listConnections(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId)]);
   return { tasks, projects, companies, connections, rules, samples, scored: scoreAll(tasks, projects, samples) };
+}
+
+// kolejka wiadomości Piotra w zadaniu: ile czeka bez odpowiedzi i kto się nimi zajmie (historia rozmowy, karta nad dokiem); null, gdy nic nie czeka
+export async function taskQueue(ownerId: string, taskId: string): Promise<Queue | null> {
+  const [pending, st, tasks] = await Promise.all([repo.listPendingChat(ownerId, taskId), repo.bridgeStatus(ownerId, BRIDGE_ALIVE_MS), repo.listTasks(ownerId)]);
+  if (!pending.length) return null;
+  const w: Worker = { alive: st.alive, name: st.name, run: liveActivity(st.run) };
+  return queueWho(w, taskId, pending.length, busyWith(w.run, tasks));
 }
 
 // krok gotowy: zapis, uczenie z czasu, odbiór raportu, notatka końcowa gdy to był ostatni krok

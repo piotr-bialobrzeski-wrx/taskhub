@@ -342,10 +342,8 @@ export async function completeStep(ownerId: string, task: Task, step: Step, opts
     patch.logged = true;
   }
   await updateStep(step.id, patch);
-  const fresh = await getTask(ownerId, task.id);
-  if (fresh && fresh.steps.length && fresh.steps.every((s) => s.status === "done") && !fresh.doneAt) {
-    await sql()`update tasks set done_at = now() where id = ${task.id}`;
-  }
+  // ostatni krok gotowy: zadanie kończy się samo, chyba że jakaś wiadomość Piotra czeka jeszcze na odpowiedź agenta (zamknie je reply_chat)
+  await closeIfDone(ownerId, task.id);
 }
 export async function reopenStep(ownerId: string, taskId: string, step: Step): Promise<void> {
   const status = step.prevStatus === "handoff" ? "todo" : step.prevStatus && step.prevStatus !== "done" ? (step.prevStatus as Step["status"]) : step.output ? "draft" : "todo";
@@ -503,8 +501,9 @@ export async function listSamples(ownerId: string): Promise<TimeSample[]> {
 }
 
 // ---------- czat ----------
-export type ChatMessage = { id: string; role: "user" | "agent"; text: string; actions: unknown; createdAt: string; seenAt: string | null };
-const rowToChat = (r: Row): ChatMessage => ({ id: r.id as string, role: r.role as "user" | "agent", text: r.text as string, actions: r.actions, createdAt: iso(r.createdAt) as string, seenAt: iso(r.seenAt) });
+// seenAt: agent wziął wiadomość do opracowania w bieżącym biegu; answeredAt: załatwiona (reply_chat albo odpowiedź agenta w aplikacji); obie null = czeka w kolejce
+export type ChatMessage = { id: string; role: "user" | "agent"; text: string; actions: unknown; createdAt: string; seenAt: string | null; answeredAt: string | null };
+const rowToChat = (r: Row): ChatMessage => ({ id: r.id as string, role: r.role as "user" | "agent", text: r.text as string, actions: r.actions, createdAt: iso(r.createdAt) as string, seenAt: iso(r.seenAt), answeredAt: iso(r.answeredAt) });
 // before: kursor (created_at) do wczytywania starszych wpisów w historii rozmowy
 export async function listChat(ownerId: string, taskId: string | null, limit = 20, before: string | null = null): Promise<ChatMessage[]> {
   const cut = before ?? "9999-12-31T00:00:00Z";
@@ -513,22 +512,58 @@ export async function listChat(ownerId: string, taskId: string | null, limit = 2
     : await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id is null and created_at < ${cut} order by created_at desc limit ${limit}`;
   return rows.reverse().map(rowToChat);
 }
-// seen: wiadomość Piotra już obsłużona (agent w aplikacji odpowiedział od razu); bez tego czeka na mostek albo automat jako praca
+// seen: wiadomość Piotra już załatwiona (agent w aplikacji odpowiedział od razu); bez tego czeka na mostek albo automat jako praca
 export async function addChat(ownerId: string, taskId: string | null, role: "user" | "agent", text: string, actions?: unknown, opts: { seen?: boolean } = {}): Promise<string> {
   const seen = role === "agent" || opts.seen ? new Date() : null;
-  const [r] = await sql()`insert into chat_messages (owner_id, task_id, role, text, actions, seen_at) values (${ownerId}, ${taskId}, ${role}, ${text}, ${actions ? sql().json(actions as never) : null}, ${seen}) returning id`;
+  const [r] = await sql()`insert into chat_messages (owner_id, task_id, role, text, actions, seen_at, answered_at) values (${ownerId}, ${taskId}, ${role}, ${text}, ${actions ? sql().json(actions as never) : null}, ${seen}, ${seen}) returning id`;
   return r.id as string;
 }
-// wiadomości Piotra w zadaniach, których agent jeszcze nie przeczytał (praca dla mostka: odpowiedzieć, dopisać kroki, poprawić szkic)
-export async function listUnseenChat(ownerId: string, limit = 30): Promise<(ChatMessage & { taskId: string; taskTitle: string })[]> {
+// wiadomość wzięta do opracowania dawniej niż tyle minut temu i wciąż bez odpowiedzi liczy się jako nowa (bieg mostka padł bez sygnału, automat co godzinę ją weźmie)
+export const CHAT_STALE_MIN = 90;
+// wiadomości Piotra w zadaniach czekające na agenta (praca dla mostka: odpowiedzieć, dopisać kroki, poprawić szkic); zadanie z taką wiadomością nigdy nie wypada z listy pracy
+export async function listUnseenChat(ownerId: string, limit = 30, staleMin = CHAT_STALE_MIN): Promise<(ChatMessage & { taskId: string; taskTitle: string })[]> {
   const rows = await sql()`select c.*, t.title as task_title from chat_messages c join tasks t on t.id = c.task_id
-    where c.owner_id = ${ownerId} and c.role = 'user' and c.seen_at is null and c.task_id is not null and t.deleted_at is null and t.done_at is null
+    where c.owner_id = ${ownerId} and c.role = 'user' and c.answered_at is null and c.task_id is not null and t.deleted_at is null
+      and (c.seen_at is null or c.seen_at < now() - make_interval(mins => ${staleMin}))
     order by c.created_at limit ${limit}`;
   return rows.map((r) => ({ ...rowToChat(r), taskId: r.taskId as string, taskTitle: r.taskTitle as string }));
 }
+// wiadomości Piotra bez odpowiedzi w jednym zadaniu (linia stanu pod dymkiem, karta nad dokiem, pasek nad kanwą, blokada samozamknięcia)
+export async function listPendingChat(ownerId: string, taskId: string): Promise<ChatMessage[]> {
+  const rows = await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and role = 'user' and answered_at is null order by created_at`;
+  return rows.map(rowToChat);
+}
+// ile wiadomości bez odpowiedzi ma każde zadanie (chip „2 wiadomości” na kafelku); taskId zawęża do jednego zadania
+export async function countPendingChat(ownerId: string, taskId: string | null = null): Promise<Map<string, number>> {
+  const rows = await sql()`select task_id, count(*)::int as n from chat_messages where owner_id = ${ownerId} and role = 'user' and answered_at is null and task_id is not null
+    ${taskId ? sql()`and task_id = ${taskId}` : sql()``} group by task_id`;
+  return new Map(rows.map((r) => [r.taskId as string, Number(r.n)]));
+}
+// agent wziął wiadomości do opracowania (list_work): od teraz „w pracy”, aż reply_chat je załatwi albo bieg skończy się bez odpowiedzi
 export async function markChatSeen(ownerId: string, where: { ids?: string[]; taskId?: string }): Promise<void> {
-  if (where.ids) { if (where.ids.length) await sql()`update chat_messages set seen_at = now() where owner_id = ${ownerId} and id in ${sql()(where.ids)} and seen_at is null`; }
-  else if (where.taskId) await sql()`update chat_messages set seen_at = now() where owner_id = ${ownerId} and task_id = ${where.taskId} and role = 'user' and seen_at is null`;
+  if (where.ids) { if (where.ids.length) await sql()`update chat_messages set seen_at = now() where owner_id = ${ownerId} and id in ${sql()(where.ids)} and answered_at is null`; }
+  else if (where.taskId) await sql()`update chat_messages set seen_at = now() where owner_id = ${ownerId} and task_id = ${where.taskId} and role = 'user' and answered_at is null`;
+}
+// reply_chat: załatwione wiadomości (wskazane albo wszystkie dotychczasowe w zadaniu); zwraca ich id, żeby odpowiedź w historii wiązała się z prośbami
+export async function markChatAnswered(ownerId: string, taskId: string, ids?: string[]): Promise<string[]> {
+  if (ids && !ids.length) return [];
+  const rows = await sql()`update chat_messages set answered_at = now(), seen_at = coalesce(seen_at, now())
+    where owner_id = ${ownerId} and task_id = ${taskId} and role = 'user' and answered_at is null ${ids ? sql()`and id in ${sql()(ids)}` : sql()``} returning id`;
+  return rows.map((r) => r.id as string);
+}
+// wiadomości wzięte w biegu, który właśnie się skończył, a bez odpowiedzi: wracają do kolejki (następny bieg widzi je jako NOWE); nic nie ginie po cichu
+async function requeueChat(ownerId: string, since: Date | string | null): Promise<void> {
+  if (!since) return;
+  await sql()`update chat_messages set seen_at = null where owner_id = ${ownerId} and role = 'user' and answered_at is null and seen_at is not null and seen_at >= ${new Date(since)}`;
+}
+// zadanie z wszystkimi krokami gotowymi i bez wiadomości czekających na odpowiedź: kończy się samo; zwraca true, gdy właśnie się zakończyło
+export async function closeIfDone(ownerId: string, taskId: string): Promise<boolean> {
+  const t = await getTask(ownerId, taskId);
+  if (!t || t.doneAt || !t.steps.length || !t.steps.every((s) => s.status === "done")) return false;
+  const [pending] = await sql()`select 1 from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and role = 'user' and answered_at is null limit 1`;
+  if (pending) return false;
+  const rows = await sql()`update tasks set done_at = now() where id = ${taskId} and owner_id = ${ownerId} and done_at is null returning id`;
+  return rows.length > 0;
 }
 // stempel zmian dla pulsu przeglądarki: ostatnia zmiana zadania, kroków, rozmowy i pytań (jednego zadania albo wszystkich)
 export async function changeStamp(ownerId: string, taskId: string | null): Promise<string> {
@@ -536,14 +571,14 @@ export async function changeStamp(ownerId: string, taskId: string | null): Promi
     ? await sql()`select greatest(
         (select max(updated_at) from tasks where id = ${taskId} and owner_id = ${ownerId}),
         (select max(updated_at) from steps where task_id = ${taskId}),
-        (select max(created_at) from chat_messages where owner_id = ${ownerId} and task_id = ${taskId}),
+        (select max(greatest(created_at, coalesce(seen_at, created_at), coalesce(answered_at, created_at))) from chat_messages where owner_id = ${ownerId} and task_id = ${taskId}),
         (select max(greatest(asked_at, coalesce(answered_at, asked_at))) from questions where task_id = ${taskId}),
         (select max(coalesce(fetched_at, '1970-01-01')) from facts where task_id = ${taskId} or step_id in (select id from steps where task_id = ${taskId}))
       ) as at`
     : await sql()`select greatest(
         (select max(updated_at) from tasks where owner_id = ${ownerId}),
         (select max(s.updated_at) from steps s join tasks t on t.id = s.task_id where t.owner_id = ${ownerId}),
-        (select max(created_at) from chat_messages where owner_id = ${ownerId}),
+        (select max(greatest(created_at, coalesce(seen_at, created_at), coalesce(answered_at, created_at))) from chat_messages where owner_id = ${ownerId}),
         (select max(greatest(asked_at, coalesce(answered_at, asked_at))) from questions where owner_id = ${ownerId})
       ) as at`;
   return iso(r?.at) ?? "0";
@@ -639,7 +674,8 @@ export async function bridgeStatus(ownerId: string, aliveMs: number): Promise<Br
   return { alive: !!seenAt && Date.now() - new Date(seenAt).getTime() < aliveMs, seenAt, name: t ? (t.name as string) : null, meta: t ? ((t.meta as Record<string, unknown>) ?? {}) : {}, run: r ? rowToRun(r) : null };
 }
 export async function expireBridgeRuns(ownerId: string, staleMin: number): Promise<number> {
-  const rows = await sql()`update bridge_runs set ended_at = now(), outcome = 'stale' where owner_id = ${ownerId} and ended_at is null and touched_at < now() - make_interval(mins => ${staleMin}) returning id`;
+  const rows = await sql()`update bridge_runs set ended_at = now(), outcome = 'stale' where owner_id = ${ownerId} and ended_at is null and touched_at < now() - make_interval(mins => ${staleMin}) returning id, started_at`;
+  for (const r of rows) await requeueChat(ownerId, r.startedAt as Date);
   return rows.length;
 }
 export async function startBridgeRun(ownerId: string, tokenId: string | null, bridge: string): Promise<BridgeRun | null> {
@@ -661,7 +697,8 @@ export async function touchBridgeRun(ownerId: string, id: string, note?: string,
   return rows.length > 0;
 }
 export async function endBridgeRun(ownerId: string, id: string, outcome: string, note?: string): Promise<boolean> {
-  const rows = await sql()`update bridge_runs set ended_at = now(), touched_at = now(), outcome = ${outcome.slice(0, 20)}, note = coalesce(${note?.slice(0, 600) ?? null}, note) where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id`;
+  const rows = await sql()`update bridge_runs set ended_at = now(), touched_at = now(), outcome = ${outcome.slice(0, 20)}, note = coalesce(${note?.slice(0, 600) ?? null}, note) where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id, started_at`;
+  if (rows.length) await requeueChat(ownerId, rows[0].startedAt as Date);   // wiadomości wzięte w tym biegu bez odpowiedzi wracają do kolejki
   return rows.length > 0;
 }
 export async function listBridgeRuns(ownerId: string, limit = 8): Promise<BridgeRun[]> {

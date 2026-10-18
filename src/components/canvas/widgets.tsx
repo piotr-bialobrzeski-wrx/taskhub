@@ -4,7 +4,9 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode 
 import { dayKey, fmtDateLong, fmtTime } from "@/lib/clock";
 import { createPortal, useFormStatus } from "react-dom";
 import { LEVELS } from "@/lib/priority";
-import { loadChat } from "@/app/actions";
+import { loadChat, type ChatVM } from "@/app/actions";
+import type { Queue } from "@/lib/auto";
+import { Activity } from "@/components/Activity";
 import { Icon, Lvl, projColor, type ProjectVM } from "./ui";
 
 // ---------- menu wyboru przy przycisku ----------
@@ -84,7 +86,9 @@ async function shrinkImage(file: File): Promise<File> {
 }
 
 // ---------- historia rozmowy: szkło nad kanwą, dok zostaje widoczny i działa; wpisy dosunięte do dołu (najnowsze przy polu), starsze wyżej ----------
-type Msg = { id: string; role: "user" | "agent"; text: string; createdAt: string };
+// Każda wiadomość Piotra ma pod dymkiem linię stanu liczoną na bieżąco: czeka (kto ją weźmie i kiedy), w pracy (kropki i minuty), „Odpowiedź 12:52” (klik przewija do odpowiedzi).
+// Przy kilku wiadomościach w kolejce jedna wspólna linia pod ostatnią, wcześniejsze dostają znacznik „w kolejce”.
+type Msg = ChatVM;
 const CHAT_PAGE = 50;   // tyle wpisów na stronę zwraca loadChat
 // dni i godziny w czasie polskim (zegar w src/lib/clock), żeby „Dziś” i „11:26” zgadzały się z tym, co Piotr widzi na komputerze
 const dayOf = (iso: string) => dayKey(iso);
@@ -94,9 +98,11 @@ const dayLabel = (iso: string) => {
 };
 const timeOf = (iso: string) => fmtTime(iso);
 
-// zamykanie: X u góry, ikona w doku (ta sama, która otworzyła), klik obok kolumny, Esc
-export function ChatHistory({ taskId, title, onClose }: { taskId: string | null; title: string; onClose: () => void }) {
+// zamykanie: X u góry, ikona w doku (ta sama, która otworzyła), klik obok kolumny, Esc.
+// version: zmienia się, gdy serwer ma nową odpowiedź albo inny stan kolejki (puls strony) → historia dociąga najnowsze wpisy bez zamykania
+export function ChatHistory({ taskId, title, onClose, queue = null, version = "" }: { taskId: string | null; title: string; onClose: () => void; queue?: Queue | null; version?: string }) {
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
+  const [q, setQ] = useState<Queue | null>(queue);
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const list = useRef<HTMLDivElement>(null);
@@ -114,10 +120,35 @@ export function ChatHistory({ taskId, title, onClose }: { taskId: string | null;
       const el = list.current, keep = before && el ? el.scrollHeight - el.scrollTop : null;
       const r = await loadChat(taskId, before);
       pend.current = { keep };
-      setMsgs((m) => (before ? [...r, ...(m ?? [])] : r)); setMore(r.length >= CHAT_PAGE);
+      setMsgs((m) => (before ? [...r.msgs, ...(m ?? [])] : r.msgs)); setMore(r.msgs.length >= CHAT_PAGE); setQ(r.queue);
     } finally { setBusy(false); }
   };
+  // nowe wpisy bez zamykania historii: najnowsza strona zastępuje końcówkę listy; przewinięcie zostaje, chyba że Piotr był na dole
+  const refresh = async () => {
+    const el = list.current;
+    const atBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    const keep = el && !atBottom ? el.scrollHeight - el.scrollTop : null;
+    const r = await loadChat(taskId, null);
+    pend.current = { keep };
+    setMsgs((m) => { const first = r.msgs[0]?.createdAt ?? ""; return [...(m ?? []).filter((x) => x.createdAt < first), ...r.msgs]; }); setQ(r.queue);
+  };
+  const first = useRef(true);
   useEffect(() => { void load(null); }, [taskId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (first.current) { first.current = false; return; } void refresh(); }, [version]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const flash = (id: string) => { const el = document.getElementById("hm-" + id); if (!el) return; el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); };
+  // odpowiedź na wiadomość Piotra: ta, która ją wymienia w swoich answers, inaczej pierwsza odpowiedź agenta po chwili załatwienia
+  const answerOf = (m: Msg, all: Msg[]) => all.find((a) => a.role === "agent" && a.answers?.includes(m.id)) ?? (m.answeredAt ? all.find((a) => a.role === "agent" && a.createdAt >= m.answeredAt!) ?? null : null);
+  const stateLine = (m: Msg, all: Msg[], lastPending: string | null) => {
+    if (m.role !== "user") return null;
+    if (m.answeredAt) {
+      const a = answerOf(m, all);
+      return a ? <button type="button" className="hm-s ok" onClick={() => flash(a.id)} title="Pokaż odpowiedź">Odpowiedź {timeOf(a.createdAt)}</button> : <span className="hm-s ok">Odpowiedź {timeOf(m.answeredAt)}</span>;
+    }
+    if (m.id !== lastPending) return <span className="hm-s wait"><i className="pulse" aria-hidden="true" />w kolejce</span>;
+    if (!q) return <span className="hm-s wait"><i className="pulse" aria-hidden="true" />Czeka na odpowiedź</span>;
+    const label = q.n === 1 ? q.short : q.text;
+    return q.activity ? <span className="hm-s wait"><Activity text={q.activity.text} detail={q.activity.detail} since={q.activity.since} who={label + " ·"} /></span> : <span className="hm-s wait"><i className="pulse" aria-hidden="true" />{label}</span>;
+  };
   useEffect(() => { const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key); }, [onClose]);
   return (
     <div className="hist glass" role="dialog" aria-label={title} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -128,12 +159,16 @@ export function ChatHistory({ taskId, title, onClose }: { taskId: string | null;
             {msgs === null ? <p className="sub" style={{ textAlign: "center" }}>Wczytuję…</p> : !msgs.length ? <p className="sub" style={{ textAlign: "center" }}>Jeszcze nie było tu rozmowy.</p> : (
               <>
                 {more ? <button className="btn" type="button" style={{ alignSelf: "center" }} disabled={busy} onClick={() => load(msgs[0].createdAt)}>{busy ? "Wczytuję…" : "Starsze wpisy"}</button> : null}
-                {msgs.map((m, i) => (
+                {(() => { const pendingIds = msgs.filter((m) => m.role === "user" && !m.answeredAt).map((m) => m.id); const lastPending = pendingIds[pendingIds.length - 1] ?? null; return msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {i === 0 || dayOf(m.createdAt) !== dayOf(msgs[i - 1].createdAt) ? <div className="hm-day">{dayLabel(m.createdAt)}</div> : null}
-                    <div className={"hm " + m.role}><div className="hm-b">{m.text}</div><span className="hm-t">{m.role === "agent" ? "Claude · " : ""}{timeOf(m.createdAt)}</span></div>
+                    <div id={"hm-" + m.id} className={"hm " + m.role + (m.role === "user" && !m.answeredAt ? " q" : "")}>
+                      <div className="hm-b">{m.text}</div>
+                      <span className="hm-t">{m.role === "agent" ? "Claude · " : ""}{timeOf(m.createdAt)}</span>
+                      {stateLine(m, msgs, lastPending)}
+                    </div>
                   </Fragment>
-                ))}
+                )); })()}
               </>
             )}
           </div>
@@ -173,7 +208,7 @@ function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone
     </>
   );
 }
-export function Dock({ action, taskId, stepId = null, placeholder, busyText, context, historyTitle }: { action: (fd: FormData) => Promise<void>; taskId: string | null; stepId?: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string }) {
+export function Dock({ action, taskId, stepId = null, placeholder, busyText, context, historyTitle, queue = null, version = "" }: { action: (fd: FormData) => Promise<void>; taskId: string | null; stepId?: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string; queue?: Queue | null; version?: string }) {
   const form = useRef<HTMLFormElement>(null);
   const [hist, setHist] = useState(false);
   const filesIn = useRef<HTMLInputElement>(null);
@@ -206,7 +241,7 @@ export function Dock({ action, taskId, stepId = null, placeholder, busyText, con
   // historia jest rodzeństwem formularza w tym samym kontekście warstw: szkło pod dokiem, dok nad nim (pole dalej działa)
   return (
     <div className={"dockwrap" + (hist ? " hist-on" : "")}>
-      {hist ? <ChatHistory taskId={taskId} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(false)} /> : null}
+      {hist ? <ChatHistory taskId={taskId} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(false)} queue={queue} version={version} /> : null}
       <form ref={form} className={"dock glass" + (over ? " drop" : "")} action={action} autoComplete="off"
         onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setOver(true); } }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); void addFiles([...e.dataTransfer.files]); }}>
