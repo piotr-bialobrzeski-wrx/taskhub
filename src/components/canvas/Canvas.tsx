@@ -34,6 +34,7 @@ export type CanvasProps = {
   onRename: (id: string, name: string | null) => void;
   onOpen: (id: string | null) => void;          // dwuklik (liczony z pointerup, bo przechwycenie wskaźnika psuje zwykły dblclick) / Enter: null = kafelek zadania (origin)
   onClickTile?: (id: string) => void;            // pojedyncze kliknięcie (poziom kroków otwiera panel)
+  onMenu?: (id: string | null, at: { x: number; y: number }) => void;   // prawy klik na kafelku: menu kafelka w miejscu kliknięcia (null = kafelek zadania)
   onMove: (items: { id: string; x: number; y: number }[]) => void;
   onLink?: (from: string, to: string) => void;
   onUnlink?: (from: string, to: string) => void;
@@ -310,7 +311,7 @@ export function Canvas(p: CanvasProps) {
     <div ref={canvasRef} className={"canvas" + (panning ? " panning" : "") + (drag?.kind === "link" ? " connecting" : "")} onPointerDown={onCanvasDown} onPointerMove={onCanvasMove} onPointerUp={endBand} onPointerCancel={endBand} onWheel={onWheel}>
       <div className="stage" style={{ width: Math.max(bb.w * zoom, 10) + 2 * pad.x, height: Math.max(bb.h * zoom, 10) + 2 * pad.y }}>
         <div ref={worldRef} className="world" style={{ transform: `scale(${zoom})`, width: bb.w, height: bb.h, left: pad.x, top: pad.y }} onPointerDown={onWorldDown} onPointerMove={onWorldMove} onPointerUp={endDrag} onPointerCancel={endDrag}
-          onContextMenu={(ev) => { if ((ev.target as HTMLElement).closest(".node")) ev.preventDefault(); }}   /* prawy klik na kafelku: bez menu przeglądarki („Wczytaj ponownie” w aplikacji na Maca) */
+          onContextMenu={(ev) => { const n = (ev.target as HTMLElement).closest<HTMLElement>(".node"); if (!n) return; ev.preventDefault(); if (p.onMenu) p.onMenu(n.dataset.origin ? null : n.dataset.id ?? null, { x: ev.clientX, y: ev.clientY }); }}   /* prawy klik na kafelku: własne menu zamiast menu przeglądarki („Wczytaj ponownie” w aplikacji na Maca) */
           onKeyDown={(ev) => { if (ev.key !== "Enter" && ev.key !== " ") return; const n = (ev.target as HTMLElement).closest<HTMLElement>(".node"); if (!n) return; ev.preventDefault(); if (n.dataset.origin) p.onOpen(null); else if (n.dataset.id) p.onOpen(n.dataset.id); }}>
           {lg.map((g) => (
             <div key={g.id} className={"group" + (p.selectedGroup === g.id ? " on" : "") + (dropGroup === g.id ? " drop" : "")} data-group={g.id} style={{ left: g.x, top: g.y, width: g.w, height: g.h, ["--g" as string]: GCOL[g.color % GCOL.length] }}>

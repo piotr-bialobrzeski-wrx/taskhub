@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, TASK_SIZE } from "@/lib/canvas/layout";
 import { Icon, Lvl, ToolIcon, TS_LABEL, TS_SHORT, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
-import { Dock, Namer, PrioPicker, ProjectPicker, Toast, useToast } from "./widgets";
+import { Dock, Namer, PrioPicker, ProjectPicker, TileMenu, Toast, useToast } from "./widgets";
 import { AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import { Projects, type ProjectPatch } from "./Projects";
@@ -102,6 +102,7 @@ export function Board(p: BoardProps) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [tmenu, setTmenu] = useState<{ id: string; x: number; y: number } | null>(null);   // menu kafelka (prawy klik)
   const [namer, setNamer] = useState<"tile" | "group" | null>(null);
   const [arch, setArch] = useState<"done" | "trash" | null>(null);
   const [proj, setProj] = useState(false);
@@ -208,7 +209,7 @@ export function Board(p: BoardProps) {
       {off ? null : view === "canvas" ? (
         <Canvas zoomKey="board" apiRef={api} items={items} size={TASK_SIZE} groups={groups} render={(id) => <TaskTileView t={byId.get(id)!} />}
           selected={sel} onSelect={(s) => { setSel(s); setConfirm(false); }} selectedGroup={selGroup} onSelectGroup={setSelGroup} renaming={renaming} onRename={(id, name) => setRenaming(name == null ? null : id)}
-          onOpen={(id) => { if (id) open(id); }} onMove={(moved) => run(() => saveTaskPositions(moved))}
+          onOpen={(id) => { if (id) open(id); }} onMenu={(id, at) => { if (id) setTmenu({ id, ...at }); }} onMove={(moved) => run(() => saveTaskPositions(moved))}
           onLink={(from, to) => run(() => linkTasks(from, to, true), "Połączono: drugie zadanie zacznie się po pierwszym")} onUnlink={(from, to) => run(() => linkTasks(from, to, false), "Usunięto połączenie")}
           onGroupChange={(id, patch) => run(() => updateGroupAction(null, id, patch))} onGroupCreate={(rect, members) => run(async () => { await freeze(members); await createGroupAction(null, "Nowa grupa", members, rect); })}
           onAutoLayout={layoutNow} onUndoLayout={undoL.canUndo ? () => undoL.undo(null) : null}
@@ -299,6 +300,13 @@ export function Board(p: BoardProps) {
 
       {namer === "tile" ? <Namer label="Nazwa nowego zadania" placeholder="Nazwa zadania" onClose={() => setNamer(null)} onSubmit={(name) => { setNamer(null); run(() => createTaskQuick(name), "Dodano zadanie"); }} /> : null}
       {namer === "group" ? <Namer label="Nazwa grupy" placeholder={n ? `Nazwa grupy dla ${n} ${word}` : "Nazwa grupy"} onClose={() => setNamer(null)} onSubmit={makeGroup} /> : null}
+      {tmenu ? <TileMenu at={tmenu} onClose={() => setTmenu(null)} items={(() => { const id = tmenu.id, tt = byId.get(id), on = sel.has(id), done = tt?.state === "done"; return [
+        { label: "Otwórz", onPick: () => open(id) },
+        { label: on ? "Odznacz" : "Zaznacz", onPick: () => { const s = new Set(sel); if (on) s.delete(id); else s.add(id); setSel(s); } },
+        { label: "Zgrupuj", onPick: () => { setSel(new Set([...sel, id])); setNamer("group"); } },
+        { label: done ? "Wróć do pracy" : "Oznacz jako gotowe", onPick: () => run(() => batchTasks([id], { done: !done }), done ? "Przywrócono do pracy" : "Oznaczono jako gotowe") },
+        { label: "Do kosza…", danger: true, onPick: () => { setSel(new Set([id])); setConfirm(true); } },
+      ]; })()} /> : null}
 
       {!off && view === "canvas" && group && !n ? (
         <GroupBar g={group} onColor={(c) => run(() => updateGroupAction(null, group.id, { color: c }))} onRename={() => setRenaming(group.id)}

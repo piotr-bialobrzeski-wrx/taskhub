@@ -709,3 +709,8 @@ details.fold[open] > summary { margin-bottom: var(--s-3); }
 details.fold[open] > summary .t { display: none; }
 details.fold[open] > summary svg { transform: rotate(180deg); }
 
+/* ---------- menu kafelka na prawy klik (paczka 2, punkt 2) ---------- */
+.ppmenu.tmenu { min-width: 180px; }
+.pp-opt.danger { color: var(--danger); }
+.pp-opt.danger:hover, .pp-opt.danger:focus-visible { background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
+

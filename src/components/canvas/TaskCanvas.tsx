@@ -9,10 +9,10 @@ import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
 import { AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import type { SearchItem } from "@/lib/search-core";
-import { Dock, Namer, Toast, useToast } from "./widgets";
+import { Dock, Namer, TileMenu, Toast, useToast } from "./widgets";
 import { InlineText } from "@/components/StepFields";
 import { Activity } from "@/components/Activity";
-import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, linkSteps, saveStepPositions, updateGroupAction } from "@/app/actions";
+import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, saveStepPositions, updateGroupAction } from "@/app/actions";
 
 export type TaskCanvasProps = {
   task: { id: string; title: string; base: number; eff: number; why: string; state: TaskStateKey; progress: { done: number; all: number }; estText: string };
@@ -41,6 +41,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [panel, setPanel] = useState<string | null>(() => (p.focus && p.steps.some((s) => s.id === p.focus) ? p.focus : null));
   const [confirm, setConfirm] = useState(false);
+  const [tmenu, setTmenu] = useState<{ id: string | null; x: number; y: number } | null>(null);   // menu kafelka (prawy klik); null = kafelek zadania
   const [namer, setNamer] = useState<"tile" | "group" | null>(null);
   // kontekst pola czatu: domyślnie to, co jest otwarte (krok w panelu, inaczej zadanie); X zawęża o poziom wyżej (krok → zadanie → wszystkie zadania)
   const [ctxLevel, setCtxLevel] = useState<"auto" | "task" | "global">("auto");
@@ -127,7 +128,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
             </>) }}
           selected={sel} onSelect={(s) => { setSel(s); setConfirm(false); if (!s.size) setPanel(null); }} selectedGroup={selGroup} onSelectGroup={setSelGroup} renaming={renaming} onRename={(id, name) => setRenaming(name == null ? null : id)}
           onOpen={(id) => { if (id) openStep(id); else setPanel("__task"); }} onClickTile={(id) => { if (id === "__origin") { setSel(new Set()); setPanel("__task"); } else openStep(id); }}
-          onMove={(moved) => run(() => saveStepPositions(t.id, moved))}
+          onMenu={(id, at) => setTmenu({ id, ...at })} onMove={(moved) => run(() => saveStepPositions(t.id, moved))}
           onLink={(from, to) => run(() => linkSteps(t.id, from, to, true), "Połączono: drugi krok zacznie się po pierwszym")} onUnlink={(from, to) => run(() => linkSteps(t.id, from, to, false), "Usunięto połączenie")}
           onGroupChange={(id, patch) => run(() => updateGroupAction(t.id, id, patch))} onGroupCreate={(rect, members) => run(async () => { await freeze(members); await createGroupAction(t.id, "Nowa grupa", members, rect); })}
           onAutoLayout={layoutNow} onUndoLayout={undoL.canUndo ? () => undoL.undo(t.id) : null} />
@@ -161,12 +162,20 @@ export function TaskCanvas(p: TaskCanvasProps) {
 
       {namer === "tile" ? <Namer label="Nazwa nowego kroku" placeholder={after ? "Nazwa kroku (po zaznaczonym)" : "Nazwa kroku"} onClose={() => setNamer(null)} onSubmit={(name) => { setNamer(null); run(() => addStepQuick(t.id, name, after), "Dodano krok"); }} /> : null}
       {namer === "group" ? <Namer label="Nazwa grupy" placeholder={n ? `Nazwa grupy dla ${n} ${word}` : "Nazwa grupy"} onClose={() => setNamer(null)} onSubmit={(name) => { const members = ids; const rect = groupRect(members); setNamer(null); setSel(new Set()); setPanel(null); run(async () => { await freeze(members); const id = await createGroupAction(t.id, name, members, rect); setSelGroup(id); }); }} /> : null}
+      {tmenu ? <TileMenu at={tmenu} onClose={() => setTmenu(null)} items={(() => { const id = tmenu.id; if (!id) return [{ label: "Otwórz zadanie", onPick: () => { setSel(new Set()); setPanel("__task"); } }]; const st = byId.get(id), on = sel.has(id), done = st?.state === "done"; return [
+        { label: "Otwórz", onPick: () => openStep(id) },
+        ...(st && st.state === "ready" && st.tool !== "manual" && !p.aiOn ? [{ label: "Uruchom", onPick: () => run(() => handoff(t.id, id), "Claude bierze ten krok") }] : []),
+        { label: on ? "Odznacz" : "Zaznacz", onPick: () => { const s = new Set(sel); if (on) s.delete(id); else s.add(id); setSel(s); } },
+        { label: "Zgrupuj", onPick: () => { setSel(new Set([...sel, id])); setNamer("group"); } },
+        { label: done ? "Wróć do pracy" : "Oznacz jako gotowe", onPick: () => run(() => batchSteps(t.id, [id], { done: !done }), done ? "Przywrócono do pracy" : "Oznaczono jako gotowe") },
+        { label: "Usuń…", danger: true, onPick: () => { setPanel(null); setSel(new Set([id])); setConfirm(true); } },
+      ]; })()} /> : null}
 
       {view === "canvas" && group && !n ? (
         <GroupBar g={group} onColor={(c) => run(() => updateGroupAction(t.id, group.id, { color: c }))} onRename={() => setRenaming(group.id)}
           onSelectMembers={() => { setSel(new Set(group.members)); setSelGroup(null); }} onUngroup={() => { setSelGroup(null); run(() => deleteGroupAction(t.id, group.id), "Rozgrupowano, kafelki zostały"); }} onClear={() => setSelGroup(null)} />
       ) : null}
-      {view === "canvas" && n > 1 ? (
+      {view === "canvas" && (n > 1 || (n === 1 && confirm)) ? (   /* jeden krok: tylko potwierdzenie usunięcia z menu kafelka */
         <div className="selbar glass" role="toolbar" aria-label="Akcje dla zaznaczonych">
           {confirm ? (
             <><span className="rb-t">Usunąć <b>{n} {word}</b>? Tego nie da się cofnąć.</span><span className="dv" />

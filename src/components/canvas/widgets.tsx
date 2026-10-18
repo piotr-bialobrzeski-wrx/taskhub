@@ -271,6 +271,26 @@ export function RemovePop({ label, question, onYes }: { label: string; question:
   );
 }
 
+// ---------- menu kafelka na prawy klik: te same akcje co pasek zaznaczenia, w miejscu kliknięcia (paczka 2, punkt 2) ----------
+export type MenuItem = { label: string; danger?: boolean; onPick: () => void };
+export function TileMenu({ at, items, onClose }: { at: { x: number; y: number }; items: MenuItem[]; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: at.x, top: at.y });
+  useEffect(() => {
+    const r = ref.current?.getBoundingClientRect();
+    const w = r?.width ?? 200, h = r?.height ?? 220;
+    setPos({ left: Math.max(8, Math.min(at.x, window.innerWidth - w - 8)), top: Math.max(8, Math.min(at.y, window.innerHeight - h - 8)) });
+    const close = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".tmenu")) onClose(); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("pointerdown", close); document.addEventListener("keydown", key); window.addEventListener("resize", onClose);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", key); window.removeEventListener("resize", onClose); };
+  }, [at, onClose]);
+  return createPortal(
+    <div ref={ref} className="ppmenu glass tmenu" role="menu" style={{ position: "fixed", left: pos.left, top: pos.top }} onPointerDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
+      {items.map((it, i) => <button key={i} type="button" role="menuitem" className={"pp-opt" + (it.danger ? " danger" : "")} onClick={() => { onClose(); it.onPick(); }}>{it.label}</button>)}
+    </div>, document.body);
+}
+
 // ---------- nazwa w wierszu: klik → pole w tym samym miejscu (Enter zapisuje, Esc cofa) ----------
 export function InlineName({ name, label, onRename }: { name: string; label: string; onRename: (n: string) => void }) {
   const [edit, setEdit] = useState(false);
