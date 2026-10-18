@@ -180,7 +180,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     id: r.id as string, taskId: r.taskId as string, position: Number(r.position), title: r.title as string, detail: (r.detail as string) ?? "",
     tool: r.tool as string, status: r.status as Step["status"], prevStatus: (r.prevStatus as string) ?? null, needsApproval: !!r.needsApproval,
     estMin: Number(r.estMin), spentSec: Number(r.spentSec), spentManual: !!r.spentManual, link: (r.link as string) ?? null,
-    handoffAt: iso(r.handoffAt), report: (r.report as string) ?? null, output: (r.output as string) ?? "",
+    handoffAt: iso(r.handoffAt), doneAt: iso(r.doneAt), report: (r.report as string) ?? null, output: (r.output as string) ?? "",
     review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), logged: !!r.logged,
     pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, connectionId: (r.connectionId as string) ?? null,
   };
@@ -293,7 +293,7 @@ export async function purgeTask(ownerId: string, id: string): Promise<void> {
   await sql()`delete from tasks where id = ${id} and owner_id = ${ownerId}`;
 }
 
-export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null }>;
+export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null }>;
 export async function updateStep(id: string, patch: StepPatch): Promise<void> {
   const p: Row = {};
   if (patch.title !== undefined) p.title = patch.title.slice(0, 200);
@@ -307,6 +307,7 @@ export async function updateStep(id: string, patch: StepPatch): Promise<void> {
   if (patch.spentManual !== undefined) p.spent_manual = patch.spentManual;
   if (patch.link !== undefined) p.link = patch.link;
   if (patch.handoffAt !== undefined) p.handoff_at = patch.handoffAt;
+  if (patch.doneAt !== undefined) p.done_at = patch.doneAt;
   if (patch.report !== undefined) p.report = patch.report;
   if (patch.output !== undefined) p.output = patch.output;
   if (patch.review !== undefined) p.review = patch.review === null ? null : sql().json(patch.review as never);
@@ -329,7 +330,7 @@ export async function deleteStep(id: string): Promise<void> { await sql()`delete
 // krok gotowy: zapis czasu do historii (uczenie), status, raport i link
 export async function completeStep(ownerId: string, task: Task, step: Step, opts: { report?: string; link?: string; output?: string; addSpentSec?: number } = {}): Promise<void> {
   const spentSec = step.spentSec + (opts.addSpentSec ?? 0);
-  const patch: StepPatch = { status: "done", prevStatus: step.status === "done" ? step.prevStatus : step.status, spentSec, handoffAt: null };
+  const patch: StepPatch = { status: "done", prevStatus: step.status === "done" ? step.prevStatus : step.status, spentSec, handoffAt: null, doneAt: new Date().toISOString() };
   if (opts.report !== undefined) { patch.report = opts.report; patch.output = opts.report; }
   if (opts.output !== undefined) patch.output = opts.output;
   if (opts.link) patch.link = opts.link;
@@ -349,7 +350,7 @@ export async function completeStep(ownerId: string, task: Task, step: Step, opts
 export async function reopenStep(ownerId: string, taskId: string, step: Step): Promise<void> {
   const status = step.prevStatus === "handoff" ? "todo" : step.prevStatus && step.prevStatus !== "done" ? (step.prevStatus as Step["status"]) : step.output ? "draft" : "todo";
   await sql().begin(async (tx) => {
-    await tx`update steps set status = ${status}, prev_status = null, logged = false where id = ${step.id}`;
+    await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null where id = ${step.id}`;
     await tx`delete from time_samples where step_id = ${step.id}`;
     await tx`update tasks set done_at = null where id = ${taskId} and owner_id = ${ownerId}`;
   });

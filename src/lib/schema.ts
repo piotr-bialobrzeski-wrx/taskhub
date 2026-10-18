@@ -178,6 +178,7 @@ export const Step = z.object({
   spentManual: z.boolean(),
   link: z.string().nullable(),
   handoffAt: z.string().nullable(),
+  doneAt: z.string().nullable(),   // kiedy krok został zrobiony (nagłówek „Zrobione HH:MM” na karcie)
   report: z.string().nullable(),
   output: z.string(),
   review: z.record(z.string(), z.unknown()).nullable(),

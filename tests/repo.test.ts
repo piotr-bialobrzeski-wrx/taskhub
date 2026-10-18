@@ -238,4 +238,14 @@ describe.skipIf(!DB)("repo", async () => {
     expect((await repo.getTask(owner, t.id))!.steps.find((s) => s.id === more.id)?.tool).toBe("github");
   });
 
+  it("zrobiony krok ma czas zakończenia; cofnięcie go czyści", async () => {
+    const t = await repo.createTask(owner, { title: "Czas zrobienia", steps: [{ title: "a" }] });
+    await repo.completeStep(owner, t, t.steps[0], { report: "Zrobione." });
+    let s = (await repo.getTask(owner, t.id))!.steps[0];
+    expect(s.doneAt).toBeTruthy();
+    await repo.reopenStep(owner, t.id, s);
+    s = (await repo.getTask(owner, t.id))!.steps[0];
+    expect(s.doneAt).toBeNull();
+  });
+
 });

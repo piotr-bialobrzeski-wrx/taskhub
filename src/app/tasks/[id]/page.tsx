@@ -20,6 +20,7 @@ import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepTile, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
+import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { Timer } from "@/components/Timer";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -174,14 +175,12 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
-const KIND_LABEL: Record<string, string> = { text: "notatka", facts: "fakty", thread: "wątek", list: "lista", media: "pliki", link: "linki", mail: "mail", comment: "komentarz", table: "tabela", free: "treść", question: "pytanie" };
-
 function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null; company: string | null;
   connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null;
 }) {
-  // szczegóły są już pod tytułem, więc blok tekstu z tą samą treścią odpada
+  // szczegóły są już w sekcji „Co”, więc blok tekstu z tą samą treścią odpada
   const blocks = (s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
   const cal = calibrationFor(samples, s.tool);
   const calOn = !!cal && state !== "done" && Math.abs(cal.k - 1) >= 0.1;
@@ -190,26 +189,41 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const link = externalLink(s.link, origin);
   const prompt = s.status === "handoff" ? handoffPrompt(t, s, rules, { appUrl: origin, companyId, attachments: attachments.filter((a) => a.analysis) }) : null;
   const review = s.review as { summary?: string; links?: string[]; fits?: boolean; warning?: string; pending?: boolean } | null;
-  const linkLabel = ext ? "Otwórz wynik" : s.tool === "manual" || s.tool === "claude" ? "Otwórz link" : `Otwórz w ${toolLabel(s.tool)}`;
   // karta publikacji zastępuje blok szkicu i rząd akcji: decyzja stoi przy miejscu docelowym i podglądzie
   const mode = cardModeOf(s);
-  const shown = mode ? blocks.filter((b) => b.type !== "draft") : blocks;
-  // strefy: „Na podstawie” (klocki kontekstu) i „Odpowiedź” (karta publikacji); obok siebie, gdy panel jest szeroki (container query w CSS)
-  const kinds = [...new Set(shown.map((b) => KIND_LABEL[b.type] ?? b.type))].join(", ");
-  const answerNote = mode === "sent" ? "zapis wysyłki" : mode === "sending" ? "w toku" : mode === "parked" ? "odłożony szkic" : s.blocks?.some((b) => b.type === "draft") ? "szkic Claude" : "szkic";
-  const blocksNode = shown.length ? <BlocksView blocks={shown} form={s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined} /> : null;
+  const done = s.status === "done";
+  // trzy stałe sekcje (paczka 2, punkt 8): „Teraz” = stan i jedyny wyróżniony blok (akcje, czynność Claude, karta publikacji albo wynik),
+  // „Co” = brief, „Skąd” = materiały; wynik kroku (blok zmian w kodzie) idzie do „Teraz”, nie między materiały; po zrobieniu „Co” i „Skąd” zwijają się do linii
+  const { result, material } = splitBlocks(blocks);
+  const form = s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined;
+  const folds = foldsFor(state as CardState, mode);
+  const head = nowHeading(state as CardState, mode, s.dependsOn.length, waits);
+  const draft = s.blocks?.find((b) => b.type === "draft") as { body?: string } | undefined;
+  // raport bez powtórki streszczenia bloku zmian ani treści szkicu; „Do potwierdzenia: …” jako osobna linia
+  const lines = reportLines(s.report, [...result.map((b) => b.summary), draft?.body]);
+  const outputExtra = done && s.output && s.output.trim() !== (s.report ?? "").trim() && !s.blocks?.length && mode !== "sent" ? s.output : null;
+  const links = mode === "sent" ? [] : resultLinks(s, result[0] ?? null, link ?? null);
+  const kinds = kindsOf(material);
   const deps = s.dependsOn.length;
-  const tech = [toolLabel(s.tool), `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}`, s.needsApproval ? "wymaga zgody" : "bez zgody", deps ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
-  return (
-    <>
-      <div className="pctx" title={`Zadanie: ${t.title}`}><span className="d" style={{ ["--c" as string]: ctx.color }} /><span><b>{t.title}</b> · {ctx.text}</span></div>
-      <InlineText taskId={t.id} stepId={s.id} field="detail" value={s.detail} as="p" placeholder="Dodaj szczegóły: co dokładnie, gdzie, dla kogo…" />
-      {mode ? (
-        <div className={"zones" + (shown.length ? " two" : "")}>
-          {shown.length ? <div className="zone src"><div className="lbl">Na podstawie<span className="n">{kinds}</span></div>{blocksNode}</div> : null}
-          <div className="zone ans"><div className="lbl">Odpowiedź<span className="n">{answerNote}</span></div><PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} /></div>
-        </div>
-      ) : null}
+  const tech = [toolLabel(s.tool), `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}`, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
+  const meta = done ? `${toolLabel(s.tool)} · ${spentMin(s) ? fmtMin(spentMin(s)) : `~${fmtMin(estOf(s))}`}` : state === "ready" && !mode ? `${toolLabel(s.tool)} · ~${fmtMin(estOf(s))}` : null;
+
+  const now = (
+    <div className={"zone ans now " + head.cls}>
+      <div className="now-h">
+        {s.status === "handoff" && !mode ? (activity ? <Activity text={activity.text} detail={activity.detail} since={activity.since} who="Claude" big />
+          : <span className="working" title={prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />Claude pracuje{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>)
+          : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
+        {meta ? <small>· {meta}</small> : null}
+      </div>
+      {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} /> : null}
+      {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
+      {done && result.length ? <BlocksView blocks={result} form={form} /> : null}
+      {done && lines.length ? <div className="stack">{lines.map((l, i) => l.confirm
+        ? <div key={i} className="confirm"><b>Do potwierdzenia:</b><span>{l.text.replace(/^do potwierdzenia:\s*/i, "")}</span></div>
+        : <div key={i} className="note">{l.text}</div>)}</div> : null}
+      {outputExtra ? <div className="note">{outputExtra}</div> : null}
+      {review?.summary ? <div className={"review" + (review.fits === false || review.warning ? " warn" : "")}>{review.warning ? <div><b>Uwaga:</b> {review.warning}</div> : null}<div>{review.summary}</div>{review.links?.length ? <div className="deps">{review.links.map((u) => <a key={u} className="chip" href={u} target="_blank" rel="noopener"><span>{u.replace(/^https?:\/\//, "").slice(0, 40)}</span></a>)}</div> : null}</div> : null}
       {!mode || mode === "sent" ? (
         <div className="actions">
           {s.status === "todo" ? (<>
@@ -219,17 +233,11 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
             <Timer stepId={s.id} onStop={addSpent.bind(null, t.id, s.id)} />
             <form action={markDone.bind(null, t.id, s.id)}><PendingButton className={"btn" + (!runnable ? " primary" : "")}>Gotowe</PendingButton></form>
           </>) : null}
-          {s.status === "handoff" ? (<>
-            {activity ? <Activity text={activity.text} detail={activity.detail} since={activity.since} who="Claude" big />
-              : <span className="working" title={prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />Claude pracuje{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>}
-            <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Wróć do kroków gotowych; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form>
-          </>) : null}
-          {s.status === "done" ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Cofnij gotowe</PendingButton></form> : null}
-          {link && mode !== "sent" ? <a className="btn ico" href={link} target="_blank" rel="noopener" title={link}>{linkLabel}<Icon k="ext" size={13} sw={1.6} /></a> : null}
+          {s.status === "handoff" ? <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Wróć do kroków gotowych; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form> : null}
+          {links.map((l, i) => <a key={l.url} className={"btn ico" + (done && i === 0 ? " primary" : "")} href={l.url} target="_blank" rel="noopener" title={l.url}>{l.label}<Icon k="ext" size={13} sw={1.6} /></a>)}
+          {done ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Cofnij gotowe</PendingButton></form> : null}
         </div>
       ) : null}
-      {state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
-
       {s.status === "handoff" && prompt ? (
         <details className="edit">
           <summary>Awaryjnie: zrób to poza aplikacją</summary>
@@ -244,10 +252,18 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           </div>
         </details>
       ) : null}
-      {review?.summary ? <div><div className="lbl">Odbiór agenta</div><div className={"review" + (review.fits === false || review.warning ? " warn" : "")}>{review.warning ? <div><b>Uwaga:</b> {review.warning}</div> : null}<div>{review.summary}</div>{review.links?.length ? <div className="deps">{review.links.map((u) => <a key={u} className="chip" href={u} target="_blank" rel="noopener"><span>{u.replace(/^https?:\/\//, "").slice(0, 40)}</span></a>)}</div> : null}</div></div> : null}
-      {!mode && blocksNode ? <div className="zone src">{s.blocks?.length ? <div className="lbl">Na podstawie<span className="n">{kinds}</span></div> : null}{blocksNode}</div> : null}
-      {s.status === "done" && s.report ? <div><div className="lbl">Raport</div><div className="note">{s.report}</div></div> : null}
-      {s.status === "done" && s.output && !s.blocks?.length && mode !== "sent" ? <div><div className="lbl">Wynik</div><div className="note">{s.output}</div></div> : null}
+    </div>
+  );
+  const brief = <InlineText taskId={t.id} stepId={s.id} field="detail" value={s.detail} as="p" placeholder="Dodaj szczegóły: co dokładnie, gdzie, dla kogo…" />;
+  const co = folds.brief ? <div className="zone"><div className="lbl">Co</div>{brief}</div>
+    : <details className="fold"><summary><span className="k">Co</span><span className="t">{s.detail.trim() || "bez szczegółów"}</span><Icon k="chev" size={10} sw={2.2} /></summary>{brief}</details>;
+  const skad = material.length ? (folds.material
+    ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span></div><BlocksView blocks={material} form={form} /></div>
+    : <details className="fold"><summary><span className="k">Skąd</span><span className="t">{kinds}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView blocks={material} form={form} /></details>) : null;
+  return (
+    <>
+      <div className="pctx" title={`Zadanie: ${t.title}`}><span className="d" style={{ ["--c" as string]: ctx.color }} /><span><b>{t.title}</b> · {ctx.text}</span></div>
+      {mode && skad && folds.material ? <><div className="zones two">{now}{skad}</div>{co}</> : <>{now}{co}{skad}</>}
       <details className="edit tech">
         <summary><span className="k">Szczegóły techniczne</span> · {tech}</summary>
         <div className="stack">
