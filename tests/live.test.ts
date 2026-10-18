@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { activityText, linkOfNote, liveActivity, liveKey } from "@/lib/live";
 import { nextAutoAt } from "@/lib/clock";
-import { allDoneWaitText, busyWith, chatWho, msgCount, noStepsWho, newTaskText, queueWho, yourMsgsNom } from "@/lib/auto";
+import { allDoneWaitText, bridgeHold, busyWith, chatWho, msgCount, noStepsWho, newTaskText, queueWho, yourMsgsNom } from "@/lib/auto";
 import { task, step } from "./helpers";
 
 const run = (note: string | null, extra: Partial<Parameters<typeof liveActivity>[0] & object> = {}) => ({ id: "r1", bridge: "Mac", startedAt: "2026-10-18T09:00:00Z", touchedAt: "2026-10-18T09:01:00Z", endedAt: null, outcome: null, note, taskId: null, stepId: null, ...extra });
@@ -71,6 +71,20 @@ describe("kolejka wiadomości Piotra w zadaniu", () => {
     expect(queueWho({ alive: true, name: null, run: null }, "t1", 1).text).toBe("1 wiadomość czeka na mostek · weźmie ją w ciągu minuty");
     const auto = queueWho({ alive: false, name: null, run: null }, "t1", 5, null, new Date("2026-10-18T09:33:00Z"));
     expect(auto.kind).toBe("auto"); expect(auto.text).toBe("5 wiadomości czekają na Claude · zajrzy o 12:07 (automat co godzinę)"); expect(auto.short).toBe("Czeka na Claude o 12:07");
+  });
+  it("mostek żywy, ale wstrzymany (limit, wylogowanie, błąd): mówi dlaczego stoi zamiast „w ciągu minuty”", () => {
+    const limit = bridgeHold({ state: "limit", until: "2026-10-18T23:00:00Z" });
+    expect(limit).toEqual({ kind: "limit", until: "2026-10-18T23:00:00Z" });
+    const q = queueWho({ alive: true, name: "Mac", run: null, hold: limit }, "t1", 1);
+    expect(q).toMatchObject({ kind: "held", text: "1 wiadomość czeka · mostek stoi: limit Claude do 01:00", short: "Czeka: limit Claude do 01:00" });
+    expect(allDoneWaitText(q)).toContain("aż mostek odpowie");
+    expect(queueWho({ alive: true, name: null, run: null, hold: bridgeHold({ state: "auth" }) }, "t1", 2).text).toContain("Claude Code wylogowany");
+    expect(noStepsWho({ alive: true, name: null, run: null, hold: limit }, "t1").kind).toBe("held");
+    expect(chatWho({ alive: true, name: null, run: null, hold: limit }, "t1")).toContain("stoi: limit Claude do 01:00");
+    // bieg trwa: liczy się bieg, nie stary stan; idle, check i pusty termin to brak wstrzymania
+    expect(queueWho({ alive: true, name: "Mac", run: live, hold: limit }, "t1", 1).kind).toBe("working");
+    expect([bridgeHold({ state: "idle", until: "2026-10-18T23:00:00Z" }), bridgeHold({ state: "check" }), bridgeHold(null)]).toEqual([null, null, null]);
+    expect(bridgeHold({ state: "error", until: "" })).toEqual({ kind: "error", until: null });
   });
   it("pasek po ostatnim kroku i odmiana liczebników", () => {
     expect(allDoneWaitText(queueWho({ alive: true, name: "Mac", run: null }, "t1", 2))).toBe("Wszystkie kroki gotowe; czekam, aż mostek odpowie na Twoje 2 wiadomości.");

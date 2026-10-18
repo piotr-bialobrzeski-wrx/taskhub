@@ -11,7 +11,7 @@ import { calEst, calibrationFor, estOf, fmtMin, spentMin, taskEst, taskSpent, to
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
-import { allDoneWaitText, bridgeLabel, busyWith, noStepsWho, queueWho, yourMsgsNom, type Worker } from "@/lib/auto";
+import { allDoneWaitText, bridgeHold, bridgeLabel, busyWith, noStepsWho, queueWho, yourMsgsNom, type Worker } from "@/lib/auto";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
@@ -58,7 +58,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const acts = (lastAgent?.actions ?? null) as { stepId?: string; link?: string } | null;
   const origin = appUrl();
   // kto pracuje teraz (mostek na komputerze z bieżącym biegiem albo automat o pełnej godzinie) i nad czym
-  const w: Worker = { alive: bridge.alive, name: bridge.name, run: liveActivity(bridge.run) };
+  const w: Worker = { alive: bridge.alive, name: bridge.name, run: liveActivity(bridge.run), hold: bridgeHold(bridge.meta) };
   const busy = busyWith(w.run, b.tasks);
   const tiles = t.steps.map((s) => stepTile(t, s, b.tasks, w.run));
   const stateOf = (s: Step) => tiles.find((x) => x.id === s.id)!.state;

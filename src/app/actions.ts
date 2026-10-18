@@ -8,7 +8,7 @@ import { requireOwner } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { aiFor, composeFlow, finishStep, prepareStep, taskQueue } from "@/lib/services";
 import { runChat } from "@/lib/agent/chat";
-import { busyWith, newTaskText, noStepsWho, type Queue, type Worker } from "@/lib/auto";
+import { bridgeHold, busyWith, newTaskText, noStepsWho, type Queue, type Worker } from "@/lib/auto";
 import { liveActivity } from "@/lib/live";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import type { Connection, Rule, Sphere } from "@/lib/schema";
@@ -69,7 +69,7 @@ export async function chat(fd: FormData) {
       // nowe zadanie z kanwy: kto je rozpisze i kiedy (mostek teraz / po bieżącej pracy / w ciągu minuty, albo automat o pełnej godzinie)
       const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files);
       const [st, tasks] = await Promise.all([repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.listTasks(o.id)]);
-      const w: Worker = { alive: st.alive, name: st.name, run: liveActivity(st.run) };
+      const w: Worker = { alive: st.alive, name: st.name, run: liveActivity(st.run), hold: bridgeHold(st.meta) };
       await repo.addChat(o.id, null, "agent", newTaskText(t.title, noStepsWho(w, t.id, busyWith(w.run, tasks)))); goTo = t.id;
     }
   } else {

@@ -1,7 +1,7 @@
 // Automat: kto i kiedy wykonuje pracę agenta bez klucza API.
 // Główna ścieżka: mostek na komputerze Piotra (jak w Project Hub) pracuje na bieżąco. Zapas: zadanie zaplanowane na jego koncie Claude co godzinę.
 // Każde zdanie „kto pracuje i kiedy” (pasek nad kanwą, komunikat po dodaniu zadania, odpowiedź na wiadomość w czacie) bierze się stąd.
-import { nextAutoAt } from "./clock";
+import { fmtTime, nextAutoAt } from "./clock";
 import type { LiveActivity } from "./live";
 import type { Task } from "./schema";
 
@@ -13,8 +13,21 @@ export const BRIDGE_TEXT = "Mostek na Twoim komputerze pracuje na bieżąco: now
 export const shortTitle = (title: string, max = 60) => { const t = title.replace(/\s+/g, " ").trim(); if (t.length <= max) return t; const cut = t.slice(0, max); return (cut.includes(" ") ? cut.slice(0, cut.lastIndexOf(" ")) : cut) + "…"; };
 
 // kto może pracować: mostek (żywy? jak się nazywa? co robi teraz?) albo automat co godzinę
-export type Worker = { alive: boolean; name: string | null; run: LiveActivity | null };
-export type Who = { kind: "decomposing" | "busy" | "soon" | "auto"; who: string; text: string };   // who = krótka etykieta do paska, text = pełne zdanie
+// hold: mostek się zgłasza, ale nie startuje pracy (limit Claude do godziny resetu, Claude Code wylogowany, ostatni bieg nie wyszedł)
+export type Hold = { kind: "limit" | "auth" | "error"; until: string | null };
+export type Worker = { alive: boolean; name: string | null; run: LiveActivity | null; hold?: Hold | null };
+export type Who = { kind: "decomposing" | "busy" | "soon" | "held" | "auto"; who: string; text: string };
+// stan zgłoszony przez aplikację na Macu przy ostatnim sprawdzeniu pracy (meta tokenu mostka: state, until)
+export function bridgeHold(meta: Record<string, unknown> | null | undefined): Hold | null {
+  const st = meta?.state, until = typeof meta?.until === "string" && meta.until ? meta.until : null;
+  return st === "limit" || st === "auth" || st === "error" ? { kind: st, until } : null;
+}
+// dlaczego mostek stoi, jednym zdaniem: „limit Claude do 02:00”
+export function holdText(h: Hold): string {
+  if (h.kind === "limit") return `limit Claude${h.until ? ` do ${fmtTime(h.until)}` : ""}`;
+  if (h.kind === "auth") return "Claude Code wylogowany (w Terminalu: claude, potem /login)";
+  return `ostatni bieg nie wyszedł, ponowi${h.until ? ` o ${fmtTime(h.until)}` : " za chwilę"}`;
+}   // who = krótka etykieta do paska, text = pełne zdanie
 export const bridgeLabel = (w: Pick<Worker, "name">) => (w.name ? `Mostek (${w.name})` : "Mostek na Twoim komputerze");
 
 // nad czym mostek pracuje teraz: tytuł kroku, a gdy nie wiadomo, tytuł zadania albo sama czynność
@@ -30,6 +43,7 @@ export function noStepsWho(w: Worker, taskId: string, busy: string | null = null
   const b = bridgeLabel(w);
   if (w.run && w.run.taskId === taskId) return { kind: "decomposing", who: b, text: `${b} rozpisuje kroki tego zadania.` };
   if (w.run) return { kind: "busy", who: b, text: `${b} kończy${busy ? `: ${busy}` : " inną pracę"}, potem weźmie to zadanie i rozpisze kroki.` };
+  if (w.alive && w.hold) return { kind: "held", who: b, text: `${b} stoi: ${holdText(w.hold)}. Potem weźmie to zadanie i rozpisze kroki.` };
   if (w.alive) return { kind: "soon", who: b, text: `${b} weźmie to zadanie w ciągu minuty i rozpisze kroki.` };
   const n = nextAutoAt(now);
   return { kind: "auto", who: `Claude ${n.text}`, text: `Nikt teraz nie pracuje: mostek na komputerze nie działa. Claude zajrzy tu ${n.text} (automat ${AUTO_EVERY}) i rozpisze kroki.` };
@@ -39,6 +53,7 @@ export function chatWho(w: Worker, taskId: string, busy: string | null = null, n
   const b = bridgeLabel(w);
   if (w.run && w.run.taskId === taskId) return `${b} właśnie pracuje nad tym zadaniem: przeczyta to za chwilę i odpowie tutaj.`;
   if (w.run) return `${b} kończy${busy ? `: ${busy}` : " inną pracę"}, potem przeczyta Twoją wiadomość i odpowie tutaj; gdy prośba zmienia zakres, dopisze kroki.`;
+  if (w.alive && w.hold) return `${b} stoi: ${holdText(w.hold)}. Potem przeczyta Twoją wiadomość i odpowie tutaj; gdy prośba zmienia zakres, dopisze kroki.`;
   if (w.alive) return `Przekazałem mostkowi na Twoim komputerze. Odpowie tutaj w ciągu minuty; gdy prośba zmienia zakres, dopisze kroki.`;
   const n = nextAutoAt(now);
   return `Mostek na komputerze nie działa, więc nikt nie czyta tego teraz. Claude zajrzy tu ${n.text} (automat ${AUTO_EVERY}), odpowie i w razie potrzeby dopisze kroki.`;
@@ -55,11 +70,12 @@ const overMsgs = (n: number) => (n === 1 ? "Twoją wiadomością" : `Twoimi ${n}
 const waiting = (n: number) => (n === 1 ? "1 wiadomość czeka" : `${n} wiadomości czekają`);
 // stan kolejki: kto zajmie się wiadomościami bez odpowiedzi i kiedy. text = linia na karcie nad dokiem i w pasku nad kanwą (z czynnością mostka obok, gdy pracuje),
 // short = linia pod dymkiem w historii; activity = bieg mostka nad tym zadaniem (kropki i minuty)
-export type Queue = { n: number; kind: "working" | "busy" | "soon" | "auto"; who: string; text: string; short: string; activity: LiveActivity | null };
+export type Queue = { n: number; kind: "working" | "busy" | "soon" | "held" | "auto"; who: string; text: string; short: string; activity: LiveActivity | null };
 export function queueWho(w: Worker, taskId: string, n: number, busy: string | null = null, now = new Date()): Queue {
   const b = bridgeLabel(w);
   if (w.run && w.run.taskId === taskId) return { n, kind: "working", who: b, text: `${b} pracuje nad ${overMsgs(n)}`, short: "Mostek pracuje nad tym", activity: w.run };
   if (w.run) return { n, kind: "busy", who: b, text: `${b} kończy${busy ? `: ${busy}` : " inną pracę"}, potem przeczyta ${yourMsgs(n)}`, short: `Czeka: mostek kończy${busy ? ` „${shortTitle(busy, 40)}”` : " inną pracę"}`, activity: null };
+  if (w.alive && w.hold) return { n, kind: "held", who: b, text: `${waiting(n)} · mostek stoi: ${holdText(w.hold)}`, short: `Czeka: ${holdText(w.hold)}`, activity: null };
   if (w.alive) return { n, kind: "soon", who: b, text: `${waiting(n)} na mostek · weźmie ${n === 1 ? "ją" : "je"} w ciągu minuty`, short: "Czeka na mostek · weźmie w ciągu minuty", activity: null };
   const a = nextAutoAt(now);
   return { n, kind: "auto", who: `Claude ${a.text}`, text: `${waiting(n)} na Claude · zajrzy ${a.text} (automat ${AUTO_EVERY})`, short: `Czeka na Claude ${a.text}`, activity: null };
