@@ -169,6 +169,12 @@ describe.skipIf(!DB)("mostek: serwer", async () => {
     expect((await repo.getTask(owner, t.id))!.doneAt).toBeNull();
     await repo.updateStep(pub.id, { status: "handoff", prevStatus: "draft", handoffAt: new Date().toISOString(), blocks: [{ type: "draft", target: { app: "clickup", action: "update" }, body: "x", status: "approved" }] });
     expect((await workSummary(owner, { peek: true })).text).toContain("ZATWIERDZONE SZKICE DO WYSŁANIA");
+    // zatwierdzony szkic, przed którym jest niezrobiony krok, czeka z wysyłką
+    const [pre] = await repo.addSteps(t.id, [{ title: "Najpierw to", tool: "clickup" }]);
+    await sql()`insert into step_dependencies (step_id, depends_on_id) values (${pub.id}, ${pre.id})`;
+    const w = (await workSummary(owner, { peek: true })).text;
+    expect(w).toContain("ZATWIERDZONE, ALE CZEKAJĄ NA KROKI PRZED NIMI");
+    expect(w).not.toContain("ZATWIERDZONE SZKICE DO WYSŁANIA");
     await sql()`delete from tasks where id = ${t.id}`;
   });
   it("punkty wejścia mostka: 401 bez tokenu mostka, puls + liczba pracy, bieg na wyłączność, zakończenie", async () => {

@@ -54,8 +54,57 @@ export function nowHeading(state: CardState, mode: string | null, deps: number, 
   if (mode === "proposed") return { title: "Do zatwierdzenia", cls: "draft" };
   if (mode === "sending") return { title: "W toku", cls: "handoff" };
   if (mode === "parked") return { title: "Odłożony szkic", cls: "draft" };
+  if (mode === "unsent") return { title: "Zamknięty bez wysyłki", cls: "blocked" };
   if (state === "done") return { title: "Zrobione", cls: "done" };
   if (state === "handoff") return { title: "W pracy", cls: "handoff" };
   if (state === "blocked") return { title: waits ? "Czeka na inne zadanie" : `Czeka na ${steps(deps)}`, cls: "blocked" };
   return { title: "Do zrobienia", cls: "ready" };
+}
+
+// dokąd prowadzi krok jeszcze przed wysyłką: ticket, wątek albo dokument, w którym coś się zmieni. Kolejność: adres podany przez agenta w szkicu,
+// adres albo id ClickUp w polu „dokąd”, potem źródło z kartki z tej samej aplikacji (ticket, wątek, komentarz, z którego krok wyrósł)
+const NO_TARGET = new Set(["manual", "claude", "claudeapp", "code"]);
+const HTTP = /https?:\/\/[^\s)>\]]+/;
+export function targetLink(s: Pick<Step, "tool" | "title">, blocks: Block[] | null | undefined): { label: string; url: string } | null {
+  const draft = blocks?.find((b) => b.type === "draft") as Extract<Block, { type: "draft" }> | undefined;
+  const app = draft?.target.app ?? s.tool;
+  const label = `Otwórz w ${toolLabel(app)}`;
+  const given = draft?.target.url?.trim();
+  if (given && /^https?:\/\//.test(given)) return { label, url: given };
+  if (NO_TARGET.has(app)) return null;   // prompt dla agenta, zmiany w kodzie, krok ręczny: miejscem jest podgląd albo repozytorium z bloku zmian
+  const where = draft?.target.where ?? "";
+  const inWhere = HTTP.exec(where)?.[0];
+  if (inWhere) return { label, url: inWhere };
+  if (app === "clickup") {
+    const id = [where, s.title].map((x) => /\b(?=[0-9a-z]*[a-z])(?=[0-9a-z]*\d)([0-9][0-9a-z]{6,10})\b/.exec(x)?.[1]).find(Boolean);
+    if (id) return { label, url: `https://app.clickup.com/t/${id}` };
+  }
+  for (const b of blocks ?? []) {
+    const src = (b as { source?: { app?: string; url?: string } }).source;
+    if (src?.url && /^https?:\/\//.test(src.url) && src.app?.toLowerCase() === app.toLowerCase()) return { label, url: src.url };
+  }
+  return null;
+}
+
+// to samo miejsce i ta sama czynność (np. komentarz w tickecie 869dxk3h9): po tym rozpoznajemy dwa kroki, które wysłałyby to samo dwa razy
+const COMMENTISH = new Set(["figma", "github", "clickup"]);
+export function draftPlace(s: Pick<Step, "tool" | "title">, blocks: Block[] | null | undefined): string | null {
+  const draft = blocks?.find((b) => b.type === "draft") as Extract<Block, { type: "draft" }> | undefined;
+  if (!draft) return null;
+  const url = targetLink(s, blocks)?.url;
+  if (!url) return null;
+  const app = draft.target.app.toLowerCase(), act = draft.target.action ?? "send";
+  const kind = COMMENTISH.has(app) && (act === "reply" || act === "send") ? "comment" : act;
+  return `${url.replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase()} ${kind}`;
+}
+// inne kroki zadania z szkicem do tego samego miejsca: otwarte (dwa szkice tego samego) i już wysłane (to samo poszło wcześniej)
+export function sameTarget(steps: Step[], stepId: string, blocks: Block[] | null | undefined): { open: Step[]; sent: Step[] } {
+  const me = steps.find((x) => x.id === stepId);
+  const key = me ? draftPlace(me, blocks) : null;
+  if (!key) return { open: [], sent: [] };
+  const others = steps.filter((x) => x.id !== stepId && draftPlace(x, x.blocks) === key);
+  return {
+    open: others.filter((x) => x.status !== "done"),
+    sent: others.filter((x) => x.status === "done" && x.blocks?.some((b) => b.type === "draft" && b.status === "sent")),
+  };
 }

@@ -124,10 +124,12 @@ export function TaskCanvas(p: TaskCanvasProps) {
             </>); }}
           origin={{ cls: "task " + t.state, node: (
             <>
-              <span className="n-top"><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="st" style={{ marginLeft: "auto", background: "rgba(255,255,255,.2)", color: "#fff" }}>{TS_LABEL[t.state]}</span>
-                {t.pending ? <span className="st" style={{ background: "rgba(255,255,255,.2)", color: "#fff" }} title="Twoje wiadomości czekają na odpowiedź agenta">{msgCount(t.pending)}</span> : null}</span>
+              {/* nagłówek: priorytet i jedna plakietka stanu; wiadomości czekające idą do linii na dole, żeby nic nie wychodziło poza kafelek */}
+              <span className="n-top"><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="st" style={{ marginLeft: "auto", background: "rgba(255,255,255,.2)", color: "#fff" }}>{TS_LABEL[t.state]}</span></span>
               <span className="n-title" style={{ WebkitLineClamp: 3 }}>{t.title}</span>
-              <span className="n-meta">{t.activity ? <Activity text={t.activity.text} detail={t.activity.detail} since={t.activity.since} who="Mostek" /> : `${t.progress.done}/${t.progress.all} kroków · ${t.estText}`}</span>
+              <span className="n-meta">{t.activity ? <Activity text={t.activity.text} detail={null} since={t.activity.since} who="Mostek" />
+                : t.pending ? <span title="Twoje wiadomości czekają na odpowiedź agenta">{msgCount(t.pending)} czeka · {t.progress.done}/{t.progress.all} kroków</span>
+                : `${t.progress.done}/${t.progress.all} kroków · ${t.estText}`}</span>
             </>) }}
           selected={sel} onSelect={(s) => { setSel(s); setConfirm(false); if (!s.size) setPanel(null); }} selectedGroup={selGroup} onSelectGroup={setSelGroup} renaming={renaming} onRename={(id, name) => setRenaming(name == null ? null : id)}
           onOpen={(id) => { if (id) openStep(id); else setPanel("__task"); }} onClickTile={(id) => { if (id === "__origin") { setSel(new Set()); setPanel("__task"); } else openStep(id); }}
@@ -207,21 +209,18 @@ export function TaskCanvas(p: TaskCanvasProps) {
       ) : null}
 
       {p.questions && !n && !group ? <div className={"answer glass" + (panel ? " withpanel" : "")} aria-live="polite">{p.questions}</div> : null}
-      {/* karta nad dokiem: najpierw stan kolejki wiadomości (znika sam po odpowiedzi), pod nim ostatni komunikat agenta (X zamyka tylko komunikat) */}
-      {!p.questions && (p.queue || (p.lastAgent && !answerOff)) && !n && !group ? (
-        <div className={"answer plain glass" + (panel ? " withpanel" : "") + (p.queue && !(p.lastAgent && !answerOff) ? " qonly" : " bubble")} role="status" aria-live="polite">
-          {p.queue ? <div className="ans-q">{p.queue.activity ? <Activity text={p.queue.activity.text} detail={p.queue.activity.detail} since={p.queue.activity.since} who={p.queue.text + " ·"} /> : <><i className="pulse" aria-hidden="true" /><span>{p.queue.text}</span></>}</div> : null}
-          {p.lastAgent && !answerOff ? (<>
-            <div className="ans-text">{p.lastAgent.text}</div>
-            {p.lastAgent.at ? <span className="ans-t">Claude · {p.lastAgent.at}</span> : null}
-            {(p.lastAgent.stepId && byId.has(p.lastAgent.stepId)) || p.lastAgent.link ? (
-              <div className="ans-acts">
-                {p.lastAgent.stepId && byId.has(p.lastAgent.stepId) ? <button className="btn" type="button" onClick={() => openStep(p.lastAgent!.stepId!)}>Otwórz krok {pad(byId.get(p.lastAgent.stepId)!.idx)}</button> : null}
-                {p.lastAgent.link ? <a className="btn ico" href={p.lastAgent.link} target="_blank" rel="noopener" title={p.lastAgent.link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a> : null}
-              </div>
-            ) : null}
-            <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans-" + t.id, p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button>
-          </>) : null}
+      {/* nad dokiem tylko to, co jest w historii rozmowy: ostatnia odpowiedź agenta (X zamyka). Stan pracy i kolejki mówi jedna linia paska na górze */}
+      {!p.questions && p.lastAgent && !answerOff && !n && !group ? (
+        <div className={"answer plain glass bubble" + (panel ? " withpanel" : "")} role="status" aria-live="polite">
+          <div className="ans-text">{p.lastAgent.text}</div>
+          {p.lastAgent.at ? <span className="ans-t">Claude · {p.lastAgent.at}</span> : null}
+          {(p.lastAgent.stepId && byId.has(p.lastAgent.stepId)) || p.lastAgent.link ? (
+            <div className="ans-acts">
+              {p.lastAgent.stepId && byId.has(p.lastAgent.stepId) ? <button className="btn" type="button" onClick={() => openStep(p.lastAgent!.stepId!)}>Otwórz krok {pad(byId.get(p.lastAgent.stepId)!.idx)}</button> : null}
+              {p.lastAgent.link ? <a className="btn ico" href={p.lastAgent.link} target="_blank" rel="noopener" title={p.lastAgent.link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a> : null}
+            </div>
+          ) : null}
+          <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans-" + t.id, p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button>
         </div>
       ) : null}
 

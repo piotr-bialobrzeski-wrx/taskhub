@@ -20,7 +20,7 @@ import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
-import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, type CardState } from "@/lib/stepcard";
+import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { Timer } from "@/components/Timer";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -73,12 +73,13 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const queue = pending.length ? queueWho(w, t.id, pending.length, busy) : null;
   const bridgeAct = w.run && w.run.taskId === t.id ? w.run : null;
   const allDone = t.steps.length > 0 && t.steps.every((s) => s.status === "done");
-  const runbar = waits.length ? <span className="rb-t"><b>Czeka na zadanie:</b> {waits.map((x) => x.title).join(", ")}</span>
+  // pasek ma zawsze jedną krótką linię; pełne zdanie i szczegóły (ścieżki, polecenia) są w podpowiedzi po najechaniu
+  const runbar = waits.length ? <span className="rb-t" title={waits.map((x) => x.title).join(", ")}><b>Czeka na zadanie:</b> {waits.map((x) => x.title).join(", ")}</span>
     : who && who.kind === "decomposing" && w.run ? <Activity text="rozpisuje kroki" detail={w.run.detail} since={w.run.since} who={who.who} big />
     : bridgeAct ? <><Activity text={bridgeAct.text} detail={bridgeAct.detail} since={bridgeAct.since} who={bridgeLabel(w)} big />{queue ? <span className="rb-t">· {yourMsgsNom(queue.n)}</span> : null}</>
     : queue && allDone && !t.doneAt ? <span className="rb-t">{allDoneWaitText(queue)}</span>
-    : queue ? <span className="rb-t">{queue.text}</span>
-    : who ? <span className="rb-t"><b>Bez kroków.</b> {aiOn ? "Napisz w doku, co ma zrobić agent." : who.text}</span>
+    : queue ? <span className="rb-t" title={queue.text}>{queue.short}</span>
+    : who ? <span className="rb-t" title={who.text}><b>Bez kroków</b> · {aiOn ? "napisz w doku, co ma zrobić agent" : who.short}</span>
     : null;
   const runAction = who && who.kind !== "decomposing" && !aiOn ? { label: "Rozpisz teraz", anchor: "rozpisz" } : null;
 
@@ -212,7 +213,11 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // raport bez powtórki streszczenia bloku zmian ani treści szkicu; „Do potwierdzenia: …” jako osobna linia
   const lines = reportLines(s.report, [...result.map((b) => b.summary), draft?.body]);
   const outputExtra = done && s.output && s.output.trim() !== (s.report ?? "").trim() && !s.blocks?.length && mode !== "sent" ? s.output : null;
-  const links = mode === "sent" ? [] : resultLinks(s, result[0] ?? null, link ?? null);
+  const found = mode === "sent" ? [] : resultLinks(s, result[0] ?? null, link ?? null);
+  const done0 = done && !found.length && mode !== "sent" ? targetLink(s, s.blocks) : null;   // zrobione bez linku do wyniku: zostaje chociaż miejsce, którego dotyczyło
+  const links = done0 ? [done0] : found;
+  // miejsce docelowe (ticket, wątek, dokument) od razu w nagłówku „Teraz”, zanim cokolwiek poleci; po wysyłce jego miejsce zajmuje link do wyniku
+  const target = !done && mode !== "sent" ? targetLink(s, s.blocks) : null;
   const kinds = kindsOf(material);
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}`, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
@@ -225,8 +230,10 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           : <span className="working" title={prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />Claude pracuje{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>)
           : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
         {meta ? <small>· {meta}</small> : null}
+        {target ? <><span className="sp" /><a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
       </div>
-      {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} /> : null}
+      {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity}
+        waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} /> : null}
       {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
       {done && result.length ? <BlocksView blocks={result} form={form} /> : null}
       {done && lines.length ? <div className="stack">{lines.map((l, i) => l.confirm
@@ -234,7 +241,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         : <div key={i} className="note">{l.text}</div>)}</div> : null}
       {outputExtra ? <div className="note">{outputExtra}</div> : null}
       {review?.summary ? <div className={"review" + (review.fits === false || review.warning ? " warn" : "")}>{review.warning ? <div><b>Uwaga:</b> {review.warning}</div> : null}<div>{review.summary}</div>{review.links?.length ? <div className="deps">{review.links.map((u) => <a key={u} className="chip" href={u} target="_blank" rel="noopener"><span>{u.replace(/^https?:\/\//, "").slice(0, 40)}</span></a>)}</div> : null}</div> : null}
-      {!mode || mode === "sent" ? (
+      {!mode || mode === "sent" || mode === "unsent" ? (
         <div className="actions">
           {s.status === "todo" ? (<>
             {aiOn && !ext && runnable ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Agent przygotowuje…">Przygotuj</PendingButton></form> : null}

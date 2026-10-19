@@ -48,6 +48,7 @@ export const ThreadBlock = z.object({
 export const DraftTarget = z.object({
   app: z.string(),                         // gdzie poleci
   where: z.string().optional(),            // '#dev', 'anna@firma.pl', 'lista Backlog'
+  url: z.string().max(2000).optional(),    // adres miejsca docelowego (ticket, wątek, kanał, dokument): przycisk „Otwórz w …” jeszcze przed wysyłką
   action: z.enum(["send", "reply", "create", "update", "comment", "commit", "push", "other"]).default("send"),   // commit/push: zmiany w kodzie do opublikowania
 });
 export const DraftBlock = z.object({

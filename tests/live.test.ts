@@ -77,7 +77,7 @@ describe("kolejka wiadomości Piotra w zadaniu", () => {
     expect(limit).toEqual({ kind: "limit", until: "2026-10-18T23:00:00Z" });
     const q = queueWho({ alive: true, name: "Mac", run: null, hold: limit }, "t1", 1);
     expect(q).toMatchObject({ kind: "held", text: "1 wiadomość czeka · mostek stoi: limit Claude do 01:00", short: "Czeka: limit Claude do 01:00" });
-    expect(allDoneWaitText(q)).toContain("aż mostek odpowie");
+    expect(allDoneWaitText(q)).toContain("czeka na mostek");
     expect(queueWho({ alive: true, name: null, run: null, hold: bridgeHold({ state: "auth" }) }, "t1", 2).text).toContain("Claude Code wylogowany");
     expect(noStepsWho({ alive: true, name: null, run: null, hold: limit }, "t1").kind).toBe("held");
     expect(chatWho({ alive: true, name: null, run: null, hold: limit }, "t1")).toContain("stoi: limit Claude do 01:00");
@@ -87,8 +87,8 @@ describe("kolejka wiadomości Piotra w zadaniu", () => {
     expect(bridgeHold({ state: "error", until: "" })).toEqual({ kind: "error", until: null });
   });
   it("pasek po ostatnim kroku i odmiana liczebników", () => {
-    expect(allDoneWaitText(queueWho({ alive: true, name: "Mac", run: null }, "t1", 2))).toBe("Wszystkie kroki gotowe; czekam, aż mostek odpowie na Twoje 2 wiadomości.");
-    expect(allDoneWaitText(queueWho({ alive: false, name: null, run: null }, "t1", 1))).toBe("Wszystkie kroki gotowe; czekam, aż Claude odpowie na Twoją wiadomość.");
+    expect(allDoneWaitText(queueWho({ alive: true, name: "Mac", run: null }, "t1", 2))).toBe("Kroki gotowe · 2 Twoje wiadomości czekają na mostek");
+    expect(allDoneWaitText(queueWho({ alive: false, name: null, run: null }, "t1", 1))).toBe("Kroki gotowe · Twoja wiadomość czeka na Claude");
     expect([1, 2, 5, 22].map(msgCount)).toEqual(["1 wiadomość", "2 wiadomości", "5 wiadomości", "22 wiadomości"]);
     expect([1, 2].map(yourMsgsNom)).toEqual(["Twoja wiadomość", "2 Twoje wiadomości"]);
   });

@@ -171,7 +171,7 @@ export function draftsText(steps: Pick<Step, "id" | "title" | "status" | "blocks
         : s.status === "draft" ? "czeka na zatwierdzenie Piotra: nie wysyłaj"
         : "odłożony: nie wysyłaj";
       const t = b.target;
-      const lines = [`SZKIC KROKU ${s.id} „${s.title}” (${state})`, `- dokąd: ${t.app}${t.where ? ` · ${t.where}` : ""} · akcja ${t.action}`];
+      const lines = [`SZKIC KROKU ${s.id} „${s.title}” (${state})`, `- dokąd: ${t.app}${t.where ? ` · ${t.where}` : ""}${t.url ? ` · ${t.url}` : ""} · akcja ${t.action}`];
       if (b.subject) lines.push(`- temat: ${b.subject}`);
       if (b.fields?.length) lines.push(`- pola: ${b.fields.map((f) => `${f.label} = ${f.value}`).join("; ")}`);
       if (b.columns?.length) lines.push(`- wiersze (${b.columns.join(" | ")}):\n${(b.rows ?? []).map((r) => `  ${r.join(" | ")}`).join("\n")}`);
