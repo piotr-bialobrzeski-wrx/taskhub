@@ -46,7 +46,6 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const [tmenu, setTmenu] = useState<{ id: string | null; x: number; y: number } | null>(null);   // menu kafelka (prawy klik); null = kafelek zadania
   const [namer, setNamer] = useState<"tile" | "group" | null>(null);
   // kontekst pola czatu: domyślnie to, co jest otwarte (krok w panelu, inaczej zadanie); X zawęża o poziom wyżej (krok → zadanie → wszystkie zadania)
-  const [ctxLevel, setCtxLevel] = useState<"auto" | "task" | "global">("auto");
   // szerokość panelu: dwa tryby (wąski do 600 px, szeroki do 1200 px) zapamiętane jako wybór, a uchwyt nadpisuje je dokładną szerokością
   const [wide, setWide] = useState(false);
   const [gripW, setGripW] = useState<number | null>(null);
@@ -103,9 +102,9 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const endGrip = () => { if (!grip.current) return; grip.current = null; setGripOn(false); try { localStorage.setItem("th-dw", String(dw)); } catch { /* brak storage */ } };
   const widen = () => { const w = !wide; setWide(w); setGripW(null); try { localStorage.setItem("th-wide", w ? "1" : "0"); localStorage.removeItem("th-dw"); } catch { /* brak storage */ } };
   const cur = panel && panel !== "__task" ? byId.get(panel) ?? null : null;
-  useEffect(() => { setCtxLevel("auto"); }, [panel]);
-  const ctxGlobal = ctxLevel === "global";
-  const ctxStep = ctxLevel === "auto" ? cur : null;
+  // kontekst wiadomości wynika z widoku i nie zajmuje miejsca nad polem: otwarty krok, inaczej całe zadanie (ogólny kanwas ma własny dok)
+  const ctxGlobal = false;
+  const ctxStep = cur;
   // wynik szukania: krok tego zadania otwiera się na miejscu (panel + środek kanwy); reszta prowadzi pod swój adres
   const onPick = (it: SearchItem): boolean => {
     if (it.kind !== "step" || it.taskId !== t.id) return false;
@@ -226,12 +225,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
 
       <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
         queue={ctxGlobal ? null : p.queue} version={`${p.lastAgent?.id ?? ""}|${p.queue?.n ?? 0}|${p.queue?.kind ?? ""}|${p.queue?.activity?.text ?? ""}`}
-        placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : ctxStep ? "Napisz, co dalej z tym krokiem: popraw szkic, dopisz, zapytaj…" : "Napisz, co dalej z tym zadaniem, albo dopisz notatkę…"}
-        context={ctxGlobal
-          ? <span className="ctx"><span className="k">Kontekst: wszystkie zadania</span><button type="button" aria-label="Wróć do kontekstu zadania" title="Wróć do kontekstu zadania" onClick={() => setCtxLevel("auto")}><Icon k="undo" size={12} sw={1.9} /></button></span>
-          : ctxStep
-            ? <span className="ctx" title="Wiadomość dotyczy otwartego kroku"><span className="k">Kontekst: krok {pad(ctxStep.idx)}</span><b>{ctxStep.title}</b><button type="button" aria-label="Pisz w kontekście całego zadania" title="Pisz w kontekście całego zadania" onClick={() => setCtxLevel("task")}><Icon k="x" size={12} sw={2} /></button></span>
-            : <span className="ctx" title="Wiadomość dotyczy tego zadania"><span className="k">Kontekst:</span><b>{t.title}</b><button type="button" aria-label="Pisz w kontekście wszystkich zadań" title="Pisz w kontekście wszystkich zadań" onClick={() => setCtxLevel("global")}><Icon k="x" size={12} sw={2} /></button></span>} />
+        placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : ctxStep ? `Krok ${pad(ctxStep.idx)}: popraw szkic, dopisz, zapytaj…` : "Napisz, co dalej z tym zadaniem, albo dopisz notatkę…"} />
       <Toast text={toast} />
     </div>
   );
