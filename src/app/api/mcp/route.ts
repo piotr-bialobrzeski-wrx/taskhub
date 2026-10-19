@@ -75,7 +75,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("create_task", {
-      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, whatsapp, sheets, docs, est w minutach (wielokrotność 5), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
+      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. title: 2–6 słów, samo sedno (nie cała wiadomość); title kroku od czasownika, 2–6 słów, bez identyfikatorów. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, whatsapp, sheets, docs, est w minutach (wielokrotność 5), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
       inputSchema: z.object({
         title: z.string(), summary: z.string().optional(), source: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().optional(), project: z.string().optional(),
         steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })).optional(),
@@ -88,7 +88,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("update_task", {
-      title: "Zmień zadanie", description: "Zmienia tytuł, cel, priorytet, termin albo projekt zadania.",
+      title: "Zmień zadanie", description: "Zmienia tytuł, cel, priorytet, termin albo projekt zadania. Tytuł: 2–6 słów, samo sedno; pierwotny tytuł zostaje zapisany sam.",
       inputSchema: z.object({ taskId: z.string(), title: z.string().optional(), summary: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().nullable().optional(), project: z.string().nullable().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
