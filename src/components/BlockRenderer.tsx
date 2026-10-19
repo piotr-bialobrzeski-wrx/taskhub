@@ -4,6 +4,7 @@ import { toolLabel } from "@/lib/schema";
 import { answerBlockForm } from "@/app/actions";
 import { Markdown } from "@/lib/markdown";
 import { plural } from "@/components/canvas/ui";
+import { GrowTextarea } from "@/components/GrowTextarea";
 
 // gdzie blok pytania ma zapisać odpowiedź (panel kroku); bez tego pytanie jest tylko do odczytu
 export type BlockForm = { taskId: string; stepId: string };
@@ -177,7 +178,10 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
           <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
           <p>{b.text}</p>
           <div className="opts">{b.options.map((o, i) => <button key={i} type="submit" name="option" value={o.label} className={"btn" + (b.recommended === i ? " primary" : "")} title={o.note}>{o.label}</button>)}</div>
-          <div className="row" style={{ marginTop: 8 }}><input className="in" name="answer" placeholder="Albo odpowiedz własnymi słowami…" /><button className="btn" type="submit">Odpowiedz</button></div>
+          <div className="row q-own" style={{ marginTop: 8 }}>
+            <GrowTextarea name="answer" minRows={1} placeholder="Albo odpowiedz własnymi słowami…" submitOnModEnter />
+            <button className="btn" type="submit">Odpowiedz</button>
+          </div>
         </form>
       );
   }
