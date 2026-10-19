@@ -266,6 +266,8 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
     if (target && target !== created[i].id) links.push({ step_id: created[i].id, depends_on_id: target });
   }));
   if (links.length) await sql()`insert into step_dependencies ${sql()(links)} on conflict do nothing`;
+  // nowe kroki to nowa praca: zadanie, które zamknęło się samo (wszystkie dotychczasowe kroki gotowe), wraca do pracy, inaczej list_work go nie widzi
+  if (created.length) await sql()`update tasks set done_at = null where id = ${taskId} and done_at is not null`;
   if (bef) {
     // dziedziczenie: nowy krok bez własnych zależności czeka na to, na co czekał krok „before”; „before” czeka na ostatnie z nowych (te, na które żaden nowy nie czeka)
     const inherited = (await sql()`select depends_on_id from step_dependencies where step_id = ${bef.id as string}`).map((r) => r.dependsOnId as string);

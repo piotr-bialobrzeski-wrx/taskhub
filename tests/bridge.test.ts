@@ -164,6 +164,11 @@ describe.skipIf(!DB)("mostek: serwer", async () => {
     expect(await repo.closeIfDone(owner, t.id)).toBe(true);
     expect((await repo.getTask(owner, t.id))!.doneAt).not.toBeNull();
     expect(await repo.closeIfDone(owner, t.id)).toBe(false);                  // już zamknięte
+    // agent dopisuje kroki do zamkniętego zadania: wraca do pracy, a zatwierdzony szkic trafia do listy pracy
+    const [pub] = await repo.addSteps(t.id, [{ title: "Opublikuj opis", tool: "clickup", needsApproval: true }]);
+    expect((await repo.getTask(owner, t.id))!.doneAt).toBeNull();
+    await repo.updateStep(pub.id, { status: "handoff", prevStatus: "draft", handoffAt: new Date().toISOString(), blocks: [{ type: "draft", target: { app: "clickup", action: "update" }, body: "x", status: "approved" }] });
+    expect((await workSummary(owner, { peek: true })).text).toContain("ZATWIERDZONE SZKICE DO WYSŁANIA");
     await sql()`delete from tasks where id = ${t.id}`;
   });
   it("punkty wejścia mostka: 401 bez tokenu mostka, puls + liczba pracy, bieg na wyłączność, zakończenie", async () => {
