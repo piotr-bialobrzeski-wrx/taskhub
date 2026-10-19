@@ -202,10 +202,10 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .menu .mi:hover { background: var(--accent-soft); }
 .menu .mi small { color: var(--sub); font-size: 11.5px; }
 .menu hr { border: 0; height: 1px; background: var(--line); margin: 4px 8px; }
-/* Kafelek/Grupa: lewy dolny róg (prawy należy do odpowiedzi agenta); na wąskim ekranie nad dokiem (dok zajmuje całą szerokość) */
+/* Kafelek/Grupa: prawy dolny róg (lewy należy do odpowiedzi agenta); na wąskim ekranie nad dokiem (dok zajmuje całą szerokość) */
 .mkpill, .namer { --mk-b: calc(16px + env(safe-area-inset-bottom, 0px)); }
-.mkpill { position: fixed; z-index: 9; left: max(16px, env(safe-area-inset-left, 0px)); bottom: var(--mk-b); }
-.namer { position: fixed; z-index: 12; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(var(--mk-b) + 52px); display: flex; gap: 6px; align-items: center; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5); border-radius: 999px; width: min(420px, calc(100% - 32px)); }
+.mkpill { position: fixed; z-index: 9; right: max(16px, env(safe-area-inset-right, 0px)); bottom: var(--mk-b); }
+.namer { position: fixed; z-index: 12; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(var(--mk-b) + 52px); display: flex; gap: 6px; align-items: center; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5); border-radius: 999px; width: min(420px, calc(100% - 32px)); }
 .namer input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; padding: 6px 0; }
 /* powiększenie, Dopasuj i Ułóż: pigułka w górnym pasku (dół należy do odpowiedzi agenta); za wąsko → sam procent z menu */
 .zslot { display: flex; pointer-events: none; flex: none; }
@@ -813,19 +813,18 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .d-body .rf-bar { top: calc(-1 * var(--s-6)); }
 .d-body .rf-link { top: calc(41px - var(--s-6)); }
 
-/* ---------- odpowiedzi agenta: prawy dolny róg, najnowsza na dole, starsze wyżej ---------- */
-.feed { position: fixed; z-index: 10; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+/* ---------- odpowiedzi agenta: lewy dolny róg, najnowsza na dole, starsze wyżej ---------- */
+.feed { position: fixed; z-index: 10; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   width: min(380px, calc(100% - 32px)); max-height: calc(100% - 160px); display: flex; flex-direction: column; justify-content: flex-end; gap: var(--s-3); pointer-events: none; }
 .feed .fb { pointer-events: auto; position: relative; display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-4) 44px var(--s-4) var(--s-5);
-  border-radius: var(--r-md) var(--r-md) 6px var(--r-md); min-height: 0; }
+  border-radius: var(--r-md) var(--r-md) var(--r-md) 6px; min-height: 0; }
 .feed .fb .ans-text { padding-right: 0; max-height: 30vh; overflow: auto; }
 .feed .fb .ans-x { top: 6px; transform: none; }
-.feed.withpanel { right: calc(var(--dw, 600px) + 32px); }
 /* okno węższe niż dok + róg: dymki nad linią doku, żeby nie wchodziły na pole wpisywania */
 @media (max-width: 1520px) { .feed { bottom: calc(28px + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); } }
 .app.cramped .feed.withpanel { display: none; }
 @media (max-width: 860px) {
-  .feed { left: max(16px, env(safe-area-inset-left, 0px)); width: auto; bottom: calc(28px + var(--mk-h) + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); max-height: 45%; }
+  .feed { left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: auto; bottom: calc(28px + var(--mk-h) + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); max-height: 45%; }
   .feed.withpanel { display: none; }   /* telefon: panel kroku zajmuje dół ekranu */
   .feed .fb:not(:last-child) { display: none; }   /* telefon: tylko najnowsza odpowiedź, reszta w historii rozmowy */
 }

@@ -342,7 +342,7 @@ export function InlineName({ name, label, onRename }: { name: string; label: str
   );
 }
 
-// Dymki agenta w prawym dolnym rogu: najnowszy na samym dole, starsze wyżej; każdy zamyka się X (zapamiętane w tej przeglądarce)
+// Dymki agenta w lewym dolnym rogu: najnowszy na samym dole, starsze wyżej; każdy zamyka się X (zapamiętane w tej przeglądarce)
 export function AgentFeed({ items, stepLabel, onStep, className = "", style }: {
   items: FeedItem[]; stepLabel?: (stepId: string) => string | null; onStep?: (stepId: string) => void; className?: string; style?: React.CSSProperties;
 }) {

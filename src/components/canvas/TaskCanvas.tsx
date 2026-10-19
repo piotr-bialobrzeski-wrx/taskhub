@@ -215,7 +215,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
       ) : null}
 
       {p.questions && !n && !group ? <div className={"answer glass" + (panel ? " withpanel" : "")} aria-live="polite">{p.questions}</div> : null}
-      {/* odpowiedzi agenta (to, co jest w historii rozmowy) w prawym dolnym rogu; przy otwartym panelu na lewo od niego */}
+      {/* odpowiedzi agenta (to, co jest w historii rozmowy) w lewym dolnym rogu ekranu */}
       <AgentFeed items={p.feed} className={panel ? "withpanel" : ""} style={{ ["--dw" as string]: dw + "px" }}
         stepLabel={(id) => (byId.has(id) ? pad(byId.get(id)!.idx) : null)} onStep={openStep} />
 
