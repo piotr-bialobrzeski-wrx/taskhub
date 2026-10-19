@@ -702,6 +702,7 @@ table.tb tr.new td { background: var(--accent-soft); }
 .now.draft { background: var(--warn-soft); }
 .now.blocked { background: var(--surface-2); }
 .now-h { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; font-size: 13.5px; font-weight: 650; min-height: 28px; }
+.now-h .sp { flex: 1; }
 .now-h small { font-weight: 500; font-size: 12.5px; color: var(--sub); }
 .now .block { background: var(--surface); }
 .now .note { background: var(--surface); box-shadow: none; color: var(--text); }

@@ -1,6 +1,6 @@
 // Karta kroku „Teraz · Co · Skąd”: podział klocków, zwijanie według stanu, raport bez powtórek, linki bez dubli. Czysta logika, bez bazy.
 import { describe, it, expect } from "vitest";
-import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks } from "@/lib/stepcard";
+import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink } from "@/lib/stepcard";
 import type { Block } from "@/lib/schema";
 
 const changes: Block = { type: "changes", repo: "wlrx/custom-cookies", branch: "intake", preview: "file:///Users/osobiste/prototype.html#catalog", summary: "W menu po lewej jest moduł Catalog Items: 17 pozycji. Format drugiej części kodu to założenie do potwierdzenia.", files: [{ path: "a.js" }] } as Block;
@@ -50,5 +50,24 @@ describe("karta kroku", () => {
     expect(nowHeading("handoff", null, 0, false)).toEqual({ title: "W pracy", cls: "handoff" });
     expect(nowHeading("draft", "proposed", 0, false)).toEqual({ title: "Do zatwierdzenia", cls: "draft" });
     expect(nowHeading("done", "sent", 0, false)).toEqual({ title: "Zrobione", cls: "done" });
+  });
+});
+
+describe("targetLink: dokąd prowadzi krok przed wysyłką", () => {
+  const draft = (target: Record<string, unknown>) => [{ type: "draft", target: { action: "update", ...target }, body: "x", status: "proposed" }] as never;
+  it("adres podany przez agenta wygrywa", () => {
+    expect(targetLink({ tool: "slack", title: "Odpisz" }, draft({ app: "slack", where: "#dev", url: "https://x.slack.com/archives/C1/p2" }))).toEqual({ label: "Otwórz w Slack", url: "https://x.slack.com/archives/C1/p2" });
+  });
+  it("id ClickUp z pola dokąd albo z tytułu kroku", () => {
+    expect(targetLink({ tool: "clickup", title: "Zaktualizuj story" }, draft({ app: "clickup", where: "869f2j817 Employees step - Add Employee flow (opis)" }))?.url).toBe("https://app.clickup.com/t/869f2j817");
+    expect(targetLink({ tool: "clickup", title: "Dodaj komentarz w 869ewyvbg" }, null)?.url).toBe("https://app.clickup.com/t/869ewyvbg");
+    expect(targetLink({ tool: "clickup", title: "Zaktualizuj story Employees step" }, draft({ app: "clickup", where: "lista Backlog" }))).toBeNull();
+  });
+  it("źródło z kartki z tej samej aplikacji", () => {
+    const blocks = [{ type: "thread", source: { app: "slack", url: "https://x.slack.com/archives/C1/p9" }, messages: [] }] as never;
+    expect(targetLink({ tool: "slack", title: "Odpisz Annie" }, blocks)?.url).toBe("https://x.slack.com/archives/C1/p9");
+  });
+  it("prompt i kod nie dostają przycisku", () => {
+    expect(targetLink({ tool: "code", title: "Popraw 869abcdef" }, null)).toBeNull();
   });
 });

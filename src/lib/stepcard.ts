@@ -59,3 +59,28 @@ export function nowHeading(state: CardState, mode: string | null, deps: number, 
   if (state === "blocked") return { title: waits ? "Czeka na inne zadanie" : `Czeka na ${steps(deps)}`, cls: "blocked" };
   return { title: "Do zrobienia", cls: "ready" };
 }
+
+// dokąd prowadzi krok jeszcze przed wysyłką: ticket, wątek albo dokument, w którym coś się zmieni. Kolejność: adres podany przez agenta w szkicu,
+// adres albo id ClickUp w polu „dokąd”, potem źródło z kartki z tej samej aplikacji (ticket, wątek, komentarz, z którego krok wyrósł)
+const NO_TARGET = new Set(["manual", "claude", "claudeapp", "code"]);
+const HTTP = /https?:\/\/[^\s)>\]]+/;
+export function targetLink(s: Pick<Step, "tool" | "title">, blocks: Block[] | null | undefined): { label: string; url: string } | null {
+  const draft = blocks?.find((b) => b.type === "draft") as Extract<Block, { type: "draft" }> | undefined;
+  const app = draft?.target.app ?? s.tool;
+  const label = `Otwórz w ${toolLabel(app)}`;
+  const given = draft?.target.url?.trim();
+  if (given && /^https?:\/\//.test(given)) return { label, url: given };
+  if (NO_TARGET.has(app)) return null;   // prompt dla agenta, zmiany w kodzie, krok ręczny: miejscem jest podgląd albo repozytorium z bloku zmian
+  const where = draft?.target.where ?? "";
+  const inWhere = HTTP.exec(where)?.[0];
+  if (inWhere) return { label, url: inWhere };
+  if (app === "clickup") {
+    const id = [where, s.title].map((x) => /\b(?=[0-9a-z]*[a-z])(?=[0-9a-z]*\d)([0-9][0-9a-z]{6,10})\b/.exec(x)?.[1]).find(Boolean);
+    if (id) return { label, url: `https://app.clickup.com/t/${id}` };
+  }
+  for (const b of blocks ?? []) {
+    const src = (b as { source?: { app?: string; url?: string } }).source;
+    if (src?.url && /^https?:\/\//.test(src.url) && src.app?.toLowerCase() === app.toLowerCase()) return { label, url: src.url };
+  }
+  return null;
+}

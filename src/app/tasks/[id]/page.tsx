@@ -20,7 +20,7 @@ import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
-import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, type CardState } from "@/lib/stepcard";
+import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { Timer } from "@/components/Timer";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -213,7 +213,11 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // raport bez powtórki streszczenia bloku zmian ani treści szkicu; „Do potwierdzenia: …” jako osobna linia
   const lines = reportLines(s.report, [...result.map((b) => b.summary), draft?.body]);
   const outputExtra = done && s.output && s.output.trim() !== (s.report ?? "").trim() && !s.blocks?.length && mode !== "sent" ? s.output : null;
-  const links = mode === "sent" ? [] : resultLinks(s, result[0] ?? null, link ?? null);
+  const found = mode === "sent" ? [] : resultLinks(s, result[0] ?? null, link ?? null);
+  const done0 = done && !found.length && mode !== "sent" ? targetLink(s, s.blocks) : null;   // zrobione bez linku do wyniku: zostaje chociaż miejsce, którego dotyczyło
+  const links = done0 ? [done0] : found;
+  // miejsce docelowe (ticket, wątek, dokument) od razu w nagłówku „Teraz”, zanim cokolwiek poleci; po wysyłce jego miejsce zajmuje link do wyniku
+  const target = !done && mode !== "sent" ? targetLink(s, s.blocks) : null;
   const kinds = kindsOf(material);
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}`, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
@@ -226,6 +230,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           : <span className="working" title={prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />Claude pracuje{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>)
           : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
         {meta ? <small>· {meta}</small> : null}
+        {target ? <><span className="sp" /><a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
       </div>
       {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} /> : null}
       {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
