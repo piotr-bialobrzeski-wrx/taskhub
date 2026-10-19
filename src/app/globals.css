@@ -815,13 +815,15 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 
 /* ---------- odpowiedzi agenta: lewy dolny róg, najnowsza na dole, starsze wyżej ---------- */
 .feed { position: fixed; z-index: 10; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  width: min(380px, calc(100% - 32px)); max-height: calc(100% - 160px); display: flex; flex-direction: column; justify-content: flex-end; gap: var(--s-3); pointer-events: none; }
+  width: var(--fw); max-height: calc(100% - 160px); display: flex; flex-direction: column; justify-content: flex-end; gap: var(--s-3); pointer-events: none; }
 .feed .fb { pointer-events: auto; position: relative; display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-4) 44px var(--s-4) var(--s-5);
   border-radius: var(--r-md) var(--r-md) var(--r-md) 6px; min-height: 0; }
 .feed .fb .ans-text { padding-right: 0; max-height: 30vh; overflow: auto; }
 .feed .fb .ans-x { top: 6px; transform: none; }
-/* okno węższe niż dok + róg: dymki nad linią doku, żeby nie wchodziły na pole wpisywania */
-@media (max-width: 1520px) { .feed { bottom: calc(28px + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); } }
+/* dymki stoją na linii pola czatu, obok niego: szerokie do 380 px, gdy obok wyśrodkowanego doku jest miejsce; w węższym oknie mają 260 px,
+   a dok (i wszystko, co liczy się od --side) zwęża się symetrycznie, żeby na nie nie wchodzić */
+.app { --fw: clamp(260px, calc((100vw - 720px) / 2 - 48px), 380px); }
+@media (min-width: 861px) { .app:has(.feed .fb) { --side: calc(var(--fw) + 32px); } }
 .app.cramped .feed.withpanel { display: none; }
 @media (max-width: 860px) {
   .feed { left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: auto; bottom: calc(28px + var(--mk-h) + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); max-height: 45%; }
