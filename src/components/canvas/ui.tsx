@@ -8,7 +8,7 @@ export type TaskStateKey = "done" | "blocked" | "draft" | "active" | "new";
 export type StepStateKey = "done" | "draft" | "handoff" | "blocked" | "ready";
 export const TS_LABEL: Record<TaskStateKey, string> = { done: "Ukończone", draft: "Do zatwierdzenia", active: "W toku", blocked: "Czeka", new: "Nowe" };
 export const TS_SHORT: Record<TaskStateKey, string> = { ...TS_LABEL, draft: "Do zatw." };   // na kafelku, obok terminu
-export const ST_LABEL: Record<StepStateKey, string> = { done: "Zrobione", ready: "Gotowy", draft: "Do zatwierdzenia", blocked: "Czeka", handoff: "Pracuje" };
+export const ST_LABEL: Record<StepStateKey, string> = { done: "Zrobione", ready: "Do zrobienia", draft: "Do zatwierdzenia", blocked: "Czeka", handoff: "Pracuje" };
 
 // ---------- modele kafelków (liczone na serwerze, rysowane u klienta) ----------
 export type TaskTile = {

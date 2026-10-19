@@ -176,7 +176,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
         ...(st && st.state === "ready" && st.tool !== "manual" && !p.aiOn ? [{ label: "Uruchom", onPick: () => run(() => handoff(t.id, id), "Claude bierze ten krok") }] : []),
         { label: on ? "Odznacz" : "Zaznacz", onPick: () => { const s = new Set(sel); if (on) s.delete(id); else s.add(id); setSel(s); } },
         { label: "Zgrupuj", onPick: () => { setSel(new Set([...sel, id])); setNamer("group"); } },
-        { label: done ? "Wróć do pracy" : "Oznacz jako gotowe", onPick: () => run(() => batchSteps(t.id, [id], { done: !done }), done ? "Przywrócono do pracy" : "Oznaczono jako gotowe") },
+        { label: done ? "Wróć do pracy" : "Oznacz jako zrobione", onPick: () => run(() => batchSteps(t.id, [id], { done: !done }), done ? "Przywrócono do pracy" : "Oznaczono jako zrobione") },
         { label: "Usuń…", danger: true, onPick: () => { setPanel(null); setSel(new Set([id])); setConfirm(true); } },
       ]; })()} /> : null}
 
@@ -193,7 +193,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
             <><span className="rb-t"><b>{n} {word}</b></span><span className="dv" />
               <button className="btn" type="button" onClick={() => setNamer("group")}>Zgrupuj</button>
               {allDone ? <button className="btn" type="button" onClick={() => { const list = ids; setSel(new Set()); run(() => batchSteps(t.id, list, { done: false }), "Przywrócono do pracy"); }}>Wróć do pracy</button>
-                : <button className="btn" type="button" onClick={() => { const list = ids; setSel(new Set()); run(() => batchSteps(t.id, list, { done: true }), "Oznaczono jako gotowe"); }}>Oznacz jako gotowe</button>}
+                : <button className="btn" type="button" onClick={() => { const list = ids; setSel(new Set()); run(() => batchSteps(t.id, list, { done: true }), "Oznaczono jako zrobione"); }}>Oznacz jako zrobione</button>}
               <button className="btn danger" type="button" onClick={() => setConfirm(true)}>Usuń</button>
               <button className="icobtn end" type="button" aria-label="Odznacz wszystko" title="Odznacz (Esc)" onClick={() => { setSel(new Set()); setConfirm(false); }}><Icon k="x" size={12} sw={2} /></button></>
           )}

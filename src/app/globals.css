@@ -69,7 +69,10 @@ a { color: var(--accent); }
 .node.handoff { box-shadow: 0 2px 10px var(--shadow), 0 0 0 1.5px var(--t-claude); }
 .node.blocked { opacity: .74; }
 .node.dragging { cursor: grabbing; box-shadow: 0 18px 40px var(--shadow), 0 0 0 2px var(--accent); z-index: 3; }
-.node.sel { box-shadow: 0 14px 34px var(--shadow), 0 0 0 2px var(--accent); }
+/* otwarty krok (paczka 6, punkt 2): wypełnienie w kolorze akcentu, gruba ramka i poświata; „Gotowy” ma tylko cienką ramkę */
+.node.sel { background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  box-shadow: 0 0 0 3px var(--accent), 0 0 0 9px color-mix(in srgb, var(--accent) 24%, transparent), 0 14px 34px var(--shadow); z-index: 2; }
+.node.sel .n-title, .node.sel.done .n-title { color: var(--text); font-weight: 700; }
 .node.done .n-title { color: var(--sub); }
 .node.origin.done .n-title { color: rgba(255,255,255,.92); }   /* na fioletowym tle szary tytuł był nieczytelny */
 .node.drop { box-shadow: 0 0 0 3px var(--accent), 0 14px 34px var(--shadow); }

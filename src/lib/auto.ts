@@ -81,4 +81,4 @@ export function queueWho(w: Worker, taskId: string, n: number, busy: string | nu
   return { n, kind: "auto", who: `Claude ${a.text}`, text: `${waiting(n)} na Claude · zajrzy ${a.text} (automat ${AUTO_EVERY})`, short: `Czeka na Claude ${a.text}`, activity: null };
 }
 // wszystkie kroki gotowe, ale zadanie nie zamyka się, dopóki agent nie odpowie na wiadomości
-export const allDoneWaitText = (q: Queue) => `Kroki gotowe · ${q.n === 1 ? "Twoja wiadomość czeka" : `${yourMsgsNom(q.n)} czekają`} na ${q.kind === "auto" ? "Claude" : "mostek"}`;
+export const allDoneWaitText = (q: Queue) => `Kroki zrobione · ${q.n === 1 ? "Twoja wiadomość czeka" : `${yourMsgsNom(q.n)} czekają`} na ${q.kind === "auto" ? "Claude" : "mostek"}`;

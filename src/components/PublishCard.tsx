@@ -22,7 +22,7 @@ export function cardModeOf(s: Step): CardMode | null {
   const draft = s.blocks?.some((b) => b.type === "draft") ?? false;
   if (s.status === "draft") return "proposed";
   if (s.status === "handoff" && s.prevStatus === "draft") return "sending";
-  // zrobiony krok ze szkicem, którego nikt nie zatwierdził (zamknięty „Gotowe bez wysyłki” albo przez agenta): nic nie poleciało, więc nie „Wysłano”
+  // zrobiony krok ze szkicem, którego nikt nie zatwierdził (zamknięty „Zamknij bez wysyłki” albo przez agenta): nic nie poleciało, więc nie „Wysłano”
   if (s.status === "done" && draft) return s.blocks!.some((b) => b.type === "draft" && b.status === "proposed") ? "unsent" : "sent";
   if (s.status === "todo" && draft) return "parked";
   return null;
@@ -111,15 +111,15 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       {preview}
       {mode === "proposed" ? (
         <div className="actions">
-          <form id={formId} action={approveStep.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} title={stays ? "Szkic jest dobry, krok gotowy" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść`}>{mainLabel}</PendingButton></form>
+          <form id={formId} action={approveStep.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} title={stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść`}>{mainLabel}</PendingButton></form>
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
-          <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Szkic zostaje, krok wraca do gotowych">Odłóż</PendingButton></form>
+          <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Szkic zostaje, krok wraca do zrobienia">Odłóż</PendingButton></form>
         </div>
       ) : mode === "parked" ? (
         <div className="actions">
           <form id={formId} action={approveStep.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"}>{mainLabel}</PendingButton></form>
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
-          <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn" title="Zamknij krok bez wysyłania">Gotowe bez wysyłki</PendingButton></form>
+          <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn" title="Zamknij krok bez wysyłania">Zamknij bez wysyłki</PendingButton></form>
         </div>
       ) : mode === "sending" ? (
         <div className="actions">

@@ -87,8 +87,8 @@ describe("kolejka wiadomości Piotra w zadaniu", () => {
     expect(bridgeHold({ state: "error", until: "" })).toEqual({ kind: "error", until: null });
   });
   it("pasek po ostatnim kroku i odmiana liczebników", () => {
-    expect(allDoneWaitText(queueWho({ alive: true, name: "Mac", run: null }, "t1", 2))).toBe("Kroki gotowe · 2 Twoje wiadomości czekają na mostek");
-    expect(allDoneWaitText(queueWho({ alive: false, name: null, run: null }, "t1", 1))).toBe("Kroki gotowe · Twoja wiadomość czeka na Claude");
+    expect(allDoneWaitText(queueWho({ alive: true, name: "Mac", run: null }, "t1", 2))).toBe("Kroki zrobione · 2 Twoje wiadomości czekają na mostek");
+    expect(allDoneWaitText(queueWho({ alive: false, name: null, run: null }, "t1", 1))).toBe("Kroki zrobione · Twoja wiadomość czeka na Claude");
     expect([1, 2, 5, 22].map(msgCount)).toEqual(["1 wiadomość", "2 wiadomości", "5 wiadomości", "22 wiadomości"]);
     expect([1, 2].map(yourMsgsNom)).toEqual(["Twoja wiadomość", "2 Twoje wiadomości"]);
   });

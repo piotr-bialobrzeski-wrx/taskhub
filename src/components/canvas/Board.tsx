@@ -306,7 +306,7 @@ export function Board(p: BoardProps) {
         { label: "Otwórz", onPick: () => open(id) },
         { label: on ? "Odznacz" : "Zaznacz", onPick: () => { const s = new Set(sel); if (on) s.delete(id); else s.add(id); setSel(s); } },
         { label: "Zgrupuj", onPick: () => { setSel(new Set([...sel, id])); setNamer("group"); } },
-        { label: done ? "Wróć do pracy" : "Oznacz jako gotowe", onPick: () => run(() => batchTasks([id], { done: !done }), done ? "Przywrócono do pracy" : "Oznaczono jako gotowe") },
+        { label: done ? "Wróć do pracy" : "Oznacz jako ukończone", onPick: () => run(() => batchTasks([id], { done: !done }), done ? "Przywrócono do pracy" : "Oznaczono jako ukończone") },
         { label: "Do kosza…", danger: true, onPick: () => { setSel(new Set([id])); setConfirm(true); } },
       ]; })()} /> : null}
 
@@ -325,7 +325,7 @@ export function Board(p: BoardProps) {
               <PrioPicker base={3} cls="btn" onPick={(l) => batch({ level: l }, "Zmieniono priorytet")} />
               <button className="btn" type="button" onClick={() => setNamer("group")}>Zgrupuj</button>
               {allDone ? <button className="btn" type="button" onClick={() => batch({ done: false }, "Przywrócono do pracy")}>Wróć do pracy</button>
-                : <button className="btn" type="button" onClick={() => batch({ done: true }, "Oznaczono jako gotowe")}>Oznacz jako gotowe</button>}
+                : <button className="btn" type="button" onClick={() => batch({ done: true }, "Oznaczono jako ukończone")}>Oznacz jako ukończone</button>}
               <button className="btn danger" type="button" onClick={() => setConfirm(true)}>Usuń</button>
               <button className="icobtn end" type="button" aria-label="Odznacz wszystko" title="Odznacz (Esc)" onClick={() => { setSel(new Set()); setConfirm(false); }}><Icon k="x" size={12} sw={2} /></button></>
           )}

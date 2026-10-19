@@ -101,7 +101,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("add_steps", {
-      title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. before: id kroku, przed którym nowe kroki mają wejść (np. krok publikacji, wysyłki, commitu): dziedziczą jego zależności, on zaczyna zależeć od nich, a jego szkic (gdy czekał na zgodę) staje się nieaktualny i krok wraca do gotowych. Bez before kroki idą na koniec. Termin zadania ustaw osobno przez update_task(due).",
+      title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. before: id kroku, przed którym nowe kroki mają wejść (np. krok publikacji, wysyłki, commitu): dziedziczą jego zależności, on zaczyna zależeć od nich, a jego szkic (gdy czekał na zgodę) staje się nieaktualny i krok wraca do zrobienia. Bez before kroki idą na koniec. Termin zadania ustaw osobno przez update_task(due).",
       inputSchema: z.object({ taskId: z.string(), steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })), before: z.string().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
@@ -109,7 +109,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       if (a.before && !bef) return text("Nie ma takiego kroku (before) w tym zadaniu.");
       const fresh = t.steps.length === 0;
       const steps = await repo.addSteps(t.id, await Promise.all(a.steps.map(async (s) => ({ ...s, link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection) }))), { before: bef?.id ?? null });
-      // przed krokiem ze szkicem weszła nowa praca: szkic jest nieaktualny, krok wraca do gotowych i dostanie nowy szkic po nowych krokach
+      // przed krokiem ze szkicem weszła nowa praca: szkic jest nieaktualny, krok wraca do zrobienia i dostanie nowy szkic po nowych krokach
       if (bef && bef.status === "draft") await repo.updateStep(bef.id, { status: "todo", prevStatus: null, handoffAt: null, blocks: (bef.blocks ?? []).map((b): Block => (b.type === "draft" ? { ...b, stale: true } : b)) });
       // w rozmowie tylko fakt: ile kroków i gdzie; tytuły, gdy jest ich mało (szczegóły są na kafelkach)
       const n = steps.length, word = n === 1 ? "krok" : n < 5 ? "kroki" : "kroków";
@@ -156,7 +156,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("complete_step", {
-      title: "Krok gotowy", description: "Zgłasza wynik kroku: summary = 1–2 zdania o efekcie (Piotr czyta je w raporcie kroku; w rozmowie zobaczy tylko „Gotowe: tytuł kroku”), link do wyniku, opcjonalnie czas w minutach. Krok z kodem: changes = zmienione pliki (path, status, diff, note), repo, branch, preview = adres podglądu (http albo file://); trafiają na kartkę kroku jako blok zmian. Gdy to ostatni krok, zadanie się kończy i agent pisze notatkę końcową.",
+      title: "Krok gotowy", description: "Zgłasza wynik kroku: summary = 1–2 zdania o efekcie (Piotr czyta je w raporcie kroku; w rozmowie zobaczy tylko „Zrobione: tytuł kroku”), link do wyniku, opcjonalnie czas w minutach. Krok z kodem: changes = zmienione pliki (path, status, diff, note), repo, branch, preview = adres podglądu (http albo file://); trafiają na kartkę kroku jako blok zmian. Gdy to ostatni krok, zadanie się kończy i agent pisze notatkę końcową.",
       inputSchema: z.object({ stepId: z.string(), summary: z.string().max(4000), link: z.string().optional(), spentMin: z.number().int().optional(), repo: z.string().max(200).optional(), branch: z.string().max(200).optional(), preview: z.string().max(1000).optional(), changes: z.array(ChangedFile).max(60).optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId);
@@ -173,7 +173,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
         await repo.updateStep(st.id, { blocks: [...rest, { type: "changes", repo: a.repo, branch: a.branch, preview: a.preview, summary: a.summary.slice(0, 2000), files: a.changes ?? [] }] });
       }
       // w rozmowie tylko fakt; opis, pliki i adresy są na kartce kroku („Otwórz krok”)
-      await repo.addChat(ownerId, taskId, "agent", `Gotowe: „${shortTitle(st?.title ?? "", 70)}”.${r.closed ? " Zadanie ukończone." : ""}`, { stepId: a.stepId, link: externalLink(a.link) ?? undefined });
+      await repo.addChat(ownerId, taskId, "agent", `Zrobione: „${shortTitle(st?.title ?? "", 70)}”.${r.closed ? " Zadanie ukończone." : ""}`, { stepId: a.stepId, link: externalLink(a.link) ?? undefined });
       // po wysyłce: inne otwarte kroki ze szkicem do tego samego miejsca są pewnie zbędne; agent sprawdza je teraz, a nie zostawia Piotrowi do zatwierdzenia
       const twins = st ? sameTarget(r.task.steps, st.id, st.blocks).open : [];
       const hint = twins.length ? ` Inne otwarte kroki ze szkicem do tego samego miejsca: ${twins.map((x) => `[${x.id}] „${x.title}”`).join(", ")}. Sprawdź, czy po tej wysyłce nie są zbędne; zbędne zamknij przez skip_step z powodem.` : "";
@@ -192,7 +192,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("skip_step", {
-      title: "Zamykam zbędny krok", description: "Zamyka krok, który stał się zbędny (to samo już wysłane w innym kroku, zakres się zmienił, ticket już ma tę zmianę), także krok ze szkicem czekającym na zgodę. Nic nie wysyła; Piotr widzi „Zamknięty bez wysyłki” i powód, a „Cofnij gotowe” przywraca krok. reason: jedno zdanie, czemu zbędny.",
+      title: "Zamykam zbędny krok", description: "Zamyka krok, który stał się zbędny (to samo już wysłane w innym kroku, zakres się zmienił, ticket już ma tę zmianę), także krok ze szkicem czekającym na zgodę. Nic nie wysyła; Piotr widzi „Zamknięty bez wysyłki” i powód, a „Przywróć do zrobienia” przywraca krok. reason: jedno zdanie, czemu zbędny.",
       inputSchema: z.object({ stepId: z.string(), reason: z.string().min(3).max(400) }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
@@ -206,7 +206,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("leave_step", {
-      title: "Oddaję krok", description: "Gdy kroku nie da się zrobić (brak narzędzia, dostępu albo danych): krok wraca do gotowych, a Piotr widzi powód w zadaniu. Nie używaj do pytań, od tego jest ask_question, ani do kroków zbędnych, od tego jest skip_step.",
+      title: "Oddaję krok", description: "Gdy kroku nie da się zrobić (brak narzędzia, dostępu albo danych): krok wraca do zrobienia, a Piotr widzi powód w zadaniu. Nie używaj do pytań, od tego jest ask_question, ani do kroków zbędnych, od tego jest skip_step.",
       inputSchema: z.object({ stepId: z.string(), reason: z.string().max(600) }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
@@ -236,7 +236,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("list_work", {
-      title: "Co czeka na agenta", description: "Lista pracy dla agenta, w kolejności robienia: kroki w toku (zaczęte, dokończ), zatwierdzone szkice do wysłania, zadania bez kroków (rozłóż przez add_steps), odpowiedzi Piotra, kroki gotowe bez zgody (start_step → zrób swoimi konektorami → complete_step), kroki wymagające zgody (przygotuj szkic przez set_blocks jako draft, niczego nie wysyłaj). Rób tylko to, do czego masz narzędzia; krok, którego nie możesz zrobić, oddaj przez leave_step. Nigdy niczego nie usuwaj. Gdy mostek na komputerze Piotra jest aktywny, inni agenci dostają „MOSTEK AKTYWNY” i nie robią nic (force: true pokaże pracę mimo to).",
+      title: "Co czeka na agenta", description: "Lista pracy dla agenta, w kolejności robienia: kroki w toku (zaczęte, dokończ), zatwierdzone szkice do wysłania, zadania bez kroków (rozłóż przez add_steps), odpowiedzi Piotra, kroki do zrobienia bez zgody (start_step → zrób swoimi konektorami → complete_step), kroki wymagające zgody (przygotuj szkic przez set_blocks jako draft, niczego nie wysyłaj). Rób tylko to, do czego masz narzędzia; krok, którego nie możesz zrobić, oddaj przez leave_step. Nigdy niczego nie usuwaj. Gdy mostek na komputerze Piotra jest aktywny, inni agenci dostają „MOSTEK AKTYWNY” i nie robią nic (force: true pokaże pracę mimo to).",
       inputSchema: z.object({ force: z.boolean().optional() }),
     }, async ({ force }) => {
       // mostek pracuje na bieżąco: automat co godzinę i inni agenci ustępują, żeby nie robić tego samego dwa razy
@@ -257,7 +257,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     });
 
     server.registerTool("reply_chat", {
-      title: "Odpowiedz w rozmowie zadania", description: "Odpowiada Piotrowi w rozmowie zadania (1–3 zdania: co dopisałeś, numery i tytuły kroków, albo odpowiedź na pytanie; bez raportu z postępu). messageIds: id wiadomości Piotra, które ta odpowiedź załatwia (z get_task, przy NOWE); bez nich załatwia wszystkie dotychczasowe w zadaniu. Odpowiadaj osobno po każdej załatwionej prośbie, żeby Piotr widział, co już jest zrobione. stepId: krok, którego odpowiedź dotyczy (karta w rozmowie dostanie „Otwórz krok”); link: adres wyniku w zewnętrznej aplikacji. Gdy wszystkie kroki są gotowe i nic już nie czeka na odpowiedź, zadanie kończy się samo.",
+      title: "Odpowiedz w rozmowie zadania", description: "Odpowiada Piotrowi w rozmowie zadania (1–3 zdania: co dopisałeś, numery i tytuły kroków, albo odpowiedź na pytanie; bez raportu z postępu). messageIds: id wiadomości Piotra, które ta odpowiedź załatwia (z get_task, przy NOWE); bez nich załatwia wszystkie dotychczasowe w zadaniu. Odpowiadaj osobno po każdej załatwionej prośbie, żeby Piotr widział, co już jest zrobione. stepId: krok, którego odpowiedź dotyczy (karta w rozmowie dostanie „Otwórz krok”); link: adres wyniku w zewnętrznej aplikacji. Gdy wszystkie kroki są zrobione i nic już nie czeka na odpowiedź, zadanie kończy się samo.",
       inputSchema: z.object({ taskId: z.string(), text: z.string().min(1).max(1200), messageIds: z.array(z.string()).max(50).optional(), stepId: z.string().optional(), link: z.string().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
@@ -266,7 +266,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       await repo.addChat(ownerId, t.id, "agent", a.text.trim(), { stepId, link: externalLink(a.link) ?? undefined, answers });
       // ostatni krok gotowy czekał tylko na tę odpowiedź: zadanie kończy się teraz
       const closed = await repo.closeIfDone(ownerId, t.id);
-      if (closed) await repo.addChat(ownerId, t.id, "agent", "Wszystkie kroki gotowe, zadanie ukończone.");
+      if (closed) await repo.addChat(ownerId, t.id, "agent", "Wszystkie kroki zrobione, zadanie ukończone.");
       const left = (await repo.listPendingChat(ownerId, t.id)).length;
       return text(`Odpowiedź zapisana${answers.length ? ` (załatwione wiadomości: ${answers.length})` : ""}.${left ? ` Bez odpowiedzi zostało: ${left}.` : ""}${closed ? " Zadanie ukończone." : ""}`);
     });

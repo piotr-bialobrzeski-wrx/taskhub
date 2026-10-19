@@ -248,11 +248,11 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
             {aiOn ? <form action={compose.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Składam…" title="Agent składa panel z faktów, migawek i załączników">Pokaż kontekst</PendingButton></form> : null}
             {!aiOn && runnable && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
             <Timer stepId={s.id} onStop={addSpent.bind(null, t.id, s.id)} />
-            <form action={markDone.bind(null, t.id, s.id)}><PendingButton className={"btn" + (!runnable ? " primary" : "")}>Gotowe</PendingButton></form>
+            <form action={markDone.bind(null, t.id, s.id)}><PendingButton className={"btn" + (!runnable ? " primary" : "")}>Oznacz jako zrobione</PendingButton></form>
           </>) : null}
-          {s.status === "handoff" ? <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Wróć do kroków gotowych; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form> : null}
+          {s.status === "handoff" ? <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Krok wraca do zrobienia; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form> : null}
           {links.map((l, i) => <a key={l.url} className={"btn ico" + (done && i === 0 ? " primary" : "")} href={l.url} target="_blank" rel="noopener" title={l.url}>{l.label}<Icon k="ext" size={13} sw={1.6} /></a>)}
-          {done ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Cofnij gotowe</PendingButton></form> : null}
+          {done ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Przywróć do zrobienia</PendingButton></form> : null}
         </div>
       ) : null}
       {s.status === "handoff" && prompt ? (
@@ -264,7 +264,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
               <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} />
               <div className="lbl">Wynik zrobiony poza aplikacją</div>
               <GrowTextarea className="out" minRows={3} name="report" placeholder="Wklej, co powstało: podsumowanie, link do artefaktu albo PR…" required />
-              <div className="row"><input className="in" name="link" placeholder="Link do wyniku (opcjonalnie)" /><PendingButton className="btn primary" busy="Zapisuję…">Zapisz jako gotowe</PendingButton></div>
+              <div className="row"><input className="in" name="link" placeholder="Link do wyniku (opcjonalnie)" /><PendingButton className="btn primary" busy="Zapisuję…">Zapisz jako zrobione</PendingButton></div>
             </form>
           </div>
         </details>
