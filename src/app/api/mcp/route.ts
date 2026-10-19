@@ -309,9 +309,9 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
 
     server.registerTool("list_connections", {
       title: "Połączenia", description: "Rejestr połączeń: do jakich aplikacji agent ma dostęp, przez co (claude = konektor w Claude, claude-code = Claude Code na komputerze Piotra przez mostek, taskhub = sam Task Hub), na jakim koncie, dla której firmy albo sfery (work | private) i czy działa (active | expired | off). Krok może wskazać połączenie przez pole connection (nazwa); bez wskazania wybierz połączenie pasujące do firmy zadania. Żadnych sekretów: połączenie to rura, nie klucz. audit: true zwraca zamiast tego raport bezpieczeństwa (tokeny, klienci OAuth, mostki, próby logowania, nocne zmiany), tylko na prośbę Piotra o sprawdzenie dostępu.",
-      inputSchema: z.object({ audit: z.boolean().optional() }),
+      inputSchema: z.object({ audit: z.union([z.boolean(), z.enum(["true", "false"])]).optional() }),   // klient z zapamiętanym starszym schematem przysyła tekst
     }, async (a) => {
-      if (a.audit) return json(await securityReport(ownerId));
+      if (a.audit === true || a.audit === "true") return json(await securityReport(ownerId));
       const [connections, companies] = await Promise.all([repo.listConnections(ownerId), repo.listCompanies(ownerId)]);
       return json(connections.map((c) => ({ id: c.id, label: c.label, app: c.app, account: c.account, company: companies.find((x) => x.id === c.companyId)?.name ?? null, sphere: c.sphere, provider: c.provider, kind: c.kind, state: c.state, host: c.host, seenAt: c.seenAt })));
     });
