@@ -73,12 +73,13 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const queue = pending.length ? queueWho(w, t.id, pending.length, busy) : null;
   const bridgeAct = w.run && w.run.taskId === t.id ? w.run : null;
   const allDone = t.steps.length > 0 && t.steps.every((s) => s.status === "done");
-  const runbar = waits.length ? <span className="rb-t"><b>Czeka na zadanie:</b> {waits.map((x) => x.title).join(", ")}</span>
+  // pasek ma zawsze jedną krótką linię; pełne zdanie i szczegóły (ścieżki, polecenia) są w podpowiedzi po najechaniu
+  const runbar = waits.length ? <span className="rb-t" title={waits.map((x) => x.title).join(", ")}><b>Czeka na zadanie:</b> {waits.map((x) => x.title).join(", ")}</span>
     : who && who.kind === "decomposing" && w.run ? <Activity text="rozpisuje kroki" detail={w.run.detail} since={w.run.since} who={who.who} big />
     : bridgeAct ? <><Activity text={bridgeAct.text} detail={bridgeAct.detail} since={bridgeAct.since} who={bridgeLabel(w)} big />{queue ? <span className="rb-t">· {yourMsgsNom(queue.n)}</span> : null}</>
     : queue && allDone && !t.doneAt ? <span className="rb-t">{allDoneWaitText(queue)}</span>
-    : queue ? <span className="rb-t">{queue.text}</span>
-    : who ? <span className="rb-t"><b>Bez kroków.</b> {aiOn ? "Napisz w doku, co ma zrobić agent." : who.text}</span>
+    : queue ? <span className="rb-t" title={queue.text}>{queue.short}</span>
+    : who ? <span className="rb-t" title={who.text}><b>Bez kroków</b> · {aiOn ? "napisz w doku, co ma zrobić agent" : who.short}</span>
     : null;
   const runAction = who && who.kind !== "decomposing" && !aiOn ? { label: "Rozpisz teraz", anchor: "rozpisz" } : null;
 

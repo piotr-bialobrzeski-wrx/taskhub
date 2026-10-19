@@ -16,7 +16,7 @@ export const shortTitle = (title: string, max = 60) => { const t = title.replace
 // hold: mostek się zgłasza, ale nie startuje pracy (limit Claude do godziny resetu, Claude Code wylogowany, ostatni bieg nie wyszedł)
 export type Hold = { kind: "limit" | "auth" | "error"; until: string | null };
 export type Worker = { alive: boolean; name: string | null; run: LiveActivity | null; hold?: Hold | null };
-export type Who = { kind: "decomposing" | "busy" | "soon" | "held" | "auto"; who: string; text: string };
+export type Who = { kind: "decomposing" | "busy" | "soon" | "held" | "auto"; who: string; text: string; short: string };   // short: jedna krótka linia na pasek nad kanwą
 // stan zgłoszony przez aplikację na Macu przy ostatnim sprawdzeniu pracy (meta tokenu mostka: state, until)
 export function bridgeHold(meta: Record<string, unknown> | null | undefined): Hold | null {
   const st = meta?.state, until = typeof meta?.until === "string" && meta.until ? meta.until : null;
@@ -41,12 +41,12 @@ export function busyWith(run: LiveActivity | null, tasks: Pick<Task, "id" | "tit
 // zadanie bez kroków: kto je rozpisze i kiedy
 export function noStepsWho(w: Worker, taskId: string, busy: string | null = null, now = new Date()): Who {
   const b = bridgeLabel(w);
-  if (w.run && w.run.taskId === taskId) return { kind: "decomposing", who: b, text: `${b} rozpisuje kroki tego zadania.` };
-  if (w.run) return { kind: "busy", who: b, text: `${b} kończy${busy ? `: ${busy}` : " inną pracę"}, potem weźmie to zadanie i rozpisze kroki.` };
-  if (w.alive && w.hold) return { kind: "held", who: b, text: `${b} stoi: ${holdText(w.hold)}. Potem weźmie to zadanie i rozpisze kroki.` };
-  if (w.alive) return { kind: "soon", who: b, text: `${b} weźmie to zadanie w ciągu minuty i rozpisze kroki.` };
+  if (w.run && w.run.taskId === taskId) return { kind: "decomposing", who: b, text: `${b} rozpisuje kroki tego zadania.`, short: `${b} rozpisuje kroki` };
+  if (w.run) return { kind: "busy", who: b, text: `${b} kończy${busy ? `: ${busy}` : " inną pracę"}, potem weźmie to zadanie i rozpisze kroki.`, short: "Mostek kończy inną pracę, potem rozpisze kroki" };
+  if (w.alive && w.hold) return { kind: "held", who: b, text: `${b} stoi: ${holdText(w.hold)}. Potem weźmie to zadanie i rozpisze kroki.`, short: `Mostek stoi: ${holdText(w.hold)}` };
+  if (w.alive) return { kind: "soon", who: b, text: `${b} weźmie to zadanie w ciągu minuty i rozpisze kroki.`, short: "Mostek rozpisze kroki w ciągu minuty" };
   const n = nextAutoAt(now);
-  return { kind: "auto", who: `Claude ${n.text}`, text: `Nikt teraz nie pracuje: mostek na komputerze nie działa. Claude zajrzy tu ${n.text} (automat ${AUTO_EVERY}) i rozpisze kroki.` };
+  return { kind: "auto", who: `Claude ${n.text}`, text: `Nikt teraz nie pracuje: mostek na komputerze nie działa. Claude zajrzy tu ${n.text} (automat ${AUTO_EVERY}) i rozpisze kroki.`, short: `Claude rozpisze kroki ${n.text}` };
 }
 // wiadomość Piotra w zadaniu: kto ją przeczyta i kiedy (odpowiedź w rozmowie zamiast „wezmę pod uwagę”)
 export function chatWho(w: Worker, taskId: string, busy: string | null = null, now = new Date()): string {
@@ -81,4 +81,4 @@ export function queueWho(w: Worker, taskId: string, n: number, busy: string | nu
   return { n, kind: "auto", who: `Claude ${a.text}`, text: `${waiting(n)} na Claude · zajrzy ${a.text} (automat ${AUTO_EVERY})`, short: `Czeka na Claude ${a.text}`, activity: null };
 }
 // wszystkie kroki gotowe, ale zadanie nie zamyka się, dopóki agent nie odpowie na wiadomości
-export const allDoneWaitText = (q: Queue) => `Wszystkie kroki gotowe; czekam, aż ${q.kind === "auto" ? "Claude" : "mostek"} odpowie na ${yourMsgs(q.n)}.`;
+export const allDoneWaitText = (q: Queue) => `Kroki gotowe · ${q.n === 1 ? "Twoja wiadomość czeka" : `${yourMsgsNom(q.n)} czekają`} na ${q.kind === "auto" ? "Claude" : "mostek"}`;

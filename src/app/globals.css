@@ -780,3 +780,8 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .rf-doc.ProseMirror { display: flex; flex-direction: column; min-height: 64px; }
 .pub .msg .md { margin-top: var(--s-1); }
 .pub .msg .md p { white-space: pre-wrap; }
+
+/* pasek nad kanwą: jedna krótka linia stanu; szczegół czynności (ścieżka, polecenie) tylko w podpowiedzi */
+.runbar { max-width: min(640px, calc(100% - 32px)); }
+.runbar .act-d { display: none; }
+.runbar .rb-t { min-width: 0; white-space: nowrap; }
