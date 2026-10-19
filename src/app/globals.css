@@ -739,5 +739,12 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .ans-q .act { font-size: 12.5px; max-width: 100%; }
 .answer.qonly { padding-right: var(--s-5); }
 .answer.qonly .ans-q { margin-bottom: 0; }
+/* odpowiedź agenta nad dokiem = ostatni dymek czatu (pełna rozmowa w historii): przy lewej krawędzi doku, szerokość treści, rogi dymka */
+.answer.bubble { width: fit-content; border-radius: var(--r-md) var(--r-md) var(--r-md) 6px; }
+.answer.bubble:not(.withpanel) { max-width: min(612px, 100% - 2 * var(--side)); left: max(var(--side), calc(50% - 360px)); transform: none; }
+.answer.bubble.withpanel { max-width: min(612px, calc(100% - var(--dw, 600px) - 64px)); }
+.answer.bubble .ans-x { top: 6px; transform: none; }
+.ans-t { font-size: 11px; color: var(--sub); margin-top: calc(-1 * var(--s-2)); }   /* jak podpis dymka w historii rozmowy */
+@media (max-width: 860px) { .answer.bubble.withpanel { max-width: min(612px, 100% - 2 * var(--side)); left: max(var(--side), calc(50% - 360px)); transform: none; } }
 .node.origin .act { color: #fff; }
 .node.origin .act .act-d, .node.origin .act .act-m { color: rgba(255,255,255,.85); }

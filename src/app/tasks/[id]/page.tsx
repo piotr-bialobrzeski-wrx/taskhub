@@ -179,7 +179,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       steps={tiles}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
       aiOn={aiOn} agent={agentLabel(providers)} index={indexFrom(b)}
-      lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text, stepId: acts?.stepId ?? null, link: acts?.link ?? null } : null}
+      lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text, at: fmtTime(lastAgent.createdAt), stepId: acts?.stepId ?? null, link: acts?.link ?? null } : null}
       focus={focus ?? null} runbar={runbar} runAction={runAction} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} />
     </>
   );

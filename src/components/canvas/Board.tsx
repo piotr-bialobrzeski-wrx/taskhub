@@ -20,7 +20,7 @@ export type ArchRow = { id: string; title: string; when: string; summary: string
 export type BoardInitial = { view?: string; p?: string; t?: string; focus?: string };
 export type BoardProps = {
   tasks: TaskTile[]; groups: GroupVM[]; projects: ProjectRow[]; companies: CompanyRow[]; projTasks: ProjTask[]; index: SearchItem[]; initial: BoardInitial;
-  aiOn: boolean; agent: string; lastAgent: { id: string; text: string; link?: string | null } | null;
+  aiOn: boolean; agent: string; lastAgent: { id: string; text: string; at?: string; link?: string | null } | null;
   archive: { done: ArchRow[]; trash: ArchRow[]; trashDays: number };
 };
 type LayoutSnap = { items: { id: string; x: number; y: number }[]; groups: { id: string; x: number; y: number; w: number; h: number; auto: boolean }[] };
@@ -333,8 +333,9 @@ export function Board(p: BoardProps) {
       ) : null}
 
       {!off && p.lastAgent && !answerOff && !n && !group ? (
-        <div className="answer plain glass" role="status" aria-live="polite">
+        <div className="answer plain glass bubble" role="status" aria-live="polite">
           <div className="ans-text">{p.lastAgent.text}</div>
+          {p.lastAgent.at ? <span className="ans-t">Claude · {p.lastAgent.at}</span> : null}
           {p.lastAgent.link ? <div className="ans-acts"><a className="btn ico" href={p.lastAgent.link} target="_blank" rel="noopener" title={p.lastAgent.link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a></div> : null}
           <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans", p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button>
         </div>

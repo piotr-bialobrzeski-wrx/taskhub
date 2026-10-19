@@ -20,7 +20,7 @@ export type TaskCanvasProps = {
   queue: Queue | null;                     // wiadomości Piotra bez odpowiedzi: kto je weźmie i kiedy (karta nad dokiem, historia rozmowy)
   steps: (StepTile & { toolName: string })[];
   groups: GroupVM[]; index: SearchItem[];
-  aiOn: boolean; agent: string; lastAgent: { id: string; text: string; stepId?: string | null; link?: string | null } | null;
+  aiOn: boolean; agent: string; lastAgent: { id: string; text: string; at?: string; stepId?: string | null; link?: string | null } | null;
   focus: string | null;
   runbar: ReactNode;                       // treść paska stanu nad kanwą
   runAction?: { label: string; anchor: string } | null;   // przycisk w pasku: otwiera panel zadania i rozwija wskazaną sekcję
@@ -209,10 +209,11 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {p.questions && !n && !group ? <div className={"answer glass" + (panel ? " withpanel" : "")} aria-live="polite">{p.questions}</div> : null}
       {/* karta nad dokiem: najpierw stan kolejki wiadomości (znika sam po odpowiedzi), pod nim ostatni komunikat agenta (X zamyka tylko komunikat) */}
       {!p.questions && (p.queue || (p.lastAgent && !answerOff)) && !n && !group ? (
-        <div className={"answer plain glass" + (panel ? " withpanel" : "") + (p.queue && !(p.lastAgent && !answerOff) ? " qonly" : "")} role="status" aria-live="polite">
+        <div className={"answer plain glass" + (panel ? " withpanel" : "") + (p.queue && !(p.lastAgent && !answerOff) ? " qonly" : " bubble")} role="status" aria-live="polite">
           {p.queue ? <div className="ans-q">{p.queue.activity ? <Activity text={p.queue.activity.text} detail={p.queue.activity.detail} since={p.queue.activity.since} who={p.queue.text + " ·"} /> : <><i className="pulse" aria-hidden="true" /><span>{p.queue.text}</span></>}</div> : null}
           {p.lastAgent && !answerOff ? (<>
             <div className="ans-text">{p.lastAgent.text}</div>
+            {p.lastAgent.at ? <span className="ans-t">Claude · {p.lastAgent.at}</span> : null}
             {(p.lastAgent.stepId && byId.has(p.lastAgent.stepId)) || p.lastAgent.link ? (
               <div className="ans-acts">
                 {p.lastAgent.stepId && byId.has(p.lastAgent.stepId) ? <button className="btn" type="button" onClick={() => openStep(p.lastAgent!.stepId!)}>Otwórz krok {pad(byId.get(p.lastAgent.stepId)!.idx)}</button> : null}

@@ -1,4 +1,5 @@
 // Główna kanwa: zadania jako kafelki, kolejność z priorytetu efektywnego, grupy, archiwum (ukończone + kosz), dok czatu.
+import { fmtTime } from "@/lib/clock";
 import { requireOwner } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { bundle } from "@/lib/services";
@@ -53,7 +54,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
       index={indexFrom(b, now)} initial={{ view: initial.view, p: initial.p, t: initial.t, focus: initial.focus }}
       aiOn={providers.length > 0}
       agent={agentLabel(providers)}
-      lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text, link: acts?.link ?? null } : null}
+      lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text, at: fmtTime(lastAgent.createdAt), link: acts?.link ?? null } : null}
       archive={{
         done: doneArch.map((s) => row(s, `ukończone ${fmtDate(s.task.doneAt!)}`)),
         trash: trash.map((s) => row(s, `w koszu, zniknie za ${Math.max(1, Math.ceil((new Date(s.task.deletedAt!).getTime() + repo.TRASH_DAYS * DAY - Date.now()) / DAY))} dni`)),
