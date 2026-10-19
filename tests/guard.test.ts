@@ -40,9 +40,27 @@ describe("ochrona logowania", () => {
     expect(v.ok).toBe(false);
   });
 
+  it("limit wspólny nie blokuje prób z Polski (boty nie zablokują Piotra)", async () => {
+    for (let i = 0; i < GLOBAL_LIMIT; i++) await record("web", false, c(`10.0.1.${i}`));
+    expect((await mayTry("9.9.9.8", new Date(), "PL")).ok).toBe(true);
+    expect((await mayTry("9.9.9.8", new Date(), "US")).ok).toBe(false);
+  });
+
   it("komunikaty pod polem hasła", () => {
     expect(guardMessage("lock", "07:00")).toBe("Logowanie jest wstrzymane do 07:00 (ochrona na noc).");
     expect(guardMessage("rate", "<b>")).toBe("Za dużo nieudanych prób. Spróbuj później.");
     expect(guardMessage(undefined, undefined)).toBeNull();
+  });
+});
+
+describe("raport bezpieczeństwa", () => {
+  it("zbiera tokeny, mostki i próby logowania bez sekretów", async () => {
+    const { securityReport } = await import("@/lib/security");
+    const { ensureOwner } = await import("@/lib/repo");
+    const o = await ensureOwner();
+    await record("web", false, c("5.5.5.5"));
+    const r = await securityReport(o.id);
+    expect(r.logins.some((l) => l.ip === "5.5.5.5" && l.ok === false)).toBe(true);
+    expect(JSON.stringify(r)).not.toMatch(/token_hash|secret_hash/);
   });
 });

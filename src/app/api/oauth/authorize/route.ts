@@ -20,7 +20,7 @@ export async function POST(req: Request) {
   if (fd.get("decision") === "deny") return back(303, redirectWith(r.redirect_uri, { error: "access_denied", state: r.state }));
   if (!(await isSignedIn())) {
     const c = await client();
-    const v = await mayTry(c.ip);
+    const v = await mayTry(c.ip, new Date(), c.country);
     if (!v.ok) { query.set("e", v.reason); query.set("t", hhmm(v.until)); return back(303, `/oauth/authorize?${query}`); }
     const ok = checkPassword(String(fd.get("password") ?? ""));
     await record("oauth", ok, c);

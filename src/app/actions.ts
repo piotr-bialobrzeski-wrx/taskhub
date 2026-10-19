@@ -28,7 +28,7 @@ function refresh(taskId?: string | null) {
 // ---------- logowanie ----------
 export async function login(fd: FormData) {
   const c = await client();
-  const v = await mayTry(c.ip);
+  const v = await mayTry(c.ip, new Date(), c.country);
   if (!v.ok) redirect(`/login?e=${v.reason}&t=${encodeURIComponent(hhmm(v.until))}`);
   const ok = checkPassword(str(fd, "password"));
   await record("web", ok, c);

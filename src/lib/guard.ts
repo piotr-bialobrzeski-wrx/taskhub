@@ -1,11 +1,11 @@
 // Ochrona logowania: zapis każdej próby hasła (IP, przeglądarka, kraj z Vercela), limit nieudanych prób i nocna blokada.
-// Nieudane próby z jednego IP: 5 na 15 min. Wszystkie nieudane: 30 na godzinę (rozproszone zgadywanie z wielu IP).
+// Nieudane próby z jednego IP: 5 na 15 min. Wszystkie nieudane: 30 na godzinę (rozproszone zgadywanie z wielu IP), poza Polską.
 // Blokada nocna (LOCK_UNTIL): do tej chwili nikt nie zaloguje się hasłem, nawet poprawnym; tokeny konektorów i mostka działają dalej.
 import { headers } from "next/headers";
 import { sql } from "./db";
 
 export const IP_LIMIT = 5, IP_WINDOW_MIN = 15;
-export const GLOBAL_LIMIT = 30, GLOBAL_WINDOW_MIN = 60;
+export const GLOBAL_LIMIT = 30, GLOBAL_WINDOW_MIN = 60, HOME_COUNTRY = "PL";
 // nocna blokada na prośbę Piotra (2026-10-19 22:07 UTC) do 07:00 czasu warszawskiego; TASKHUB_LOCK_UNTIL nadpisuje (pusty = brak)
 const DEFAULT_LOCK_UNTIL = "2026-10-20T05:00:00Z";
 
@@ -26,12 +26,15 @@ export async function client() {
 }
 
 // czy wolno teraz sprawdzić hasło (przed porównaniem, żeby zgadujący nie dostawał odpowiedzi)
-export async function mayTry(ip: string | null, now = new Date()): Promise<Verdict> {
+// Limit wspólny nie dotyczy prób z Polski: inaczej boty z dowolnego miejsca mogłyby trwale zablokować Piotrowi logowanie.
+export async function mayTry(ip: string | null, now = new Date(), country: string | null = null): Promise<Verdict> {
   const lock = lockUntil(now);
   if (lock) return { ok: false, reason: "lock", until: lock };
-  const [g] = await sql()`select count(*)::int as n, min(at) as first from login_events
-    where not ok and at > ${new Date(now.getTime() - GLOBAL_WINDOW_MIN * 60_000)}`;
-  if ((g.n as number) >= GLOBAL_LIMIT) return { ok: false, reason: "rate", until: new Date(new Date(g.first as string).getTime() + GLOBAL_WINDOW_MIN * 60_000) };
+  if (country !== HOME_COUNTRY) {
+    const [g] = await sql()`select count(*)::int as n, min(at) as first from login_events
+      where not ok and at > ${new Date(now.getTime() - GLOBAL_WINDOW_MIN * 60_000)}`;
+    if ((g.n as number) >= GLOBAL_LIMIT) return { ok: false, reason: "rate", until: new Date(new Date(g.first as string).getTime() + GLOBAL_WINDOW_MIN * 60_000) };
+  }
   if (ip) {
     const [r] = await sql()`select count(*)::int as n, min(at) as first from login_events
       where not ok and ip = ${ip} and at > ${new Date(now.getTime() - IP_WINDOW_MIN * 60_000)}`;
