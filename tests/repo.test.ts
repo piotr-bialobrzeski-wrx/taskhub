@@ -256,4 +256,23 @@ describe.skipIf(!DB)("repo", async () => {
     expect(s.doneAt).toBeNull();
   });
 
+  it("żywa kartka: odpowiedź na pytanie z kartki zwraca pytanie, zmiana kartki zostawia poprzednią wersję do cofnięcia", async () => {
+    const t = await repo.createTask(owner, { title: "Kartka", steps: [{ title: "Zdecyduj", tool: "manual" }] });
+    const sid = t.steps[0].id;
+    const v1 = [{ type: "question" as const, text: "Kto?", options: [{ label: "A" }, { label: "B" }] }];
+    await repo.updateStep(sid, { blocks: v1 });
+    expect((await repo.getTask(owner, t.id))!.steps[0].hasPrevBlocks).toBe(false);
+    expect(await repo.answerBlockQuestion(sid, 0, "A, ale inaczej")).toBe("Kto?");
+    expect(await repo.answerBlockQuestion(sid, 5, "x")).toBeNull();
+    const v2 = [{ type: "text" as const, title: "Zmienione po Twojej odpowiedzi", body: "Dopisałem wyjątek." }];
+    await repo.updateStep(sid, { blocks: v2 });
+    let s = (await repo.getTask(owner, t.id))!.steps[0];
+    expect(s.hasPrevBlocks).toBe(true);
+    expect(s.blocks?.[0]).toMatchObject({ type: "text" });
+    expect(await repo.restorePrevBlocks(sid)).toBe(true);
+    s = (await repo.getTask(owner, t.id))!.steps[0];
+    expect(s.blocks?.[0]).toMatchObject({ type: "question", answer: "A, ale inaczej" });   // cofnięcie przywraca wersję z odpowiedzią
+    await repo.restorePrevBlocks(sid);
+    expect((await repo.getTask(owner, t.id))!.steps[0].blocks?.[0]).toMatchObject({ type: "text" });   // drugie cofnięcie wraca do zmiany
+  });
 });

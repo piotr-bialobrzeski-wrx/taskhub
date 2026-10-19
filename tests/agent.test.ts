@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Ai, AiError } from "@/lib/ai";
 import { FakeProvider, project, rule, step, task } from "./helpers";
 import { handoffPrompt } from "@/lib/agent/handoff";
-import { contextText, draftsText, procedureMatches, rulesText } from "@/lib/agent/context";
+import { cardText, contextText, draftsText, procedureMatches, rulesText } from "@/lib/agent/context";
 import { z } from "zod";
 import type { Connection } from "@/lib/schema";
 
@@ -189,5 +189,23 @@ describe("get_task: szkice kroków w pełnej treści", () => {
     expect(out).toContain("SZKIC KROKU d „D” (wysłany)");
     expect(out).not.toContain("SZKIC KROKU e");
     expect(draftsText([{ id: "z", title: "Z", status: "todo", blocks: null as never }])).toBe("");
+  });
+});
+
+describe("get_task: kartka niezrobionego kroku", () => {
+  it("klocki w kolejności z numerami, odpowiedź Piotra na pytanie widoczna, szkic tylko jako odnośnik; zrobione kroki pominięte", () => {
+    const out = cardText([
+      { id: "s1", title: "Wybierz strategię", status: "todo", blocks: [
+        { type: "table", title: "Poziomy", columns: ["Poziom", "Model"], rows: [["Strategia", "Opus"]] },
+        { type: "question", text: "Kto nadaje poziom?", options: [{ label: "Agent" }, { label: "Reguły" }], answer: "Agent, ale z wyjątkiem" },
+        { type: "draft", target: { app: "slack", action: "send" }, body: "x", status: "proposed" },
+      ] },
+      { id: "s2", title: "Zrobiony", status: "done", blocks: [{ type: "text", body: "stare" }] },
+    ]);
+    expect(out).toContain("KARTKA KROKU s1 „Wybierz strategię”:");
+    expect(out).toContain("[0] table „Poziomy” (Poziom | Model):\n  Strategia | Opus");
+    expect(out).toContain("[1] question: Kto nadaje poziom? | opcje: Agent / Reguły | ODPOWIEDŹ PIOTRA: Agent, ale z wyjątkiem");
+    expect(out).toContain("[2] draft (pełna treść w SZKIC KROKU)");
+    expect(out).not.toContain("Zrobiony");
   });
 });

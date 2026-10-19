@@ -195,7 +195,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     tool: r.tool as string, status: r.status as Step["status"], prevStatus: (r.prevStatus as string) ?? null, needsApproval: !!r.needsApproval,
     estMin: Number(r.estMin), spentSec: Number(r.spentSec), spentManual: !!r.spentManual, link: (r.link as string) ?? null,
     handoffAt: iso(r.handoffAt), doneAt: iso(r.doneAt), report: (r.report as string) ?? null, output: (r.output as string) ?? "",
-    review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), logged: !!r.logged,
+    review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), hasPrevBlocks: r.blocksPrev != null, logged: !!r.logged,
     pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, connectionId: (r.connectionId as string) ?? null,
   };
 }
@@ -325,7 +325,12 @@ export async function updateStep(id: string, patch: StepPatch): Promise<void> {
   if (patch.report !== undefined) p.report = patch.report;
   if (patch.output !== undefined) p.output = patch.output;
   if (patch.review !== undefined) p.review = patch.review === null ? null : sql().json(patch.review as never);
-  if (patch.blocks !== undefined) { p.blocks = patch.blocks === null ? null : sql().json(patch.blocks); p.blocks_at = patch.blocks === null ? null : new Date(); }
+  if (patch.blocks !== undefined) {
+    // poprzednia wersja kartki zostaje do cofnięcia; zapis tej samej treści jej nie nadpisuje
+    const [cur] = await sql()`select blocks from steps where id = ${id}`;
+    if (cur?.blocks && JSON.stringify(cur.blocks) !== JSON.stringify(patch.blocks)) p.blocks_prev = sql().json(cur.blocks as never);
+    p.blocks = patch.blocks === null ? null : sql().json(patch.blocks); p.blocks_at = patch.blocks === null ? null : new Date();
+  }
   if (patch.pos !== undefined) p.pos = patch.pos === null ? null : sql().json(patch.pos);
   if (patch.position !== undefined) p.position = patch.position;
   if (patch.logged !== undefined) p.logged = patch.logged;
@@ -760,10 +765,17 @@ export async function markQuestionsSeen(ownerId: string, ids: string[]): Promise
 export async function deleteQuestion(ownerId: string, id: string): Promise<void> { await sql()`delete from questions where id = ${id} and owner_id = ${ownerId}`; }
 
 // odpowiedź na blok "question" w panelu kroku (agent wbudowany albo konektor ułożył pytanie w blokach)
-export async function answerBlockQuestion(stepId: string, index: number, answer: string): Promise<void> {
+// odpowiedź na pytanie z kartki; zwraca treść pytania (null = nie ma takiego pytania), żeby odpowiedź poszła też do agenta
+export async function answerBlockQuestion(stepId: string, index: number, answer: string): Promise<string | null> {
   const [r] = await sql()`select blocks from steps where id = ${stepId}`;
-  const p = r?.blocks ? Blocks.safeParse(r.blocks) : null; if (!p || !p.success) return;
-  const b = p.data[index]; if (!b || b.type !== "question") return;
+  const p = r?.blocks ? Blocks.safeParse(r.blocks) : null; if (!p || !p.success) return null;
+  const b = p.data[index]; if (!b || b.type !== "question") return null;
   b.answer = answer.slice(0, 2000);
   await sql()`update steps set blocks = ${sql().json(p.data as never)} where id = ${stepId}`;
+  return b.text;
+}
+// cofnięcie ostatniej zmiany kartki: poprzednia i obecna wersja zamieniają się miejscami (drugie cofnięcie przywraca zmianę)
+export async function restorePrevBlocks(stepId: string): Promise<boolean> {
+  const r = await sql()`update steps set blocks = blocks_prev, blocks_prev = blocks, blocks_at = now() where id = ${stepId} and blocks_prev is not null returning id`;
+  return r.length > 0;
 }

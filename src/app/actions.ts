@@ -60,7 +60,7 @@ export async function chat(fd: FormData) {
   let goTo: string | null = null;
   if (!ai.enabled) {
     // bez klucza modelu: na kanwie tekst staje się zadaniem, w zadaniu zostaje jako notatka rozmowy; pliki trafiają do zadania
-    await repo.addChat(o.id, taskId, "user", text + (typed && files.length ? ` (załączniki: ${files.map((f) => f.name).join(", ")})` : ""));
+    await repo.addChat(o.id, taskId, "user", text + (typed && files.length ? ` (załączniki: ${files.map((f) => f.name).join(", ")})` : ""), stepId ? { stepId } : undefined);
     // komunikaty mówią, co z tego ma Piotr, nie jak działa mechanizm
     // w zadaniu wiadomość czeka w kolejce: jej stan (kto ją weźmie i kiedy, w pracy, odpowiedziano) liczy się na bieżąco pod dymkiem i na karcie nad dokiem,
     // bez dopisywania do rozmowy zapowiedzi „przeczyta za chwilę” przy każdej wiadomości
@@ -484,7 +484,16 @@ export async function answerBlockForm(fd: FormData) {
   const taskId = str(fd, "taskId"), stepId = str(fd, "stepId");
   await stepOf(o.id, taskId, stepId);
   const answer = str(fd, "answer") || str(fd, "option"); if (!answer) return;
-  await repo.answerBlockQuestion(stepId, num(fd, "index", 0), answer);
+  const q = await repo.answerBlockQuestion(stepId, num(fd, "index", 0), answer);
+  // kartka żyje, dopóki krok nie jest zrobiony: odpowiedź idzie do agenta jak wiadomość przy kroku, a on poprawia kartkę albo mówi, czemu nie
+  if (q) await repo.addChat(o.id, taskId, "user", `Odpowiedź na pytanie z kartki „${q}”: ${answer}`, { stepId });
+  refresh(taskId);
+}
+export async function restoreBlocksForm(fd: FormData) {
+  const o = await requireOwner();
+  const taskId = str(fd, "taskId"), stepId = str(fd, "stepId");
+  await stepOf(o.id, taskId, stepId);
+  await repo.restorePrevBlocks(stepId);
   refresh(taskId);
 }
 

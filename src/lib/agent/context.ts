@@ -126,6 +126,36 @@ INNE ZADANIA NA GŁÓWNEJ KANWIE (${others.length}):
 ${others.slice(0, 40).map(brief).join("\n") || "(brak)"}${notesText(c.tasks)}`;
 }
 
+// get_task: kartka każdego niezrobionego kroku (bez szkiców, te idą w draftsText), żeby agent mógł ją poprawić po odpowiedzi Piotra.
+// Klocki w kolejności z kartki, numerowane jak w set_blocks; zmiany zapisuje się pełnym zestawem klocków.
+export function cardText(steps: Pick<Step, "id" | "title" | "status" | "blocks">[], max = 6000): string {
+  const one = (b: NonNullable<Step["blocks"]>[number], i: number): string => {
+    const h = `[${i}] ${b.type}${"title" in b && b.title ? ` „${b.title}”` : ""}`;
+    switch (b.type) {
+      case "text": return `${h}: ${b.body}`;
+      case "facts": return `${h}: ${b.facts.map((f) => `${f.label} = ${f.value}`).join("; ")}`;
+      case "table": return `${h} (${b.columns.join(" | ")}):\n${b.rows.map((r) => `  ${r.join(" | ")}`).join("\n")}`;
+      case "list": return `${h}:\n${b.items.map((x) => `  - ${x.title}${x.note ? `: ${x.note}` : ""}${x.done ? " (zrobione)" : ""}`).join("\n")}`;
+      case "question": return `${h}: ${b.text} | opcje: ${b.options.map((o) => o.label).join(" / ")}${b.answer ? ` | ODPOWIEDŹ PIOTRA: ${b.answer}` : " | bez odpowiedzi"}`;
+      case "free": return `${h}:\n${b.markdown}`;
+      case "thread": return `${h}: ${b.messages.map((m) => `${m.author}: ${m.text}`).join(" / ")}`;
+      case "mail": return `${h}: ${b.messages.map((m) => `${m.from}: ${m.text}`).join(" / ")}`;
+      case "comment": return `${h}: ${b.author}: ${b.text}`;
+      case "link": return `${h}: ${b.links.map((l) => l.title ?? l.url).join("; ")}`;
+      case "media": return `${h}: ${b.items.map((m) => m.caption ?? m.name ?? m.url).join("; ")}`;
+      case "changes": return `${h}: ${b.summary ?? ""} (${b.files.length} plików)`;
+      default: return h;
+    }
+  };
+  const out: string[] = [];
+  for (const s of steps) {
+    if (s.status === "done" || !s.blocks?.length) continue;
+    const body = s.blocks.map((b, i) => (b.type === "draft" ? `[${i}] draft (pełna treść w SZKIC KROKU)` : one(b, i))).join("\n");
+    out.push(`KARTKA KROKU ${s.id} „${s.title}”:\n${body.length > max ? body.slice(0, max) + "…" : body}`);
+  }
+  return out.join("\n");
+}
+
 // get_task: szkice kroków w pełnym brzmieniu. Zatwierdzony szkic (ZATWIERDZONE SZKICE DO WYSŁANIA w list_work) agent wysyła dokładnie w tej treści,
 // więc body, temat, pola i wiersze idą bez skracania; odłożony szkic (krok wrócił do todo) i nieaktualny są oznaczone, żeby ich nie wysłać.
 export function draftsText(steps: Pick<Step, "id" | "title" | "status" | "blocks">[]): string {

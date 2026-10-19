@@ -184,6 +184,7 @@ export const Step = z.object({
   review: z.record(z.string(), z.unknown()).nullable(),
   blocks: Blocks.nullable(),
   blocksAt: z.string().nullable(),
+  hasPrevBlocks: z.boolean().optional(),   // jest poprzednia wersja kartki (cofnięcie zmiany agenta)
   logged: z.boolean(),
   pos: z.object({ x: z.number(), y: z.number() }).nullable(),
   dependsOn: z.array(z.string()),

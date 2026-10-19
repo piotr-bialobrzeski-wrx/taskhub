@@ -632,6 +632,9 @@ details.tech > summary .k { font-weight: 600; }
 .zone { display: flex; flex-direction: column; gap: var(--s-3); min-width: 0; }
 .zone > .lbl { margin: 0; }
 .lbl .n { font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 11.5px; margin-left: var(--s-2); }
+.zone.src .lbl { display: flex; align-items: center; }
+.lbl .undo { margin-left: auto; }
+.lbl .undo .btn { text-transform: none; letter-spacing: 0; padding: 4px 10px; font-size: 11.5px; }
 @container (min-width: 900px) {
   .zones.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-5); }
   .zones.two > .zone.src { grid-column: 1; grid-row: 1; }   /* w DOM „Teraz” jest pierwsze (wąski panel: nad materiałami), w szerokim panelu idzie na prawo */

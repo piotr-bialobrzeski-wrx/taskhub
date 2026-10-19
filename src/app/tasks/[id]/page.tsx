@@ -31,7 +31,7 @@ import { Icon, plural } from "@/components/canvas/ui";
 import { InlineDate, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
 import { projColor } from "@/components/canvas/ui";
 import { PublishCard, cardModeOf } from "@/components/PublishCard";
-import { addSpent, answerQuestionForm, backToTodo, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, removeStep, reopen, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
+import { addSpent, answerQuestionForm, restoreBlocksForm, backToTodo, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, removeStep, reopen, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -267,8 +267,12 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const brief = <InlineText taskId={t.id} stepId={s.id} field="detail" value={s.detail} as="p" placeholder="Dodaj szczegóły: co dokładnie, gdzie, dla kogo…" />;
   const co = folds.brief ? <div className="zone"><div className="lbl">Co</div>{brief}</div>
     : <details className="fold"><summary><span className="k">Co</span><span className="t">{s.detail.trim() || "bez szczegółów"}</span><Icon k="chev" size={10} sw={2.2} /></summary>{brief}</details>;
+  // kartka zmieniona przez agenta po odpowiedzi Piotra: jedno kliknięcie przywraca poprzednią wersję (drugie wraca do zmienionej)
+  const undo = s.hasPrevBlocks && !done ? (
+    <form action={restoreBlocksForm} className="undo"><input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} /><button type="submit" className="btn sm">Cofnij zmianę kartki</button></form>
+  ) : null;
   const skad = material.length ? (folds.material
-    ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span></div><BlocksView blocks={material} form={form} /></div>
+    ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span>{undo}</div><BlocksView blocks={material} form={form} /></div>
     : <details className="fold"><summary><span className="k">Skąd</span><span className="t">{kinds}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView blocks={material} form={form} /></details>) : null;
   return (
     <>
