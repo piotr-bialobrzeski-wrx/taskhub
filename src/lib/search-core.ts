@@ -34,10 +34,11 @@ export const tokens = (q: string) => norm(q).split(/\s+/).filter(Boolean);
 export const matches = (hay: string, words: string[]) => words.every((w) => hay.includes(w));
 
 // ukończone przed dzisiejszą północą idą do archiwum; dzisiejsze zostają na kanwie
+// ukończone zadanie schodzi z kanwy do archiwum po 5 minutach (chwila na „jednak wracam”); nowy niezrobiony krok albo cofnięcie kroku wyciąga je z powrotem
+export const ARCHIVE_AFTER_MS = 5 * 60_000;
 export function isArchivedDone(doneAt: string | null, now = Date.now()): boolean {
   if (!doneAt) return false;
-  const start = new Date(now); start.setHours(0, 0, 0, 0);
-  return new Date(doneAt).getTime() < start.getTime();
+  return now - new Date(doneAt).getTime() >= ARCHIVE_AFTER_MS;
 }
 
 export type Section = { kind: SearchKind; items: SearchItem[]; more: number };

@@ -10,7 +10,7 @@ import { remainEst, taskSpent } from "@/lib/time";
 import type { ProjTask } from "@/components/canvas/ui";
 import { Board, type ArchRow, type BoardInitial } from "@/components/canvas/Board";
 import { agentLabel, indexFrom } from "@/lib/search";
-import { isArchivedDone } from "@/lib/search-core";
+import { ARCHIVE_AFTER_MS, isArchivedDone } from "@/lib/search-core";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
@@ -28,6 +28,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
   const live = sortByPriority(b.scored.filter((s) => !s.task.deletedAt));
   // ukończone zostają na kanwie do końca dnia, potem idą do archiwum (ta sama reguła co w indeksie szukajki)
   const onBoard = live.filter((s) => !isArchivedDone(s.task.doneAt, now));
+  const archiveAt = onBoard.reduce<number | null>((m, s) => { if (!s.task.doneAt) return m; const at = new Date(s.task.doneAt).getTime() + ARCHIVE_AFTER_MS; return m == null || at < m ? at : m; }, null);
   const doneArch = live.filter((s) => isArchivedDone(s.task.doneAt, now)).sort((a, b2) => (b2.task.doneAt ?? "").localeCompare(a.task.doneAt ?? ""));
   // kosz nie jest punktowany (scoreAll pomija usunięte), więc priorytet = ustawiony
   const trash = b.tasks.filter((t) => t.deletedAt).sort((a, b2) => (b2.deletedAt ?? "").localeCompare(a.deletedAt ?? ""))
@@ -42,7 +43,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
 
   return (
     <>
-    <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run || pending.size > 0} />
+    <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run || pending.size > 0} refreshAt={archiveAt} />
     <Board
       tasks={onBoard.map((s) => taskTile(s, all, qCount.get(s.task.id) ?? 0, run, pending.get(s.task.id) ?? 0))}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}

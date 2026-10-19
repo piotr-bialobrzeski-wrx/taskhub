@@ -6,8 +6,14 @@ import { useRouter } from "next/navigation";
 
 const FAST = 3000, SLOW = 15000;
 
-export function LivePoll({ taskId, liveKey, active }: { taskId: string | null; liveKey: string; active: boolean }) {
+export function LivePoll({ taskId, liveKey, active, refreshAt = null }: { taskId: string | null; liveKey: string; active: boolean; refreshAt?: number | null }) {
   const router = useRouter();
+  // o tej chwili coś na stronie zmienia się samo z upływem czasu (ukończone zadanie schodzi do archiwum): odśwież, choć w bazie nic nowego
+  useEffect(() => {
+    if (!refreshAt) return;
+    const t = setTimeout(() => router.refresh(), Math.max(1000, refreshAt - Date.now() + 1000));
+    return () => clearTimeout(t);
+  }, [refreshAt, router]);
   const key = useRef(liveKey);
   useEffect(() => { key.current = liveKey; }, [liveKey]);
   useEffect(() => {
