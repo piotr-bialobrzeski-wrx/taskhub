@@ -263,7 +263,7 @@ export type Connection = z.infer<typeof Connection>;
 const APP_ALIASES: [RegExp, string][] = [
   [/slack/i, "slack"], [/gmail|\bmail|poczta|outlook/i, "gmail"], [/clickup/i, "clickup"], [/calendar|kalendarz/i, "calendar"],
   [/figma/i, "figma"], [/github/i, "github"], [/notion/i, "notion"], [/hubspot/i, "hubspot"], [/clockify/i, "clockify"],
-  [/fireflies/i, "fireflies"], [/drive/i, "drive"], [/linkedin/i, "linkedin"], [/jira/i, "jira"], [/task[-_ ]?hub/i, "taskhub"],
+  [/fireflies/i, "fireflies"], [/drive/i, "drive"], [/linkedin/i, "linkedin"], [/jira/i, "jira"], [/task[-_ ]?hub/i, "taskhub"], [/google|workspace/i, "google"],
 ];
 export const appOfLabel = (label: string) => APP_ALIASES.find(([re]) => re.test(label))?.[1] ?? label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
 

@@ -32,6 +32,14 @@ describe.skipIf(!DB)("repo", async () => {
     await repo.updateConnection(owner, bgmail.id, { label: "Gmail firmowy", account: "piotr@firma-x.pl" });   // etykieta zmieniona ręcznie zostaje, mostek dopasowuje po nazwie serwera
     const r2 = await repo.upsertBridgeConnections(owner, "MacBook", [{ name: "gmail", ok: true }]);
     expect(r2).toEqual({ added: 0, updated: 1, off: 1 });
+    // konektory z konta Claude („claude.ai Gmail”) i „✔ Connected” ze starej aplikacji (ok: false); firma z nazwy „slack-firma”
+    const r3 = await repo.upsertBridgeConnections(owner, "MacBook", [{ name: "gmail", ok: true }, { name: "claude.ai Google Calendar", url: "https://calendarmcp.googleapis.com/mcp/v1", ok: false, status: "✔ Connected" }, { name: "claude.ai Task Hub", ok: true }, { name: "slack-firma", command: "/x/slack.sh", ok: false, status: "✔ Connected" }]);
+    expect(r3).toEqual({ added: 2, updated: 1, off: 0 });
+    const after = await repo.listConnections(owner);
+    expect(after.find((x) => x.label === "Google Calendar")).toMatchObject({ app: "calendar", provider: "claude", state: "active" });
+    expect(after.find((x) => x.label === "slack-firma")).toMatchObject({ companyId: c.id, provider: "claude-code", state: "active" });
+    expect(after.some((x) => x.app === "taskhub")).toBe(false);
+    await repo.upsertBridgeConnections(owner, "MacBook", [{ name: "gmail", ok: true }]);
     expect((await repo.listConnections(owner)).find((x) => x.id === bgmail.id)).toMatchObject({ label: "Gmail firmowy", account: "piotr@firma-x.pl", state: "active" });
     list = await repo.listConnections(owner);
     expect(list.find((x) => x.id === bslack.id)?.state).toBe("off");

@@ -141,33 +141,47 @@ export async function findConnection(ownerId: string, ref: string): Promise<Conn
 }
 // zgłoszenie mostka: lista serwerów MCP, które widzi Claude Code na tym komputerze. Wpisy tego komputera, których nie ma na liście, gasną (off);
 // serwer bez połączenia = wygasły; nowe wpisy dostają sferę i firmę z istniejącego wpisu o tej samej nazwie (ręcznie przypisanych nie nadpisujemy).
+// Konektory z konta Claude Claude Code wypisuje jako „claude.ai Gmail”; firma z nazwy: „slack-pirxey” należy do firmy, której nazwa ma słowo „Pirxey”.
 export type BridgeServer = { name: string; url?: string | null; command?: string | null; transport?: string | null; ok: boolean; status?: string | null };
+const CLAUDE_AI = /^claude\.ai\s+/i;
+// Claude Code pisze „✔ Connected” (starsza aplikacja na Macu znała tylko ✓), więc stan czytamy też z napisu
+export const bridgeServerOk = (s: BridgeServer) => s.ok || /^[^a-z]*connected\b/i.test(s.status?.trim() ?? "");
+export const companyOfLabel = (label: string, companies: Company[]): Company | null => {
+  const l = label.toLowerCase();
+  return companies.find((c) => !c.endedAt && c.name.toLowerCase().split(/[^\p{L}\p{N}]+/u).some((w) => w.length >= 4 && l.includes(w))) ?? null;
+};
 export async function upsertBridgeConnections(ownerId: string, host: string, servers: BridgeServer[]): Promise<{ added: number; updated: number; off: number }> {
   const h = host.trim().slice(0, 80) || "komputer";
-  const keep = servers.filter((s) => s.name && !/^task[-_ ]?hub$/i.test(s.name.trim()));
+  const keep = servers.filter((s) => s.name && !/^task[-_ ]?hub$/i.test(s.name.trim().replace(CLAUDE_AI, "")));
   const existing = (await sql()`select * from connections where owner_id = ${ownerId} and source = 'bridge' and host = ${h}`).map(rowToConnection);
   const all = (await sql()`select * from connections where owner_id = ${ownerId}`).map(rowToConnection);
+  const companies = await listCompanies(ownerId);
   let added = 0, updated = 0;
   for (const srv of keep) {
-    const label = srv.name.trim().slice(0, 80);
-    const state: Connection["state"] = srv.ok ? "active" : "expired";
+    const server = srv.name.trim().slice(0, 80), label = server.replace(CLAUDE_AI, "");
+    const state: Connection["state"] = bridgeServerOk(srv) ? "active" : "expired";
+    const provider: Connection["provider"] = CLAUDE_AI.test(server) ? "claude" : "claude-code";
+    const named = companyOfLabel(label, companies);
     const url = (srv.url ?? srv.command ?? null)?.trim().slice(0, 500) || null;
-    const meta = { server: label, transport: srv.transport ?? null, status: srv.status ?? null };
+    const meta = { server, transport: srv.transport ?? null, status: srv.status ?? null };
     // dopasowanie po nazwie serwera zapamiętanej w meta (etykietę Piotr może zmienić), awaryjnie po etykiecie
-    const mine = existing.find((c) => String(c.meta.server ?? c.label).toLowerCase() === label.toLowerCase());
+    const mine = existing.find((c) => String(c.meta.server ?? c.label).toLowerCase() === server.toLowerCase());
     if (mine) {
-      await sql()`update connections set state = ${state}, url = ${url}, meta = meta || ${sql().json(meta as never)}, seen_at = now(), updated_at = now() where id = ${mine.id}`;
+      // wpis bez firmy dostaje firmę z nazwy; firmy wybranej ręcznie nie ruszamy
+      const fill = !mine.companyId && named ? named : null;
+      await sql()`update connections set state = ${state}, url = ${url}, meta = meta || ${sql().json(meta as never)},
+        company_id = coalesce(company_id, ${fill?.id ?? null}), sphere = ${fill ? fill.sphere : mine.sphere}, seen_at = now(), updated_at = now() where id = ${mine.id}`;
       updated++;
     } else {
       // ten sam konektor znany skądinąd (ręczny wpis o tej nazwie albo inny komputer) podpowiada konto, firmę i sferę; sama aplikacja to za mało (Gmail firmowy i prywatny)
       const twin = all.find((c) => c.label.toLowerCase() === label.toLowerCase() || String(c.meta.server ?? "").toLowerCase() === label.toLowerCase());
       await sql()`insert into connections (owner_id, app, label, account, company_id, sphere, provider, kind, state, source, host, url, meta, seen_at)
-        values (${ownerId}, ${appOfLabel(label)}, ${label}, ${twin?.account ?? null}, ${twin?.companyId ?? null}, ${twin?.sphere ?? "work"}, 'claude-code', 'mcp', ${state}, 'bridge', ${h}, ${url}, ${sql().json(meta as never)}, now())
+        values (${ownerId}, ${appOfLabel(label)}, ${label}, ${twin?.account ?? null}, ${twin?.companyId ?? named?.id ?? null}, ${twin?.sphere ?? named?.sphere ?? "work"}, ${provider}, 'mcp', ${state}, 'bridge', ${h}, ${url}, ${sql().json(meta as never)}, now())
         on conflict (owner_id, host, lower(label)) where source = 'bridge' do update set state = excluded.state, url = excluded.url, meta = connections.meta || excluded.meta, seen_at = now(), updated_at = now()`;
       added++;
     }
   }
-  const names = new Set(keep.map((s) => s.name.trim().toLowerCase()));
+  const names = new Set(keep.map((s) => s.name.trim().slice(0, 80).toLowerCase()));
   const gone = existing.filter((c) => !names.has(String(c.meta.server ?? c.label).toLowerCase()) && c.state !== "off");
   if (gone.length) await sql()`update connections set state = 'off', updated_at = now() where id in ${sql()(gone.map((c) => c.id))}`;
   return { added, updated, off: gone.length };

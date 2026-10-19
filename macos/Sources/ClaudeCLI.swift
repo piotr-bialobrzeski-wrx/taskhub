@@ -80,7 +80,8 @@ enum ClaudeCLI {
             let line = raw.trimmingCharacters(in: .whitespaces)
             guard let colon = line.firstIndex(of: ":") else { continue }
             let name = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty, !name.contains(" "), !name.hasPrefix("http") else { continue }   // „Checking MCP server health...” i podobne odpadają
+            // konektory z konta Claude mają nazwę ze spacją („claude.ai Gmail”); inne nazwy ze spacją to komunikaty („Checking MCP server health...”)
+            guard !name.isEmpty, !name.contains(" ") || name.hasPrefix("claude.ai "), !name.hasPrefix("http") else { continue }
             var rest = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
             var status = ""
             if let dash = rest.range(of: " - ", options: .backwards) {
@@ -93,8 +94,9 @@ enum ClaudeCLI {
                 rest = String(rest[..<open.lowerBound]).trimmingCharacters(in: .whitespaces)
             }
             guard !rest.isEmpty else { continue }
-            let ok = status.contains("✓") || status.lowercased().hasPrefix("connected")
-            let clean = status.replacingOccurrences(of: "✓", with: "").replacingOccurrences(of: "✗", with: "").replacingOccurrences(of: "⚠", with: "").trimmingCharacters(in: .whitespaces)
+            // znaczek bywa różny (✓, ✔, ✗, !, ⚠), więc stan czytamy z napisu po nim
+            let clean = status.trimmingCharacters(in: CharacterSet.letters.inverted.union(.whitespaces))
+            let ok = clean.lowercased().hasPrefix("connected")
             if transport.isEmpty { transport = rest.hasPrefix("http") ? "http" : "stdio" }
             out.append(McpServer(name: name, target: rest, transport: transport, ok: ok, status: clean))
         }

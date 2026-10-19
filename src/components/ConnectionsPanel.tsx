@@ -61,7 +61,7 @@ export function ConnectionsPanel({ connections, companies }: { connections: Conn
 
   const row = (c: Connection) => {
     const w = whereOf(c), bridge = c.source === "bridge";
-    const sub = [appName(c.app), bridge ? `${w.label}${c.host ? ` (${c.host})` : ""}` : w.label, bridge ? ago(c.seenAt) : null, c.kind === "ical" || c.kind === "imap" ? null : c.url?.replace(/^https?:\/\//, "")].filter(Boolean).join(" · ");
+    const sub = [appName(c.app), bridge && c.provider !== "claude" ? `${w.label}${c.host ? ` (${c.host})` : ""}` : w.label, bridge ? ago(c.seenAt) : null, c.kind === "ical" || c.kind === "imap" ? null : c.url?.replace(/^https?:\/\//, "")].filter(Boolean).join(" · ");
     return (
       <div key={c.id} id={"conn-" + c.id} className={"lrow arow prow conn" + (c.state === "active" ? "" : " dim")}>
         <div className="p-head">
