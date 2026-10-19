@@ -72,13 +72,19 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
     <div className="thread"><div className="msg mine rows"><div className="who">{who}</div><Table columns={d.columns ?? d.rows![0].map((_, i) => `Kolumna ${i + 1}`)} rows={d.rows!} highlightFrom={0} />{body ? <p className="sub">{body}</p> : null}</div></div>
   ) : (isPrompt || isCommit) && (d || mode !== "proposed") ? (
     <div className="thread"><div className="msg mine"><div className="who">{who}</div>{d?.subject ? <h4>{d.subject}</h4> : null}<pre className="code">{body || "Brak treści."}</pre></div></div>
+  ) : editable ? (
+    // przed decyzją: samo pole z formatowaniem, bez ramki wiadomości (dokąd poleci mówi nagłówek karty), żeby nie zagnieżdżać trzech tła w sobie
+    <div className="pub-edit">
+      {d?.subject ? <h4>{d.subject}</h4> : null}
+      <RichField key={s.id} value={body ?? ""} form={formId} onSave={saveDraftBody.bind(null, t.id, s.id)} />
+      {d?.fields?.length ? <Facts facts={d.fields} /> : null}
+    </div>
   ) : (
-    // treść w Markdown: przed decyzją pole z formatowaniem (Piotr poprawia w miejscu), po zatwierdzeniu sformatowany podgląd
+    // po zatwierdzeniu: sformatowany podgląd, jak będzie wyglądać po drugiej stronie
     <div className="thread"><div className="msg mine">
       <div className="who">{who}</div>
       {d?.subject ? <h4>{d.subject}</h4> : null}
-      {editable ? <RichField key={s.id} value={body ?? ""} form={formId} onSave={saveDraftBody.bind(null, t.id, s.id)} />
-        : body ? <Markdown text={body} /> : <p>Brak treści.</p>}
+      {body ? <Markdown text={body} /> : <p>Brak treści.</p>}
       {d?.fields?.length ? <Facts facts={d.fields} /> : null}
     </div></div>
   );
