@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE, checkPassword, isSignedIn, sessionValue } from "@/lib/auth";
 import { ensureOwner } from "@/lib/repo";
 import { checkAuthRequest, issueCode, redirectWith } from "@/lib/oauth";
+import { client, hhmm, mayTry, record } from "@/lib/guard";
 
 const back = (status: number, location: string) => new Response(null, { status, headers: { location, "cache-control": "no-store" } });
 
@@ -18,7 +19,12 @@ export async function POST(req: Request) {
 
   if (fd.get("decision") === "deny") return back(303, redirectWith(r.redirect_uri, { error: "access_denied", state: r.state }));
   if (!(await isSignedIn())) {
-    if (!checkPassword(String(fd.get("password") ?? ""))) { query.set("e", "1"); return back(303, `/oauth/authorize?${query}`); }
+    const c = await client();
+    const v = await mayTry(c.ip);
+    if (!v.ok) { query.set("e", v.reason); query.set("t", hhmm(v.until)); return back(303, `/oauth/authorize?${query}`); }
+    const ok = checkPassword(String(fd.get("password") ?? ""));
+    await record("oauth", ok, c);
+    if (!ok) { query.set("e", "1"); return back(303, `/oauth/authorize?${query}`); }
     (await cookies()).set(SESSION_COOKIE, sessionValue(), { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 90 });
   }
   const owner = await ensureOwner();

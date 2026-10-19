@@ -9,8 +9,10 @@ function secret(): string {
   if (!s || s.length < 16) throw new Error("TASKHUB_SECRET musi mieć co najmniej 16 znaków");
   return s;
 }
+// Zmiana wersji wylogowuje wszystkie urządzenia (v2: 2026-10-19, zabezpieczenie na noc po pytaniu Piotra o bezpieczeństwo).
+const SESSION_VERSION = "v2";
 export function sessionValue(): string {
-  return createHmac("sha256", secret()).update("owner:" + (process.env.TASKHUB_OWNER_EMAIL ?? "")).digest("hex");
+  return createHmac("sha256", secret()).update(`owner:${SESSION_VERSION}:` + (process.env.TASKHUB_OWNER_EMAIL ?? "")).digest("hex");
 }
 export function checkPassword(pw: string): boolean {
   const want = process.env.TASKHUB_PASSWORD ?? "";

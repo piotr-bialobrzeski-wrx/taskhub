@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SESSION_COOKIE, checkPassword, sessionValue } from "@/lib/auth";
 import { requireOwner } from "@/lib/session";
+import { client, hhmm, mayTry, record } from "@/lib/guard";
 import * as repo from "@/lib/repo";
 import { aiFor, composeFlow, finishStep, prepareStep, taskQueue } from "@/lib/services";
 import { Q, roundQ } from "@/lib/time";
@@ -26,7 +27,12 @@ function refresh(taskId?: string | null) {
 
 // ---------- logowanie ----------
 export async function login(fd: FormData) {
-  if (!checkPassword(str(fd, "password"))) redirect("/login?e=1");
+  const c = await client();
+  const v = await mayTry(c.ip);
+  if (!v.ok) redirect(`/login?e=${v.reason}&t=${encodeURIComponent(hhmm(v.until))}`);
+  const ok = checkPassword(str(fd, "password"));
+  await record("web", ok, c);
+  if (!ok) redirect("/login?e=1");
   (await cookies()).set(SESSION_COOKIE, sessionValue(), { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 90 });
   redirect("/");
 }

@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { isSignedIn } from "@/lib/auth";
 import { OAuthError, checkAuthRequest } from "@/lib/oauth";
+import { guardMessage } from "@/lib/guard";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,7 @@ export default async function Authorize({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const q: Record<string, string | undefined> = {};
   for (const k of KEYS) { const v = sp[k]; if (typeof v === "string") q[k] = v; }
-  const wrongPassword = sp.e === "1";
+  const wrongPassword = guardMessage(sp.e, sp.t);
   const signedIn = await isSignedIn();
 
   let client: { id: string; name: string } | null = null, error: string | null = null;
@@ -36,7 +37,7 @@ export default async function Authorize({ searchParams }: { searchParams: Promis
             <div className="sub">Po połączeniu będzie czytać i zmieniać Twoje zadania, kroki, fakty i zasady. Po zgodzie wrócisz na {host || "stronę klienta"}. Połączenie pojawi się w Ustawieniach, gdzie można je unieważnić.</div>
             {KEYS.map((k) => (q[k] ? <input key={k} type="hidden" name={k} value={q[k]} /> : null))}
             {signedIn ? null : <input className="in" type="password" name="password" placeholder="Hasło do Task Hub" autoFocus required />}
-            {wrongPassword ? <div className="sub" style={{ color: "var(--danger)" }}>Złe hasło.</div> : null}
+            {wrongPassword ? <div className="sub" style={{ color: "var(--danger)" }}>{wrongPassword}</div> : null}
             <div className="actions">
               <button className="pill primary" type="submit" name="decision" value="allow">Połącz</button>
               <button className="pill" type="submit" name="decision" value="deny">Odmów</button>
