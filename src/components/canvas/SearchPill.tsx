@@ -18,6 +18,8 @@ export function SearchPill({ index, screen, here, value, onChange, onPick }: Pro
   const q = value ?? inner;
   const setQ = (v: string) => { setInner(v); onChange?.(v); };
   const [open, setOpen] = useState(false);
+  const [touch, setTouch] = useState(false);   // telefon: bez podpowiedzi skrótu „/”, której i tak nie ma jak użyć
+  useEffect(() => { setTouch(window.matchMedia("(pointer: coarse)").matches); }, []);
   const ref = useRef<HTMLInputElement>(null);
   const words = useMemo(() => tokens(q), [q]);
   const secs = useMemo(() => sections(index, words, screen, here), [index, words, screen, here]);
@@ -67,7 +69,7 @@ export function SearchPill({ index, screen, here, value, onChange, onPick }: Pro
     <div className="srchw">
       <div className={"gpill glass srch" + (q ? " on" : "")} role="search">
         <Icon k="search" size={15} sw={1.8} />
-        <input ref={ref} type="text" value={q} placeholder="Szukaj… (/)" aria-label="Szukaj" autoComplete="off" spellCheck={false}
+        <input ref={ref} type="text" value={q} placeholder={touch ? "Szukaj…" : "Szukaj… (/)"} aria-label="Szukaj" autoComplete="off" spellCheck={false}
           onChange={(e) => { setQ(e.currentTarget.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
           onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); setQ(""); e.currentTarget.blur(); } else if (e.key === "Enter" && first) { e.preventDefault(); pick(first); } }} />
         {q ? <button className="icobtn sm" type="button" aria-label="Wyczyść" onClick={() => { setQ(""); ref.current?.focus(); }}><Icon k="x" size={11} sw={2.2} /></button> : null}

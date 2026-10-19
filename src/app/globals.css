@@ -826,3 +826,26 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
   .feed.withpanel { display: none; }   /* telefon: panel kroku zajmuje dół ekranu */
   .feed .fb:not(:last-child) { display: none; }   /* telefon: tylko najnowsza odpowiedź, reszta w historii rozmowy */
 }
+
+/* ---------- telefon: krok otwiera się jako szuflada od dołu (paczka 5, punkt 5) ----------
+   Widać tylko szufladę i pole czatu; kanwa, górny pasek, zoom, Kafelek/Grupa i dymki chowają się do zamknięcia kroku. */
+.dhandle { display: none; }
+.pub-h .pub-t { flex: 1 1 14ch; }   /* kropka narzędzia nie zostaje sama w linii */
+@media (max-width: 860px) {
+  .detail { top: calc(10px + env(safe-area-inset-top, 0px)); left: 0; right: 0; bottom: 0; height: auto; border-radius: 22px 22px 0 0;
+    border-bottom: 0; animation: drawer-in .22s ease-out; transition: transform .18s ease-out; }
+  .dhandle { display: block; position: absolute; z-index: 3; left: 0; right: 0; top: 0; height: 18px; touch-action: none; cursor: grab; }
+  .dhandle::after { content: ""; position: absolute; left: 50%; top: 7px; width: 40px; height: 4px; margin-left: -20px; border-radius: 99px; background: var(--line); }
+  .d-bar { padding: var(--s-6) var(--s-4) var(--s-3) var(--s-5); }
+  .d-widen { display: none; }
+  .d-body { padding: var(--s-4) var(--s-4) calc(var(--dock-h, 46px) + 40px + env(safe-area-inset-bottom, 0px)); }
+  .now { padding: var(--s-3) var(--s-4); }
+  .pub .msg { padding: var(--s-3) var(--s-4); }
+  .detail.glass { background: var(--bg); }   /* szuflada pełna, kanwa nie prześwituje */
+  .srchw { min-width: 46px; }                    /* szukajka nie zgniata się do kropki obok wstecz i zoomu */
+  .pillbar .sp { flex: 0 0 0; }                  /* resztę szerokości bierze szukajka */
+  .pillbar .crumb .lvl i { width: 9px; }
+  .srch > svg { flex: none; }
+  .app.haspanel :is(.pillbar, .mkpill, .namer, .runbar, .feed, .answer, .selbar, .zmenu) { display: none; }
+}
+@keyframes drawer-in { from { transform: translateY(40%); opacity: .4; } to { transform: none; opacity: 1; } }

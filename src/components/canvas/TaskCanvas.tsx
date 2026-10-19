@@ -99,6 +99,11 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const onGrip = (e: React.PointerEvent) => { e.preventDefault(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); grip.current = { x: e.clientX, w: dw }; setGripOn(true); };
   const onGripMove = (e: React.PointerEvent) => { const g = grip.current; if (!g) return; setGripW(clamp(g.w + (g.x - e.clientX), 360, window.innerWidth - 32)); };
   const endGrip = () => { if (!grip.current) return; grip.current = null; setGripOn(false); try { localStorage.setItem("th-dw", String(dw)); } catch { /* brak storage */ } };
+  const [pull, setPull] = useState(0);
+  const pullRef = useRef<number | null>(null);
+  const onPullDown = (e: React.PointerEvent) => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); pullRef.current = e.clientY; };
+  const onPullMove = (e: React.PointerEvent) => { if (pullRef.current != null) setPull(Math.max(0, e.clientY - pullRef.current)); };
+  const endPull = () => { if (pullRef.current == null) return; pullRef.current = null; if (pull > 110) { setPanel(null); setSel(new Set()); } setPull(0); };
   const widen = () => { const w = !wide; setWide(w); setGripW(null); try { localStorage.setItem("th-wide", w ? "1" : "0"); localStorage.removeItem("th-dw"); } catch { /* brak storage */ } };
   const cur = panel && panel !== "__task" ? byId.get(panel) ?? null : null;
   // kontekst wiadomości wynika z widoku i nie zajmuje miejsca nad polem: otwarty krok, inaczej całe zadanie (ogólny kanwas ma własny dok)
@@ -112,7 +117,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const layoutNow = () => { undoL.remember(layoutSnapshot(api.current, p.steps.map((s) => s.id), p.groups)); run(() => autoLayout(t.id), "Ułożono"); };
 
   return (
-    <div className={"app" + (panel && cramped ? " cramped" : "")} style={panel ? { ["--dw" as string]: dw + "px" } : undefined}>
+    <div className={"app" + (panel ? " haspanel" : "") + (panel && cramped ? " cramped" : "")} style={panel ? { ["--dw" as string]: dw + "px" } : undefined}>
       {view === "canvas" ? (
         <Canvas zoomKey={"task"} apiRef={api} items={items} size={STEP_SIZE} groups={groups} render={(id) => { const s = byId.get(id)!; return (
             <>
@@ -196,11 +201,13 @@ export function TaskCanvas(p: TaskCanvasProps) {
       ) : null}
 
       {panel ? (
-        <aside className="detail glass" style={{ ["--dw" as string]: dw + "px" }} aria-live="polite" onPointerDown={(e) => e.stopPropagation()}>
+        <aside className="detail glass" style={{ ["--dw" as string]: dw + "px", ...(pull ? { transform: `translateY(${pull}px)`, transition: "none" } : {}) }} aria-live="polite" onPointerDown={(e) => e.stopPropagation()}>
+          {/* telefon: szuflada od dołu; uchwyt pociągnięty w dół zamyka krok */}
+          <div className="dhandle" aria-hidden="true" onPointerDown={onPullDown} onPointerMove={onPullMove} onPointerUp={endPull} onPointerCancel={() => { pullRef.current = null; setPull(0); }} />
           <div className={"grip" + (gripOn ? " on" : "")} title="Przeciągnij, aby zmienić szerokość" onPointerDown={onGrip} onPointerMove={onGripMove} onPointerUp={endGrip} onPointerCancel={endGrip} />
           <div className="d-bar">
             {panel === "__task" ? p.taskBar : cur ? stepBar(cur) : null}
-            <button className={"icobtn" + (wide && gripW == null ? " on" : "")} type="button" aria-label={wide ? "Węziej" : "Szerzej"} title={wide ? "Węziej" : "Szerzej (kartka obok siebie)"} aria-pressed={wide} onClick={widen}><Icon k="widen" size={14} sw={1.6} /></button>
+            <button className={"icobtn d-widen" + (wide && gripW == null ? " on" : "")} type="button" aria-label={wide ? "Węziej" : "Szerzej"} title={wide ? "Węziej" : "Szerzej (kartka obok siebie)"} aria-pressed={wide} onClick={widen}><Icon k="widen" size={14} sw={1.6} /></button>
             <button className="icobtn" type="button" aria-label="Zamknij" onClick={() => { setPanel(null); setSel(new Set()); }}><Icon k="x" size={12} sw={2} /></button>
           </div>
           <div className="d-body" key={panel}>{panel === "__task" ? p.taskBody : p.panels[panel]}</div>
