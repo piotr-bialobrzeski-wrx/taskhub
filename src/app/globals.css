@@ -748,3 +748,35 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 @media (max-width: 860px) { .answer.bubble.withpanel { max-width: min(612px, 100% - 2 * var(--side)); left: max(var(--side), calc(50% - 360px)); transform: none; } }
 .node.origin .act { color: #fff; }
 .node.origin .act .act-d, .node.origin .act .act-m { color: rgba(255,255,255,.85); }
+
+/* ---------- pole z formatowaniem (szkic do ClickUp, Slacka, maila) ---------- */
+.rf { display: flex; flex-direction: column; border-radius: var(--r-sm); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); margin-top: var(--s-2); }
+.rf:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
+.rf-bar { display: flex; align-items: center; gap: 2px; padding: var(--s-1); border-bottom: 1px solid var(--line); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.rf-bar .sp { flex: 1; }
+.rf-b { flex: none; display: inline-grid; place-items: center; min-width: 32px; height: 32px; padding: 0 var(--s-2); border: 0; border-radius: 8px; background: transparent; color: var(--sub); font: inherit; font-size: 13.5px; cursor: pointer; }
+.rf-b:hover { background: var(--surface-2); color: var(--text); }
+.rf-b.on { background: var(--accent-soft); color: var(--accent); }
+.rf-b b, .rf-b i, .rf-b s { font-family: Georgia, "Times New Roman", serif; font-size: 15px; }
+.rf-h { font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+.rf-sep { flex: none; width: 1px; height: 18px; margin: 0 var(--s-1); background: var(--line); }
+.rf-link { display: flex; gap: var(--s-2); align-items: center; padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--line); }
+.rf-link input.in { flex: 1; height: 30px; }
+.rf-link .btn { padding: 5px 10px; }
+.rf-st { flex: none; font-size: 11.5px; color: var(--sub); padding: 0 var(--s-3); white-space: nowrap; }
+.rf-box { position: relative; padding: var(--s-4) var(--s-5); max-height: 60vh; overflow-y: auto; cursor: text; }
+.rf-ph { position: absolute; left: var(--s-5); top: var(--s-4); color: var(--sub); pointer-events: none; }
+.rf-doc { outline: none; color: var(--text); line-height: 1.55; overflow-wrap: anywhere; }
+.rf-doc.md, .rf-doc .md { gap: var(--s-3); }
+.rf-doc :is(p, ul, ol, h1, h2, h3, h4, h5, pre) { margin: 0; }
+.rf-doc :is(ul, ol) { padding-left: 20px; }
+.rf-doc li p { margin: 0; }
+.rf-doc h1, .md h4 { font-size: 16px; font-weight: 700; }
+.rf-doc h2, .md h5 { font-size: 14.5px; font-weight: 650; }
+.rf-doc h3 { font-size: 13.5px; font-weight: 650; }
+.rf-doc a { color: var(--accent); text-decoration: underline; }
+.rf-doc code { font-family: var(--font-mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
+.rf-doc pre { font-family: var(--font-mono); font-size: 12.5px; background: var(--surface-2); padding: var(--s-3) var(--s-4); border-radius: 8px; white-space: pre-wrap; }
+.rf-doc.ProseMirror { display: flex; flex-direction: column; min-height: 64px; }
+.pub .msg .md { margin-top: var(--s-1); }
+.pub .msg .md p { white-space: pre-wrap; }

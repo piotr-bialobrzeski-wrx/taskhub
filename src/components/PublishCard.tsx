@@ -7,11 +7,12 @@ import { toolColor } from "@/components/canvas/ui";
 import { Icon } from "@/components/canvas/ui";
 import { Facts, Table } from "@/components/BlockRenderer";
 import { PendingButton } from "@/components/Pending";
-import { GrowTextarea } from "@/components/GrowTextarea";
+import { RichField } from "@/components/RichField";
+import { Markdown } from "@/lib/markdown";
 import { ConnectionHead, type StepConnection } from "@/components/StepFields";
 import { Activity } from "@/components/Activity";
 import type { TileActivity } from "@/components/canvas/ui";
-import { approveStep, backToTodo, markDone, prepare, saveOutput } from "@/app/actions";
+import { approveStep, backToTodo, markDone, prepare, saveDraftBody } from "@/app/actions";
 
 export type CardMode = "proposed" | "parked" | "sending" | "sent";
 type Draft = Extract<Block, { type: "draft" }>;
@@ -63,24 +64,23 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
     : app === "slack" || app === "whatsapp" ? `${me} · ${mode === "sent" ? "wysłano" : "teraz"}`
     : isPrompt ? `Prompt dla ${name}${where ? ` · ${where}` : ""}`
     : `${me}${where ? ` · ${where}` : ""}`;
+  // pole z formatowaniem dla zwykłej treści przed decyzją; jego ukryte pole „body” należy do formularza „Zatwierdź”
+  const editable = (mode === "proposed" || mode === "parked") && !isRows && !((isPrompt || isCommit) && d);
+  const formId = "pub-" + s.id;
   // podgląd według rodzaju odpowiedzi: wiersze do arkusza jako tabela, prompt jako ramka kodu, reszta jako wiadomość „moja”
   const preview = isRows && d ? (
     <div className="thread"><div className="msg mine rows"><div className="who">{who}</div><Table columns={d.columns ?? d.rows![0].map((_, i) => `Kolumna ${i + 1}`)} rows={d.rows!} highlightFrom={0} />{body ? <p className="sub">{body}</p> : null}</div></div>
   ) : (isPrompt || isCommit) && (d || mode !== "proposed") ? (
     <div className="thread"><div className="msg mine"><div className="who">{who}</div>{d?.subject ? <h4>{d.subject}</h4> : null}<pre className="code">{body || "Brak treści."}</pre></div></div>
-  ) : d || mode !== "proposed" ? (
+  ) : (
+    // treść w Markdown: przed decyzją pole z formatowaniem (Piotr poprawia w miejscu), po zatwierdzeniu sformatowany podgląd
     <div className="thread"><div className="msg mine">
       <div className="who">{who}</div>
       {d?.subject ? <h4>{d.subject}</h4> : null}
-      <p>{body || "Brak treści."}</p>
+      {editable ? <RichField key={s.id} value={body ?? ""} form={formId} onSave={saveDraftBody.bind(null, t.id, s.id)} />
+        : body ? <Markdown text={body} /> : <p>Brak treści.</p>}
       {d?.fields?.length ? <Facts facts={d.fields} /> : null}
     </div></div>
-  ) : (
-    <form className="stack" action={saveOutput}>
-      <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} />
-      <GrowTextarea className="out" minRows={3} name="output" defaultValue={s.output} placeholder="Treść, która ma polecieć…" aria-label="Treść szkicu" />
-      <div className="actions"><PendingButton className="btn" busy="Zapisuję…">Zapisz treść</PendingButton></div>
-    </form>
   );
 
   return (
@@ -103,13 +103,13 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       {preview}
       {mode === "proposed" ? (
         <div className="actions">
-          <form action={approveStep.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} title={stays ? "Szkic jest dobry, krok gotowy" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść`}>{mainLabel}</PendingButton></form>
+          <form id={formId} action={approveStep.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} title={stays ? "Szkic jest dobry, krok gotowy" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść`}>{mainLabel}</PendingButton></form>
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Szkic zostaje, krok wraca do gotowych">Odłóż</PendingButton></form>
         </div>
       ) : mode === "parked" ? (
         <div className="actions">
-          <form action={approveStep.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"}>{mainLabel}</PendingButton></form>
+          <form id={formId} action={approveStep.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"}>{mainLabel}</PendingButton></form>
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn" title="Zamknij krok bez wysyłania">Gotowe bez wysyłki</PendingButton></form>
         </div>

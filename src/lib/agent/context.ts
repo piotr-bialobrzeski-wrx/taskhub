@@ -1,4 +1,5 @@
 // Kontekst dla agenta: to samo dla agenta w aplikacji, dla klientów MCP i dla promptów hand-off.
+import { publishFormat } from "../format";
 import { type Company, type Connection, type Project, type Rule, type Sphere, type Step, type Task, type TimeSample, CONNECTION_PROVIDER_LABELS, CONNECTION_STATE_LABELS, sphereOf, toolLabel } from "../schema";
 import { LEVELS, scoreOf, whyText, type Score } from "../priority";
 import { calibrationText, fmtMin, remainEst, taskSpent, todayISO } from "../time";
@@ -174,7 +175,13 @@ export function draftsText(steps: Pick<Step, "id" | "title" | "status" | "blocks
       if (b.subject) lines.push(`- temat: ${b.subject}`);
       if (b.fields?.length) lines.push(`- pola: ${b.fields.map((f) => `${f.label} = ${f.value}`).join("; ")}`);
       if (b.columns?.length) lines.push(`- wiersze (${b.columns.join(" | ")}):\n${(b.rows ?? []).map((r) => `  ${r.join(" | ")}`).join("\n")}`);
-      if (b.body) lines.push(`- treść (dokładnie, między liniami ---):\n---\n${b.body}\n---`);
+      if (b.body) {
+        lines.push(`- treść w Markdown (dokładnie, między liniami ---):\n---\n${b.body}\n---`);
+        // formatowanie: każda aplikacja dostaje swój format, inaczej gwiazdki i krzyżyki lecą dosłownie
+        const f = publishFormat(t.app, b.body);
+        if (f) lines.push(`- formatowanie: ${f.how}`);
+        if (f?.text) lines.push(`- treść jako ${f.label} (wyślij tę wersję):\n---\n${f.text}\n---`);
+      }
       out.push(lines.join("\n"));
     }
   }

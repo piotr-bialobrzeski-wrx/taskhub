@@ -7,8 +7,8 @@ export const safeUrl = (u: string) => (SAFE_URL.test(u) ? u : null);
 
 function inline(text: string, key = 0): ReactNode[] {
   const out: ReactNode[] = [];
-  // obrazek, link, pogrubienie, kursywa, kod; kolejność ważna: ![..](..) przed [..](..)
-  const re = /!\[([^\]]*)\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`/g;
+  // obrazek, link, pogrubienie, kursywa, kod, przekreślenie; kolejność ważna: ![..](..) przed [..](..)
+  const re = /!\[([^\]]*)\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`|~~([^~]+)~~/g;
   let last = 0, m: RegExpExecArray | null, i = 0;
   while ((m = re.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index));
@@ -18,6 +18,7 @@ function inline(text: string, key = 0): ReactNode[] {
     else if (m[5] !== undefined) out.push(<b key={k}>{m[5]}</b>);
     else if (m[6] !== undefined) out.push(<i key={k}>{m[6]}</i>);
     else if (m[7] !== undefined) out.push(<code key={k}>{m[7]}</code>);
+    else if (m[8] !== undefined) out.push(<s key={k}>{m[8]}</s>);
     last = m.index + m[0].length;
   }
   if (last < text.length) out.push(text.slice(last));

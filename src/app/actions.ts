@@ -11,7 +11,7 @@ import { runChat } from "@/lib/agent/chat";
 import { bridgeHold, busyWith, newTaskText, noStepsWho, type Queue, type Worker } from "@/lib/auto";
 import { liveActivity } from "@/lib/live";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
-import type { Connection, Rule, Sphere } from "@/lib/schema";
+import type { Connection, Rule, Sphere, Step } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const num = (fd: FormData, k: string, def: number) => { const v = Number(str(fd, k)); return Number.isFinite(v) && str(fd, k) !== "" ? v : def; };
@@ -218,11 +218,15 @@ export async function handoff(taskId: string, stepId: string) {
   refresh(taskId);
 }
 // zatwierdzenie szkicu: krok, który coś wysyła, idzie do wysłania (Claude wyśle dokładnie zatwierdzoną treść); inny szkic jest po prostu gotowy
-export async function approveStep(taskId: string, stepId: string) {
+// fd: formularz zatwierdzenia niesie treść z pola z formatowaniem (body), więc zatwierdza się to, co Piotr widzi, także bez wcześniejszego zapisu
+export async function approveStep(taskId: string, stepId: string, fd?: FormData) {
   const o = await requireOwner();
   const { step } = await stepOf(o.id, taskId, stepId);
+  const body = fd?.get("body");
+  const edited = typeof body === "string" ? body : null;
+  if (edited !== null) await writeDraftBody(stepId, step, edited);
   if (!step.needsApproval) { await finishStep(o.id, taskId, stepId); refresh(taskId); return; }
-  const blocks = step.blocks?.map((b) => (b.type === "draft" && b.status === "proposed" ? { ...b, status: "approved" as const } : b)) ?? null;
+  const blocks = step.blocks?.map((b) => (b.type === "draft" && b.status === "proposed" ? { ...b, ...(edited !== null ? { body: edited } : {}), status: "approved" as const } : b)) ?? null;
   await repo.updateStep(stepId, { status: "handoff", prevStatus: "draft", handoffAt: new Date().toISOString(), ...(blocks ? { blocks } : {}) });
   refresh(taskId);
 }
@@ -231,6 +235,20 @@ export async function saveReport(fd: FormData) {
   const taskId = str(fd, "taskId"), stepId = str(fd, "stepId");
   const report = str(fd, "report"); if (!report) return;
   await finishStep(o.id, taskId, stepId, { report, link: url(str(fd, "link")) ?? undefined });
+  refresh(taskId);
+}
+// treść szkicu z pola z formatowaniem (Markdown): poprawia blok draft czekający na decyzję albo, gdy szkicu nie ma, wynik kroku
+async function writeDraftBody(stepId: string, step: Step, body: string) {
+  const d = step.blocks?.find((b) => b.type === "draft");
+  if (d && d.status === "sent") return;
+  if (d) { if (d.body !== body) await repo.updateStep(stepId, { blocks: step.blocks!.map((b) => (b === d ? { ...d, body } : b)) }); }
+  else if (step.output !== body) await repo.updateStep(stepId, { output: body });
+}
+export async function saveDraftBody(taskId: string, stepId: string, body: string) {
+  const o = await requireOwner();
+  const { step } = await stepOf(o.id, taskId, stepId);
+  if (step.status === "done" || step.status === "handoff") return;   // wysłane albo w wysyłce: treść już nie do zmiany
+  await writeDraftBody(stepId, step, body);
   refresh(taskId);
 }
 export async function saveOutput(fd: FormData) {
