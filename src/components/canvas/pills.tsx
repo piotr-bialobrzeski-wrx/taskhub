@@ -1,6 +1,7 @@
 "use client";
 // Pigułki górnego paska wspólne dla wszystkich ekranów: logo-menu, wstecz, Kafelek/Grupa, widok, agent.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Icon } from "./ui";
 
@@ -53,6 +54,33 @@ export function MakePill({ tileTitle, groupTitle, onTile, onGroup }: { tileTitle
     <div className="gpill glass mkpill" role="toolbar" aria-label="Nowe na kanwie">
       <button className="icobtn mk" type="button" title={tileTitle} onClick={onTile}><Icon k="tile" size={18} />Kafelek</button>
       <button className="icobtn mk" type="button" title={groupTitle} onClick={onGroup}><Icon k="group" size={18} />Grupa</button>
+    </div>
+  );
+}
+
+// telefon: zamiast pigułki Kafelek/Grupa na dole jeden „+” w górnym pasku, rozwijany w dwie pozycje
+export function AddButton({ tileLabel, groupLabel, onTile, onGroup }: { tileLabel: string; groupLabel: string; onTile: () => void; onGroup: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ right: 16, top: 0 });
+  const btn = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const r = btn.current?.getBoundingClientRect();
+    if (r) setPos({ right: Math.max(16, window.innerWidth - r.right), top: r.bottom + 6 });
+    const close = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".addmenu, .addbtn")) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", close); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", key); };
+  }, [open]);
+  const pick = (f: () => void) => { setOpen(false); f(); };
+  return (
+    <div className="gpill glass addbtn">
+      <button ref={btn} className="icobtn" type="button" aria-label="Dodaj" title="Dodaj" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}><Icon k="plus" size={16} sw={1.9} /></button>
+      {open ? createPortal(
+        <div className="addmenu zmenu glass" role="menu" style={{ position: "fixed", right: pos.right, top: pos.top }} onPointerDown={(e) => e.stopPropagation()}>
+          <button className="mi" role="menuitem" type="button" onClick={() => pick(onTile)}><Icon k="tile" size={16} />{tileLabel}</button>
+          <button className="mi" role="menuitem" type="button" onClick={() => pick(onGroup)}><Icon k="group" size={16} />{groupLabel}</button>
+        </div>, document.body) : null}
     </div>
   );
 }

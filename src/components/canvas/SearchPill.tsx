@@ -18,7 +18,8 @@ export function SearchPill({ index, screen, here, value, onChange, onPick }: Pro
   const q = value ?? inner;
   const setQ = (v: string) => { setInner(v); onChange?.(v); };
   const [open, setOpen] = useState(false);
-  const [touch, setTouch] = useState(false);   // telefon: bez podpowiedzi skrótu „/”, której i tak nie ma jak użyć
+  const [touch, setTouch] = useState(false);
+  const [wide, setWide] = useState(false);   // telefon: szukajka to sama lupa; po kliknięciu rozwija się na cały górny pasek   // telefon: bez podpowiedzi skrótu „/”, której i tak nie ma jak użyć
   useEffect(() => { setTouch(window.matchMedia("(pointer: coarse)").matches); }, []);
   const ref = useRef<HTMLInputElement>(null);
   const words = useMemo(() => tokens(q), [q]);
@@ -66,11 +67,12 @@ export function SearchPill({ index, screen, here, value, onChange, onPick }: Pro
   );
 
   return (
-    <div className="srchw">
+    <div className={"srchw" + (wide || q ? " open" : "")}>
+      <button className="gpill glass srch-ico icobtn" type="button" aria-label="Szukaj" title="Szukaj" onClick={() => { setWide(true); setTimeout(() => ref.current?.focus(), 0); }}><Icon k="search" size={16} sw={1.8} /></button>
       <div className={"gpill glass srch" + (q ? " on" : "")} role="search">
         <Icon k="search" size={15} sw={1.8} />
         <input ref={ref} type="text" value={q} placeholder={touch ? "Szukaj…" : "Szukaj… (/)"} aria-label="Szukaj" autoComplete="off" spellCheck={false}
-          onChange={(e) => { setQ(e.currentTarget.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onChange={(e) => { setQ(e.currentTarget.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => { setOpen(false); setWide(false); }, 150)}
           onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); setQ(""); e.currentTarget.blur(); } else if (e.key === "Enter" && first) { e.preventDefault(); pick(first); } }} />
         {q ? <button className="icobtn sm" type="button" aria-label="Wyczyść" onClick={() => { setQ(""); ref.current?.focus(); }}><Icon k="x" size={11} sw={2.2} /></button> : null}
       </div>

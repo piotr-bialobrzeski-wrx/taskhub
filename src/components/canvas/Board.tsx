@@ -9,7 +9,7 @@ import { Icon, Lvl, ToolIcon, TS_LABEL, TS_SHORT, GCOL, plural, projColor, toolC
 import { AgentFeed, Dock, Namer, PrioPicker, ProjectPicker, TileMenu, Toast, useToast } from "./widgets";
 import { msgCount } from "@/lib/auto";
 import type { FeedItem } from "@/lib/feed";
-import { AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
+import { AddButton, AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import { Projects, type ProjectPatch } from "./Projects";
 import { matches, norm, tokens, type Screen, type SearchItem } from "@/lib/search-core";
@@ -282,6 +282,7 @@ export function Board(p: BoardProps) {
         </div>
         {off ? null : <ViewPill view={view} onView={onView} />}
         <span className="sp" />
+        {!off && view === "canvas" ? <AddButton tileLabel="Dodaj zadanie" groupLabel={n ? "Zgrupuj zaznaczone" : "Dodaj grupę"} onTile={() => setNamer("tile")} onGroup={() => setNamer("group")} /> : null}
         <SearchPill index={p.index} screen={screen} value={q} onChange={setQ} onPick={onPick} />
         <AgentPill agent={p.agent} aiOn={p.aiOn} />
       </div>

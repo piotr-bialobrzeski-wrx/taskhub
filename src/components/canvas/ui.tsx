@@ -44,6 +44,8 @@ export const TOOL_COLORS: Record<string, string> = {
 export const toolColor = (tool: string) => TOOL_COLORS[tool] ?? "var(--sub)";
 
 const PATHS: Record<string, string> = {
+  zoom: '<path d="M2 5.5V2h3.5M10.5 2H14v3.5M14 10.5V14h-3.5M5.5 14H2v-3.5M6 8h4M8 6v4"/>',
+  plus: '<path d="M8 3v10M3 8h10"/>',
   slack: '<path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5a1.5 1.5 0 0 1-1.5 1.5H7l-3 2.5V11h.5"/>',
   gmail: '<rect x="2.5" y="3.5" width="11" height="9" rx="1.5"/><path d="m3 5 5 3.5L13 5"/>',
   clickup: '<rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="m5.5 8 1.8 1.8L10.5 6"/>',

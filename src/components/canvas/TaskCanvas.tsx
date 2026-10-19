@@ -7,7 +7,7 @@ import { GHEAD, GPAD, STEP_SIZE } from "@/lib/canvas/layout";
 import { Icon, Lvl, ST_LABEL, TS_LABEL, plural, toolColor, type GroupVM, type StepTile, type TaskStateKey, type TileActivity } from "./ui";
 import { msgCount, type Queue } from "@/lib/auto";
 import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
-import { AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
+import { AddButton, AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import type { SearchItem } from "@/lib/search-core";
 import { AgentFeed, Dock, Namer, TileMenu, Toast, useToast } from "./widgets";
@@ -162,6 +162,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
         </div>
         <ViewPill view={view} onView={onView} />
         <span className="sp" />
+        {view === "canvas" ? <AddButton tileLabel={after ? "Dodaj krok po zaznaczonym" : "Dodaj krok"} groupLabel={n ? "Zgrupuj zaznaczone" : "Dodaj grupę"} onTile={() => setNamer("tile")} onGroup={() => setNamer("group")} /> : null}
         <SearchPill index={p.index} screen="task" here={t.id} onPick={onPick} />
         <AgentPill agent={p.agent} aiOn={p.aiOn} />
       </div>
@@ -221,7 +222,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
 
       <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
         queue={ctxGlobal ? null : p.queue} version={`${p.feed.at(-1)?.id ?? ""}|${p.queue?.n ?? 0}|${p.queue?.kind ?? ""}|${p.queue?.activity?.text ?? ""}`}
-        placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : ctxStep ? `Krok ${pad(ctxStep.idx)}: popraw szkic, dopisz, zapytaj…` : "Napisz, co dalej z tym zadaniem, albo dopisz notatkę…"} />
+        placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : "Napisz, co dalej"} />
       <Toast text={toast} />
     </div>
   );

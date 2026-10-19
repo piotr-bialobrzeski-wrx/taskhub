@@ -218,6 +218,14 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .zmenu .mi:hover { background: var(--accent-soft); }
 .zrow { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 4px; }
 .zpct { font: 600 12px/1 var(--font-mono); color: var(--sub); font-variant-numeric: tabular-nums; }
+.zmenu { width: 264px; }
+.zpre { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 4px 6px; }
+.zpre .chip { border: 0; cursor: pointer; font: 600 12px/1 var(--font-mono); padding: 6px 8px; }
+.zpre .chip.on { background: var(--accent); color: var(--accent-text); }
+.zoom .zbtn .zt { display: inline-flex; align-items: center; gap: 4px; }
+.zoom .zbtn .zi, .addbtn, .srch-ico { display: none; }
+.addmenu { width: 220px; }
+.addmenu .mi { display: flex; align-items: center; gap: 10px; }
 .zoom input { width: 48px; height: 28px; border: 0; padding: 0; border-radius: 999px; background: transparent; font: 600 11.5px/1 var(--font-mono); color: var(--sub); text-align: center; font-variant-numeric: tabular-nums; outline: none; }
 .zoom input:hover { background: var(--accent-soft); color: var(--text); }
 .zoom input:focus { background: var(--accent-soft); color: var(--text); box-shadow: inset 0 0 0 1.5px var(--accent); }
@@ -531,7 +539,6 @@ body:has(> main.page) { background: radial-gradient(560px 380px at 8% -8%, var(-
   .detail { top: auto; left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: auto; max-width: none; height: 62%; }
   .grip { display: none; }
   .mkpill, .namer { --mk-b: calc(28px + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); }
-  .app:has(.mkpill) { --mk-h: 56px; }                                /* telefon: odpowiedź, pasek zaznaczenia i toast idą nad pigułkę Kafelek/Grupa */
   .runbar { max-width: calc(100% - 32px); }
   .grid2 { grid-template-columns: 1fr; }
 }
@@ -846,10 +853,32 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
   .now { padding: var(--s-3) var(--s-4); }
   .pub .msg { padding: var(--s-3) var(--s-4); }
   .detail.glass { background: var(--bg); }   /* szuflada pełna, kanwa nie prześwituje */
-  .srchw { min-width: 46px; }                    /* szukajka nie zgniata się do kropki obok wstecz i zoomu */
-  .pillbar .sp { flex: 0 0 0; }                  /* resztę szerokości bierze szukajka */
-  .pillbar .crumb .lvl i { width: 9px; }
+  .pillbar .sp { flex: 0 0 0; }
   .srch > svg { flex: none; }
   .app.haspanel :is(.pillbar, .mkpill, .namer, .runbar, .feed, .answer, .selbar, .zmenu) { display: none; }
 }
 @keyframes drawer-in { from { transform: translateY(40%); opacity: .4; } to { transform: none; opacity: 1; } }
+
+/* ---------- telefon: górny pasek z ikon (paczka 6, punkt 5) ----------
+   wstecz + tytuł zadania biorą całą wolną szerokość; obok ikony: powiększenie (menu z procentami i ±10%), „+” (dodaj kafelek albo grupę), lupa.
+   Lupa po kliknięciu rozwija pole szukania na cały pasek. Pigułka Kafelek/Grupa na dole znika, jej miejsce zajmuje „+”. */
+@media (max-width: 860px) {
+  .pillbar > .pl { flex: 1 1 auto; }
+  .pillbar > .pl > .gpill:has(.crumb) { flex: 1 1 auto; }
+  .pillbar .crumb { flex: 1 1 auto; }
+  .pillbar .crumb .ct { display: block; }
+  .pillbar .crumb .lvl { display: none; }
+  .zoom .zbtn { width: 32px; padding: 0; justify-content: center; }
+  .zoom .zbtn .zt { display: none; }
+  .zoom .zbtn .zi { display: inline-flex; }
+  .addbtn { display: flex; flex: none; }
+  .mkpill { display: none; }
+  .namer { bottom: var(--mk-b); }
+  .srchw { flex: none; width: auto; min-width: 0; }
+  .srch-ico { display: inline-flex; width: 44px; height: 44px; justify-content: center; padding: 0; }
+  .srchw:not(.open) > .srch { display: none; }
+  .srchw.open { position: absolute; left: 0; right: 0; top: 0; z-index: 3; }
+  .srchw.open > .srch-ico { display: none; }
+  .srchw.open > .srch { width: 100%; }
+  .pillbar:has(.srchw.open) > :not(.srchw) { visibility: hidden; }
+}

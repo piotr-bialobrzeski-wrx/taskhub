@@ -331,10 +331,12 @@ export function Canvas(p: CanvasProps) {
   const [zOpen, setZOpen] = useState(false);
   const zBtn = useRef<HTMLButtonElement>(null);
   const [zPos, setZPos] = useState({ left: 0, top: 0 });
+  // przyciski −/+ zmieniają powiększenie co 10 punktów procentowych (42% → 50% → 60%), nie mnożnikiem
+  const zoomBy = (d: number) => setZoom(d > 0 ? Math.floor(zoom * 10 + 1e-6) / 10 + d : Math.ceil(zoom * 10 - 1e-6) / 10 + d);
   useEffect(() => {
     if (!zOpen) return;
     const r = zBtn.current!.getBoundingClientRect();
-    setZPos({ left: Math.max(16, Math.min(r.left, window.innerWidth - 216)), top: r.bottom + 6 });
+    setZPos({ left: Math.max(16, Math.min(r.left, window.innerWidth - 280)), top: r.bottom + 6 });
     const close = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".zmenu, .zbtn")) setZOpen(false); };
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") setZOpen(false); };
     document.addEventListener("pointerdown", close); document.addEventListener("keydown", key);
@@ -406,24 +408,25 @@ export function Canvas(p: CanvasProps) {
         // w górnym pasku (miejsce na dole zajmują odpowiedzi agenta); gdy pasek jest za wąski, zostaje sam procent, a reszta rozwija się pod nim
         <div className="zoom glass gpill">
           <div className="zfull">
-            <button className="icobtn" type="button" onClick={() => setZoom(zoom / 1.15)} aria-label="Oddal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10" /></svg></button>
+            <button className="icobtn" type="button" onClick={() => zoomBy(-0.1)} aria-label="Oddal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10" /></svg></button>
             <input value={zEdit ?? fmtPct(zoom)} inputMode="numeric" aria-label="Powiększenie w procentach (35–160)" title="Wpisz powiększenie w procentach (35–160)"
           onFocus={(e) => { zFocus.current = Date.now(); e.currentTarget.select(); }} onMouseUp={(e) => { if (Date.now() - zFocus.current < 400) e.preventDefault(); }}   /* klik zaznacza całość; mouseup nie cofa zaznaczenia */
           onChange={(e) => setZEdit(e.currentTarget.value.replace(/\D/g, "").slice(0, 3))}
           onBlur={(e) => { if (zCancel.current) { zCancel.current = false; setZEdit(null); return; } commitZoom(e.currentTarget.value); }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } else if (e.key === "Escape") { e.preventDefault(); zCancel.current = true; e.currentTarget.blur(); } }} />
-            <button className="icobtn" type="button" onClick={() => setZoom(zoom * 1.15)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
+            <button className="icobtn" type="button" onClick={() => zoomBy(0.1)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
             <button className="icobtn txt" type="button" onClick={fit}>Dopasuj</button>
             {layoutBtn}
           </div>
-          <button ref={zBtn} className="icobtn txt zbtn" type="button" aria-haspopup="menu" aria-expanded={zOpen} title="Powiększenie i układ" onClick={() => setZOpen((o) => !o)}>{fmtPct(zoom)}<Icon k="chev" size={10} sw={2.2} /></button>
+          <button ref={zBtn} className="icobtn txt zbtn" type="button" aria-haspopup="menu" aria-expanded={zOpen} title="Powiększenie i układ" onClick={() => setZOpen((o) => !o)}><span className="zt">{fmtPct(zoom)}<Icon k="chev" size={10} sw={2.2} /></span><span className="zi"><Icon k="zoom" size={16} sw={1.7} /></span></button>
           {zOpen ? createPortal(
             <div className="zmenu glass" role="menu" style={{ position: "fixed", left: zPos.left, top: zPos.top }} onPointerDown={(e) => e.stopPropagation()}>
               <div className="zrow">
-                <button className="icobtn" type="button" onClick={() => setZoom(zoom / 1.15)} aria-label="Oddal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10" /></svg></button>
+                <button className="icobtn" type="button" onClick={() => zoomBy(-0.1)} aria-label="Oddal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10" /></svg></button>
                 <span className="zpct">{fmtPct(zoom)}</span>
-                <button className="icobtn" type="button" onClick={() => setZoom(zoom * 1.15)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
+                <button className="icobtn" type="button" onClick={() => zoomBy(0.1)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
               </div>
+              <div className="zpre">{[50, 75, 100, 125, 150].map((v) => <button key={v} type="button" className={"chip" + (Math.round(zoom * 100) === v ? " on" : "")} onClick={() => setZoom(v / 100)}>{v}%</button>)}</div>
               <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); fit(); }}>Dopasuj do ekranu</button>
               {p.onUndoLayout ? <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); p.onUndoLayout!(); }}>Cofnij ułożenie</button>
                 : <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); p.onAutoLayout(); }}>Ułóż kafelki</button>}
