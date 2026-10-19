@@ -54,6 +54,7 @@ export function nowHeading(state: CardState, mode: string | null, deps: number, 
   if (mode === "proposed") return { title: "Do zatwierdzenia", cls: "draft" };
   if (mode === "sending") return { title: "W toku", cls: "handoff" };
   if (mode === "parked") return { title: "Odłożony szkic", cls: "draft" };
+  if (mode === "unsent") return { title: "Zamknięty bez wysyłki", cls: "blocked" };
   if (state === "done") return { title: "Zrobione", cls: "done" };
   if (state === "handoff") return { title: "W pracy", cls: "handoff" };
   if (state === "blocked") return { title: waits ? "Czeka na inne zadanie" : `Czeka na ${steps(deps)}`, cls: "blocked" };

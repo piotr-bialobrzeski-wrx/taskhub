@@ -139,7 +139,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       if (st && st.status !== "done" && st.status !== "draft" && a.blocks.some((b) => b.type === "draft" && b.status === "proposed")) {
         await repo.updateStep(st.id, { status: "draft", prevStatus: st.status === "handoff" ? st.prevStatus : st.status, handoffAt: null });
         await repo.addChat(ownerId, taskId, "agent", `Szkic do zatwierdzenia: „${shortTitle(st.title, 70)}”.`, { stepId: st.id });
-        return text("Panel zapisany, krok czeka na zatwierdzenie Piotra.");
+        return text("Panel zapisany, krok czeka na zatwierdzenie Piotra. Nie wywołuj complete_step dla tego kroku, dopóki Piotr nie zatwierdzi i nie wyślesz treści.");
       }
       return text("Panel zapisany.");
     });
@@ -150,6 +150,10 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId);
       if (!taskId) return text("Nie ma takiego kroku.");
+      // szkic czekający na zgodę Piotra nie może się zamknąć: kartka pokazałaby „Wysłano”, a kroki po nim ruszyłyby, choć nic nie poleciało
+      const cur = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId);
+      if (cur && (cur.status === "draft" || cur.blocks?.some((b) => b.type === "draft" && b.status === "proposed")))
+        return text("Nie zamknąłem kroku: jego szkic czeka na zatwierdzenie Piotra. Zostaw krok jako szkic; gdy Piotr zatwierdzi, list_work poda go do wysłania, a complete_step wywołasz po wysyłce. Jeśli krok jest zbędny, powiedz to Piotrowi przez reply_chat albo ask_question; zamknąć go może tylko on.");
       const r = await finishStep(ownerId, taskId, a.stepId, { report: a.summary, link: a.link, addSpentSec: a.spentMin ? a.spentMin * 60 : 0 });
       const st = r.task.steps.find((x) => x.id === a.stepId);
       // zmiany w kodzie na kartce kroku: jeden blok changes (zastępuje poprzedni), reszta klocków zostaje

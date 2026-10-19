@@ -71,3 +71,9 @@ describe("targetLink: dokąd prowadzi krok przed wysyłką", () => {
     expect(targetLink({ tool: "code", title: "Popraw 869abcdef" }, null)).toBeNull();
   });
 });
+
+describe("szkic zamknięty bez zatwierdzenia", () => {
+  it("nagłówek nie mówi „Zrobione”, tylko że nic nie poleciało", () => {
+    expect(nowHeading("done", "unsent", 0, false).title).toBe("Zamknięty bez wysyłki");
+  });
+});

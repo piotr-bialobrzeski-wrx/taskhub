@@ -14,7 +14,7 @@ import { Activity } from "@/components/Activity";
 import type { TileActivity } from "@/components/canvas/ui";
 import { approveStep, backToTodo, markDone, prepare, saveDraftBody } from "@/app/actions";
 
-export type CardMode = "proposed" | "parked" | "sending" | "sent";
+export type CardMode = "proposed" | "parked" | "sending" | "sent" | "unsent";
 type Draft = Extract<Block, { type: "draft" }>;
 
 // tryb karty z stanu kroku: szkic do decyzji, szkic odłożony (krok wrócił do gotowych), wysyłka w toku, wysłano
@@ -22,7 +22,8 @@ export function cardModeOf(s: Step): CardMode | null {
   const draft = s.blocks?.some((b) => b.type === "draft") ?? false;
   if (s.status === "draft") return "proposed";
   if (s.status === "handoff" && s.prevStatus === "draft") return "sending";
-  if (s.status === "done" && draft) return "sent";
+  // zrobiony krok ze szkicem, którego nikt nie zatwierdził (zamknięty „Gotowe bez wysyłki” albo przez agenta): nic nie poleciało, więc nie „Wysłano”
+  if (s.status === "done" && draft) return s.blocks!.some((b) => b.type === "draft" && b.status === "proposed") ? "unsent" : "sent";
   if (s.status === "todo" && draft) return "parked";
   return null;
 }
@@ -49,7 +50,8 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   const isPrompt = PROMPT_APPS.has(app), isRows = !!d?.rows?.length, isComment = action === "comment" || (COMMENT_APPS.has(app) && (action === "reply" || action === "send"));
   const stale = !!d?.stale;
   const mainLabel = stays ? "Zatwierdź" : isPrompt ? "Zatwierdź i uruchom" : `Zatwierdź i ${isRows && action !== "create" ? "dopisz" : VERB[action] ?? "wyślij"}`;
-  const head = mode === "sent" ? <><b>{isPrompt ? "Wykonano" : isCommit ? "Opublikowano" : "Wysłano"}</b> · {name}{where ? ` · ${where}` : ""}</>
+  const head = mode === "unsent" ? <><b>Nie wysłano</b> · zamknięty bez zatwierdzenia</>
+    : mode === "sent" ? <><b>{isPrompt ? "Wykonano" : isCommit ? "Opublikowano" : "Wysłano"}</b> · {name}{where ? ` · ${where}` : ""}</>
     : mode === "sending" ? <><b>{isPrompt || isCommit ? "Claude pracuje" : "Claude wysyła"}</b> · {name}{where ? ` · ${where}` : ""}</>
     : stays ? <><b>Szkic</b> · zostaje w zadaniu</>
     : mode === "parked" ? <><b>{stale ? "Nieaktualny szkic" : "Odłożony szkic"}</b> · {name}{where ? ` · ${where}` : ""}</>

@@ -240,7 +240,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         : <div key={i} className="note">{l.text}</div>)}</div> : null}
       {outputExtra ? <div className="note">{outputExtra}</div> : null}
       {review?.summary ? <div className={"review" + (review.fits === false || review.warning ? " warn" : "")}>{review.warning ? <div><b>Uwaga:</b> {review.warning}</div> : null}<div>{review.summary}</div>{review.links?.length ? <div className="deps">{review.links.map((u) => <a key={u} className="chip" href={u} target="_blank" rel="noopener"><span>{u.replace(/^https?:\/\//, "").slice(0, 40)}</span></a>)}</div> : null}</div> : null}
-      {!mode || mode === "sent" ? (
+      {!mode || mode === "sent" || mode === "unsent" ? (
         <div className="actions">
           {s.status === "todo" ? (<>
             {aiOn && !ext && runnable ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Agent przygotowuje…">Przygotuj</PendingButton></form> : null}
