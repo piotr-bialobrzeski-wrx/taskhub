@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "./db";
 import { type Company, type Connection, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample, appOfLabel, normalizeTool } from "./schema";
-import { roundQ, spentMin } from "./time";
+import { Q, roundQ, spentMin } from "./time";
 
 type Row = Record<string, unknown>;
 const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : v == null ? null : String(v));
@@ -254,7 +254,7 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
   const created: { id: string }[] = [];
   for (const s of steps) {
     const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id)
-      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval}, ${roundQ(s.estMin ?? 15)}, ${s.link ?? null}, ${s.connectionId ?? null}) returning id`;
+      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval}, ${roundQ(s.estMin ?? Q)}, ${s.link ?? null}, ${s.connectionId ?? null}) returning id`;
     created.push({ id: r.id as string });
   }
   // zależności: "n2" / indeks w tej paczce albo id istniejącego kroku

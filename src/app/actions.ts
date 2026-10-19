@@ -7,7 +7,7 @@ import { SESSION_COOKIE, checkPassword, sessionValue } from "@/lib/auth";
 import { requireOwner } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { aiFor, composeFlow, finishStep, prepareStep, taskQueue } from "@/lib/services";
-import { roundQ } from "@/lib/time";
+import { Q, roundQ } from "@/lib/time";
 import { runChat } from "@/lib/agent/chat";
 import { bridgeHold, busyWith, newTaskText, noStepsWho, type Queue, type Worker } from "@/lib/auto";
 import { liveActivity } from "@/lib/live";
@@ -159,7 +159,7 @@ export async function addStepForm(fd: FormData) {
   await stepOf(o.id, taskId, (await repo.getTask(o.id, taskId))?.steps[0]?.id ?? "").catch(() => null); // tylko sprawdzenie własności zadania
   const task = await repo.getTask(o.id, taskId); if (!task) return;
   const after = str(fd, "after");
-  await repo.addSteps(taskId, [{ title, detail: str(fd, "detail"), tool: str(fd, "tool") || "manual", estMin: num(fd, "est", 15), needsApproval: fd.get("needsApproval") === "on", link: url(str(fd, "link")) ?? undefined, dependsOn: after ? [after] : [] }]);
+  await repo.addSteps(taskId, [{ title, detail: str(fd, "detail"), tool: str(fd, "tool") || "manual", estMin: num(fd, "est", Q), needsApproval: fd.get("needsApproval") === "on", link: url(str(fd, "link")) ?? undefined, dependsOn: after ? [after] : [] }]);
   refresh(taskId);
 }
 // edycja w miejscu: jedno pole naraz, tam gdzie je widać w panelu kroku
