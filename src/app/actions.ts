@@ -7,6 +7,7 @@ import { SESSION_COOKIE, checkPassword, sessionValue } from "@/lib/auth";
 import { requireOwner } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { aiFor, composeFlow, finishStep, prepareStep, taskQueue } from "@/lib/services";
+import { roundQ } from "@/lib/time";
 import { runChat } from "@/lib/agent/chat";
 import { bridgeHold, busyWith, newTaskText, noStepsWho, type Queue, type Worker } from "@/lib/auto";
 import { liveActivity } from "@/lib/live";
@@ -169,7 +170,7 @@ export async function patchStep(taskId: string, stepId: string, patch: { title?:
   if (patch.title !== undefined && patch.title.trim()) p.title = patch.title.trim().slice(0, 200);
   if (patch.detail !== undefined) p.detail = patch.detail.trim();
   if (patch.tool) p.tool = patch.tool;
-  if (patch.estMin !== undefined && Number.isFinite(patch.estMin)) p.estMin = Math.max(15, Math.round(patch.estMin / 15) * 15);
+  if (patch.estMin !== undefined && Number.isFinite(patch.estMin)) p.estMin = roundQ(patch.estMin);
   if (patch.spentMin !== undefined && Number.isFinite(patch.spentMin) && patch.spentMin >= 0) { p.spentSec = Math.round(patch.spentMin * 60); p.spentManual = true; }
   if (patch.link !== undefined) p.link = patch.link.trim() ? url(patch.link.trim()) : null;
   if (patch.needsApproval !== undefined) p.needsApproval = patch.needsApproval;

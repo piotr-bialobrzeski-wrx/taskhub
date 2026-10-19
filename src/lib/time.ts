@@ -1,7 +1,7 @@
-// Czas: szacunki w kwantach 15 min, kalibracja z historii, formatowanie.
+// Czas: szacunki w kwantach 5 min, kalibracja z historii, formatowanie.
 import type { Step, Task, TimeSample } from "./schema";
 
-export const Q = 15;             // kwant szacunku w minutach
+export const Q = 5;              // kwant szacunku w minutach
 export const WORK_HOURS = 6;     // ile godzin pracy liczymy na dzień
 
 export const roundQ = (min: number) => Math.max(Q, Math.round(min / Q) * Q);

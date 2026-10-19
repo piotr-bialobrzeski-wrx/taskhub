@@ -98,7 +98,7 @@ describe.skipIf(!DB)("repo", async () => {
       { title: "Wysłać", tool: "manual", dependsOn: ["n2"] },
     ] });
     expect(t.steps.map((s) => s.title)).toEqual(["Zebrać dane", "Napisać mail", "Wysłać"]);
-    expect(t.steps[0].estMin).toBe(15);              // zaokrąglenie do kwantu
+    expect(t.steps[0].estMin).toBe(20);              // 20 to już wielokrotność kwantu 5 min
     expect(t.steps[1].dependsOn).toEqual([t.steps[0].id]);
     expect(t.steps[1].needsApproval).toBe(true);
     const more = await repo.addSteps(t.id, [{ title: "Follow-up", dependsOn: [t.steps[2].id] }]);
@@ -149,7 +149,7 @@ describe.skipIf(!DB)("repo", async () => {
     expect(fresh.steps[0].output).toContain("Zrobione");
     expect(fresh.doneAt).not.toBeNull();
     let samples = await repo.listSamples(owner);
-    expect(samples.find((x) => x.tool === "code")).toMatchObject({ estMin: 30, spentMin: 45 });
+    expect(samples.find((x) => x.tool === "code")).toMatchObject({ estMin: 30, spentMin: 50 });
     await repo.reopenStep(owner, t.id, fresh.steps[0]);
     fresh = (await repo.getTask(owner, t.id))!;
     expect(fresh.steps[0].status).toBe("todo");

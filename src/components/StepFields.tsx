@@ -7,7 +7,7 @@ import { Picker } from "@/components/canvas/widgets";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { Icon } from "@/components/canvas/ui";
 import { TOOL_LABELS } from "@/lib/schema";
-import { fmtMin } from "@/lib/time";
+import { Q, fmtMin } from "@/lib/time";
 
 type Patch = Parameters<typeof patchStep>[2];
 type Field = "title" | "detail" | "link";
@@ -76,7 +76,7 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
         <div><div className="lbl">Narzędzie</div>
           <Picker cls="boxed" title="Narzędzie kroku" trigger={<span className="pp-t">{TOOL_LABELS[step.tool] ?? step.tool}</span>} onPick={(k) => patch({ tool: k })}
             options={tools.map(([k, v]) => ({ key: k, on: k === step.tool, node: <span>{v}</span> }))} /></div>
-        <div><div className="lbl">Szacunek{step.estHint ? <span className="hint"> {step.estHint}</span> : null}</div><NumChip value={step.estMin} stepBy={15} min={15} label="Szacunek w minutach" onSave={(v) => patch({ estMin: v })} /></div>
+        <div><div className="lbl">Szacunek{step.estHint ? <span className="hint"> {step.estHint}</span> : null}</div><NumChip value={step.estMin} stepBy={Q} min={Q} label="Szacunek w minutach" onSave={(v) => patch({ estMin: v })} /></div>
         <div><div className="lbl">Rzeczywiście</div><NumChip value={step.spentMin} stepBy={5} min={0} label="Czas zrobiony w minutach" onSave={(v) => patch({ spentMin: v })} /></div>
         <div><div className="lbl">Zgoda</div>
           <Picker cls="boxed" title="Czy krok wysyła coś na zewnątrz i czeka na Twoją zgodę" trigger={<span className="pp-t">{step.needsApproval ? "wymaga zgody" : "bez zgody"}</span>} onPick={(k) => patch({ needsApproval: k === "1" })}

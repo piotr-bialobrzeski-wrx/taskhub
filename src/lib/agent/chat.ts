@@ -41,7 +41,7 @@ Akcje (tylko gdy wiadomość o to prosi; na pytanie po prostu odpowiedz):
 - update_step {id, title?, detail?, output?, status? "done"|"todo", link?, est?} - output = poprawiona treść szkicu otwartego kroku (gdy Piotr prosi o zmianę w szkicu); zmienia też treść bloku draft.
 - set_facts {stepId, facts [{label, value, source {app, ref, url}}]} - gdy Piotr podaje informacje do kroku (adresat, termin, lista).
 - create_group {name, taskIds} - tylko na głównej kanwie, gdy Piotr mówi, ile ma czasu (np. „mam 1,5 h”): wybierz otwarte zadania mieszczące się w czasie, najpierw bliski termin i wysoki priorytet, nazwij np. „Na 1,5 h” i wypisz je w reply z czasami.
-KROK = {id "n1", title, tool, detail jedno zdanie, dependsOn [], needsApproval true dla wszystkiego, co wysyła coś na zewnątrz, est minuty (wielokrotność 15, min 15, wg kalibracji), link gdy znany}
+KROK = {id "n1", title, tool, detail jedno zdanie, dependsOn [], needsApproval true dla wszystkiego, co wysyła coś na zewnątrz, est minuty (wielokrotność 5, min 5, wg kalibracji), link gdy znany}
 Zasady: nic nie usuwaj. Tytuły zadań maks. 7 słów od czasownika; tytuły kroków maks. 6 słów. Nowe zadanie ma 3-8 kroków. Priorytet nowych zadań oceń z treści; gdy Piotr poda priorytet, użyj go. Gdy Piotr opisuje nową sprawę na głównej kanwie, utwórz z niej zadanie. Stosuj ZASADY PRACY z kontekstu (język projektu, styl).
 Gdy dołączono grafiki, dodaj "attachments": [{caption maks. 6 słów, analysis: co przedstawia, cały istotny tekst i liczby dosłownie, wnioski}] w tej samej kolejności.
 Odpowiedz wyłącznie JSON: {"reply": "1-4 zdania po polsku", "actions": [...], "attachments"?: [...]}`;
