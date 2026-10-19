@@ -85,3 +85,26 @@ export function targetLink(s: Pick<Step, "tool" | "title">, blocks: Block[] | nu
   }
   return null;
 }
+
+// to samo miejsce i ta sama czynność (np. komentarz w tickecie 869dxk3h9): po tym rozpoznajemy dwa kroki, które wysłałyby to samo dwa razy
+const COMMENTISH = new Set(["figma", "github", "clickup"]);
+export function draftPlace(s: Pick<Step, "tool" | "title">, blocks: Block[] | null | undefined): string | null {
+  const draft = blocks?.find((b) => b.type === "draft") as Extract<Block, { type: "draft" }> | undefined;
+  if (!draft) return null;
+  const url = targetLink(s, blocks)?.url;
+  if (!url) return null;
+  const app = draft.target.app.toLowerCase(), act = draft.target.action ?? "send";
+  const kind = COMMENTISH.has(app) && (act === "reply" || act === "send") ? "comment" : act;
+  return `${url.replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase()} ${kind}`;
+}
+// inne kroki zadania z szkicem do tego samego miejsca: otwarte (dwa szkice tego samego) i już wysłane (to samo poszło wcześniej)
+export function sameTarget(steps: Step[], stepId: string, blocks: Block[] | null | undefined): { open: Step[]; sent: Step[] } {
+  const me = steps.find((x) => x.id === stepId);
+  const key = me ? draftPlace(me, blocks) : null;
+  if (!key) return { open: [], sent: [] };
+  const others = steps.filter((x) => x.id !== stepId && draftPlace(x, x.blocks) === key);
+  return {
+    open: others.filter((x) => x.status !== "done"),
+    sent: others.filter((x) => x.status === "done" && x.blocks?.some((b) => b.type === "draft" && b.status === "sent")),
+  };
+}

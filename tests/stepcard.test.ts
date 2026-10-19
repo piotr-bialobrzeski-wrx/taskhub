@@ -1,6 +1,6 @@
 // Karta kroku „Teraz · Co · Skąd”: podział klocków, zwijanie według stanu, raport bez powtórek, linki bez dubli. Czysta logika, bez bazy.
 import { describe, it, expect } from "vitest";
-import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink } from "@/lib/stepcard";
+import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink, sameTarget } from "@/lib/stepcard";
 import type { Block } from "@/lib/schema";
 
 const changes: Block = { type: "changes", repo: "wlrx/custom-cookies", branch: "intake", preview: "file:///Users/osobiste/prototype.html#catalog", summary: "W menu po lewej jest moduł Catalog Items: 17 pozycji. Format drugiej części kodu to założenie do potwierdzenia.", files: [{ path: "a.js" }] } as Block;
@@ -75,5 +75,19 @@ describe("targetLink: dokąd prowadzi krok przed wysyłką", () => {
 describe("szkic zamknięty bez zatwierdzenia", () => {
   it("nagłówek nie mówi „Zrobione”, tylko że nic nie poleciało", () => {
     expect(nowHeading("done", "unsent", 0, false).title).toBe("Zamknięty bez wysyłki");
+  });
+});
+
+describe("sameTarget: dwa kroki, które wysłałyby to samo", () => {
+  const step = (id: string, status: string, where: string, action: string, draft = "proposed") => ({ id, title: "Krok " + id, tool: "clickup", status, blocks: [{ type: "draft", target: { app: "clickup", where, action }, body: "x", status: draft }] }) as never;
+  it("ten sam ticket i komentarz: drugi otwarty i już wysłany", () => {
+    const steps = [step("a", "draft", "869dxk3h9 AI data analysis (komentarz)", "comment"), step("b", "todo", "869dxk3h9 AI data analysis: Employees", "reply"), step("c", "done", "869dxk3h9", "comment", "sent")];
+    const r = sameTarget(steps, "a", (steps[0] as { blocks: never }).blocks);
+    expect(r.open.map((x) => x.id)).toEqual(["b"]);
+    expect(r.sent.map((x) => x.id)).toEqual(["c"]);
+  });
+  it("opis i komentarz w tym samym tickecie to różne czynności", () => {
+    const steps = [step("a", "draft", "869dxk3h9", "update"), step("b", "draft", "869dxk3h9", "comment")];
+    expect(sameTarget(steps, "a", (steps[0] as { blocks: never }).blocks).open).toEqual([]);
   });
 });

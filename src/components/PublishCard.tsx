@@ -34,8 +34,8 @@ const VERB: Record<string, string> = { send: "wyślij", reply: "wyślij", create
 const PROMPT_APPS = new Set(["claudeapp", "code", "claude"]);
 const COMMENT_APPS = new Set(["figma", "github", "clickup"]);
 
-export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, company, activity }: {
-  t: Task; s: Step; mode: CardMode; aiOn: boolean; ownerName: string; link: string | null; connections: StepConnection[]; company: string | null; activity?: TileActivity | null;
+export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, company, activity, waitsOn = [] }: {
+  t: Task; s: Step; mode: CardMode; aiOn: boolean; ownerName: string; link: string | null; connections: StepConnection[]; company: string | null; activity?: TileActivity | null; waitsOn?: string[];
 }) {
   const d = (s.blocks?.find((b) => b.type === "draft") ?? null) as Draft | null;
   const changes = (s.blocks?.find((b) => b.type === "changes") ?? null) as Extract<Block, { type: "changes" }> | null;
@@ -123,7 +123,8 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
         </div>
       ) : mode === "sending" ? (
         <div className="actions">
-          {activity ? <Activity text={activity.text} detail={activity.detail} since={activity.since} who="Claude" big />
+          {waitsOn.length ? <span className="working" title="Zatwierdzone; wyśle się samo, gdy skończą się kroki przed nim">Zatwierdzone · wyśle po kroku {waitsOn.join(", ")}</span>
+            : activity ? <Activity text={activity.text} detail={activity.detail} since={activity.since} who="Claude" big />
             : <span className="working" title="Claude wysyła zatwierdzoną treść przez konektor; krok zamknie się sam"><span className="pulse" />Claude {isPrompt || isCommit ? "pracuje" : "wysyła"}{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>}
           <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Wstrzymaj wysyłkę; szkic zostaje" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form>
         </div>

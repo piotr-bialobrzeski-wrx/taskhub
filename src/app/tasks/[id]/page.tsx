@@ -232,7 +232,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         {meta ? <small>· {meta}</small> : null}
         {target ? <><span className="sp" /><a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
       </div>
-      {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} /> : null}
+      {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity}
+        waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} /> : null}
       {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
       {done && result.length ? <BlocksView blocks={result} form={form} /> : null}
       {done && lines.length ? <div className="stack">{lines.map((l, i) => l.confirm

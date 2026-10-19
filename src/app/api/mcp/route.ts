@@ -8,7 +8,8 @@ import { rulesText } from "@/lib/agent/context";
 import { workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
-import { Blocks, ChangedFile, Fact, SPHERES, sphereOf, type Block } from "@/lib/schema";
+import { Blocks, ChangedFile, Fact, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
+import { sameTarget } from "@/lib/stepcard";
 import { shortTitle } from "@/lib/auto";
 import { sql } from "@/lib/db";
 import { originOf, wwwAuthenticate } from "@/lib/oauth";
@@ -129,9 +130,19 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
 
     server.registerTool("set_blocks", {
       title: "Ułóż panel kroku", description: "Zapisuje kartkę kroku z klocków: najpierw kontekst (thread = wątek jako dymki, mail = wątek maili z from/to/subject, comment = jeden komentarz z miejscem, facts, table = wiersze, list, media = zrzuty i pliki z opisem, link, free = markdown gdy nic nie pasuje, text = krótka notatka), potem jeden draft (to, co powstaje: target.app, target.where, target.url = adres miejsca, gdzie treść trafi lub co zmieni: ticket, wątek, kanał, dokument; Piotr otwiera go przyciskiem przed wysyłką, action, subject, body w Markdown: nagłówki #, **pogrubienie**, *kursywa*, listy - i 1., linki [tekst](url); Piotr widzi i edytuje je sformatowane, przy wysyłce get_task poda wersję w formacie aplikacji docelowej; dla wierszy arkusza columns + rows; dla promptu dla agenta target.app code). Każdy klocek kontekstu ma source {app, ref = miejsce, url}. Pokaż tylko to, co ważne dla tego kroku; długi wątek daj cały, aplikacja pokaże ostatnie 3. rememberFor: nazwa aplikacji źródłowej, jeśli ten układ ma być wzorem dla podobnych kroków.",
-      inputSchema: z.object({ stepId: z.string(), blocks: Blocks, rememberFor: z.string().optional() }),
+      inputSchema: z.object({ stepId: z.string(), blocks: Blocks, rememberFor: z.string().optional(), sameTargetOk: z.string().max(300).optional().describe("tylko gdy celowo drugi raz to samo miejsce i czynność (np. kolejny komentarz w tym samym tickecie): jednym zdaniem czemu") }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
+      // dwa kroki z tym samym szkicem (ten sam ticket i czynność) wysłałyby to samo dwa razy: zatrzymaj, zanim powstanie drugi
+      if (!a.sameTargetOk) {
+        const all = (await repo.getTask(ownerId, taskId))?.steps ?? [];
+        const dup = sameTarget(all, a.stepId, a.blocks);
+        const name = (x: Step) => `[${x.id}] „${x.title}”`;
+        if (dup.open.length || dup.sent.length) return text(`Nie zapisałem: ${[
+          dup.sent.length ? `to samo miejsce i ta sama czynność już wysłane w ${dup.sent.map(name).join(", ")}` : "",
+          dup.open.length ? `inny otwarty krok ma szkic do tego samego miejsca: ${dup.open.map(name).join(", ")}` : "",
+        ].filter(Boolean).join("; ")}. Popraw szkic w jednym kroku zamiast dublować, a zbędny krok zamknij przez skip_step z powodem. Jeśli to celowo drugi raz (np. kolejny komentarz), podaj sameTargetOk z powodem.`);
+      }
       await repo.updateStep(a.stepId, { blocks: a.blocks });
       if (a.rememberFor) await repo.setLayoutMemory(ownerId, a.rememberFor, a.blocks);
       // szkic czekający na zgodę: krok przechodzi do zatwierdzenia, Piotr widzi to na kafelku i w rozmowie zadania
@@ -153,7 +164,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       // szkic czekający na zgodę Piotra nie może się zamknąć: kartka pokazałaby „Wysłano”, a kroki po nim ruszyłyby, choć nic nie poleciało
       const cur = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId);
       if (cur && (cur.status === "draft" || cur.blocks?.some((b) => b.type === "draft" && b.status === "proposed")))
-        return text("Nie zamknąłem kroku: jego szkic czeka na zatwierdzenie Piotra. Zostaw krok jako szkic; gdy Piotr zatwierdzi, list_work poda go do wysłania, a complete_step wywołasz po wysyłce. Jeśli krok jest zbędny, powiedz to Piotrowi przez reply_chat albo ask_question; zamknąć go może tylko on.");
+        return text("Nie zamknąłem kroku: jego szkic czeka na zatwierdzenie Piotra. Zostaw krok jako szkic; gdy Piotr zatwierdzi, list_work poda go do wysłania, a complete_step wywołasz po wysyłce. Jeśli krok stał się zbędny (to samo już wysłane, zakres się zmienił), zamknij go przez skip_step z powodem.");
       const r = await finishStep(ownerId, taskId, a.stepId, { report: a.summary, link: a.link, addSpentSec: a.spentMin ? a.spentMin * 60 : 0 });
       const st = r.task.steps.find((x) => x.id === a.stepId);
       // zmiany w kodzie na kartce kroku: jeden blok changes (zastępuje poprzedni), reszta klocków zostaje
@@ -163,7 +174,10 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       }
       // w rozmowie tylko fakt; opis, pliki i adresy są na kartce kroku („Otwórz krok”)
       await repo.addChat(ownerId, taskId, "agent", `Gotowe: „${shortTitle(st?.title ?? "", 70)}”.${r.closed ? " Zadanie ukończone." : ""}`, { stepId: a.stepId, link: externalLink(a.link) ?? undefined });
-      return text(r.closed ? "Krok zapisany, zadanie ukończone." : "Krok zapisany.");
+      // po wysyłce: inne otwarte kroki ze szkicem do tego samego miejsca są pewnie zbędne; agent sprawdza je teraz, a nie zostawia Piotrowi do zatwierdzenia
+      const twins = st ? sameTarget(r.task.steps, st.id, st.blocks).open : [];
+      const hint = twins.length ? ` Inne otwarte kroki ze szkicem do tego samego miejsca: ${twins.map((x) => `[${x.id}] „${x.title}”`).join(", ")}. Sprawdź, czy po tej wysyłce nie są zbędne; zbędne zamknij przez skip_step z powodem.` : "";
+      return text((r.closed ? "Krok zapisany, zadanie ukończone." : "Krok zapisany.") + hint);
     });
 
     server.registerTool("start_step", {
@@ -177,8 +191,22 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       return text("Krok w toku.");
     });
 
+    server.registerTool("skip_step", {
+      title: "Zamykam zbędny krok", description: "Zamyka krok, który stał się zbędny (to samo już wysłane w innym kroku, zakres się zmienił, ticket już ma tę zmianę), także krok ze szkicem czekającym na zgodę. Nic nie wysyła; Piotr widzi „Zamknięty bez wysyłki” i powód, a „Cofnij gotowe” przywraca krok. reason: jedno zdanie, czemu zbędny.",
+      inputSchema: z.object({ stepId: z.string(), reason: z.string().min(3).max(400) }),
+    }, async (a) => {
+      const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
+      const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
+      if (st.status === "done") return text("Ten krok jest już zamknięty.");
+      // zatwierdzony, ale niewysłany szkic wraca do stanu propozycji: kartka nie może potem udawać, że coś poszło
+      if (st.blocks?.some((b) => b.type === "draft" && b.status === "approved")) await repo.updateStep(st.id, { blocks: st.blocks.map((b): Block => (b.type === "draft" && b.status === "approved" ? { ...b, status: "proposed" } : b)) });
+      const r = await finishStep(ownerId, taskId, st.id, { report: `Zbędny: ${a.reason}` });
+      await repo.addChat(ownerId, taskId, "agent", `Zamknąłem jako zbędny: „${shortTitle(st.title, 60)}”. ${a.reason}`, { stepId: st.id });
+      return text(r.closed ? "Krok zamknięty jako zbędny, zadanie ukończone." : "Krok zamknięty jako zbędny.");
+    });
+
     server.registerTool("leave_step", {
-      title: "Oddaję krok", description: "Gdy kroku nie da się zrobić (brak narzędzia, dostępu albo danych): krok wraca do gotowych, a Piotr widzi powód w zadaniu. Nie używaj do pytań, od tego jest ask_question.",
+      title: "Oddaję krok", description: "Gdy kroku nie da się zrobić (brak narzędzia, dostępu albo danych): krok wraca do gotowych, a Piotr widzi powód w zadaniu. Nie używaj do pytań, od tego jest ask_question, ani do kroków zbędnych, od tego jest skip_step.",
       inputSchema: z.object({ stepId: z.string(), reason: z.string().max(600) }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
