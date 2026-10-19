@@ -275,7 +275,42 @@ export function Canvas(p: CanvasProps) {
     const r = canvasRef.current!.getBoundingClientRect(), dy = ev.deltaMode === 1 ? ev.deltaY * 33 : ev.deltaY;
     setZoom(zoom * Math.exp(-dy * (pinch ? 0.01 : 0.0015)), ev.clientX - r.left, ev.clientY - r.top);
   };
-  useEffect(() => { const c = canvasRef.current; if (!c) return; const h = (e: WheelEvent) => { if (e.ctrlKey || e.metaKey || e.deltaMode !== 0 || (e.deltaX === 0 && Math.abs(e.deltaY) >= 40)) e.preventDefault(); }; c.addEventListener("wheel", h, { passive: false }); return () => c.removeEventListener("wheel", h); }, []);
+  const zoomRef = useRef(zoom); zoomRef.current = zoom;
+  useEffect(() => {
+    const c = canvasRef.current; if (!c) return;
+    // WebKit (aplikacja na Macu, Safari, iPhone): przewijanie gładzikiem trzyma się jednej osi, więc ruch po skosie przesuwamy sami;
+    // Chrome przewija po skosie natywnie i płynniej, tam zostaje zwykłe przewijanie
+    const webkit = "GestureEvent" in window;
+    const at = (x: number, y: number) => { const r = c.getBoundingClientRect(); return [x - r.left, y - r.top] as const; };
+    const wheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey || e.deltaMode !== 0 || (e.deltaX === 0 && Math.abs(e.deltaY) >= 40)) { e.preventDefault(); return; }
+      if (webkit) { e.preventDefault(); c.scrollLeft += e.deltaX; c.scrollTop += e.deltaY; }
+    };
+    // szczypanie w WebKit (gładzik w aplikacji na Macu, iPhone, iPad) przychodzi jako gesture*, nie jako wheel z ctrl
+    let g0 = 1;
+    type G = Event & { scale: number; clientX: number; clientY: number };
+    const gStart = (e: Event) => { e.preventDefault(); g0 = zoomRef.current; };
+    const gChange = (e: Event) => { e.preventDefault(); const g = e as G; const [x, y] = at(g.clientX, g.clientY); setZoom(g0 * g.scale, x, y); };
+    // szczypanie dwoma palcami poza WebKit (Android): przybliżenie wokół środka palców i przesuwanie razem z nim
+    let t0: { d: number; z: number; mx: number; my: number } | null = null;
+    const two = (e: TouchEvent) => { const [a, b] = [e.touches[0], e.touches[1]]; return { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), mx: (a.clientX + b.clientX) / 2, my: (a.clientY + b.clientY) / 2 }; };
+    const tStart = (e: TouchEvent) => { if (e.touches.length === 2) { const q = two(e); t0 = { ...q, z: zoomRef.current }; } };
+    const tMove = (e: TouchEvent) => {
+      if (!t0 || e.touches.length !== 2) return;
+      e.preventDefault();
+      const q = two(e); c.scrollLeft -= q.mx - t0.mx; c.scrollTop -= q.my - t0.my; t0.mx = q.mx; t0.my = q.my;
+      const [x, y] = at(q.mx, q.my); setZoom(t0.z * (q.d / Math.max(t0.d, 1)), x, y);
+    };
+    const tEnd = (e: TouchEvent) => { if (e.touches.length < 2) t0 = null; };
+    c.addEventListener("wheel", wheel, { passive: false });
+    if (webkit) { c.addEventListener("gesturestart", gStart, { passive: false }); c.addEventListener("gesturechange", gChange, { passive: false }); c.addEventListener("gestureend", gChange, { passive: false }); }
+    else { c.addEventListener("touchstart", tStart, { passive: true }); c.addEventListener("touchmove", tMove, { passive: false }); c.addEventListener("touchend", tEnd); c.addEventListener("touchcancel", tEnd); }
+    return () => {
+      c.removeEventListener("wheel", wheel);
+      c.removeEventListener("gesturestart", gStart); c.removeEventListener("gesturechange", gChange); c.removeEventListener("gestureend", gChange);
+      c.removeEventListener("touchstart", tStart); c.removeEventListener("touchmove", tMove); c.removeEventListener("touchend", tEnd); c.removeEventListener("touchcancel", tEnd);
+    };
+  }, [setZoom]);
 
   const fit = () => {
     const c = canvasRef.current; if (!c) return;
