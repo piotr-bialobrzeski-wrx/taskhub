@@ -6,6 +6,7 @@ import { createPortal, useFormStatus } from "react-dom";
 import { LEVELS } from "@/lib/priority";
 import { loadChat, type ChatVM } from "@/app/actions";
 import type { Queue } from "@/lib/auto";
+import type { FeedItem } from "@/lib/feed";
 import { Activity } from "@/components/Activity";
 import { Icon, Lvl, projColor, type ProjectVM } from "./ui";
 
@@ -338,5 +339,41 @@ export function InlineName({ name, label, onRename }: { name: string; label: str
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); done(e.currentTarget.value); } else if (e.key === "Escape") { e.preventDefault(); setEdit(false); } }}
         onBlur={(e) => done(e.currentTarget.value)} />
     </span>
+  );
+}
+
+// Dymki agenta w prawym dolnym rogu: najnowszy na samym dole, starsze wyżej; każdy zamyka się X (zapamiętane w tej przeglądarce)
+export function AgentFeed({ items, stepLabel, onStep, className = "", style }: {
+  items: FeedItem[]; stepLabel?: (stepId: string) => string | null; onStep?: (stepId: string) => void; className?: string; style?: React.CSSProperties;
+}) {
+  const KEY = "th-feed-off";
+  const [off, setOff] = useState<Set<string> | null>(null);   // null do montażu: serwer nie zna zamkniętych, więc nic nie miga
+  useEffect(() => { try { setOff(new Set(JSON.parse(localStorage.getItem(KEY) ?? "[]") as string[])); } catch { setOff(new Set()); } }, []);
+  const close = (id: string) => setOff((s) => {
+    const n = new Set(s); n.add(id);
+    try { localStorage.setItem(KEY, JSON.stringify([...n].slice(-100))); } catch { /* brak storage */ }
+    return n;
+  });
+  const shown = off ? items.filter((m) => !off.has(m.id)) : [];
+  if (!shown.length) return null;
+  return (
+    <div className={"feed " + className} style={style} role="log" aria-live="polite" aria-label="Odpowiedzi Claude">
+      {shown.map((m) => {
+        const step = m.stepId && stepLabel ? stepLabel(m.stepId) : null;
+        return (
+          <div key={m.id} className="fb glass">
+            <div className="ans-text">{m.text}</div>
+            <span className="ans-t">Claude · {m.at}</span>
+            {step || m.link ? (
+              <div className="ans-acts">
+                {step && onStep ? <button className="btn" type="button" onClick={() => onStep(m.stepId!)}>Otwórz krok {step}</button> : null}
+                {m.link ? <a className="btn ico" href={m.link} target="_blank" rel="noopener" title={m.link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a> : null}
+              </div>
+            ) : null}
+            <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => close(m.id)}><Icon k="x" size={12} sw={2} /></button>
+          </div>
+        );
+      })}
+    </div>
   );
 }

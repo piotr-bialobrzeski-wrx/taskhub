@@ -20,6 +20,7 @@ import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
+import { agentFeed } from "@/lib/feed";
 import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { Timer } from "@/components/Timer";
@@ -46,7 +47,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const [factsPerStep, attachments, chatLog, groups, questions, bridge, stamp, pending] = await Promise.all([
     Promise.all(t.steps.map((s) => repo.listFacts({ stepId: s.id }))),
     repo.listAttachments({ taskId: t.id }),
-    repo.listChat(o.id, t.id, 2),
+    repo.listChat(o.id, t.id, 8),
     repo.listGroups(o.id, t.id),
     repo.listQuestions(o.id, { taskId: t.id, open: true }),
     repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS),
@@ -54,8 +55,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     repo.listPendingChat(o.id, t.id),
   ]);
   const providers = availableProviders(), aiOn = providers.length > 0;
-  const lastAgent = [...chatLog].reverse().find((m) => m.role === "agent");
-  const acts = (lastAgent?.actions ?? null) as { stepId?: string; link?: string } | null;
+  const feed = agentFeed(chatLog);
   const origin = appUrl();
   // kto pracuje teraz (mostek na komputerze z bieżącym biegiem albo automat o pełnej godzinie) i nad czym
   const w: Worker = { alive: bridge.alive, name: bridge.name, run: liveActivity(bridge.run), hold: bridgeHold(bridge.meta) };
@@ -180,7 +180,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       steps={tiles}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
       aiOn={aiOn} agent={agentLabel(providers)} index={indexFrom(b)}
-      lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text, at: fmtTime(lastAgent.createdAt), stepId: acts?.stepId ?? null, link: acts?.link ?? null } : null}
+      feed={feed}
       focus={focus ?? null} runbar={runbar} runAction={runAction} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} />
     </>
   );

@@ -6,8 +6,9 @@ import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, TASK_SIZE } from "@/lib/canvas/layout";
 import { Icon, Lvl, ToolIcon, TS_LABEL, TS_SHORT, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
-import { Dock, Namer, PrioPicker, ProjectPicker, TileMenu, Toast, useToast } from "./widgets";
+import { AgentFeed, Dock, Namer, PrioPicker, ProjectPicker, TileMenu, Toast, useToast } from "./widgets";
 import { msgCount } from "@/lib/auto";
+import type { FeedItem } from "@/lib/feed";
 import { AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import { Projects, type ProjectPatch } from "./Projects";
@@ -20,7 +21,7 @@ export type ArchRow = { id: string; title: string; when: string; summary: string
 export type BoardInitial = { view?: string; p?: string; t?: string; focus?: string };
 export type BoardProps = {
   tasks: TaskTile[]; groups: GroupVM[]; projects: ProjectRow[]; companies: CompanyRow[]; projTasks: ProjTask[]; index: SearchItem[]; initial: BoardInitial;
-  aiOn: boolean; agent: string; lastAgent: { id: string; text: string; at?: string; link?: string | null } | null;
+  aiOn: boolean; agent: string; feed: FeedItem[];
   archive: { done: ArchRow[]; trash: ArchRow[]; trashDays: number };
 };
 type LayoutSnap = { items: { id: string; x: number; y: number }[]; groups: { id: string; x: number; y: number; w: number; h: number; auto: boolean }[] };
@@ -114,11 +115,9 @@ export function Board(p: BoardProps) {
   const [archFocus, setArchFocus] = useState<string | null>(null);
   const off = !!arch || proj;   // widok archiwum albo projektów zakrywa kanwę
   const [purgeId, setPurgeId] = useState<string | null>(null);
-  const [answerOff, setAnswerOff] = useState(true);
   const undoL = useUndoLayout(run);
   const applied = useRef<string>("");
 
-  useEffect(() => { try { setAnswerOff(!p.lastAgent || sessionStorage.getItem("th-ans") === p.lastAgent.id); } catch { setAnswerOff(!p.lastAgent); } }, [p.lastAgent]);
   useEffect(() => { setSel((s) => { const n = new Set([...s].filter((id) => p.tasks.some((t) => t.id === id))); return n.size === s.size ? s : n; }); }, [p.tasks]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") { setMenu(false); setConfirm(false); setNamer(null); setSel(new Set()); setSelGroup(null); } };
@@ -277,6 +276,7 @@ export function Board(p: BoardProps) {
           {off ? <BackPill title={proj ? "Projekty" : "Archiwum"} onBack={showCanvas} /> : (
             <>
               <div className="gpill glass"><BrandButton open={menu} onClick={() => setMenu((m) => !m)} /></div>
+              {view === "canvas" ? <div className="zslot" /> : null}
             </>
           )}
         </div>
@@ -332,14 +332,7 @@ export function Board(p: BoardProps) {
         </div>
       ) : null}
 
-      {!off && p.lastAgent && !answerOff && !n && !group ? (
-        <div className="answer plain glass bubble" role="status" aria-live="polite">
-          <div className="ans-text">{p.lastAgent.text}</div>
-          {p.lastAgent.at ? <span className="ans-t">Claude · {p.lastAgent.at}</span> : null}
-          {p.lastAgent.link ? <div className="ans-acts"><a className="btn ico" href={p.lastAgent.link} target="_blank" rel="noopener" title={p.lastAgent.link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a></div> : null}
-          <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans", p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button>
-        </div>
-      ) : null}
+      {off ? null : <AgentFeed items={p.feed} />}
 
       {off ? null : <Dock action={chat} taskId={null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"} placeholder="Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" />}
       <Toast text={toast} />

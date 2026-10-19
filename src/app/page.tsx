@@ -1,5 +1,5 @@
 // Główna kanwa: zadania jako kafelki, kolejność z priorytetu efektywnego, grupy, archiwum (ukończone + kosz), dok czatu.
-import { fmtTime } from "@/lib/clock";
+import { agentFeed } from "@/lib/feed";
 import { requireOwner } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { bundle } from "@/lib/services";
@@ -22,7 +22,7 @@ const DAY = 864e5;
 export default async function Home({ searchParams }: { searchParams: Promise<BoardInitial> }) {
   const initial = await searchParams;
   const o = await requireOwner();
-  const [b, chatLog, groups, questions, bridge, stamp, pending] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 2), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null), repo.countPendingChat(o.id)]);
+  const [b, chatLog, groups, questions, bridge, stamp, pending] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 8), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null), repo.countPendingChat(o.id)]);
   const run = liveActivity(bridge.run);
   const now = Date.now();
   const live = sortByPriority(b.scored.filter((s) => !s.task.deletedAt));
@@ -36,12 +36,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
   questions.forEach((q) => qCount.set(q.taskId, (qCount.get(q.taskId) ?? 0) + 1));
   const all = b.tasks;
   const providers = availableProviders();
-  const lastAgent = [...chatLog].reverse().find((m) => m.role === "agent");
   const row = (s: (typeof live)[number], when: string): ArchRow => ({ id: s.task.id, title: s.task.title, when, summary: s.task.noteSummary ?? (s.task.summary || null), base: s.score.base, eff: s.score.eff, project: s.project?.name ?? null });
   // widok „Projekty”: wszystkie żywe zadania (także ukończone) z pozostałym szacunkiem i zmierzonym czasem
   const projTasks: ProjTask[] = live.map((s) => ({ id: s.task.id, title: s.task.title, state: taskStateOf(s.task, all), base: s.score.base, eff: s.score.eff, due: dueOf(s.task.due), remain: remainEst(s.task), spent: taskSpent(s.task), projectId: s.task.projectId }));
 
-  const acts = (lastAgent?.actions ?? null) as { link?: string } | null;
   return (
     <>
     <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run || pending.size > 0} />
@@ -54,7 +52,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
       index={indexFrom(b, now)} initial={{ view: initial.view, p: initial.p, t: initial.t, focus: initial.focus }}
       aiOn={providers.length > 0}
       agent={agentLabel(providers)}
-      lastAgent={lastAgent ? { id: lastAgent.id, text: lastAgent.text, at: fmtTime(lastAgent.createdAt), link: acts?.link ?? null } : null}
+      feed={agentFeed(chatLog)}
       archive={{
         done: doneArch.map((s) => row(s, `ukończone ${fmtDate(s.task.doneAt!)}`)),
         trash: trash.map((s) => row(s, `w koszu, zniknie za ${Math.max(1, Math.ceil((new Date(s.task.deletedAt!).getTime() + repo.TRASH_DAYS * DAY - Date.now()) / DAY))} dni`)),

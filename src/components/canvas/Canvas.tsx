@@ -1,6 +1,7 @@
 "use client";
 // Silnik kanwy (port z prototypu): kafelki, strzałki zależności, grupy, zaznaczanie ramką, przeciąganie, zoom kółkiem, przesuwanie środkowym przyciskiem.
 // Rysuje tylko to, co dostanie; co znaczy kafelek i co robią akcje, decyduje rodzic (Board / TaskCanvas).
+import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bounds, centerOf, computePositions, groupAt, reassign, type DropChange, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
 import { GCOL, Icon } from "./ui";
@@ -324,6 +325,24 @@ export function Canvas(p: CanvasProps) {
     setZoomState(z); c.scrollTo(padRef.current.x, padRef.current.y);
   };
 
+  // pigułka powiększenia siedzi w górnym pasku ekranu (.zslot), a jej rozwijane menu w portalu (pasek ma backdrop-filter)
+  const [zslot, setZslot] = useState<HTMLElement | null>(null);
+  useEffect(() => { setZslot(document.querySelector<HTMLElement>(".zslot")); }, []);
+  const [zOpen, setZOpen] = useState(false);
+  const zBtn = useRef<HTMLButtonElement>(null);
+  const [zPos, setZPos] = useState({ left: 0, top: 0 });
+  useEffect(() => {
+    if (!zOpen) return;
+    const r = zBtn.current!.getBoundingClientRect();
+    setZPos({ left: Math.max(16, Math.min(r.left, window.innerWidth - 216)), top: r.bottom + 6 });
+    const close = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".zmenu, .zbtn")) setZOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setZOpen(false); };
+    document.addEventListener("pointerdown", close); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", key); };
+  }, [zOpen]);
+  const layoutBtn = p.onUndoLayout ? <button className="icobtn txt undo" type="button" onClick={p.onUndoLayout} title="Przywróć układ sprzed ułożenia"><Icon k="undo" size={12} sw={2} />Cofnij</button>
+    : <button className="icobtn txt" type="button" onClick={p.onAutoLayout} title="Ułóż kafelki automatycznie">Ułóż</button>;
+
   // ---------- strzałki ----------
   const edges: ReactNode[] = [];
   const H = p.size.h;
@@ -383,18 +402,33 @@ export function Canvas(p: CanvasProps) {
         </div>
       </div>
       {p.empty}
-      <div className="zoom glass gpill">
-        <button className="icobtn" type="button" onClick={() => setZoom(zoom / 1.15)} aria-label="Oddal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10" /></svg></button>
-        <input value={zEdit ?? fmtPct(zoom)} inputMode="numeric" aria-label="Powiększenie w procentach (35–160)" title="Wpisz powiększenie w procentach (35–160)"
+      {zslot ? createPortal(
+        // w górnym pasku (miejsce na dole zajmują odpowiedzi agenta); gdy pasek jest za wąski, zostaje sam procent, a reszta rozwija się pod nim
+        <div className="zoom glass gpill">
+          <div className="zfull">
+            <button className="icobtn" type="button" onClick={() => setZoom(zoom / 1.15)} aria-label="Oddal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10" /></svg></button>
+            <input value={zEdit ?? fmtPct(zoom)} inputMode="numeric" aria-label="Powiększenie w procentach (35–160)" title="Wpisz powiększenie w procentach (35–160)"
           onFocus={(e) => { zFocus.current = Date.now(); e.currentTarget.select(); }} onMouseUp={(e) => { if (Date.now() - zFocus.current < 400) e.preventDefault(); }}   /* klik zaznacza całość; mouseup nie cofa zaznaczenia */
           onChange={(e) => setZEdit(e.currentTarget.value.replace(/\D/g, "").slice(0, 3))}
           onBlur={(e) => { if (zCancel.current) { zCancel.current = false; setZEdit(null); return; } commitZoom(e.currentTarget.value); }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } else if (e.key === "Escape") { e.preventDefault(); zCancel.current = true; e.currentTarget.blur(); } }} />
-        <button className="icobtn" type="button" onClick={() => setZoom(zoom * 1.15)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
-        <button className="icobtn txt" type="button" onClick={fit}>Dopasuj</button>
-        {p.onUndoLayout ? <button className="icobtn txt undo" type="button" onClick={p.onUndoLayout} title="Przywróć układ sprzed ułożenia"><Icon k="undo" size={12} sw={2} />Cofnij</button>
-          : <button className="icobtn txt" type="button" onClick={p.onAutoLayout} title="Ułóż kafelki automatycznie">Ułóż</button>}
-      </div>
+            <button className="icobtn" type="button" onClick={() => setZoom(zoom * 1.15)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
+            <button className="icobtn txt" type="button" onClick={fit}>Dopasuj</button>
+            {layoutBtn}
+          </div>
+          <button ref={zBtn} className="icobtn txt zbtn" type="button" aria-haspopup="menu" aria-expanded={zOpen} title="Powiększenie i układ" onClick={() => setZOpen((o) => !o)}>{fmtPct(zoom)}<Icon k="chev" size={10} sw={2.2} /></button>
+          {zOpen ? createPortal(
+            <div className="zmenu glass" role="menu" style={{ position: "fixed", left: zPos.left, top: zPos.top }} onPointerDown={(e) => e.stopPropagation()}>
+              <div className="zrow">
+                <button className="icobtn" type="button" onClick={() => setZoom(zoom / 1.15)} aria-label="Oddal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10" /></svg></button>
+                <span className="zpct">{fmtPct(zoom)}</span>
+                <button className="icobtn" type="button" onClick={() => setZoom(zoom * 1.15)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
+              </div>
+              <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); fit(); }}>Dopasuj do ekranu</button>
+              {p.onUndoLayout ? <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); p.onUndoLayout!(); }}>Cofnij ułożenie</button>
+                : <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); p.onAutoLayout(); }}>Ułóż kafelki</button>}
+            </div>, document.body) : null}
+        </div>, zslot) : null}
     </div>
   );
 }

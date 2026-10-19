@@ -10,7 +10,8 @@ import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
 import { AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import type { SearchItem } from "@/lib/search-core";
-import { Dock, Namer, TileMenu, Toast, useToast } from "./widgets";
+import { AgentFeed, Dock, Namer, TileMenu, Toast, useToast } from "./widgets";
+import type { FeedItem } from "@/lib/feed";
 import { InlineText } from "@/components/StepFields";
 import { Activity } from "@/components/Activity";
 import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, saveStepPositions, updateGroupAction } from "@/app/actions";
@@ -20,7 +21,7 @@ export type TaskCanvasProps = {
   queue: Queue | null;                     // wiadomości Piotra bez odpowiedzi: kto je weźmie i kiedy (karta nad dokiem, historia rozmowy)
   steps: (StepTile & { toolName: string })[];
   groups: GroupVM[]; index: SearchItem[];
-  aiOn: boolean; agent: string; lastAgent: { id: string; text: string; at?: string; stepId?: string | null; link?: string | null } | null;
+  aiOn: boolean; agent: string; feed: FeedItem[];
   focus: string | null;
   runbar: ReactNode;                       // treść paska stanu nad kanwą
   runAction?: { label: string; anchor: string } | null;   // przycisk w pasku: otwiera panel zadania i rozwija wskazaną sekcję
@@ -51,7 +52,6 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const [gripW, setGripW] = useState<number | null>(null);
   const [ww, setWw] = useState(1280);
   const [gripOn, setGripOn] = useState(false);
-  const [answerOff, setAnswerOff] = useState(true);
   const grip = useRef<{ x: number; w: number } | null>(null);
   const maxW = Math.max(360, ww - 32);
   const dw = clamp(gripW ?? (wide ? Math.min(1200, ww - 64) : Math.min(600, ww - 32)), 360, maxW);
@@ -64,7 +64,6 @@ export function TaskCanvas(p: TaskCanvasProps) {
   }, []);
   // przycisk w pasku („Rozpisz teraz”): panel zadania i rozwinięta sekcja, do której prowadzi
   const runAct = (anchor: string) => { setSel(new Set()); setPanel("__task"); setTimeout(() => { const el = document.getElementById(anchor); if (el instanceof HTMLDetailsElement) el.open = true; el?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, 80); };
-  useEffect(() => { try { setAnswerOff(!p.lastAgent || sessionStorage.getItem("th-ans-" + p.task.id) === p.lastAgent.id); } catch { setAnswerOff(!p.lastAgent); } }, [p.lastAgent, p.task.id]);
   useEffect(() => {
     setSel((s) => { const n = new Set([...s].filter((id) => p.steps.some((x) => x.id === id))); return n.size === s.size ? s : n; });
     setPanel((cur) => (cur && cur !== "__task" && !p.steps.some((x) => x.id === cur) ? null : cur));
@@ -154,6 +153,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
       <div className="pillbar">
         <div className="pl">
           <BackPill onBack={() => router.push("/")}><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="ct">{t.title}</span></BackPill>
+          {view === "canvas" ? <div className="zslot" /> : null}
         </div>
         <ViewPill view={view} onView={onView} />
         <span className="sp" />
@@ -208,23 +208,12 @@ export function TaskCanvas(p: TaskCanvasProps) {
       ) : null}
 
       {p.questions && !n && !group ? <div className={"answer glass" + (panel ? " withpanel" : "")} aria-live="polite">{p.questions}</div> : null}
-      {/* nad dokiem tylko to, co jest w historii rozmowy: ostatnia odpowiedź agenta (X zamyka). Stan pracy i kolejki mówi jedna linia paska na górze */}
-      {!p.questions && p.lastAgent && !answerOff && !n && !group ? (
-        <div className={"answer plain glass bubble" + (panel ? " withpanel" : "")} role="status" aria-live="polite">
-          <div className="ans-text">{p.lastAgent.text}</div>
-          {p.lastAgent.at ? <span className="ans-t">Claude · {p.lastAgent.at}</span> : null}
-          {(p.lastAgent.stepId && byId.has(p.lastAgent.stepId)) || p.lastAgent.link ? (
-            <div className="ans-acts">
-              {p.lastAgent.stepId && byId.has(p.lastAgent.stepId) ? <button className="btn" type="button" onClick={() => openStep(p.lastAgent!.stepId!)}>Otwórz krok {pad(byId.get(p.lastAgent.stepId)!.idx)}</button> : null}
-              {p.lastAgent.link ? <a className="btn ico" href={p.lastAgent.link} target="_blank" rel="noopener" title={p.lastAgent.link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a> : null}
-            </div>
-          ) : null}
-          <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => { setAnswerOff(true); try { sessionStorage.setItem("th-ans-" + t.id, p.lastAgent!.id); } catch { /* brak storage */ } }}><Icon k="x" size={12} sw={2} /></button>
-        </div>
-      ) : null}
+      {/* odpowiedzi agenta (to, co jest w historii rozmowy) w prawym dolnym rogu; przy otwartym panelu na lewo od niego */}
+      <AgentFeed items={p.feed} className={panel ? "withpanel" : ""} style={{ ["--dw" as string]: dw + "px" }}
+        stepLabel={(id) => (byId.has(id) ? pad(byId.get(id)!.idx) : null)} onStep={openStep} />
 
       <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
-        queue={ctxGlobal ? null : p.queue} version={`${p.lastAgent?.id ?? ""}|${p.queue?.n ?? 0}|${p.queue?.kind ?? ""}|${p.queue?.activity?.text ?? ""}`}
+        queue={ctxGlobal ? null : p.queue} version={`${p.feed.at(-1)?.id ?? ""}|${p.queue?.n ?? 0}|${p.queue?.kind ?? ""}|${p.queue?.activity?.text ?? ""}`}
         placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : ctxStep ? `Krok ${pad(ctxStep.idx)}: popraw szkic, dopisz, zapytaj…` : "Napisz, co dalej z tym zadaniem, albo dopisz notatkę…"} />
       <Toast text={toast} />
     </div>

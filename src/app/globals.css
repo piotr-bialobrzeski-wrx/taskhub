@@ -199,12 +199,22 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .menu .mi:hover { background: var(--accent-soft); }
 .menu .mi small { color: var(--sub); font-size: 11.5px; }
 .menu hr { border: 0; height: 1px; background: var(--line); margin: 4px 8px; }
-/* Kafelek/Grupa: prawy dolny róg, lustro pigułki powiększenia; na wąskim ekranie nad dokiem (dok zajmuje całą szerokość) */
+/* Kafelek/Grupa: lewy dolny róg (prawy należy do odpowiedzi agenta); na wąskim ekranie nad dokiem (dok zajmuje całą szerokość) */
 .mkpill, .namer { --mk-b: calc(16px + env(safe-area-inset-bottom, 0px)); }
-.mkpill { position: fixed; z-index: 9; right: max(16px, env(safe-area-inset-right, 0px)); bottom: var(--mk-b); }
-.namer { position: fixed; z-index: 12; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(var(--mk-b) + 52px); display: flex; gap: 6px; align-items: center; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5); border-radius: 999px; width: min(420px, calc(100% - 32px)); }
+.mkpill { position: fixed; z-index: 9; left: max(16px, env(safe-area-inset-left, 0px)); bottom: var(--mk-b); }
+.namer { position: fixed; z-index: 12; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(var(--mk-b) + 52px); display: flex; gap: 6px; align-items: center; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5); border-radius: 999px; width: min(420px, calc(100% - 32px)); }
 .namer input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; padding: 6px 0; }
-.zoom { position: fixed; z-index: 9; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 2px; padding: var(--s-2); border-radius: 999px; }
+/* powiększenie, Dopasuj i Ułóż: pigułka w górnym pasku (dół należy do odpowiedzi agenta); za wąsko → sam procent z menu */
+.zslot { display: flex; pointer-events: none; flex: none; }
+.zoom { position: relative; display: flex; align-items: center; gap: 2px; padding: var(--s-2); border-radius: 999px; }
+.zoom .zfull { display: flex; align-items: center; gap: 2px; }
+.zoom .zbtn { display: none; gap: 4px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+@media (max-width: 1499px) { .zoom .zfull { display: none; } .zoom .zbtn { display: inline-flex; } }
+.zmenu { z-index: 30; width: 200px; border-radius: var(--r-lg); padding: var(--s-2); display: flex; flex-direction: column; gap: 2px; }
+.zmenu .mi { border: 0; background: transparent; text-align: left; border-radius: 12px; padding: 9px 12px; color: var(--text); font: inherit; cursor: pointer; }
+.zmenu .mi:hover { background: var(--accent-soft); }
+.zrow { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 4px; }
+.zpct { font: 600 12px/1 var(--font-mono); color: var(--sub); font-variant-numeric: tabular-nums; }
 .zoom input { width: 48px; height: 28px; border: 0; padding: 0; border-radius: 999px; background: transparent; font: 600 11.5px/1 var(--font-mono); color: var(--sub); text-align: center; font-variant-numeric: tabular-nums; outline: none; }
 .zoom input:hover { background: var(--accent-soft); color: var(--text); }
 .zoom input:focus { background: var(--accent-soft); color: var(--text); box-shadow: inset 0 0 0 1.5px var(--accent); }
@@ -502,7 +512,7 @@ body:has(> main.page) { background: radial-gradient(560px 380px at 8% -8%, var(-
 .hm-day { align-self: center; font-size: 11px; font-weight: 600; color: var(--sub); padding: var(--s-3) 0 var(--s-1); text-transform: uppercase; letter-spacing: .05em; }
 
 /* okno 861–1240 px: pigułki w dolnych rogach (zoom 244 px, Kafelek/Grupa 189 px) zachodziłyby na dok, więc dok i to, co nad nim, zwęża się symetrycznie */
-@media (min-width: 861px) and (max-width: 1240px) { .app:has(.zoom), .app:has(.mkpill) { --side: 280px; } }
+@media (min-width: 861px) and (max-width: 1240px) { .app:has(.mkpill) { --side: 210px; } }
 @media (max-width: 860px) {
   .gpill.center, .gpill[aria-label="Agent"] { display: none; }
   .pillbar > .pl { max-width: none; }
@@ -516,7 +526,7 @@ body:has(> main.page) { background: radial-gradient(560px 380px at 8% -8%, var(-
   .sres { width: calc(100vw - 32px); right: auto; }
   .p-tasks { padding-left: 0; }
   .detail { top: auto; left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: auto; max-width: none; height: 62%; }
-  .grip, .zoom { display: none; }
+  .grip { display: none; }
   .mkpill, .namer { --mk-b: calc(28px + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); }
   .app:has(.mkpill) { --mk-h: 56px; }                                /* telefon: odpowiedź, pasek zaznaczenia i toast idą nad pigułkę Kafelek/Grupa */
   .runbar { max-width: calc(100% - 32px); }
@@ -799,3 +809,20 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 /* lepkie elementy w panelu liczą od wewnętrznego marginesu: przesunięcie o padding .d-body przykleja pasek do samej krawędzi */
 .d-body .rf-bar { top: calc(-1 * var(--s-6)); }
 .d-body .rf-link { top: calc(41px - var(--s-6)); }
+
+/* ---------- odpowiedzi agenta: prawy dolny róg, najnowsza na dole, starsze wyżej ---------- */
+.feed { position: fixed; z-index: 10; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  width: min(380px, calc(100% - 32px)); max-height: calc(100% - 160px); display: flex; flex-direction: column; justify-content: flex-end; gap: var(--s-3); pointer-events: none; }
+.feed .fb { pointer-events: auto; position: relative; display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-4) 44px var(--s-4) var(--s-5);
+  border-radius: var(--r-md) var(--r-md) 6px var(--r-md); min-height: 0; }
+.feed .fb .ans-text { padding-right: 0; max-height: 30vh; overflow: auto; }
+.feed .fb .ans-x { top: 6px; transform: none; }
+.feed.withpanel { right: calc(var(--dw, 600px) + 32px); }
+/* okno węższe niż dok + róg: dymki nad linią doku, żeby nie wchodziły na pole wpisywania */
+@media (max-width: 1520px) { .feed { bottom: calc(28px + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); } }
+.app.cramped .feed.withpanel { display: none; }
+@media (max-width: 860px) {
+  .feed { left: max(16px, env(safe-area-inset-left, 0px)); width: auto; bottom: calc(28px + var(--mk-h) + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); max-height: 45%; }
+  .feed.withpanel { display: none; }   /* telefon: panel kroku zajmuje dół ekranu */
+  .feed .fb:not(:last-child) { display: none; }   /* telefon: tylko najnowsza odpowiedź, reszta w historii rozmowy */
+}
