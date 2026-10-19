@@ -221,6 +221,8 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .zmenu { width: 264px; }
 .zpre { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 4px 6px; }
 .zpre .chip { border: 0; cursor: pointer; font: 600 12px/1 var(--font-mono); padding: 6px 8px; }
+.zacts { display: flex; flex-direction: column; gap: 2px; }
+.zpre .chip { justify-content: center; }
 .zpre .chip.on { background: var(--accent); color: var(--accent-text); }
 .zoom .zbtn .zt { display: inline-flex; align-items: center; gap: 4px; }
 .zoom .zbtn .zi, .addbtn, .srch-ico { display: none; }
@@ -881,4 +883,16 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
   .srchw.open > .srch-ico { display: none; }
   .srchw.open > .srch { width: 100%; }
   .pillbar:has(.srchw.open) > :not(.srchw) { visibility: hidden; }
+  /* równe odstępy: przyciski przy prawej krawędzi co 10 px, tytuł bierze resztę i stoi 10 px od pierwszego przycisku */
+  .pillbar .sp { display: none; }
+  .pillbar .crumb { padding: 0 12px 0 2px; height: 32px; }
+  .pillbar .crumb .ct { line-height: 32px; }
+  /* menu powiększenia i „+”: pod paskiem z tym samym odstępem co lista wyników szukania, na całą szerokość */
+  .zmenu { left: max(16px, env(safe-area-inset-left, 0px)) !important; right: max(16px, env(safe-area-inset-right, 0px)) !important; width: auto;
+    top: calc(14px + 44px + 6px + env(safe-area-inset-top, 0px)) !important; }
+  .zrow { padding: 2px 4px 6px; }
+  .zpre { padding: 0 0 4px; }
+  .zpre .chip { flex: 1; justify-content: center; padding: 9px 0; }
+  .zacts, .addmenu { flex-direction: row; gap: 4px; }
+  .zacts .mi, .addmenu .mi { flex: 1; justify-content: center; text-align: center; background: var(--accent-soft); }
 }

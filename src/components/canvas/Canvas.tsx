@@ -427,9 +427,11 @@ export function Canvas(p: CanvasProps) {
                 <button className="icobtn" type="button" onClick={() => zoomBy(0.1)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
               </div>
               <div className="zpre">{[50, 75, 100, 125, 150].map((v) => <button key={v} type="button" className={"chip" + (Math.round(zoom * 100) === v ? " on" : "")} onClick={() => setZoom(v / 100)}>{v}%</button>)}</div>
-              <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); fit(); }}>Dopasuj do ekranu</button>
-              {p.onUndoLayout ? <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); p.onUndoLayout!(); }}>Cofnij ułożenie</button>
-                : <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); p.onAutoLayout(); }}>Ułóż kafelki</button>}
+              <div className="zacts">
+                <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); fit(); }}>Dopasuj do ekranu</button>
+                {p.onUndoLayout ? <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); p.onUndoLayout!(); }}>Cofnij ułożenie</button>
+                  : <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); p.onAutoLayout(); }}>Ułóż kafelki</button>}
+              </div>
             </div>, document.body) : null}
         </div>, zslot) : null}
     </div>
