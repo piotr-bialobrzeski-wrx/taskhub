@@ -152,7 +152,7 @@ export function Board(p: BoardProps) {
   const hitIds = useMemo(() => new Set(p.index.filter((it) => it.kind === "task" && matches(it.hay, words)).map((it) => it.id)), [p.index, words]);
   const hits = useMemo(() => (words.length ? p.tasks.filter((t) => hitIds.has(t.id)) : p.tasks), [p.tasks, words, hitIds]);
   // w trakcie szukania pasujące kafelki zostają, reszta blednie
-  const items: CanvasItem[] = useMemo(() => p.tasks.map((t) => ({ id: t.id, dependsOn: t.dependsOn, pos: t.pos, cls: "task " + t.state + (words.length ? (hitIds.has(t.id) ? " hit" : " dim") : ""), done: t.state === "done", aria: "Otwórz zadanie " + t.title })), [p.tasks, words.length, hitIds]);
+  const items: CanvasItem[] = useMemo(() => p.tasks.map((t) => ({ id: t.id, dependsOn: t.dependsOn, pos: t.pos, cls: "task " + t.state + (t.activity ? " agent" : "") + (words.length ? (hitIds.has(t.id) ? " hit" : " dim") : ""), done: t.state === "done", aria: "Otwórz zadanie " + t.title })), [p.tasks, words.length, hitIds]);
   const groups: CanvasGroup[] = useMemo(() => p.groups.map((g) => ({ ...g })), [p.groups]);
   const group = selGroup ? p.groups.find((g) => g.id === selGroup) ?? null : null;
   const open = (id: string) => router.push(`/tasks/${id}`);

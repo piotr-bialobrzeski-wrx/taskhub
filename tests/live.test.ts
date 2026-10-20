@@ -1,8 +1,10 @@
 // Praca na żywo i automat: notatka biegu → zdanie po polsku i powiązanie z krokiem/zadaniem; klucz pulsu; najbliższy automat; kto rozpisze zadanie.
 import { describe, it, expect } from "vitest";
-import { activityText, linkOfNote, liveActivity, liveKey } from "@/lib/live";
+import { activityText, liveActivity, liveKey, type LiveActivity } from "@/lib/live";
 import { nextAutoAt } from "@/lib/clock";
 import { allDoneWaitText, bridgeHold, busyWith, chatWho, msgCount, noStepsWho, newTaskText, queueWho, yourMsgsNom } from "@/lib/auto";
+import { stepTile } from "@/lib/canvas/vm";
+import { agentFeed } from "@/lib/feed";
 import { task, step } from "./helpers";
 
 const run = (note: string | null, extra: Partial<Parameters<typeof liveActivity>[0] & object> = {}) => ({ id: "r1", bridge: "Mac", startedAt: "2026-10-18T09:00:00Z", touchedAt: "2026-10-18T09:01:00Z", endedAt: null, outcome: null, note, taskId: null, stepId: null, ...extra });
@@ -16,22 +18,41 @@ describe("praca na żywo", () => {
     expect(activityText("start")).toEqual({ text: "zaczyna", detail: null });
     expect(activityText("")).toBeNull();
   });
-  it("bieg wiąże się z krokiem (start_step, set_blocks, complete_step) albo zadaniem (get_task, add_steps, reply_chat)", () => {
-    const id = "3b1d2c4e-1111-4222-8333-944455556666";
-    expect(linkOfNote(`start_step: ${id}`)).toEqual({ stepId: id });
-    expect(linkOfNote(`complete_step: ${id}`)).toEqual({ stepId: id });
-    expect(linkOfNote(`get_task: ${id}`)).toEqual({ taskId: id });
-    expect(linkOfNote(`reply_chat: ${id}`)).toEqual({ taskId: id });
-    expect(linkOfNote("Read: plik.ts")).toBeNull();
-    expect(linkOfNote("list_work")).toBeNull();
-  });
-  it("klucz pulsu zmienia się ze stemplem, notatką biegu i życiem mostka; bieg zakończony nie liczy się", () => {
+  it("klucz pulsu zmienia się ze stemplem, notatką biegu, krokiem „teraz”, dotkniętymi krokami i życiem mostka; bieg zakończony nie liczy się", () => {
     const a = liveKey("s1", run("Read: a.ts"), true), b = liveKey("s1", run("Read: b.ts"), true);
     expect(a).not.toBe(b);
     expect(liveKey("s1", run("x"), true)).not.toBe(liveKey("s1", run("x"), false));
+    expect(liveKey("s1", run("x"), true)).not.toBe(liveKey("s1", run("x", { stepId: "s1" }), true));
+    const t1 = { first: "2026-10-18T09:00:30Z", at: "2026-10-18T09:00:30Z", what: "ułożył kartkę" };
+    expect(liveKey("s1", run("x"), true)).not.toBe(liveKey("s1", run("x", { steps: { s1: t1 } }), true));
+    expect(liveKey("s1", run("x", { steps: { s1: t1 } }), true)).not.toBe(liveKey("s1", run("x", { steps: { s1: { ...t1, at: "2026-10-18T09:02:00Z" } } }), true));
     expect(liveKey("s1", run("x", { endedAt: "2026-10-18T09:05:00Z" }), true)).toBe(liveKey("s1", null, true));
     expect(liveActivity(run("x", { endedAt: "2026-10-18T09:05:00Z" }))).toBeNull();
     expect(liveActivity(run(null))?.text).toBe("pracuje");
+    expect(liveActivity(run("x", { steps: { s1: t1 }, stoppable: true }))).toMatchObject({ kind: "work", runId: "r1", steps: { s1: t1 }, stoppable: true });
+  });
+  it("kafelek kroku: światełko na kroku „teraz” (także w szkicu), stała obwódka z „Claude poprawił szkic · 19:43” na dotkniętym, kropka do pierwszego otwarcia", () => {
+    const s1 = step({ id: "s1", title: "Napisz wiadomość", tool: "slack", status: "draft", blocks: [{ type: "draft", target: { app: "slack", action: "send", where: "#dev" }, body: "Hej", status: "proposed" }] });
+    const s2 = step({ id: "s2", title: "Sprawdź logi", tool: "code", agentAt: "2026-10-18T17:40:00Z", openedAt: null });
+    const s3 = step({ id: "s3", title: "Zadzwoń", tool: "manual", agentAt: "2026-10-18T17:40:00Z", openedAt: "2026-10-18T17:41:00Z" });
+    const s4 = step({ id: "s4", title: "Zapisz fakty", tool: "code", agentAt: "2026-10-18T17:45:00Z", openedAt: "2026-10-18T17:41:00Z" });
+    const t = task({ id: "t1", steps: [s1, s2, s3, s4] });
+    const live: LiveActivity = { text: "poprawia szkic kroku", detail: null, since: "2026-10-18T17:30:00Z", stepId: "s1", taskId: "t1", bridge: "Mac", runId: "r1", kind: "work", steps: { s1: { first: "2026-10-18T17:35:00Z", at: "2026-10-18T17:43:00Z", what: "napisał szkic" }, s2: { first: "2026-10-18T17:40:00Z", at: "2026-10-18T17:43:00Z", what: "poprawił szkic" } } };
+    const a = stepTile(t, s1, [t], live);
+    expect(a).toMatchObject({ state: "draft", glow: "live", touched: null, fresh: false });
+    expect(a.activity).toEqual({ text: "poprawia szkic", detail: null, since: "2026-10-18T17:30:00Z" });
+    const b = stepTile(t, s2, [t], live);
+    expect(b).toMatchObject({ glow: "touched", touched: "Claude poprawił szkic · 19:43", fresh: false, activity: null });   // obwódka zamiast kropki, póki bieg trwa
+    expect(stepTile(t, s2, [t], null)).toMatchObject({ glow: null, touched: null, fresh: true });   // po biegu: kropka, bo Piotr nie otwierał
+    expect(stepTile(t, s3, [t], null)).toMatchObject({ glow: null, fresh: false });   // otworzył po zmianie
+    expect(stepTile(t, s4, [t], null)).toMatchObject({ fresh: true });   // zmieniony znów po otwarciu
+    expect(stepTile(t, s2, [t], { ...live, taskId: "t2", stepId: "x", steps: {} })).toMatchObject({ glow: null, fresh: true });   // bieg nad innym zadaniem
+  });
+  it("dymek agenta: przyciski „Otwórz krok” do innych kroków dotkniętych w biegu (actions.steps)", () => {
+    const m = (actions: unknown) => ({ id: "m1", role: "agent" as const, text: "Gotowe", actions, createdAt: new Date().toISOString(), seenAt: null, answeredAt: null });
+    expect(agentFeed([m({ stepId: "s1", steps: ["s2", 3, "s4"] })])[0]).toMatchObject({ stepId: "s1", link: null, steps: ["s2", "s4"] });
+    expect(agentFeed([m({ stepId: "s1" })])[0].steps).toEqual([]);
+    expect(agentFeed([m(null)])[0]).toMatchObject({ stepId: null, steps: [] });
   });
 });
 

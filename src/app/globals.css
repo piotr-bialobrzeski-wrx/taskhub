@@ -72,6 +72,19 @@ a { color: var(--accent); }
 .node.done.dim:not(.sel):not(.picked):not(.dragging) { opacity: .74; }
 .node.done.dim:hover { opacity: 1; }
 .lrow.dim { opacity: .74; }
+/* praca na żywo (paczka 7, punkt 3): krok „teraz” biegu ma światełko biegnące po obwódce, kroki dotknięte w tym biegu i zadanie z biegiem
+   stałą obwódkę w kolorze Claude; obwódki zaznaczenia (.sel, .dragging) stoją niżej, więc wygrywają */
+@property --a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes run-light { to { --a: 360deg; } }
+.node.live { box-shadow: 0 2px 10px var(--shadow), 0 0 0 1.5px var(--t-claude), 0 0 18px color-mix(in srgb, var(--t-claude) 35%, transparent); }
+.node.live::after { content: ""; position: absolute; inset: -3px; border-radius: calc(var(--r-md) + 3px); padding: 3px; pointer-events: none;
+  background: conic-gradient(from var(--a), transparent 0 70%, color-mix(in srgb, var(--t-claude) 30%, white) 88%, var(--t-claude) 100%);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; animation: run-light 1.6s linear infinite; }
+.node.touched, .node.task.agent { box-shadow: 0 2px 10px var(--shadow), 0 0 0 1.5px var(--t-claude); }
+.lrow { position: relative; }
+.lrow.live, .lrow.touched { box-shadow: 0 1px 6px var(--shadow), 0 0 0 1.5px var(--t-claude); }
+.n-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--t-claude); box-shadow: 0 0 0 2px var(--surface); }
+@media (prefers-reduced-motion: reduce) { .node.live::after { animation: none; background: var(--t-claude); } }
 .node.dragging { cursor: grabbing; box-shadow: 0 18px 40px var(--shadow), 0 0 0 2px var(--accent); z-index: 3; }
 /* otwarty krok (paczka 6, punkt 2): wypełnienie w kolorze akcentu, gruba ramka i poświata; „Gotowy” ma tylko cienką ramkę */
 .node.sel { background: color-mix(in srgb, var(--accent) 22%, var(--surface));
@@ -592,11 +605,8 @@ body:has(> main.page) { background: radial-gradient(560px 380px at 8% -8%, var(-
 @keyframes pulse { 0%, 100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.1); } }
 .st.handoff::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 5px; animation: pulse 1.4s ease-in-out infinite; }
 @keyframes tile-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
-.node:not(.origin) { animation: tile-in .3s ease-out; }   /* nowy krok dopisany przez mostek wchodzi na kanwę miękko */
-.node.handoff { animation: tile-in .3s ease-out, work 2.4s ease-in-out infinite; }
-.node.handoff.sel { animation: none; }
-@keyframes work { 0%, 100% { box-shadow: 0 2px 10px var(--shadow), 0 0 0 1.5px var(--t-claude); } 50% { box-shadow: 0 2px 10px var(--shadow), 0 0 0 4px color-mix(in srgb, var(--t-claude) 40%, transparent); } }
-@media (prefers-reduced-motion: reduce) { .node, .node.handoff, .pulse, .st.handoff::before, .dots i { animation: none; } }
+.node:not(.origin) { animation: tile-in .3s ease-out; }   /* nowy krok dopisany przez mostek wchodzi na kanwę miękko; krok w toku nie miga: światełko ma tylko krok „teraz” biegu */
+@media (prefers-reduced-motion: reduce) { .node, .pulse, .st.handoff::before, .dots i { animation: none; } }
 
 /* ---------- praca na żywo: trzy kropki + co mostek robi teraz (kafelek kroku, kafelek zadania, panel, pasek nad kanwą) ---------- */
 .act { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; color: var(--t-claude); font-size: 11.5px; font-weight: 600; white-space: nowrap; }

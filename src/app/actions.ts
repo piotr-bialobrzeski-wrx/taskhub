@@ -305,6 +305,11 @@ export async function saveOutput(fd: FormData) {
   await repo.updateStep(stepId, { output: str(fd, "output") });
   refresh(taskId);
 }
+// Piotr otworzył krok zmieniony przez agenta: kropka „jeszcze nieotwarte” gaśnie (bez odświeżenia: kanwa chowa ją od razu sama)
+export async function openedStep(taskId: string, stepId: string) {
+  const o = await requireOwner();
+  await repo.stepOpened(o.id, taskId, stepId);
+}
 // zegar karty (useOwnClock): porcja sekund Piotra na jego otwartym kroku; bez odświeżenia widoku, bo porcje idą w tle co kilka minut
 export async function addOwnTime(taskId: string, stepId: string, sec: number) {
   const o = await requireOwner();

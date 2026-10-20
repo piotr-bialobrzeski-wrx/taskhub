@@ -198,6 +198,8 @@ export const Step = z.object({
   agentSec: z.number().int().optional(),            // czas Claude'a na ten krok (sekundy, liczony sam: od start_step albo znacznika biegu do zamknięcia)
   agentStartedAt: z.string().nullable().optional(), // start_step agenta; zamknięcie albo oddanie kroku go kasuje
   doneBy: z.enum(["owner", "agent"]).nullable().optional(),   // kto zamknął krok; null (sprzed paczki 7) = wg narzędzia
+  agentAt: z.string().nullable().optional(),        // ostatnia zmiana kroku przez agenta (kartka, szkic, zamknięcie); kropka na kafelku do pierwszego otwarcia
+  openedAt: z.string().nullable().optional(),       // Piotr otworzył krok po tej zmianie
 });
 export type Step = z.infer<typeof Step>;
 

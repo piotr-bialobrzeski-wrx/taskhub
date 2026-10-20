@@ -361,13 +361,16 @@ export function AgentFeed({ items, stepLabel, onStep, className = "", style }: {
     <div className={"feed " + className} style={style} role="log" aria-live="polite" aria-label="Odpowiedzi Claude">
       {shown.map((m) => {
         const step = m.stepId && stepLabel ? stepLabel(m.stepId) : null, link = safeHref(m.link);   // wynik tylko http(s) albo plik Task Hub
+        // inne kroki dotknięte w tym biegu: małe przyciski z numerem, tylko gdy nie ma linku do wyniku (dymek zostaje krótki)
+        const more = !link && stepLabel && onStep ? m.steps.map((id) => ({ id, label: stepLabel(id) })).filter((x): x is { id: string; label: string } => !!x.label) : [];
         return (
           <div key={m.id} className="fb glass">
             <div className="ans-text">{m.text}</div>
             <span className="ans-t">Claude · {m.at}</span>
-            {step || link ? (
+            {step || link || more.length ? (
               <div className="ans-acts">
                 {step && onStep ? <button className="btn" type="button" onClick={() => onStep(m.stepId!)}>Otwórz krok {step}</button> : null}
+                {more.map((x) => <button key={x.id} className="btn sm" type="button" title={`Otwórz krok ${x.label}`} onClick={() => onStep!(x.id)}>{x.label}</button>)}
                 {link ? <a className="btn ico" href={link} target="_blank" rel="noopener" title={link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a> : null}
               </div>
             ) : null}

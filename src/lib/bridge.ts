@@ -64,6 +64,8 @@ const B_APPROVAL_V1 = `   - KROKI WYMAGAJĄCE ZGODY: przygotuj kompletny szkic (
 const B_LEAVE_V1 = `   - Krok, którego nie masz jak zrobić (brak narzędzia, dostępu albo danych): leave_step z krótkim powodem. Krok, który stał się zbędny (to samo już wysłane w innym kroku, ticket już ma tę zmianę, zakres się zmienił): skip_step z powodem, nie leave_step. Przed szkicem i przed wysyłką sprawdź, czy inny krok tego zadania nie robi tego samego w tym samym miejscu: wtedy popraw jeden szkic, a drugi krok zamknij przez skip_step. Krok z tool manual zostaw Piotrowi.`;
 const B_CODE_V1 = `   - KROK Z KODEM (tool code, Claude Code): pracuj w repozytorium z profilu projektu, na gałęzi roboczej. Zanim zgłosisz complete_step, zapisz przez set_blocks blok changes (repo, branch, preview = adres podglądu http albo file://ścieżka do pliku, który Piotr otworzy, files = każdy zmieniony plik z krótkim note i diffem) oraz, gdy krok wymaga zgody, blok draft z target.app "github", action "commit" albo "push", where = repozytorium i gałąź, body = treść commita; w add_facts zapisz, jak sprawdziłeś zmiany (test, build, zrzut). Commit i push tylko po zatwierdzeniu szkicu przez Piotra (sekcja ZATWIERDZONE SZKICE).`;
 const B_LIVE = `   - Każde użycie narzędzia Piotr widzi na żywo na kafelku zadania, więc nie raportuj postępu w rozmowie; rozmowa jest na odpowiedzi i decyzje.`;
+// v2: dymek „Claude pracuje” i świecące kroki zamiast raportów; Piotr może zatrzymać bieg z Task Hub (token biegu gaśnie)
+const B_LIVE_V2 = `   - Piotr widzi Twoją pracę na żywo: dymek „Claude pracuje” nad polem czatu (co robisz teraz, nad którym krokiem) i podświetlone kroki, których dotykasz w tym biegu, więc nie raportuj postępu w rozmowie; rozmowa jest na odpowiedzi i decyzje. Piotr może zatrzymać bieg w Task Hub: gdy konektor Task Hub przestanie odpowiadać (brak autoryzacji), zakończ bez dalszych kroków.`;
 const B_SHORT = `   - KRÓTKO: summary w complete_step to 1–2 zdania o efekcie (Piotr czyta je w sekcji „Teraz” karty kroku; w rozmowie widzi tylko „Zrobione: tytuł kroku”). Gdy krok ma blok changes albo szkic, nie powtarzaj ich treści: summary mówi tylko to, czego tam nie ma (założenia, zastrzeżenia, co pominięto), a każde założenie to osobna linia od słów „Do potwierdzenia: …”. Pliki, adresy, liczby i sposób sprawdzenia idą do add_facts albo do bloku changes, nie do podsumowania ani do rozmowy. reply_chat: 1–3 zdania.`;
 const END = `4. Na końcu odpowiedz 1–3 zdaniami: co rozpisałeś, co zrobiłeś, jakie szkice czekają na zgodę, co oddałeś i dlaczego.`;
 
@@ -90,7 +92,7 @@ export function bridgeWorkPrompt(): string {
   return [
     INTRO_V2,
     STEP1,
-    [STEP2, B_CONN_V2, B_MSGS_V2, B_GOING, B_NOSTEPS_V2, B_READY_V2, B_APPROVAL_V2, B_LEAVE_V2, B_CODE_V2, B_LIVE, B_SHORT].join("\n"),
+    [STEP2, B_CONN_V2, B_MSGS_V2, B_GOING, B_NOSTEPS_V2, B_READY_V2, B_APPROVAL_V2, B_LEAVE_V2, B_CODE_V2, B_LIVE_V2, B_SHORT].join("\n"),
     RULES_V2,
     END,
   ].join("\n\n");

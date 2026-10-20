@@ -15,7 +15,7 @@ import type { FeedItem } from "@/lib/feed";
 import { InlineText } from "@/components/StepFields";
 import { Activity } from "@/components/Activity";
 import { useOwnClock } from "@/components/OwnClock";
-import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, saveStepPositions, updateGroupAction } from "@/app/actions";
+import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, openedStep, saveStepPositions, updateGroupAction } from "@/app/actions";
 
 export type TaskCanvasProps = {
   task: { id: string; title: string; base: number; eff: number; why: string; state: TaskStateKey; progress: { done: number; all: number }; estText: string; activity: TileActivity | null; pending: number };
@@ -75,7 +75,11 @@ export function TaskCanvas(p: TaskCanvasProps) {
   }, []);
 
   const byId = useMemo(() => new Map(p.steps.map((s) => [s.id, s])), [p.steps]);
-  const items: CanvasItem[] = useMemo(() => p.steps.map((s) => ({ id: s.id, dependsOn: s.dependsOn, pos: s.pos, cls: s.state + (panel === s.id ? " sel" : "") + (s.dim ? " dim" : ""), done: s.state === "done", aria: `Krok ${s.idx}: ${s.title}` })), [p.steps, panel]);
+  // kropka „Claude zmienił ten krok” gaśnie od razu po otwarciu kroku (serwer zapisuje otwarcie w tle, bez odświeżenia)
+  const [opened, setOpened] = useState<Set<string>>(new Set());
+  const seen = (id: string) => { const s = byId.get(id); if (s?.fresh && !opened.has(id)) { setOpened((o) => new Set(o).add(id)); void openedStep(t.id, id); } };
+  useEffect(() => { if (panel && panel !== "__task") seen(panel); });   // krok zmienił się, gdy jego panel był otwarty: to też otwarcie
+  const items: CanvasItem[] = useMemo(() => p.steps.map((s) => ({ id: s.id, dependsOn: s.dependsOn, pos: s.pos, cls: s.state + (panel === s.id ? " sel" : "") + (s.dim ? " dim" : "") + (s.glow ? " " + s.glow : ""), done: s.state === "done", aria: `Krok ${s.idx}: ${s.title}` })), [p.steps, panel]);
   const groups: CanvasGroup[] = useMemo(() => p.groups.map((g) => ({ ...g })), [p.groups]);
   const group = selGroup ? p.groups.find((g) => g.id === selGroup) ?? null : null;
   const ids = [...sel], n = sel.size, word = plural(n, "krok", "kroki", "kroków");
@@ -92,7 +96,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const freeze = (members: string[]) => { const P = api.current?.positions() ?? {}; const list = members.filter((k) => P[k]).map((k) => ({ id: k, x: Math.round(P[k].x), y: Math.round(P[k].y) })); return list.length ? saveStepPositions(t.id, list) : Promise.resolve(); };
   const after = n === 1 ? ids[0] : panel && panel !== "__task" ? panel : null;
   // pojedyncze kliknięcie otwiera panel kroku (pierścień akcentu); zaznaczenie zbiorcze to ramka albo Shift/Ctrl
-  const openStep = (id: string) => { setSel(new Set()); setSelGroup(null); setPanel(id); setConfirm(false); };
+  const openStep = (id: string) => { setSel(new Set()); setSelGroup(null); setPanel(id); setConfirm(false); seen(id); };
   // pasek panelu kroku: numer, tytuł (edycja klikiem, do 2 linii), stan; narzędzie jest w technikaliach, nie dubluje się tu
   const stepBar = (s: StepTile & { toolName: string }) => (
     <><span className="n-num">{pad(s.idx)}</span><InlineText taskId={t.id} stepId={s.id} field="title" value={s.title} as="bar" placeholder="Tytuł kroku" /><span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span></>
@@ -127,16 +131,19 @@ export function TaskCanvas(p: TaskCanvasProps) {
             <>
               <span className="n-top"><span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} /><span className={"st " + s.state}>{ST_LABEL[s.state]}</span></span>
               <span className="n-title">{s.title}</span>
+              {/* dolna linia: praca na żywo → co Claude zrobił w tym biegu → dokąd poszło → plan; kropka = zmienione, jeszcze nieotwarte */}
               <span className="n-meta">{s.activity ? <Activity text={s.activity.text} detail={s.activity.detail} since={s.activity.since} />
+                : s.touched ? <span className="act" title={s.touched}><span className="act-t">{s.touched}</span></span>
                 : s.destHref ? <a className="n-dest" href={s.destHref} target="_blank" rel="noopener" title={s.destHref} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>{s.meta}</a>
                 : s.meta}</span>
+              {s.fresh && !opened.has(s.id) ? <i className="n-dot" title="Claude zmienił ten krok, jeszcze go nie otwierałeś" /> : null}
             </>); }}
-          origin={{ cls: "task " + t.state, node: (
+          origin={{ cls: "task " + t.state + (t.activity ? " agent" : ""), node: (
             <>
               {/* nagłówek: priorytet i jedna plakietka stanu; wiadomości czekające idą do linii na dole, żeby nic nie wychodziło poza kafelek */}
               <span className="n-top"><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="st" style={{ marginLeft: "auto", background: "rgba(255,255,255,.2)", color: "#fff" }}>{TS_LABEL[t.state]}</span></span>
               <span className="n-title" style={{ WebkitLineClamp: 3 }}>{t.title}</span>
-              <span className="n-meta">{t.activity ? <Activity text={t.activity.text} detail={null} since={t.activity.since} who="Mostek" />
+              <span className="n-meta">{t.activity ? <Activity text={t.activity.text} detail={null} since={t.activity.since} who="Claude" />
                 : t.pending ? <span title="Twoje wiadomości czekają na odpowiedź agenta">{msgCount(t.pending)} czeka · {t.progress.done}/{t.progress.all} kroków</span>
                 : `${t.progress.done}/${t.progress.all} kroków · ${t.estText}`}</span>
             </>) }}
@@ -151,9 +158,10 @@ export function TaskCanvas(p: TaskCanvasProps) {
           <div className="stage-grp">
             <button type="button" className="lrow" onClick={() => setPanel("__task")}><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="n-title">{t.title}</span><span className="n-meta" style={{ margin: 0 }}>{t.progress.done}/{t.progress.all}</span></button>
             {p.steps.map((s) => (
-              <button key={s.id} type="button" className={"lrow" + (s.dim ? " dim" : "")} onClick={() => openStep(s.id)}>
+              <button key={s.id} type="button" className={"lrow" + (s.dim ? " dim" : "") + (s.glow ? " " + s.glow : "")} onClick={() => openStep(s.id)}>
                 <span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} />
-                <span className="n-title">{s.title}</span>{s.dest ? <span className="n-dest">{s.dest}</span> : null}<span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span>
+                <span className="n-title">{s.title}</span>{s.touched ? <span className="n-dest act"><span className="act-t">{s.touched}</span></span> : s.dest ? <span className="n-dest">{s.dest}</span> : null}<span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span>
+                {s.fresh && !opened.has(s.id) ? <i className="n-dot" title="Claude zmienił ten krok, jeszcze go nie otwierałeś" /> : null}
               </button>
             ))}
             {p.steps.length ? null : <p className="sub">Brak kroków.</p>}

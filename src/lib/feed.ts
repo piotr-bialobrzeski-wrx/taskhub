@@ -2,13 +2,15 @@
 import { fmtTime } from "./clock";
 import type { ChatMessage } from "./repo";
 
-export type FeedItem = { id: string; text: string; at: string; stepId: string | null; link: string | null };
+// steps: inne kroki, których agent dotknął w tym biegu (małe przyciski „04”, „05” obok „Otwórz krok 03”)
+export type FeedItem = { id: string; text: string; at: string; stepId: string | null; link: string | null; steps: string[] };
 export const FEED_MAX = 3;
 const FRESH_MS = 12 * 3600_000;
 
 export function agentFeed(log: ChatMessage[], now = Date.now()): FeedItem[] {
   return log.filter((m) => m.role === "agent" && now - new Date(m.createdAt).getTime() < FRESH_MS).slice(-FEED_MAX).map((m) => {
-    const a = (m.actions ?? null) as { stepId?: string; link?: string } | null;
-    return { id: m.id, text: m.text, at: fmtTime(m.createdAt), stepId: a?.stepId ?? null, link: a?.link ?? null };
+    const a = (m.actions ?? null) as { stepId?: string; link?: string; steps?: unknown } | null;
+    const steps = Array.isArray(a?.steps) ? a.steps.filter((x): x is string => typeof x === "string") : [];
+    return { id: m.id, text: m.text, at: fmtTime(m.createdAt), stepId: a?.stepId ?? null, link: a?.link ?? null, steps };
   });
 }

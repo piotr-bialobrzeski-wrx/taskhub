@@ -1,6 +1,7 @@
 // Praca na żywo: co mostek robi w tej chwili (z notatki biegu „narzędzie: argument”, którą aplikacja na Macu wysyła przy każdym użyciu
-// narzędzia), z czym to powiązać (zadanie, krok) i jeden stempel zmian, po którym przeglądarka wie, że ma się odświeżyć.
-import type { BridgeRun } from "./repo";
+// narzędzia), z czym to powiązać (zadanie, krok: zapisuje serwer MCP przy każdym wywołaniu) i jeden stempel zmian, po którym przeglądarka wie,
+// że ma się odświeżyć.
+import type { BridgeRun, RunStep } from "./repo";
 
 export type Activity = { text: string; detail: string | null };
 
@@ -18,7 +19,7 @@ const CODE: Record<string, string> = {
   Grep: "szuka w kodzie", Glob: "szuka plików", LS: "przegląda pliki", WebSearch: "szuka w sieci", WebFetch: "czyta stronę", Task: "deleguje pracę", Agent: "deleguje pracę",
   TodoWrite: "planuje", AskUserQuestion: "pyta", KillShell: "zamyka proces", BashOutput: "czyta wynik polecenia", ExitPlanMode: "kończy plan", EnterPlanMode: "planuje",
 };
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function activityText(note: string | null | undefined): Activity | null {
   const n = (note ?? "").replace(/\s+/g, " ").trim();
@@ -34,24 +35,21 @@ export function activityText(note: string | null | undefined): Activity | null {
   return { text: `używa: ${tool.replace(/[_-]+/g, " ").toLowerCase()}`, detail };
 }
 
-// „start_step: <id>” wiąże bieg z krokiem, „get_task: <id>” albo „add_steps: <id>” z zadaniem
-const STEP_TOOLS = new Set(["start_step", "set_blocks", "complete_step", "leave_step", "skip_step", "add_facts", "add_snapshot", "update_step"]);
-const TASK_TOOLS = new Set(["get_task", "add_steps", "update_task", "reply_chat", "ask_question"]);
-export function linkOfNote(note: string | null | undefined): { stepId?: string; taskId?: string } | null {
-  const m = /^([a-z_]+):\s*([0-9a-f-]{36})\s*$/i.exec((note ?? "").trim());
-  if (!m) return null;
-  if (STEP_TOOLS.has(m[1])) return { stepId: m[2] };
-  if (TASK_TOOLS.has(m[1])) return { taskId: m[2] };
-  return null;
-}
-
-// to, co mostek robi teraz, w kształcie dla kafelka i panelu; null, gdy nie ma otwartego biegu
-export type LiveActivity = { text: string; detail: string | null; since: string; stepId: string | null; taskId: string | null; bridge: string };
+// to, co mostek robi teraz, w kształcie dla kafelka i panelu; null, gdy nie ma otwartego biegu.
+// steps: kroki, których bieg dotknął (świecą na kanwie); stoppable: bieg pracy v2, który Piotr może zatrzymać w Task Hub
+export type LiveActivity = { text: string; detail: string | null; since: string; stepId: string | null; taskId: string | null; bridge: string; runId?: string; kind?: "work" | "send"; steps?: Record<string, RunStep>; stoppable?: boolean };
 export function liveActivity(run: BridgeRun | null | undefined): LiveActivity | null {
   if (!run || run.endedAt) return null;
   const a = activityText(run.note) ?? { text: "pracuje", detail: null };
-  return { text: a.text, detail: a.detail, since: run.startedAt, stepId: run.stepId, taskId: run.taskId, bridge: run.bridge };
+  return { text: a.text, detail: a.detail, since: run.startedAt, stepId: run.stepId, taskId: run.taskId, bridge: run.bridge, runId: run.id, kind: run.kind ?? "work", steps: run.steps ?? {}, stoppable: !!run.stoppable };
 }
+// czynność z numerem kroku, nad którym trwa („układa kartkę kroku 03”); na kafelku tego kroku słowo „kroku” odpada
+export const nowText = (a: Pick<LiveActivity, "text">, idx: number | null) => (idx && / kroku$/.test(a.text) ? `${a.text} ${String(idx).padStart(2, "0")}` : a.text);
+export const onTileText = (text: string) => text.replace(/ kroku$/, "");
 
-// klucz odświeżania: stempel zmian w bazie + bieg mostka (id i ostatnia notatka) + czy mostek żyje; inny klucz = przeglądarka ma odświeżyć stronę
-export const liveKey = (stamp: string, run: BridgeRun | null | undefined, alive: boolean) => `${stamp}|${run && !run.endedAt ? `${run.id}:${run.note ?? ""}` : ""}|${alive ? 1 : 0}`;
+// klucz odświeżania: stempel zmian w bazie + bieg mostka (id, ostatnia notatka, krok „teraz”, dotknięte kroki) + czy mostek żyje; inny klucz = przeglądarka ma odświeżyć stronę
+export const liveKey = (stamp: string, run: BridgeRun | null | undefined, alive: boolean) => {
+  const steps = run?.steps ? Object.values(run.steps) : [];
+  const newest = steps.reduce((m, s) => (s.at > m ? s.at : m), "");
+  return `${stamp}|${run && !run.endedAt ? `${run.id}:${run.note ?? ""}:${run.stepId ?? ""}:${steps.length}:${newest}` : ""}|${alive ? 1 : 0}`;
+};

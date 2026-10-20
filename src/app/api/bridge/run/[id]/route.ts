@@ -3,7 +3,6 @@
 // Koniec biegu gasi jego tokeny; bieg wysyłki bez zrobionego kroku cofa zgodę z notatką w rozmowie (repo.endBridgeRun), bez ponawiania.
 import * as repo from "@/lib/repo";
 import { authBridge } from "@/lib/bridge";
-import { linkOfNote } from "@/lib/live";
 import { toolLabel, normalizeTool } from "@/lib/schema";
 import { isHttpUrl } from "@/lib/safeurl";
 
@@ -20,7 +19,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const body = (await req.json().catch(() => ({}))) as { note?: string; outcome?: string; sent?: { link?: unknown; summary?: unknown } | null };
   const note = typeof body.note === "string" ? body.note : undefined;
   if (!body.outcome) {
-    const ok = await repo.touchBridgeRun(a.ownerId, id, note, linkOfNote(note) ?? {});   // „start_step: id” wiąże bieg z krokiem, „get_task: id” z zadaniem
+    const ok = await repo.touchBridgeRun(a.ownerId, id, note);   // z którym krokiem i zadaniem bieg jest związany, zapisuje serwer MCP przy wywołaniach
     // cancel: Piotr wycofał zgodę na szkic tego biegu wysyłki („Zatrzymaj” na karcie), więc aplikacja przerywa bieg
     const cancel = ok && (await repo.sendWithdrawn(a.ownerId, id));
     return Response.json(cancel ? { ok, cancel } : { ok }, { status: ok ? 200 : 404 });

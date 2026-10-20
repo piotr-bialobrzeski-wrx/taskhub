@@ -235,6 +235,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, connectionId: (r.connectionId as string) ?? null, filePath: (r.filePath as string) ?? null,
     approvedAt: iso(r.approvedAt), approvedSig: (r.approvedSig as string) ?? null, sendStartedAt: iso(r.sendStartedAt),
     agentSec: Number(r.agentSec ?? 0), agentStartedAt: iso(r.agentStartedAt), doneBy: (r.doneBy as "owner" | "agent") ?? null,
+    agentAt: iso(r.agentAt), openedAt: iso(r.openedAt),
   };
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
@@ -871,9 +872,12 @@ export async function setUserSettings(ownerId: string, patch: Record<string, unk
 // Puls: token rodzaju "bridge" ma seen_at i meta (komputer, silnik, stan). Bieg: jeden otwarty na właściciela (unikalny indeks częściowy),
 // więc dwa komputery nie wykonają tej samej pracy; bieg bez sygnału wygasa. Rodzaj biegu: work = praca bez wysyłek, send = jeden zatwierdzony szkic.
 export type RunKind = "work" | "send";
-// markAt: ostatnie wywołanie MCP, które kończy jakiś etap pracy (get_task, complete_step…): od niego liczy się czas Claude'a na krok bez start_step
-export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null; kind?: RunKind; markAt?: string | null };
-const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null, kind: r.kind === "send" ? "send" : "work", markAt: iso(r.markAt) });
+// markAt: ostatnie wywołanie MCP, które kończy jakiś etap pracy (get_task, complete_step…): od niego liczy się czas Claude'a na krok bez start_step.
+// steps: kroki, których bieg dotknął (serwer MCP zapisuje przy każdym udanym wywołaniu): first = pierwsze dotknięcie, at = ostatnie, what = co zrobił;
+// stepId = krok „teraz”. stopAt: Piotr zatrzymał bieg w Task Hub; stoppable: bieg pracy v2 (ma token biegu, więc da się go zatrzymać stąd)
+export type RunStep = { first: string; at: string; what: string };
+export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null; kind?: RunKind; markAt?: string | null; steps?: Record<string, RunStep>; stopAt?: string | null; stoppable?: boolean };
+const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null, kind: r.kind === "send" ? "send" : "work", markAt: iso(r.markAt), steps: (r.steps as Record<string, RunStep>) ?? {}, stopAt: iso(r.stopAt), stoppable: r.stoppable === true });
 export type BridgeStatus = { alive: boolean; seenAt: string | null; name: string | null; meta: Record<string, unknown>; run: BridgeRun | null };
 
 export async function bridgeSeen(tokenId: string, meta: Record<string, unknown>): Promise<void> {
@@ -881,7 +885,7 @@ export async function bridgeSeen(tokenId: string, meta: Record<string, unknown>)
 }
 export async function bridgeStatus(ownerId: string, aliveMs: number): Promise<BridgeStatus> {
   const [t] = await sql()`select name, seen_at, meta from api_tokens where owner_id = ${ownerId} and kind = 'bridge' and seen_at is not null order by seen_at desc limit 1`;
-  const [r] = await sql()`select * from bridge_runs where owner_id = ${ownerId} and ended_at is null limit 1`;
+  const [r] = await sql()`select b.*, exists(select 1 from api_tokens k where k.kind = 'run' and k.scope->>'runId' = b.id::text and k.scope->>'kind' = 'work') as stoppable from bridge_runs b where b.owner_id = ${ownerId} and b.ended_at is null limit 1`;
   const seenAt = t ? (iso(t.seenAt) as string) : null;
   return { alive: !!seenAt && Date.now() - new Date(seenAt).getTime() < aliveMs, seenAt, name: t ? (t.name as string) : null, meta: t ? ((t.meta as Record<string, unknown>) ?? {}) : {}, run: r ? rowToRun(r) : null };
 }
@@ -925,21 +929,44 @@ export async function sendWithdrawn(ownerId: string, runId: string): Promise<boo
   const [r] = await sql()`select s.status, s.send_started_at from bridge_runs b join steps s on s.id = b.step_id where b.id = ${runId} and b.owner_id = ${ownerId} and b.ended_at is null and b.kind = 'send'`;
   return !!r && r.status !== "done" && !r.sendStartedAt;
 }
-// note: co mostek robi teraz („start_step: id”, „Bash: npm test”); link: z którym zadaniem albo krokiem bieg jest związany (krok ustala też zadanie)
-export async function touchBridgeRun(ownerId: string, id: string, note?: string, link: { taskId?: string; stepId?: string } = {}): Promise<boolean> {
+// note: co mostek robi teraz („start_step: id”, „Bash: npm test”); z którym zadaniem i krokiem bieg jest związany, zapisuje serwer MCP (runTouch)
+export async function touchBridgeRun(ownerId: string, id: string, note?: string): Promise<boolean> {
   const p: Row = { touched_at: new Date() };
   if (note !== undefined) p.note = note.slice(0, 200);
-  const [run] = await sql()`select kind from bridge_runs where id = ${id} and owner_id = ${ownerId}`;
-  if (run?.kind === "send") link = {};   // bieg wysyłki ma swój krok od startu; notatki go nie przestawiają
-  if (link.stepId) {
-    const [s] = await sql()`select s.id, s.task_id from steps s join tasks t on t.id = s.task_id where s.id = ${link.stepId} and t.owner_id = ${ownerId}`;
-    if (s) { p.step_id = s.id; p.task_id = s.taskId; }
-  } else if (link.taskId) {
-    const [t] = await sql()`select id from tasks where id = ${link.taskId} and owner_id = ${ownerId}`;
-    if (t) { p.task_id = t.id; p.step_id = null; }
-  }
   const rows = await sql()`update bridge_runs set ${sql()(p)} where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id`;
   return rows.length > 0;
+}
+// otwarty, niezatrzymany bieg pracy (stary mostek v1 woła MCP tokenem mostka, nie biegu: jego wywołania liczą się do tego biegu)
+export async function openRunId(ownerId: string): Promise<string | null> {
+  const [r] = await sql()`select id from bridge_runs where owner_id = ${ownerId} and ended_at is null and stop_at is null and kind = 'work' limit 1`;
+  return r ? (r.id as string) : null;
+}
+// ślad wywołania MCP w biegu, jednym zapisem: krok „teraz” (stepId + taskId; end = ten krok się skończył; samo taskId = zadanie, krok zostaje, gdy jego),
+// i kroki, których bieg dotknął (touched: co zrobił), z pierwszym i ostatnim dotknięciem. Kroki spoza zadań właściciela odpadają. Zatrzymany bieg nie zapisuje
+export async function runTouch(ownerId: string, runId: string, o: { stepId?: string | null; taskId?: string | null; end?: string | null; touched?: { id: string; what: string }[] }): Promise<boolean> {
+  const s = sql();
+  const at = new Date().toISOString();
+  const wanted = (o.touched ?? []).map((x) => x.id);
+  const owned = wanted.length ? new Set((await s`select s.id from steps s join tasks t on t.id = s.task_id where s.id = any(${wanted}) and t.owner_id = ${ownerId}`).map((r) => r.id as string)) : new Set<string>();
+  const touched = (o.touched ?? []).filter((x) => owned.has(x.id));
+  const ids = touched.map((x) => x.id), whats = touched.map((x) => x.what.slice(0, 60));
+  const now = o.stepId ? s`, step_id = ${o.stepId}, task_id = ${o.taskId ?? null}`
+    : o.end ? s`, step_id = case when b.step_id = ${o.end} then null else b.step_id end`
+    : o.taskId ? s`, task_id = ${o.taskId}, step_id = case when b.step_id is not null and exists(select 1 from steps x where x.id = b.step_id and x.task_id = ${o.taskId}) then b.step_id else null end`
+    : s``;
+  const rows = await s`update bridge_runs b set touched_at = now(),
+    steps = b.steps || coalesce((select jsonb_object_agg(x.k, jsonb_build_object('first', coalesce(b.steps->x.k->>'first', ${at}::text), 'at', ${at}::text, 'what', x.w)) from unnest(${ids}::text[], ${whats}::text[]) as x(k, w)), '{}'::jsonb)${now}
+    where b.id = ${runId} and b.owner_id = ${ownerId} and b.ended_at is null and b.stop_at is null returning b.id`;
+  return rows.length > 0;
+}
+export async function runSteps(ownerId: string, runId: string): Promise<Record<string, RunStep>> {
+  const [r] = await sql()`select steps from bridge_runs where id = ${runId} and owner_id = ${ownerId}`;
+  return (r?.steps as Record<string, RunStep>) ?? {};
+}
+// agent zmienił krok (kartka, szkic, zamknięcie, fakty): kropka na kafelku, póki Piotr go nie otworzy
+export async function markAgentSteps(ids: string[]): Promise<void> { if (ids.length) await sql()`update steps set agent_at = now() where id = any(${ids})`; }
+export async function stepOpened(ownerId: string, taskId: string, stepId: string): Promise<void> {
+  await sql()`update steps s set opened_at = now() from tasks t where t.id = s.task_id and s.id = ${stepId} and t.id = ${taskId} and t.owner_id = ${ownerId} and s.agent_at > coalesce(s.opened_at, '-infinity'::timestamptz)`;
 }
 export async function endBridgeRun(ownerId: string, id: string, outcome: string, note?: string): Promise<boolean> {
   const rows = await sql()`update bridge_runs set ended_at = now(), touched_at = now(), outcome = ${outcome.slice(0, 20)}, note = coalesce(${note?.slice(0, 600) ?? null}, note) where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id, started_at, kind, step_id, outcome, note`;

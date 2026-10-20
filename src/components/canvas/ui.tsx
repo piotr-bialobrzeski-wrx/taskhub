@@ -29,6 +29,9 @@ export type StepTile = {
   dest: string | null;       // dokąd pójdzie albo poszło (wiersz listy); na kafelku to samo siedzi w meta
   destHref: string | null;   // po wysyłce: adres wyniku (tylko http(s)), dolna linia kafelka jest wtedy linkiem
   dim: boolean;              // zrobiony przez Claude bez śladu na zewnątrz: przygaszony
+  glow: "live" | "touched" | null;   // bieg mostka: krok „teraz” (światełko po obwódce) albo dotknięty w tym biegu (stała obwódka)
+  touched: string | null;    // „Claude poprawił szkic · 19:43” w dolnej linii dotkniętego kroku
+  fresh: boolean;            // agent zmienił krok, Piotr jeszcze go nie otworzył: kropka
   pos: Pos | null; dependsOn: string[];
   activity: TileActivity | null;
 };

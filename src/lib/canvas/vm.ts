@@ -8,7 +8,7 @@ import type { StepStateKey, StepTile, TaskStateKey, TaskTile } from "@/component
 
 export { fmtDate, fmtTime } from "../clock";   // zawsze czas polski (serwer liczy w UTC)
 import { fmtDate, fmtTime } from "../clock";
-import type { LiveActivity } from "../live";
+import { onTileText, type LiveActivity } from "../live";
 
 export function dueOf(due: string | null, now = Date.now()): TaskTile["due"] {
   if (!due) return null;
@@ -62,16 +62,21 @@ export function taskTile(s: Scored, all: Task[], questions: number, live: LiveAc
 }
 
 // bieg mostka związany z tym zadaniem: wiersz czynności na kafelku zadania (kanwa główna i kafelek zadania na kanwie kroków)
-export const taskActivity = (taskId: string, live: LiveActivity | null): TaskTile["activity"] => (live && live.taskId === taskId ? { text: live.text, detail: live.detail, since: live.since } : null);
+export const taskActivity = (taskId: string, live: LiveActivity | null): TaskTile["activity"] => (live && live.taskId === taskId ? { text: onTileText(live.text), detail: live.detail, since: live.since } : null);
 
 export function stepTile(t: Task, s: Step, all: Task[], live: LiveActivity | null = null): StepTile & { toolName: string } {
   const state = stepStateOf(t, s, all);
-  // bieg mostka związany z tym krokiem (start_step), albo jedyny krok w toku w zadaniu, nad którym mostek pracuje
-  const mine = !!live && state === "handoff" && (live.stepId === s.id || (!live.stepId && live.taskId === t.id && t.steps.filter((x) => x.status === "handoff").length === 1));
   const m = tileMeta(t, s, state);
   // krok zrobiony przez Claude bez śladu na zewnątrz (wysyłka, zmiany w kodzie) jest przygaszony: kroki Piotra widać od razu
   const dim = state === "done" && whoDid(s) === "Claude" && !(s.blocks ?? []).some((b) => (b.type === "draft" && b.status === "sent") || b.type === "changes");
-  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, ...m, dim, pos: s.pos, dependsOn: s.dependsOn, activity: mine ? { text: live!.text, detail: live!.detail, since: live!.since } : null };
+  // praca na żywo (paczka 7, punkt 3): krok „teraz” biegu ma biegnące światełko, kroki dotknięte w tym biegu stałą obwódkę z tym, co Claude zrobił;
+  // po biegu kropka, póki Piotr nie otworzy zmienionego kroku (nigdy razem z obwódką)
+  const run = live?.steps?.[s.id] ?? null;
+  const glow: StepTile["glow"] = live?.stepId === s.id ? "live" : run ? "touched" : null;
+  const touched = glow === "touched" && run ? `Claude ${run.what} · ${fmtTime(run.at)}` : null;
+  const fresh = !glow && !!s.agentAt && (!s.openedAt || s.agentAt > s.openedAt);
+  const activity = live && live.stepId === s.id ? { text: onTileText(live.text), detail: live.detail, since: live.since } : null;
+  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, ...m, dim, glow, touched, fresh, pos: s.pos, dependsOn: s.dependsOn, activity };
 }
 
 // jedna dolna linia kafelka i wiersza listy: praca w toku → dokąd poszło albo pójdzie → kto zrobił, o której, ile to zajęło → plan

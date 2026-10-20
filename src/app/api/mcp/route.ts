@@ -77,7 +77,7 @@ function buildHandler(auth: repo.TokenAuth) {
   const stepById = async (stepId: string): Promise<Step | null> => { const taskId = await ownedStep(ownerId, stepId); return taskId ? (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === stepId) ?? null : null; };
   // ---------- czas Claude'a ----------
   // bieg tego wywołania (v2: token biegu pracy); znacznik biegu = ostatnie wywołanie, które kończy jakiś etap (get_task, complete_step…)
-  const runIdOf = async (): Promise<string | null> => (scope?.kind === "work" ? scope.runId : null);
+  const runIdOf = async (): Promise<string | null> => (scope?.kind === "work" ? scope.runId : kind === "bridge" ? repo.openRunId(ownerId) : null);
   const runOf = async () => { const id = await runIdOf(); return id ? repo.getBridgeRun(ownerId, id) : null; };
   const markRun = async () => { const id = await runIdOf(); if (id) await repo.markBridgeRun(ownerId, id); };
   const clampSec = (ms: number) => Math.max(0, Math.min(AGENT_MAX_SEC, Math.round(ms / 1000)));
@@ -91,13 +91,38 @@ function buildHandler(auth: repo.TokenAuth) {
     if (run && o.runClock !== false) return clampSec(now - new Date(run.markAt ?? run.startedAt).getTime());
     return o.fallbackMin ? Math.max(0, Math.round(o.fallbackMin * 60)) : 0;
   };
+  // ---------- ślad biegu (paczka 7, punkt 3): krok „teraz”, kroki, których bieg dotknął, kropka na zmienionym kroku ----------
+  const NOW_STEP = new Set(["start_step", "set_blocks", "update_step", "add_facts", "add_snapshot"]);
+  const NOW_END = new Set(["complete_step", "skip_step", "leave_step"]);
+  const NOW_TASK = new Set(["get_task", "add_steps", "update_task", "reply_chat", "ask_question"]);
+  // po każdym wywołaniu (także odmowie): nad którym krokiem i zadaniem bieg pracuje (kafelek ze światełkiem, dymek „Claude pracuje”)
+  const live = async (name: string, a: Record<string, unknown>) => {
+    const runId = await runIdOf(); if (!runId) return;
+    const stepId = typeof a.stepId === "string" ? a.stepId : null, taskId = typeof a.taskId === "string" ? a.taskId : null;
+    if (NOW_STEP.has(name) && stepId) { const tid = await ownedStep(ownerId, stepId); if (tid) await repo.runTouch(ownerId, runId, { stepId, taskId: tid }); }
+    else if (NOW_END.has(name) && stepId) await repo.runTouch(ownerId, runId, { end: stepId });
+    else if (NOW_TASK.has(name) && taskId) { const [t] = await sql()`select 1 from tasks where id = ${taskId} and owner_id = ${ownerId}`; if (t) await repo.runTouch(ownerId, runId, { taskId }); }
+  };
+  // udana zmiana kroku: ślad w biegu (stała obwódka i „Claude poprawił szkic · 19:43” na kafelku) i kropka do pierwszego otwarcia, także bez biegu (automat z chmury)
+  const mark = async (stepId: string, what: string) => {
+    if (scope?.kind === "send") return;
+    await repo.markAgentSteps([stepId]);
+    const runId = await runIdOf(); if (runId) await repo.runTouch(ownerId, runId, { touched: [{ id: stepId, what }] });
+  };
   return createMcpHandler((server) => {
+    const reg = server.registerTool.bind(server) as (name: string, config: unknown, cb: (args: Record<string, unknown>, extra: unknown) => unknown) => unknown;
     if (scope?.kind === "send") {
       // bieg wysyłki: każde narzędzie przechodzi przez sendGuard (lista dozwolonych, jego zadanie i krok)
-      const reg = server.registerTool.bind(server) as (name: string, config: unknown, cb: (args: Record<string, unknown>, extra: unknown) => unknown) => unknown;
       server.registerTool = ((name: string, config: unknown, cb: (args: Record<string, unknown>, extra: unknown) => unknown) => reg(name, config, async (args, extra) => {
         const why = await sendGuard(ownerId, scope, name, args ?? {});
         return why ? { content: [{ type: "text" as const, text: why }], isError: true } : cb(args, extra);
+      })) as unknown as typeof server.registerTool;
+    } else {
+      // ślad biegu po każdym wywołaniu; błąd śladu nigdy nie psuje narzędzia
+      server.registerTool = ((name: string, config: unknown, cb: (args: Record<string, unknown>, extra: unknown) => unknown) => reg(name, config, async (args, extra) => {
+        const out = await cb(args, extra);
+        await live(name, args ?? {}).catch(() => undefined);
+        return out;
       })) as unknown as typeof server.registerTool;
     }
     server.registerTool("list_tasks", {
@@ -199,7 +224,7 @@ function buildHandler(auth: repo.TokenAuth) {
       // przed krokiem ze szkicem (czekającym na zgodę albo już zatwierdzonym) weszła nowa praca: szkic jest nieaktualny, zgoda przepada,
       // krok wraca do zrobienia i dostanie nowy szkic po nowych krokach (same kroki już zrobione niczego nie zmieniają: szkic zostaje)
       const reset = !!bef && doneSteps.length < steps.length && bef.status !== "done" && !bef.sendStartedAt && (bef.status === "draft" || !!bef.approvedAt);
-      if (bef && reset) await repo.updateStep(bef.id, { status: "todo", prevStatus: null, handoffAt: null, blocks: (bef.blocks ?? []).map((b): Block => (b.type === "draft" ? { ...b, status: "proposed", stale: true } : b)) });
+      if (bef && reset) { await repo.updateStep(bef.id, { status: "todo", prevStatus: null, handoffAt: null, blocks: (bef.blocks ?? []).map((b): Block => (b.type === "draft" ? { ...b, status: "proposed", stale: true } : b)) }); await mark(bef.id, "cofnął szkic do poprawy"); }
       // w rozmowie tylko fakt: ile kroków i gdzie; tytuły, gdy jest ich mało (szczegóły są na kafelkach)
       const n = steps.length, word = n === 1 ? "krok" : n < 5 ? "kroki" : "kroków";
       const q = (s: Step) => `„${shortTitle(s.title, 40)}”`;
@@ -223,6 +248,7 @@ function buildHandler(auth: repo.TokenAuth) {
       if (a.connection?.trim() && !connectionId) return text("Nie ma takiego połączenia (list_connections).");
       const was = await stepById(a.stepId);
       await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, tool: a.tool, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null, connectionId });
+      await mark(a.stepId, "zmienił krok");
       // zmiana narzędzia albo połączenia kroku z zatwierdzonym szkicem kasuje zgodę (inne konto, inna aplikacja niż te, które Piotr widział)
       if (was?.approvedAt && !(await stepById(a.stepId))?.approvedAt) return text("Zmieniono. Zgoda Piotra na szkic tego kroku wygasła (zmienione narzędzie albo połączenie): szkic wrócił do zatwierdzenia.");
       return text("Zmieniono.");
@@ -254,6 +280,7 @@ function buildHandler(auth: repo.TokenAuth) {
         ].filter(Boolean).join("; ")}. Popraw szkic w jednym kroku zamiast dublować, a zbędny krok zamknij przez skip_step z powodem. Jeśli to celowo drugi raz (np. kolejny komentarz), podaj sameTargetOk z powodem.`);
       }
       await repo.updateStep(a.stepId, { blocks });
+      await mark(a.stepId, nd ? (od ? "poprawił szkic" : "napisał szkic") : was.blocks?.length ? "poprawił kartkę" : "ułożył kartkę");
       if (a.rememberFor) await repo.setLayoutMemory(ownerId, a.rememberFor, blocks);
       // szkic czekający na zgodę: krok przechodzi do zatwierdzenia, Piotr widzi to na kafelku i w rozmowie zadania
       const st = await stepById(a.stepId);
@@ -313,6 +340,7 @@ function buildHandler(auth: repo.TokenAuth) {
       // po wysyłce: inne otwarte kroki ze szkicem do tego samego miejsca są pewnie zbędne; agent sprawdza je teraz, a nie zostawia Piotrowi do zatwierdzenia
       const twins = st ? sameTarget(r.task.steps, st.id, st.blocks).open : [];
       const hint = twins.length ? ` Inne otwarte kroki ze szkicem do tego samego miejsca: ${twins.map((x) => `[${x.id}] „${x.title}”`).join(", ")}. Sprawdź, czy po tej wysyłce nie są zbędne; zbędne zamknij przez skip_step z powodem.` : "";
+      await mark(a.stepId, "zrobił krok");
       await markRun();
       return text((r.closed ? "Krok zapisany, zadanie ukończone." : "Krok zapisany.") + hint);
     });
@@ -331,12 +359,14 @@ function buildHandler(auth: repo.TokenAuth) {
         if (!sends(st)) return text("Nie zacząłem: zatwierdzony szkic tego kroku wysyła mostek Task Hub w osobnym biegu wysyłki. Niczego tu nie wysyłaj.");
         // zatwierdzony prompt wykonuje bieg pracy: od teraz liczy się czas Claude'a
         if (!st.agentStartedAt) await repo.markAgentStart(st.id);
+        await mark(st.id, "zaczął krok");
         await markRun();
         return text("Krok w toku.");
       }
       if (needsDraft(st)) return text("Nie zacząłem: krok wymaga zgody Piotra, bo zmienia coś w aplikacji zewnętrznej. Przeczytaj, co trzeba, i przygotuj szkic przez set_blocks (blok draft, status proposed); niczego nie wysyłaj, po zatwierdzeniu wyśle go mostek Task Hub.");
       if (st.status !== "handoff") await repo.updateStep(st.id, { status: "handoff", prevStatus: st.status, handoffAt: new Date().toISOString() });
       if (st.status !== "handoff" || !st.agentStartedAt) await repo.markAgentStart(st.id);
+      await mark(st.id, "zaczął krok");
       await markRun();
       return text("Krok w toku.");
     });
@@ -353,6 +383,7 @@ function buildHandler(auth: repo.TokenAuth) {
       await repo.clearApproval(ownerId, st.id);
       const r = await finishStep(ownerId, taskId, st.id, { report: `Zbędny: ${a.reason}`, by: "agent", addAgentSec: elapsedSec(st.agentStartedAt) });
       await repo.addChat(ownerId, taskId, "agent", `Zamknąłem jako zbędny: „${shortTitle(st.title, 60)}”. ${a.reason}`, { stepId: st.id });
+      await mark(st.id, "zamknął jako zbędny");
       await markRun();
       return text(r.closed ? "Krok zamknięty jako zbędny, zadanie ukończone." : "Krok zamknięty jako zbędny.");
     });
@@ -373,6 +404,7 @@ function buildHandler(auth: repo.TokenAuth) {
       // czas od start_step liczy się mimo oddania (Claude próbował); bez start_step nic, bo oddany krok mógł nie być nawet zaczęty
       await repo.addAgentTime(st.id, await agentSecFor(st, { runClock: false }));
       await repo.addChat(ownerId, taskId, "agent", `Nie zrobiłem kroku „${shortTitle(st.title, 70)}”: ${a.reason}`, { stepId: st.id });
+      await mark(st.id, "oddał krok");
       await markRun();
       return text("Krok oddany.");
     });
@@ -384,6 +416,7 @@ function buildHandler(auth: repo.TokenAuth) {
       if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
       const old = a.replace ? [] : await repo.listFacts({ stepId: a.stepId });
       await repo.replaceFacts({ stepId: a.stepId }, [...old, ...a.facts]);
+      await mark(a.stepId, "dopisał fakty");
       return text("Zapisano fakty.");
     });
 
@@ -392,7 +425,9 @@ function buildHandler(auth: repo.TokenAuth) {
       inputSchema: z.object({ stepId: z.string(), app: z.string(), raw: z.unknown(), url: z.string().optional(), sourceId: z.string().optional() }),
     }, async (a) => {
       if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
-      await repo.addSnapshot({ stepId: a.stepId }, a.app, a.raw, { url: a.url, sourceId: a.sourceId }); return text("Zapisano migawkę.");
+      await repo.addSnapshot({ stepId: a.stepId }, a.app, a.raw, { url: a.url, sourceId: a.sourceId });
+      await mark(a.stepId, "zapisał migawkę");
+      return text("Zapisano migawkę.");
     });
 
     server.registerTool("list_work", {
@@ -417,13 +452,17 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("reply_chat", {
-      title: "Odpowiedz w rozmowie zadania", description: "Odpowiada Piotrowi w rozmowie zadania (1–3 zdania: co dopisałeś, numery i tytuły kroków, albo odpowiedź na pytanie; bez raportu z postępu). messageIds: id wiadomości Piotra, które ta odpowiedź załatwia (z get_task, przy NOWE); bez nich załatwia wszystkie dotychczasowe w zadaniu. Odpowiadaj osobno po każdej załatwionej prośbie, żeby Piotr widział, co już jest zrobione. stepId: krok, którego odpowiedź dotyczy (karta w rozmowie dostanie „Otwórz krok”); link: adres wyniku w zewnętrznej aplikacji. Gdy wszystkie kroki są zrobione i nic już nie czeka na odpowiedź, zadanie kończy się samo.",
+      title: "Odpowiedz w rozmowie zadania", description: "Odpowiada Piotrowi w rozmowie zadania (1–3 zdania: co dopisałeś, numery i tytuły kroków, albo odpowiedź na pytanie; bez raportu z postępu). messageIds: id wiadomości Piotra, które ta odpowiedź załatwia (z get_task, przy NOWE); bez nich załatwia wszystkie dotychczasowe w zadaniu. Odpowiadaj osobno po każdej załatwionej prośbie, żeby Piotr widział, co już jest zrobione. stepId: krok, którego odpowiedź dotyczy (karta w rozmowie dostanie „Otwórz krok”); link: adres wyniku w zewnętrznej aplikacji. Gdy wszystkie kroki są zrobione i nic już nie czeka na odpowiedź, zadanie kończy się samo. Kroki, których dotknąłeś w tym biegu w tym zadaniu, dostaną w dymku przyciski „Otwórz krok” same; stepId wskazuje główny.",
       inputSchema: z.object({ taskId: z.string(), text: z.string().min(1).max(1200), messageIds: z.array(z.string()).max(50).optional(), stepId: z.string().optional(), link: z.string().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
       const stepId = a.stepId && t.steps.some((s) => s.id === a.stepId) ? a.stepId : undefined;
       const answers = await repo.markChatAnswered(ownerId, t.id, a.messageIds);
-      await repo.addChat(ownerId, t.id, "agent", a.text.trim(), { stepId, link: externalLink(a.link) ?? undefined, answers });
+      // inne kroki tego zadania, których bieg dotknął: dymek dostaje do nich małe przyciski (najwyżej dwa, w kolejności kroków)
+      const runId = await runIdOf();
+      const touched = runId ? await repo.runSteps(ownerId, runId) : {};
+      const steps = t.steps.filter((s) => s.id !== stepId && touched[s.id]).map((s) => s.id).slice(0, 2);
+      await repo.addChat(ownerId, t.id, "agent", a.text.trim(), { stepId, link: externalLink(a.link) ?? undefined, answers, ...(steps.length ? { steps } : {}) });
       // ostatni krok gotowy czekał tylko na tę odpowiedź: zadanie kończy się teraz
       const closed = await repo.closeIfDone(ownerId, t.id);
       if (closed) await repo.addChat(ownerId, t.id, "agent", "Wszystkie kroki zrobione, zadanie ukończone.");

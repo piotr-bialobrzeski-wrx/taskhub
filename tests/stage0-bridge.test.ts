@@ -38,6 +38,8 @@ describe("prompty mostka", () => {
     // rozpisanie w v2: dokąd ma trafić wynik (jeden ticket = jeden krok, jedno pytanie o miejsce) i plik na Macu jako krok file; v1 bez zmian
     expect(p).toContain("jeden ticket"); expect(p).toContain("Plik na Macu"); expect(p).toContain("osobne tickety z innym tytułem");
     expect(bridgePrompt()).toContain("nie krok „Zdecyduj”"); expect(bridgePrompt()).not.toContain("jeden ticket");
+    // punkt 3: praca na żywo zamiast raportów w rozmowie; Piotr może zatrzymać bieg z Task Hub
+    expect(p).toContain("dymek „Claude pracuje”"); expect(p).toContain("zakończ bez dalszych kroków"); expect(bridgePrompt()).not.toContain("dymek „Claude pracuje”");
     // paczka 7, punkt 1: wybór Piotra to krok „Zdecyduj …” z pytaniem na kartce, praca z rozpisania jako done, szacunek tylko dla jego kroków,
     // odpowiedź na kartce decyzji to nie prośba o poprawkę kartki; v1 bez zmian
     expect(p).toContain("pole done"); expect(p).toContain("Decyzja w kroku"); expect(p).toContain("krok „Zdecyduj …” z tool manual"); expect(p).not.toContain("nie krok „Zdecyduj”");
