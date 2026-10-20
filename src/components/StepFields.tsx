@@ -6,7 +6,7 @@ import { linkSteps, patchStep } from "@/app/actions";
 import { Picker } from "@/components/canvas/widgets";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { Icon } from "@/components/canvas/ui";
-import { TOOL_LABELS } from "@/lib/schema";
+import { isGoogleApp, TOOL_LABELS } from "@/lib/schema";
 import { Q, fmtMin } from "@/lib/time";
 
 type Patch = Parameters<typeof patchStep>[2];
@@ -36,7 +36,8 @@ export type StepConnection = { id: string; label: string; app: string; account: 
 // z jakiego konta poleci wysyłka: wybór w nagłówku karty publikacji (jak priorytet w pasku panelu); tylko konta tej aplikacji
 export function ConnectionHead({ taskId, stepId, app, connectionId, connections, company }: { taskId: string; stepId: string; app: string; connectionId: string | null; connections: StepConnection[]; company: string | null }) {
   const [, start] = useTransition();
-  const conns = connections.filter((c) => c.app === app && (c.active || c.id === connectionId));
+  // konto Google („google-widelab”) obsługuje pocztę, kalendarz i Dysk, więc jest do wyboru także dla tych aplikacji
+  const conns = connections.filter((c) => (c.app === app || (isGoogleApp(app) && c.app === "google")) && (c.active || c.id === connectionId));
   const cur = connections.find((c) => c.id === connectionId) ?? null;
   const auto = `agent wybierze konto${company ? ` · ${company}` : ""}`;
   const text = (c: StepConnection) => `${c.label}${c.account ? ` · ${c.account}` : ""}${c.company ? ` · ${c.company}` : c.sphere === "private" ? " · prywatne" : ""}`;

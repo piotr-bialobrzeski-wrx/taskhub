@@ -6,10 +6,10 @@ import * as repo from "@/lib/repo";
 import { companyOf, contextText, brief, scoreAll, capText, draftsText, cardText } from "@/lib/agent/context";
 import { rulesText } from "@/lib/agent/context";
 import { audienceOf, workSummary } from "@/lib/agent/work";
-import { BRIDGE_ALIVE_MS, ago } from "@/lib/bridge";
+import { BRIDGE_ALIVE_MS, ago, connectorProblem, knownApp } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
-import { Blocks, ChangedFile, Fact, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
-import { doneChat, sameTarget } from "@/lib/stepcard";
+import { appName, Blocks, ChangedFile, Fact, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
+import { destOf, doneChat, sameTarget } from "@/lib/stepcard";
 import { shortTitle } from "@/lib/auto";
 import { sql } from "@/lib/db";
 import { originOf, wwwAuthenticate } from "@/lib/oauth";
@@ -55,11 +55,21 @@ function buildHandler(auth: repo.TokenAuth) {
   // nazwa albo id połączenia z rejestru → id; pusty napis albo brak = null (agent wybiera sam)
   const connectionIdOf = async (ref: string | undefined): Promise<string | null> => (ref?.trim() ? (await repo.findConnection(ownerId, ref))?.id ?? null : null);
   // szkic, którego nic nie wyśle (plik na Macu to nie wysyłka): odmowa z instrukcją dla tego, kto pyta; nil = szkic może się zapisać
-  const agentBlocker = (nd: Draft | null, was: Step): string | null => {
+  const agentBlocker = async (nd: Draft | null, was: Step, blocks: Block[], taskId: string): Promise<string | null> => {
     if (!nd || nd.status !== "proposed" || nd.stale || was.status === "done") return null;
     if (isLocalFile(nd.target.app)) return audience === "work"
       ? "Nie zapisałem: „Plik na Macu” to nie szkic do zatwierdzenia. Zmień narzędzie kroku na file (update_step z tool \"file\"), zapisz plik narzędziem Write w folderze z linii „Foldery na pliki”, potem complete_step z polem file."
       : "Nie zapisałem: „Plik na Macu” to nie szkic do zatwierdzenia. Zmień narzędzie kroku na file (update_step z tool \"file\") i zostaw krok; plik zapisze aplikacja Task Hub 0.1.7 na Macu.";
+    // szkic do aplikacji zewnętrznej, której mostek nie wyśle: nieznane miejsce albo brak konektora na Macu (commit, prompt i notatka nie idą konektorem;
+    // kilka kont albo konto Google do wyboru nie zatrzymuje szkicu: Piotr wskaże konto w nagłówku karty)
+    if (destOf({ tool: was.tool, blocks })?.kind !== "send") return null;
+    const app = nd.target.app, App = appName(app);
+    const conns = await repo.listConnections(ownerId);
+    if (!knownApp(conns, app)) return `Nie zapisałem: nie znam miejsca „${app.trim()}”, więc mostek nie miałby czym tego wysłać. target.app to klucz aplikacji (clickup, slack, gmail, calendar, github, figma, whatsapp, sheets, docs) albo nazwa połączenia z list_connections.`;
+    const [task, projects] = await Promise.all([repo.getTask(ownerId, taskId), repo.listProjects(ownerId)]);
+    const companyId = projects.find((p) => p.id === task?.projectId)?.companyId ?? null;
+    const p = connectorProblem(conns, { app, connectionId: was.connectionId, host: null, companyId });
+    if (p?.kind === "none" && !p.google.length) return `Nie zapisałem: na Macu nie ma działającego konektora ${App} w Claude Code, więc mostek nie wyśle tego szkicu. Nie przygotowuj go: oddaj krok przez leave_step z powodem „Na Macu nie ma konektora ${App}. Dodaj go w Claude Code na Macu.”`;
     return null;
   };
   // krok właściciela świeżo z bazy (z danymi o zgodzie); null = nie jego albo nie ma
@@ -182,7 +192,7 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("set_blocks", {
-      title: "Ułóż panel kroku", description: "Zapisuje kartkę kroku z klocków: najpierw kontekst (thread = wątek jako dymki, mail = wątek maili z from/to/subject, comment = jeden komentarz z miejscem, facts, table = wiersze, list, media = zrzuty i pliki z opisem, link, free = markdown gdy nic nie pasuje, text = krótka notatka), potem jeden draft (to, co powstaje: target.app, target.where, target.url = adres miejsca, gdzie treść trafi lub co zmieni: ticket, wątek, kanał, dokument; Piotr otwiera go przyciskiem przed wysyłką, action, subject, body w Markdown: nagłówki #, **pogrubienie**, *kursywa*, listy - i 1., linki [tekst](url); Piotr widzi i edytuje je sformatowane, przy wysyłce get_task poda wersję w formacie aplikacji docelowej; dla wierszy arkusza columns + rows; dla promptu dla agenta target.app code). Każdy klocek kontekstu ma source {app, ref = miejsce, url}. Pokaż tylko to, co ważne dla tego kroku; długi wątek daj cały, aplikacja pokaże ostatnie 3. rememberFor: nazwa aplikacji źródłowej, jeśli ten układ ma być wzorem dla podobnych kroków. target.app = klucz aplikacji albo nazwa połączenia z list_connections. Jeden szkic = jedna rzecz w miejscu docelowym (jeden ticket: tytuł w subject, opis w body, typ, priorytet, osoba i status w fields); columns + rows tylko dla wierszy arkusza.",
+      title: "Ułóż panel kroku", description: "Zapisuje kartkę kroku z klocków: najpierw kontekst (thread = wątek jako dymki, mail = wątek maili z from/to/subject, comment = jeden komentarz z miejscem, facts, table = wiersze, list, media = zrzuty i pliki z opisem, link, free = markdown gdy nic nie pasuje, text = krótka notatka), potem jeden draft (to, co powstaje: target.app, target.where, target.url = adres miejsca, gdzie treść trafi lub co zmieni: ticket, wątek, kanał, dokument; Piotr otwiera go przyciskiem przed wysyłką, action, subject, body w Markdown: nagłówki #, **pogrubienie**, *kursywa*, listy - i 1., linki [tekst](url); Piotr widzi i edytuje je sformatowane, przy wysyłce get_task poda wersję w formacie aplikacji docelowej; dla wierszy arkusza columns + rows; dla promptu dla agenta target.app code). Każdy klocek kontekstu ma source {app, ref = miejsce, url}. Pokaż tylko to, co ważne dla tego kroku; długi wątek daj cały, aplikacja pokaże ostatnie 3. rememberFor: nazwa aplikacji źródłowej, jeśli ten układ ma być wzorem dla podobnych kroków. target.app = klucz aplikacji albo nazwa połączenia z list_connections. Jeden szkic = jedna rzecz w miejscu docelowym (jeden ticket: tytuł w subject, opis w body, typ, priorytet, osoba i status w fields); columns + rows tylko dla wierszy arkusza. Szkicu do miejsca, którego mostek nie wyśle (nieznana aplikacja, brak konektora tej aplikacji na Macu, plik na Macu), set_blocks nie zapisze.",
       inputSchema: z.object({ stepId: z.string(), blocks: Blocks, rememberFor: z.string().optional(), sameTargetOk: z.string().max(300).optional().describe("tylko gdy celowo drugi raz to samo miejsce i czynność (np. kolejny komentarz w tym samym tickecie): jednym zdaniem czemu") }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
@@ -194,7 +204,7 @@ function buildHandler(auth: repo.TokenAuth) {
       const nd = draftOf({ blocks }), od = draftOf(was);
       if (was.status !== "done" && (was.approvedAt || was.sendStartedAt) && (!nd || nd.status !== od?.status))
         return text("Nie zapisałem: Piotr zatwierdził już szkic tego kroku i czeka on na wysyłkę, więc jego treść, adresat i miejsce zostają bez zmian. Zapisz kartkę z tym samym blokiem draft (SZKIC KROKU w get_task) albo, gdy szkic jest nieaktualny, napisz to Piotrowi przez reply_chat ze stepId tego kroku; on zdecyduje.");
-      const blocker = agentBlocker(nd, was);
+      const blocker = await agentBlocker(nd, was, blocks, taskId);
       if (blocker) return text(blocker);
       // dwa kroki z tym samym szkicem (ten sam ticket i czynność) wysłałyby to samo dwa razy: zatrzymaj, zanim powstanie drugi
       if (!a.sameTargetOk) {

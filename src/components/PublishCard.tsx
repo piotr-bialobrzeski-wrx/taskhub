@@ -36,8 +36,9 @@ export function cardModeOf(s: Step): CardMode | null {
 const PROMPT_APPS = new Set(["claudeapp", "code", "claude"]);
 const COMMENT_APPS = new Set(["figma", "github", "clickup"]);
 
-export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, company, activity, waitsOn = [] }: {
-  t: Task; s: Step; mode: CardMode; aiOn: boolean; ownerName: string; link: string | null; connections: StepConnection[]; company: string | null; activity?: TileActivity | null; waitsOn?: string[];
+// issue: czemu mostek nie wyśle tego szkicu (brak konektora na Macu, kilka kont, konektor innej firmy); karta ostrzega, przycisk zgody nie działa
+export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, company, activity, waitsOn = [], issue = null }: {
+  t: Task; s: Step; mode: CardMode; aiOn: boolean; ownerName: string; link: string | null; connections: StepConnection[]; company: string | null; activity?: TileActivity | null; waitsOn?: string[]; issue?: string | null;
 }) {
   const d = (s.blocks?.find((b) => b.type === "draft") ?? null) as Draft | null;
   const changes = (s.blocks?.find((b) => b.type === "changes") ?? null) as Extract<Block, { type: "changes" }> | null;
@@ -129,17 +130,17 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       {preview}
       {mode === "proposed" ? (
         <div className="actions">
-          <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} title={stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dest?.kind === "send" ? " " + dest.in : ""}`}>{mainLabel}</PendingButton></form>
+          <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} disabled={!!issue} title={issue ?? (stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dest?.kind === "send" ? " " + dest.in : ""}`)}>{mainLabel}</PendingButton></form>
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Szkic zostaje, krok wraca do zrobienia">Odłóż</PendingButton></form>
-          {hint ? <p className="pub-dest">{hint}</p> : null}
+          {issue ? <div className="note warn">{issue}</div> : hint ? <p className="pub-dest">{hint}</p> : null}
         </div>
       ) : mode === "parked" ? (
         <div className="actions">
-          <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} title={stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dest?.kind === "send" ? " " + dest.in : ""}`}>{mainLabel}</PendingButton></form>
+          <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} disabled={!!issue} title={issue ?? (stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dest?.kind === "send" ? " " + dest.in : ""}`)}>{mainLabel}</PendingButton></form>
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn" title="Zamknij krok bez wysyłania">Zamknij bez wysyłki</PendingButton></form>
-          {hint ? <p className="pub-dest">{hint}</p> : null}
+          {issue ? <div className="note warn">{issue}</div> : hint ? <p className="pub-dest">{hint}</p> : null}
         </div>
       ) : mode === "sending" ? (
         <div className="actions">

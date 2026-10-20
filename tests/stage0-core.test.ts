@@ -98,6 +98,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("Etap 0: zgoda Piotra, tokeny bi
     bridge = await repo.createApiToken(owner, "Mac", "bridge");
     bridgeId = (await repo.tokenForSecret(bridge))!.id;
     await sql()`update api_tokens set seen_at = null where id = ${bridgeId}`;   // mostek nieaktywny: list_work klienta nie odpowiada „MOSTEK AKTYWNY”
+    // szkice do Slacka i maila zapisują się i zatwierdzają tylko z konektorem tej aplikacji na Macu (paczka 7, punkt 4.5)
+    await sql()`delete from connections where owner_id = ${owner}`;
+    await repo.upsertBridgeConnections(owner, "Mac", [{ name: "claude.ai Slack", ok: true }, { name: "gmail", ok: true }]);
   });
 
   it("agent nie zatwierdza szkicu przez set_blocks: „approved” i „sent” zapisują się jako propozycja, start_step nie rusza szkicu", async () => {

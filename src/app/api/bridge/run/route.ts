@@ -5,7 +5,7 @@
 import * as repo from "@/lib/repo";
 import { listSendable, type Sendable } from "@/lib/agent/work";
 import { isExternalApp, isLocalFile } from "@/lib/agent/approval";
-import { RUN_MAX_MIN, RUN_STALE_MIN, SEND_MAX_MIN, appKey, authBridge, bridgePrompt, bridgeWorkPrompt, gitSend, isGitDraft, mcpUrl, protocolOf, sendPrompt, sendServers, type BridgeAuth } from "@/lib/bridge";
+import { RUN_MAX_MIN, RUN_STALE_MIN, SEND_MAX_MIN, authBridge, bridgePrompt, bridgeWorkPrompt, connectorProblem, gitSend, isGitDraft, mcpUrl, protocolOf, sendPrompt, sendServers, type BridgeAuth } from "@/lib/bridge";
 import { normalizeTool, toolLabel } from "@/lib/schema";
 import { shortTitle } from "@/lib/auto";
 
@@ -65,24 +65,19 @@ async function sendRun(a: BridgeAuth, bridge: string): Promise<Response> {
   if (!git) {
     const [conns, task, projects] = await Promise.all([repo.listConnections(a.ownerId), repo.getTask(a.ownerId, s.taskId), repo.listProjects(a.ownerId)]);
     const companyId = projects.find((p) => p.id === task?.projectId)?.companyId ?? null;
-    servers = sendServers(conns, { app: t.app, connectionId: s.step.connectionId, host: bridge, companyId });
-    if (!servers.length) {
-      const named = s.step.connectionId ? conns.find((c) => c.id === s.step.connectionId)?.label : null;
-      // konektor jest, ale przypisany do innej firmy niż zadanie: mówimy to wprost (claude mcp list pokazałby go jako działający)
-      const live = conns.filter((c) => c.source === "bridge" && c.state === "active");
-      const here = live.some((c) => c.host === bridge);
-      const elsewhere = named ? [] : live.filter((c) => appKey(c.app) === appKey(t.app) && (!here || c.host === bridge) && !!c.companyId && c.companyId !== companyId);
-      if (elsewhere.length) {
-        const firms = await repo.listCompanies(a.ownerId);
-        const firm = [...new Set(elsewhere.map((c) => firms.find((f) => f.id === c.companyId)?.name ?? "innej firmy"))].join(", ");
-        return refuse(a.ownerId, s, `konektor ${elsewhere.map((c) => `„${c.label}”`).join(", ")} na komputerze ${bridge} jest przypisany do firmy ${firm}, a to zadanie ${companyId ? "jest innej firmy" : "nie ma firmy"} (wybierz połączenie na karcie szkicu albo przypisz zadanie do projektu tej firmy)`);
-      }
-      return refuse(a.ownerId, s, `na komputerze ${bridge} nie ma działającego konektora ${named ? `„${named}”` : toolLabel(normalizeTool(t.app))} w Claude Code (sprawdź w Terminalu: claude mcp list)`);
+    const where = { app: t.app, connectionId: s.step.connectionId, host: bridge, companyId };
+    servers = sendServers(conns, where);
+    // ten sam sprawdzian co na karcie i przy zgodzie (konto Google do wyboru liczy się tu jak brak: bieg nie zgaduje konta)
+    const p = connectorProblem(conns, where);
+    // konektor jest, ale przypisany do innej firmy niż zadanie: mówimy to wprost (claude mcp list pokazałby go jako działający)
+    if (p?.kind === "elsewhere") {
+      const firms = await repo.listCompanies(a.ownerId);
+      const firm = [...new Set(p.companyIds.map((id) => firms.find((f) => f.id === id)?.name ?? "innej firmy"))].join(", ");
+      return refuse(a.ownerId, s, `konektor ${p.labels.map((l) => `„${l}”`).join(", ")} na komputerze ${bridge} jest przypisany do firmy ${firm}, a to zadanie ${companyId ? "jest innej firmy" : "nie ma firmy"} (wybierz połączenie na karcie szkicu albo przypisz zadanie do projektu tej firmy)`);
     }
+    if (p?.kind === "none") return refuse(a.ownerId, s, `na komputerze ${bridge} nie ma działającego konektora ${p.named ? `„${p.named}”` : toolLabel(normalizeTool(t.app))} w Claude Code (sprawdź w Terminalu: claude mcp list)`);
     // kilka kont tej samej aplikacji, a krok nie wskazuje żadnego: model nie może zgadywać, z którego wysłać
-    if (servers.length > 1 && !s.step.connectionId) {
-      return refuse(a.ownerId, s, `na komputerze ${bridge} jest kilka kont ${toolLabel(normalizeTool(t.app))} (${servers.map((x) => `„${x}”`).join(", ")}), a krok nie wskazuje, którym wysłać (wybierz połączenie na karcie szkicu)`);
-    }
+    if (p?.kind === "many") return refuse(a.ownerId, s, `na komputerze ${bridge} jest kilka kont ${toolLabel(normalizeTool(t.app))} (${p.servers.map((x) => `„${x}”`).join(", ")}), a krok nie wskazuje, którym wysłać (wybierz połączenie na karcie szkicu)`);
   }
   const run = await repo.startBridgeRun(a.ownerId, a.tokenId, bridge, "send", s.step.id);
   if (!run) return busy(a.ownerId);

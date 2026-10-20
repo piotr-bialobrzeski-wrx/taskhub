@@ -1,6 +1,6 @@
 // Karta kroku „Teraz · Co · Skąd” (paczka 2, punkt 8): stały porządek sekcji, wynik na wierzchu, nic nie pokazuje się dwa razy.
 // Czysta logika bez React, żeby dało się ją testować; składanie w JSX jest w src/app/tasks/[id]/page.tsx.
-import { EXTERNAL_TOOLS, inApp, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step } from "./schema";
+import { appName, EXTERNAL_TOOLS, inApp, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step } from "./schema";
 import { draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft } from "./agent/approval";
 import { fileName, safeHref } from "./safeurl";
 import { fmtTime } from "./clock";
@@ -65,8 +65,7 @@ export function destOf(s: Pick<Step, "tool" | "blocks"> & { filePath?: string | 
   if (!d) return s.tool === "file" || s.filePath ? { kind: "file", app: "file", name: toolLabel("file"), in: inApp("file"), where: null, action: "create", subject: null } : null;
   const app = normalizeTool(d.target.app, s.tool), action = d.target.action ?? "send";
   const kind: DestKind = isGitDraft(d, s.blocks) ? (action === "push" ? "push" : "commit") : isLocalFile(app) ? "file" : isPromptDraft(d, s.blocks) ? "prompt" : isExternalApp(app) ? "send" : "internal";
-  // nieznana aplikacja: nazwa tak, jak napisał ją agent („Notion”), nie klucz małymi literami
-  const name = TOOL_LABELS[app] ? toolLabel(app) : d.target.app.trim() || app;
+  const name = appName(d.target.app) || toolLabel(app);
   return { kind, app, name, in: TOOL_LABELS[app] ? inApp(app) : `· ${name}`, where: d.target.where?.trim() || null, action, subject: d.subject?.trim() || null };
 }
 export function approveLabel(d: Dest | null, o: { stays: boolean; rows: boolean }): string {

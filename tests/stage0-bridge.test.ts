@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import type { Block, Connection } from "@/lib/schema";
 import type { Draft } from "@/lib/agent/approval";
-import { bridgePrompt, bridgeWorkPrompt, sendPrompt, gitSend, isGitDraft, sendServers, repoOf, safeBranch, safeRepoPath, sha256Of, protocolOf } from "@/lib/bridge";
+import { bridgePrompt, bridgeWorkPrompt, sendPrompt, gitSend, isGitDraft, sendServers, repoOf, safeBranch, safeRepoPath, sha256Of, protocolOf, connectorProblem, knownApp, connectorNote } from "@/lib/bridge";
 
 // sesja Piotra w przeglądarce (ciasteczko) bez Next: przełącznik w teście
 const auth = vi.hoisted(() => ({ signed: false }));
@@ -90,6 +90,42 @@ describe("bieg wysyłki: commit z aplikacji i dobór konektora", () => {
     expect(isGitDraft(draft({ app: "github", action: "comment" }), [changes()])).toBe(false);
     expect(isGitDraft(draft({ app: "github", action: "send" }), [])).toBe(false);
     expect(isGitDraft(draft({ app: "clickup", action: "commit" }), [])).toBe(true);
+  });
+  it("czemu mostek nie wyśle: brak konektora (z kontami Google do wyboru), kilka kont, konektor innej firmy; nieznane miejsce", () => {
+    const c = (o: Partial<Connection>): Connection => ({ id: "x", app: "slack", label: "Slack", account: null, companyId: null, sphere: "work", provider: "claude", kind: "mcp", state: "active", source: "bridge", host: "mini", url: null, meta: {}, seenAt: null, ...o });
+    const conns = [
+      c({ id: "s1", label: "Slack", meta: { server: "claude.ai Slack" } }),
+      c({ id: "s2", label: "slack-bee", meta: { server: "slack-bee" } }),
+      c({ id: "k1", app: "clickup", label: "clickup", meta: { server: "clickup" }, companyId: "A" }),
+      c({ id: "g1", app: "google", label: "google-widelab", meta: { server: "google-widelab" } }),
+      c({ id: "off", app: "figma", label: "figma", state: "off" }),
+    ];
+    const t = (app: string, o: Partial<{ connectionId: string | null; host: string | null; companyId: string | null }> = {}) => ({ app, connectionId: null, host: null, companyId: null, ...o });
+    expect(connectorProblem(conns, t("figma"))).toEqual({ kind: "none", named: null, google: [] });
+    expect(connectorProblem(conns, t("gmail"))).toEqual({ kind: "none", named: null, google: ["google-widelab"] });
+    expect(connectorProblem(conns, t("sheets"))).toMatchObject({ kind: "none", google: ["google-widelab"] });
+    expect(connectorProblem(conns, t("slack"))).toEqual({ kind: "many", servers: ["claude.ai Slack", "slack-bee"] });
+    expect(connectorProblem(conns, t("slack", { connectionId: "s2" }))).toBeNull();
+    expect(connectorProblem(conns, t("clickup"))).toEqual({ kind: "elsewhere", labels: ["clickup"], companyIds: ["A"] });
+    expect(connectorProblem(conns, t("clickup", { companyId: "A" }))).toBeNull();
+    expect(connectorProblem(conns, t("clickup", { companyId: "B" }))).toMatchObject({ kind: "elsewhere" });
+    // inny komputer zgłosił swoje konektory: liczą się tylko jego
+    expect(connectorProblem(conns, t("slack", { host: "mini" }))).toMatchObject({ kind: "many" });
+    expect(connectorProblem([...conns, c({ id: "s9", host: "praca", label: "slack-praca", meta: { server: "slack-praca" } })], t("slack", { host: "praca" }))).toBeNull();
+    expect(knownApp(conns, "clickup")).toBe(true);
+    expect(knownApp(conns, "E-mail")).toBe(true);
+    expect(knownApp(conns, "slack-bee")).toBe(true);
+    expect(knownApp(conns, "google-widelab")).toBe(true);
+    expect(knownApp(conns, "drive")).toBe(true);
+    expect(knownApp(conns, "notion-x")).toBe(false);
+    expect(knownApp(conns, "")).toBe(false);
+    const task = { firm: null, companyId: null };
+    expect(connectorNote({ kind: "none", named: null, google: [] }, "clickup", task)).toBe("Na Macu nie ma konektora ClickUp. Dodaj go w Claude Code, potem w menu Task Hub kliknij „Sprawdź teraz”.");
+    expect(connectorNote({ kind: "none", named: "Slack Pirxey", google: [] }, "slack", task)).toContain("nie ma konektora „Slack Pirxey”");
+    expect(connectorNote({ kind: "none", named: null, google: ["google-widelab"] }, "gmail", task)).toBe("Wybierz konto w nagłówku karty: E-mail na Macu obsługuje „google-widelab”.");
+    expect(connectorNote({ kind: "many", servers: ["claude.ai Slack", "slack-bee"] }, "slack", task)).toBe("Na Macu jest kilka kont Slack („claude.ai Slack”, „slack-bee”). Wybierz konto w nagłówku karty.");
+    expect(connectorNote({ kind: "elsewhere", labels: ["clickup"], companyIds: ["A"] }, "clickup", { firm: "Pirxey", companyId: "B" })).toBe("Konektor „clickup” na Macu jest przypisany do firmy Pirxey, a to zadanie jest innej firmy. Wybierz połączenie w nagłówku karty albo przypisz zadanie do projektu tej firmy.");
+    expect(connectorNote({ kind: "none", named: null, google: [] }, "Notion", task)).toContain("konektora Notion.");
   });
   it("konektor: połączenie kroku z mostka, inaczej ta aplikacja z tego komputera i z firmy zadania, nigdy z innej firmy", () => {
     const c = (o: Partial<Connection>): Connection => ({ id: "x", app: "slack", label: "Slack", account: null, companyId: null, sphere: "work", provider: "claude", kind: "mcp", state: "active", source: "bridge", host: "mini", url: null, meta: {}, seenAt: null, ...o });

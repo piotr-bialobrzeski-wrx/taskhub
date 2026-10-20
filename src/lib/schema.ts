@@ -332,6 +332,11 @@ export const TOOL_IN: Record<string, string> = {
   sheets: "w arkuszu Google", docs: "w dokumencie Google", file: "na Macu",
 };
 export const inApp = (app: string) => TOOL_IN[app] ?? `· ${toolLabel(app)}`;
+// nazwa aplikacji do pokazania: etykieta znanego narzędzia, a nieznana tak, jak napisał ją agent („Notion”), nie klucz małymi literami
+export const appName = (app: string) => { const k = normalizeTool(app, ""); return TOOL_LABELS[k] ?? (app.trim() || k); };
+// aplikacje Google: jeden konektor „google-…” z Claude Code obsługuje pocztę, kalendarz i Dysk (arkusz i dokument idą przez Dysk)
+export const GOOGLE_APPS = new Set(["gmail", "calendar", "drive", "sheets", "docs"]);
+export const isGoogleApp = (app: string) => GOOGLE_APPS.has(appOfLabel(normalizeTool(app, "")));
 export const openLabel = (app: string) => "Otwórz " + (app === "gmail" ? "w Gmailu" : TOOL_IN[app] ?? "w " + toolLabel(app));
 export const TOOL_KEYS = Object.keys(TOOL_LABELS);
 // Klucz narzędzia przy zapisie: agent i formularze podają czasem etykietę („Claude Code”, „Ty”) albo alias (claude-code, e-mail);

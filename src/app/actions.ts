@@ -12,8 +12,9 @@ import { Q, roundQ } from "@/lib/time";
 import { runChat } from "@/lib/agent/chat";
 import { bridgeHold, busyWith, newTaskText, noStepsWho, shortTitle, type Queue, type Worker } from "@/lib/auto";
 import { liveActivity } from "@/lib/live";
-import { BRIDGE_ALIVE_MS, isGitDraft } from "@/lib/bridge";
+import { BRIDGE_ALIVE_MS, connectorIssue, isGitDraft } from "@/lib/bridge";
 import { draftOf, isExternalApp, isLocalFile, isPromptDraft, shownSig } from "@/lib/agent/approval";
+import { destOf } from "@/lib/stepcard";
 import type { Connection, Rule, Sphere, Step } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -233,7 +234,7 @@ export async function handoff(taskId: string, stepId: string) {
 // To jedyna droga do zgody: repo.approveDraft zapisuje podpis tej treści; każda późniejsza zmiana treści zgodę kasuje.
 export async function approveStep(taskId: string, stepId: string, fd?: FormData) {
   const o = await requireOwner();
-  const { step } = await stepOf(o.id, taskId, stepId);
+  const { task, step } = await stepOf(o.id, taskId, stepId);
   const body = fd?.get("body");
   const edited = typeof body === "string" ? body : null;
   // podpis szkicu z karty, którą Piotr widział: bez treści, gdy ją poprawił (idzie w formularzu); z treścią, gdy nietknięta (zgoda na bajty agenta)
@@ -249,6 +250,15 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
   if (!step.needsApproval) {
     if (edited !== null) await writeDraftBody(stepId, step, edited);
     await finishStep(o.id, taskId, stepId); refresh(taskId); return;
+  }
+  // szkic, którego mostek nie wyśle (brak konektora tej aplikacji na Macu, kilka kont, konektor innej firmy): zgoda nic by nie dała, Piotr czyta czemu
+  if (d0 && destOf(step)?.kind === "send") {
+    const [conns, projects, companies] = await Promise.all([repo.listConnections(o.id), repo.listProjects(o.id), repo.listCompanies(o.id)]);
+    const issue = connectorIssue(conns, companies, { app: d0.target.app, connectionId: step.connectionId, companyId: projects.find((p) => p.id === task.projectId)?.companyId ?? null });
+    if (issue) {
+      await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(step.title, 60)}”: ${issue}`, { stepId });
+      refresh(taskId); return;
+    }
   }
   if (await repo.approveDraft(o.id, stepId, { body: edited, seen })) {
     // szkic, który nie wychodzi poza Task Hub (krok Piotra, notatka): zgoda go kończy, nie czeka na bieg wysyłki mostka.

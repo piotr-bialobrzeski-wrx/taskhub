@@ -21,7 +21,13 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("zgoda na szkic z karty", async 
     return { taskId: t.id, s, d: draftOf(s)! };
   };
   const get = async (taskId: string, stepId: string) => (await repo.getTask(owner, taskId))!.steps.find((x) => x.id === stepId)!;
-  beforeAll(async () => { owner = (await repo.ensureOwner()).id; await sql()`delete from tasks where owner_id = ${owner} and title like 'Szkic %'`; });
+  beforeAll(async () => {
+    owner = (await repo.ensureOwner()).id;
+    await sql()`delete from tasks where owner_id = ${owner} and title like 'Szkic %'`;
+    // zgoda na szkic do Slacka wymaga konektora Slack na Macu (paczka 7, punkt 4.5)
+    await sql()`delete from connections where owner_id = ${owner}`;
+    await repo.upsertBridgeConnections(owner, "Mac", [{ name: "claude.ai Slack", ok: true }]);
+  });
 
   it("bez poprawki: formularz nie niesie treści, zgoda obejmuje pełny podpis i treść zostaje bajt w bajt", async () => {
     const { taskId, s, d } = await proposed(BODY);
