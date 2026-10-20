@@ -58,6 +58,23 @@ describe("biała kartka: nowe klocki, markdown, tryb karty, kontekst kroku w cza
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain('<pre class="code">kod</pre>');
   });
+  it("markdown: tabela GFM, lista zadań, linia pozioma, ucieczki i stare encje", () => {
+    const html = renderToStaticMarkup(<Markdown text={"| Nazwa | Stan |\n| --- | :-: |\n| Access & roles | **ok** |\n| a \\| b | x |\n\n- [ ] D1\n- [x] D2 &amp; D3\n\n---\n\n5 \\* 3 i \\_x\\_"} />);
+    expect(html).toContain('<div class="tbwrap"><table class="tb"><thead><tr><th>Nazwa</th><th>Stan</th></tr></thead>');
+    expect(html).toContain("<td>Access &amp; roles</td><td><b>ok</b></td>");
+    expect(html).toContain("<td>a | b</td>");
+    expect(html).toContain('<li class="task"><input type="checkbox" disabled="" aria-label="do zrobienia"/><span>D1</span></li>');
+    expect(html).toContain('<li class="task"><input type="checkbox" disabled="" aria-label="zrobione" checked=""/><span>D2 &amp; D3</span></li>');
+    expect(html).toContain("<hr/>");
+    expect(html).toContain("<p>5 * 3 i _x_</p>");
+  });
+  it("tabela wierszy szkicu: komórka z formatowaniem albo kilkoma liniami renderuje się jak treść", async () => {
+    const { Table } = await import("@/components/BlockRenderer");
+    const html = renderToStaticMarkup(<Table columns={["Osoba", "Uwagi"]} rows={[["Marek", "**pilne** & ważne"], ["Kasia", "a\nb"]]} md />);
+    expect(html).toContain('<td>Marek</td><td><div class="md"><p><b>pilne</b> &amp; ważne</p></div></td>');
+    expect(html).toContain('<td><div class="md"><p>a\nb</p></div></td>');
+    expect(renderToStaticMarkup(<Table columns={["A"]} rows={[["**x**"]]} />)).toContain("<td>**x**</td>");
+  });
   it("blok zmian w kodzie i szkic commit/push: schemat, nieaktualny szkic", () => {
     const ok = Blocks.safeParse([
       { type: "changes", repo: "wlrx/custom-cookies", branch: "draft/177", preview: "file:///Users/x/dist/index.html", summary: "Etykieta i pole daty.", files: [{ path: "src/intake.jsx", status: "modified", diff: "@@ -1 +1 @@\n-a\n+b", note: "etykieta" }] },

@@ -3,6 +3,7 @@ import type { Block, Fact, Provenance } from "@/lib/schema";
 import { toolLabel } from "@/lib/schema";
 import { answerBlockForm } from "@/app/actions";
 import { Markdown } from "@/lib/markdown";
+import { hasMarkdown } from "@/lib/format";
 import { plural } from "@/components/canvas/ui";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { CopyButton } from "@/components/CopyButton";
@@ -53,11 +54,13 @@ function FactRow({ f }: { f: Fact }) {
   return <><dt>{f.label}{f.pinned ? " 📌" : ""}</dt><dd><span>{f.value}</span><Source s={f.source} /></dd></>;
 }
 
-export function Table({ columns, rows, highlightFrom }: { columns: string[]; rows: string[][]; highlightFrom?: number }) {
+// md: komórka z formatowaniem albo kilkoma liniami (wiersze szkicu do arkusza) renderuje się jak treść, nie jako gołe gwiazdki
+export function Table({ columns, rows, highlightFrom, md }: { columns: string[]; rows: string[][]; highlightFrom?: number; md?: boolean }) {
+  const cell = (v: string) => (md && (v.includes("\n") || hasMarkdown(v)) ? <Markdown text={v} /> : v);
   return (
     <div className="tbwrap"><table className="tb">
       <thead><tr>{columns.map((c, i) => <th key={i}>{c}</th>)}</tr></thead>
-      <tbody>{rows.map((r, i) => <tr key={i} className={highlightFrom != null && i >= highlightFrom ? "new" : undefined}>{columns.map((_, j) => <td key={j}>{r[j] ?? ""}</td>)}</tr>)}</tbody>
+      <tbody>{rows.map((r, i) => <tr key={i} className={highlightFrom != null && i >= highlightFrom ? "new" : undefined}>{columns.map((_, j) => <td key={j}>{cell(r[j] ?? "")}</td>)}</tr>)}</tbody>
     </table></div>
   );
 }

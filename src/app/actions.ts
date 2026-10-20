@@ -234,9 +234,11 @@ export async function handoff(taskId: string, stepId: string) {
 export async function approveStep(taskId: string, stepId: string, fd?: FormData) {
   const o = await requireOwner();
   const { step } = await stepOf(o.id, taskId, stepId);
-  const body = fd?.get("body"), shown = fd?.get("seen");
+  const body = fd?.get("body");
   const edited = typeof body === "string" ? body : null;
-  const seen = typeof shown === "string" && shown ? shown : null;   // podpis szkicu z karty, którą Piotr widział
+  // podpis szkicu z karty, którą Piotr widział: bez treści, gdy ją poprawił (idzie w formularzu); z treścią, gdy nietknięta (zgoda na bajty agenta)
+  const shown = edited !== null ? fd?.get("seen") : fd?.get("seenFull") ?? fd?.get("seen");
+  const seen = typeof shown === "string" && shown ? shown : null;
   if (step.status === "done") { refresh(taskId); return; }
   if (!step.needsApproval) {
     if (edited !== null) await writeDraftBody(stepId, step, edited);

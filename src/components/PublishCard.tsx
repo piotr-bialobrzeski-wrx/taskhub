@@ -74,14 +74,17 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
     : isPrompt ? `Prompt dla ${name}${where ? ` · ${where}` : ""}`
     : `${me}${where ? ` · ${where}` : ""}`;
   // pole z formatowaniem dla zwykłej treści przed decyzją; jego ukryte pole „body” należy do formularza „Zatwierdź”
-  const editable = (mode === "proposed" || mode === "parked") && !isRows && !((isPrompt || isCommit) && d);
+  // szkic z obrazkiem zostaje tylko do odczytu (edytor by go zgubił) i pokazuje się sformatowany
+  const editable = (mode === "proposed" || mode === "parked") && !isRows && !((isPrompt || isCommit) && d) && !/!\[[^\]]*\]\(/.test(body ?? "");
   const formId = "pub-" + s.id;
   // podpis szkicu z tej karty: zgoda obejmie tylko tę wersję (miejsce, pola, wiersze, pliki), nawet gdy agent zmieni szkic przed kliknięciem
   const seen = d ? shownSig(s, d, editable) : null;
-  const seenInput = seen ? <input type="hidden" name="seen" value={seen} /> : null;
+  // drugi podpis, z treścią: gdy Piotr nic nie zmienił, pole nie wysyła treści i zgoda obejmuje dokładnie bajty agenta
+  const seenFull = d && editable ? shownSig(s, d, false) : null;
+  const seenInput = seen ? <>{<input type="hidden" name="seen" value={seen} />}{seenFull ? <input type="hidden" name="seenFull" value={seenFull} /> : null}</> : null;
   // podgląd według rodzaju odpowiedzi: wiersze do arkusza jako tabela, prompt jako ramka kodu, reszta jako wiadomość „moja”
   const preview = isRows && d ? (
-    <div className="thread"><div className="msg mine rows"><div className="who">{who}</div><Table columns={d.columns ?? d.rows![0].map((_, i) => `Kolumna ${i + 1}`)} rows={d.rows!} highlightFrom={0} />{body ? <p className="sub">{body}</p> : null}</div></div>
+    <div className="thread"><div className="msg mine rows"><div className="who">{who}</div><Table columns={d.columns ?? d.rows![0].map((_, i) => `Kolumna ${i + 1}`)} rows={d.rows!} highlightFrom={0} md />{body ? <Markdown text={body} /> : null}</div></div>
   ) : (isPrompt || isCommit) && (d || mode !== "proposed") ? (
     <div className="thread"><div className="msg mine"><div className="who">{who}</div>{d?.subject ? <h4>{d.subject}</h4> : null}<pre className="code">{body || "Brak treści."}</pre></div></div>
   ) : editable ? (

@@ -804,6 +804,20 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .rf-doc a { color: var(--accent); text-decoration: underline; }
 .rf-doc code { font-family: var(--font-mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
 .rf-doc pre { font-family: var(--font-mono); font-size: 12.5px; background: var(--surface-2); padding: var(--s-3) var(--s-4); border-radius: 8px; white-space: pre-wrap; }
+/* tabela w edytorze: przewija się w polu, nie rozpycha karty ani strony; listy zadań jak w Markdown; linia pozioma */
+.rf-doc table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; font-size: 12.5px; }
+.rf-doc :is(th, td) { position: relative; border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; min-width: 6ch; }
+.rf-doc th { color: var(--sub); font-weight: 600; font-size: 11px; background: var(--surface-2); }
+.rf-doc .selectedCell::after { content: ""; position: absolute; inset: 0; background: var(--accent-soft); pointer-events: none; }
+.rf-doc ul[data-type="taskList"] { list-style: none; padding-left: 2px; }
+.rf-doc ul[data-type="taskList"] > li { display: flex; gap: 8px; align-items: flex-start; }
+.rf-doc ul[data-type="taskList"] > li > label { flex: none; margin-top: 3px; }
+.rf-doc ul[data-type="taskList"] > li > div { flex: 1; min-width: 0; }
+.rf-doc hr, .md hr { border: 0; border-top: 1px solid var(--line); margin: var(--s-2) 0; }
+.md li.task { list-style: none; margin-left: -18px; display: flex; gap: 8px; align-items: flex-start; }
+.md li.task input { margin: 3px 0 0; flex: none; }
+.tb .md p, .tb .md ul, .tb .md ol { margin: 0; }
+.tb .md { gap: var(--s-1); }
 .rf-doc.ProseMirror { display: flex; flex-direction: column; min-height: 64px; }
 .pub .msg .md { margin-top: var(--s-1); }
 .pub .msg .md p { white-space: pre-wrap; }

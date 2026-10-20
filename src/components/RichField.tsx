@@ -1,12 +1,13 @@
 "use client";
 // Pole z formatowaniem dla treści, która poleci do ClickUp, Slacka albo maila: pasek z nagłówkami, pogrubieniem, kursywą, listami i linkiem,
 // a w środku już sformatowany tekst (bez gwiazdek i krzyżyków). Zapisuje Markdown, ten sam, który pisze agent; format aplikacji docelowej
-// powstaje dopiero przy wysyłce (src/lib/format.ts). Zapis sam po wyjściu z pola; ukryte pole `form` niesie treść także do „Zatwierdź”.
+// powstaje dopiero przy wysyłce (src/lib/format.ts). Zapis sam po wyjściu z pola; ukryte pole `form` niesie treść do „Zatwierdź” tylko wtedy,
+// gdy Piotr ją zmienił: nietknięty szkic zatwierdza się z podpisem pełnej treści agenta, więc wychodzi bajt w bajt.
 import { useEffect, useRef, useState, useTransition } from "react";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import { Markdown } from "@tiptap/markdown";
 import { Markdown as MdView } from "@/lib/markdown";
+import { toEditorMd } from "@/lib/format";
+import { editorOut, richExtensions } from "@/lib/richtext";
 
 const I: Record<string, React.ReactNode> = {
   ul: <><circle cx="3" cy="4.5" r=".9" fill="currentColor" /><circle cx="3" cy="8" r=".9" fill="currentColor" /><circle cx="3" cy="11.5" r=".9" fill="currentColor" /><path d="M6 4.5h8M6 8h8M6 11.5h8" /></>,
@@ -15,15 +16,13 @@ const I: Record<string, React.ReactNode> = {
 };
 const Svg = ({ k }: { k: string }) => <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{I[k]}</svg>;
 
-// edytor dokleja pustą linię na końcu: końcowe odstępy nie są zmianą
-const tidy = (m: string) => m.replace(/\s+$/, "");
-
 export function RichField({ value, onSave, form, name = "body", placeholder = "Treść, która ma polecieć…", label = "Treść szkicu", minHeight = 96 }: {
   value: string; onSave?: (md: string) => Promise<void>; form?: string; name?: string; placeholder?: string; label?: string; minHeight?: number;
 }) {
   const [md, setMd] = useState(value);
   const saved = useRef(value);      // ostatnio zapisany Markdown (w postaci, jaką zwraca edytor)
   const prop = useRef(value);       // ostatnia treść z serwera
+  const [base, setBase] = useState<string | null>(null);   // treść z serwera tak, jak zapisuje ją edytor: dopóki md jej równe, formularz nie niesie treści
   const [state, setState] = useState<"idle" | "dirty" | "saved">("idle");
   const [saving, start] = useTransition();
   const [linkOpen, setLinkOpen] = useState(false);
@@ -36,15 +35,12 @@ export function RichField({ value, onSave, form, name = "body", placeholder = "T
   };
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({ underline: false, horizontalRule: false, heading: { levels: [1, 2, 3] }, link: { openOnClick: false, autolink: true, protocols: ["http", "https", "mailto"] } }),
-      Markdown,
-    ],
-    content: value, contentType: "markdown",
+    extensions: richExtensions(),
+    content: toEditorMd(value), contentType: "markdown",
     editorProps: { attributes: { class: "rf-doc md", "aria-label": label, role: "textbox", "aria-multiline": "true" } },
     // edytor zapisuje Markdown po swojemu (np. pusta linia po nagłówku): to punkt odniesienia, żeby samo otwarcie nie liczyło się jako zmiana
-    onCreate: ({ editor }) => { saved.current = tidy(editor.getMarkdown()); setMd(saved.current); },
-    onUpdate: ({ editor }) => { const m = tidy(editor.getMarkdown()); setMd(m); setState(m === saved.current ? "idle" : "dirty"); },
+    onCreate: ({ editor }) => { saved.current = editorOut(editor); setMd(saved.current); setBase(saved.current); },
+    onUpdate: ({ editor }) => { const m = editorOut(editor); setMd(m); setState(m === saved.current ? "idle" : "dirty"); },
     onBlur: () => { /* zapis po wyjściu z pola: patrz efekt niżej (stan md jest już aktualny) */ setBlurTick((n) => n + 1); },
   });
   const [blurTick, setBlurTick] = useState(0);
@@ -55,8 +51,8 @@ export function RichField({ value, onSave, form, name = "body", placeholder = "T
     if (!editor || value === prop.current) return;
     prop.current = value;
     if (state === "dirty" || value === saved.current) return;   // własny zapis wrócił z serwera: nie ruszaj pola (kursor i zaznaczenie zostają)
-    editor.commands.setContent(value, { contentType: "markdown", emitUpdate: false });
-    saved.current = tidy(editor.getMarkdown()); setMd(saved.current);
+    editor.commands.setContent(toEditorMd(value), { contentType: "markdown", emitUpdate: false });
+    saved.current = editorOut(editor); setMd(saved.current); setBase(saved.current);
   }, [value, editor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const on = useEditorState({
@@ -110,7 +106,7 @@ export function RichField({ value, onSave, form, name = "body", placeholder = "T
         {on?.empty ? <span className="rf-ph" aria-hidden="true">{placeholder}</span> : null}
         {editor ? <EditorContent editor={editor} /> : <div className="rf-doc">{value ? <MdView text={value} /> : null}</div>}
       </div>
-      <input type="hidden" name={name} value={md} form={form} readOnly />
+      {form && base !== null && md !== base ? <input type="hidden" name={name} value={md} form={form} readOnly /> : null}
     </div>
   );
 }
