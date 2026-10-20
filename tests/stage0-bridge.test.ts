@@ -32,6 +32,9 @@ describe("prompty mostka", () => {
     expect(p).toContain("Dodaj folder repozytorium w Ustawieniach aplikacji Task Hub na Macu (Foldery z kodem)");
     expect(p).toContain("także gdy krok nie ma needsApproval");
     expect(p).toContain("WIADOMOŚCI PIOTRA W ZADANIACH");   // reszta pracy jak w v1
+    // paczka 7: plik na Macu zapisuje tylko bieg pracy v2; stary mostek nic o nim nie wie
+    expect(p).toContain("sekcja PLIKI NA MACU"); expect(p).toContain("plik w Dysku Google"); expect(p).toContain("Foldery na pliki");
+    expect(bridgePrompt()).not.toContain("PLIKI NA MACU"); expect(bridgePrompt()).not.toContain("plik w Dysku Google");
   });
   it("v2 bieg wysyłki: jeden szkic z get_task, tylko podany konektor, raz, przy wątpliwości leave_step", () => {
     const p = sendPrompt({ stepId: "S1", taskId: "T1", app: "slack", action: "reply", servers: ["claude.ai Slack"] });

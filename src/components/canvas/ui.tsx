@@ -85,6 +85,7 @@ const PATHS: Record<string, string> = {
   settings: '<circle cx="8" cy="8" r="2.2"/><path d="M8 2v1.8M8 12.2V14M2 8h1.8M12.2 8H14M3.8 3.8l1.3 1.3M10.9 10.9l1.3 1.3M3.8 12.2l1.3-1.3M10.9 5.1l1.3-1.3"/>',
   rule: '<path d="M4 2.5h8v11H4z"/><path d="M6.5 6h3M6.5 8.5h3M6.5 11h1.5"/>',
   folder: '<path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12z"/>',
+  file: '<path d="M4.5 2.5h4.5l3 3v8h-7.5z"/><path d="M9 2.5v3h3"/>',
 };
 export function Icon({ k, size = 16, sw = 1.5 }: { k: string; size?: number; sw?: number }) {
   return <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: PATHS[k] ?? PATHS.claude }} />;

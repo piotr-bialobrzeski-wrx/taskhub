@@ -65,7 +65,7 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
   const attN = await repo.countAttachments(noSteps.map((s) => s.task.id));
   // tytuły zadań wpisane jako cała wiadomość Piotra (dłuższe niż 6 słów albo zdanie z kropką), których agent jeszcze nie skrócił
   const longTitles = open.filter((s) => !s.task.titleOriginal && isLongTitle(s.task.title));
-  const going: string[] = [], approved: string[] = [], ready: string[] = [], approval: string[] = [], held: string[] = [];
+  const going: string[] = [], approved: string[] = [], ready: string[] = [], approval: string[] = [], held: string[] = [], files: string[] = [];
   for (const s of free) {
     if (waitingTask.has(s.task.id)) continue;
     for (const st of s.task.steps) {
@@ -80,16 +80,19 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
         (depsDone ? approved : held).push(line + (depsDone && st.handoffAt ? ` (od ${st.handoffAt})` : ""));
         continue;
       }
-      if (st.status === "handoff") { going.push(line + (st.handoffAt ? ` (od ${st.handoffAt})` : "")); continue; }
+      // plik na Macu zapisuje tylko bieg pracy mostka (aplikacja 0.1.7): inni go nie widzą
+      if (st.tool === "file" && audience !== "work") continue;
+      if (st.status === "handoff") { going.push(line + (st.handoffAt ? ` (od ${st.handoffAt})` : "") + (st.tool === "file" ? " (plik na Macu: dokończ jak w sekcji PLIKI NA MACU)" : "")); continue; }
       if (st.status !== "todo") continue;
       if (!depsDone) continue;
       if (st.tool === "manual") continue;
+      if (st.tool === "file") { files.push(line); continue; }
       // szkic nieaktualny (nowe kroki weszły przed nim) agent przygotowuje od nowa, gdy kroki przed nim są zrobione
       if (st.needsApproval) { if (!st.blocks?.some((b) => b.type === "draft" && !b.stale)) approval.push(line); } else ready.push(line);
     }
   }
   if (!opts.peek) await Promise.all([repo.markQuestionsSeen(ownerId, answered.map((q) => q.id)), repo.markChatSeen(ownerId, { ids: chat.map((m) => m.id) })]);
-  const counts: WorkCounts = { chat: chat.length, going: going.length, approved: approved.length, noSteps: noSteps.length, answered: answered.length, ready: ready.length, approval: approval.length, titles: longTitles.length };
+  const counts: WorkCounts = { chat: chat.length, going: going.length, approved: approved.length, noSteps: noSteps.length, answered: answered.length, ready: ready.length + files.length, approval: approval.length, titles: longTitles.length };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const out = [
     chat.length ? "WIADOMOŚCI PIOTRA W ZADANIACH (najpierw to: get_task, potem zrób, o co prosi: gdy zmienia zakres pracy, dodaj kroki przez add_steps z polem before = id kroku publikacji albo wysyłki, przed którym mają wejść; gdy prosi o poprawkę szkicu, popraw go przez set_blocks; gdy pyta, odpowiedz. Wiadomość przy kroku (także odpowiedź na pytanie z kartki) dotyczy kartki tego kroku, dopóki nie jest zrobiony, także kroku Piotra (Ty): gdy zmienia jej treść, zapisz kartkę od nowa przez set_blocks pełnym zestawem klocków (KARTKA KROKU w get_task; pytania z odpowiedziami zostają; bez klocków-notek o zmianie, kartka pokazuje tylko stan) i reply_chat z stepId tego kroku, 1–2 zdania, co zmieniłeś na kartce; gdy nic nie zmienia, reply_chat jednym zdaniem, czemu. Odpowiedź pokazuje się Piotrowi jako dymek czatu nad polem wpisywania. Po każdej załatwionej prośbie reply_chat w tym zadaniu z messageIds = id tej wiadomości: co dopisałeś (numery i tytuły kroków) albo odpowiedź; Piotr widzi wtedy, która prośba jest załatwiona, a która jeszcze w pracy. Nigdy „wezmę pod uwagę” bez kroku):\n" + chat.map((m) => `- zadanie [${m.taskId}] „${m.taskTitle}”${(m.actions as { stepId?: string } | null)?.stepId ? `, przy kroku [${(m.actions as { stepId: string }).stepId}]` : ""}, wiadomość [${m.id}] (${m.createdAt.slice(0, 16).replace("T", " ")} UTC): ${preview(m.text.replace(/\s+/g, " "))}`).join("\n") : "",
@@ -100,7 +103,8 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
     answered.length ? "ODPOWIEDZI PIOTRA (kontynuuj pracę w tych zadaniach):\n" + answered.map((q) => `- zadanie [${q.taskId}]${q.stepId ? ` krok [${q.stepId}]` : ""}: pytanie „${q.text}” → odpowiedź: ${q.answer}`).join("\n") : "",
     // bez starego mostka: konektor i bieg pracy tylko czytają; zmiana w aplikacji zewnętrznej to zawsze szkic (krok bez zgody mógł dodać agent)
     ready.length ? (sends ? "KROKI DO ZROBIENIA BEZ ZGODY (start_step, zrób swoimi konektorami, complete_step z linkiem; fakty przez add_facts):\n"
-      : "KROKI DO ZROBIENIA BEZ ZGODY (tylko czytanie i analiza: start_step, czytaj swoimi konektorami, complete_step z linkiem; fakty przez add_facts. Gdy krok ma coś wysłać albo zmienić w aplikacji zewnętrznej (wiadomość, komentarz, ticket, wydarzenie, plik), nie rób tego, nawet jeśli krok nie wymaga zgody: przygotuj szkic przez set_blocks jako blok draft ze status proposed; po zatwierdzeniu przez Piotra wyśle go mostek Task Hub):\n") + ready.join("\n") : "",
+      : "KROKI DO ZROBIENIA BEZ ZGODY (tylko czytanie i analiza: start_step, czytaj swoimi konektorami, complete_step z linkiem; fakty przez add_facts. Gdy krok ma coś wysłać albo zmienić w aplikacji zewnętrznej (wiadomość, komentarz, ticket, wydarzenie, plik w Dysku Google), nie rób tego, nawet jeśli krok nie wymaga zgody: przygotuj szkic przez set_blocks jako blok draft ze status proposed; po zatwierdzeniu przez Piotra wyśle go mostek Task Hub):\n") + ready.join("\n") : "",
+    files.length ? "PLIKI NA MACU (start_step → zapisz nowy plik narzędziem Write w folderze z linii „Foldery na pliki” na końcu polecenia → tę samą treść pokaż na kartce przez set_blocks jako klocek free → complete_step z polem file = pełna ścieżka; gdy folderu nie ma na liście: leave_step z powodem „Dodaj folder <ścieżka> w Ustawieniach aplikacji Task Hub na Macu (Foldery na pliki)”):\n" + files.join("\n") : "",
     approval.length ? "KROKI WYMAGAJĄCE ZGODY PIOTRA (przygotuj gotowy szkic przez set_blocks jako blok draft ze status proposed; niczego nie wysyłaj, krok sam przejdzie do zatwierdzenia):\n" + approval.join("\n") : "",
     longTitles.length ? `TYTUŁY DO SKRÓCENIA (update_task z nowym title, nic więcej; ${TITLE_RULE}; pierwotny tytuł zostaje zapisany sam):\n` + longTitles.map((s) => `- zadanie [${s.task.id}] „${s.task.title}”`).join("\n") : "",
     openQ.length ? `ZADANIA CZEKAJĄCE NA ODPOWIEDŹ PIOTRA (pomiń): ${[...waitingTask].map((id) => `[${id}]`).join(", ")}` : "",

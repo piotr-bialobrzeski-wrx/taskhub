@@ -30,7 +30,9 @@ enum Guard {
         let cwd = (ev["cwd"] as? String) ?? FileManager.default.currentDirectoryPath
         let allowed = (ProcessInfo.processInfo.environment["TASKHUB_ALLOWED_DIRS"] ?? "")
             .split(separator: ":").map { String($0) }.filter { $0.hasPrefix("/") }
-        if let why = check(tool: tool, input: input, cwd: cwd, allowed: allowed) { return deny(why) }
+        let fileDirs = (ProcessInfo.processInfo.environment["TASKHUB_FILE_DIRS"] ?? "")
+            .split(separator: ":").map { String($0) }.filter { $0.hasPrefix("/") }
+        if let why = check(tool: tool, input: input, cwd: cwd, allowed: allowed, fileDirs: fileDirs) { return deny(why) }
         return 0
     }
 
@@ -39,8 +41,8 @@ enum Guard {
         return 2
     }
 
-    // nil = przepuść (decydują zasady biegu); tekst = odmowa z tym powodem
-    static func check(tool: String, input: [String: Any], cwd: String, allowed: [String]) -> String? {
+    // nil = przepuść (decydują zasady biegu); tekst = odmowa z tym powodem. fileDirs = foldery na pliki: tylko zapis nowych plików, bez czytania
+    static func check(tool: String, input: [String: Any], cwd: String, allowed: [String], fileDirs: [String] = []) -> String? {
         if shellTools.contains(tool) {
             return commandProblem((input["command"] as? String) ?? "")
         }
@@ -52,13 +54,22 @@ enum Guard {
         for k in ["pattern", "glob"] where tool == "Glob" || k == "glob" {
             if let s = input[k] as? String, let m = secretMarker(s) { return "Strażnik Task Hub: wzorzec sięga do chronionych danych (\(m))." }
         }
+        // foldery na pliki: Claude tylko zapisuje tam nowe pliki; Read, Glob, Grep i LS w nich odmawiamy (także wzorzec Glob ze ścieżką bezwzględną)
+        if !fileDirs.isEmpty && !writeTools.contains(tool) {
+            let fileRoots = fileDirs.map { canonical($0) }
+            var probes = paths.map { canonical(absolute($0, cwd)) }
+            if tool == "Glob", let pat = input["pattern"] as? String, pat.hasPrefix("/") || pat.hasPrefix("~/") { probes.append(canonical(absolute(pat, cwd))) }
+            if probes.contains(where: { p in fileRoots.contains(where: { under(p, $0, caseless: false) }) }) {
+                return "Strażnik Task Hub: w folderach na pliki Claude tylko zapisuje nowe pliki, bez czytania."
+            }
+        }
         guard writeTools.contains(tool) else { return nil }
         guard !paths.isEmpty else { return "Strażnik Task Hub: zmiana pliku bez ścieżki, zablokowana." }
         let roots = allowed.map { canonical($0) }
         for p in paths {
             let c = canonical(absolute(p, cwd))
             if !roots.contains(where: { under(c, $0, caseless: false) }) {
-                return "Strażnik Task Hub: zmiany plików tylko w katalogu roboczym i w folderach z kodem z Ustawień aplikacji (\(p))."
+                return "Strażnik Task Hub: zmiany plików tylko w katalogu roboczym, w folderach z kodem i w folderach na pliki z Ustawień aplikacji (\(p))."
             }
             let comps = c.split(separator: "/").map { String($0) }
             if comps.contains(".git") || comps.contains(".claude") || comps.last == ".mcp.json" {

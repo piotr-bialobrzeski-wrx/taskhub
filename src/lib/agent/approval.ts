@@ -55,8 +55,10 @@ export function approvalValid(s: Approvable): boolean {
 export const isSendable = (s: Approvable): boolean => approvalValid(s) && !s.sendStartedAt;
 
 // aplikacje, w których szkic nie wychodzi do innych ludzi: krok Piotra, tekst w Task Hub, prompt dla agenta
-const INTERNAL = new Set(["manual", "claude", "claudeapp", "code", "taskhub"]);
+const INTERNAL = new Set(["manual", "claude", "claudeapp", "code", "taskhub", "file"]);
 export const isExternalApp = (app: string | null | undefined) => !!app?.trim() && !INTERNAL.has(normalizeTool(app));
+// plik na Macu Piotra: zapisuje go bieg pracy mostka, nie wysyłka; szkic do „pliku” to pomyłka agenta
+export const isLocalFile = (app: string | null | undefined) => normalizeTool(app ?? "", "") === "file";
 // prompt dla agenta (Claude Code, Claude): po zgodzie trzeba go wykonać (bieg pracy), a nie tylko zamknąć krok; commit to nie prompt
 const PROMPT_APPS = new Set(["code", "claudeapp"]);
 export const isPromptDraft = (d: Draft | null | undefined, blocks?: Block[] | null): boolean => !!d && PROMPT_APPS.has(normalizeTool(d.target.app)) && !isGitDraft(d, blocks);

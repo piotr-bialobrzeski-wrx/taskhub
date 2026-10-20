@@ -112,13 +112,13 @@ enum Policy {
         p.hasPrefix("/") && p.count > 1 && !p.contains { "*?[]\\:\n\r\"".contains($0) }
     }
 
-    // foldery z kodem z Ustawień, sprawdzone tak samo jak przy dodawaniu; złe pomijamy (zasady są wtedy węższe, nie szersze)
-    static func codeFolders(_ list: [String]) -> [String] {
+    // foldery z kodem (albo na pliki) z Ustawień, sprawdzone tak samo jak przy dodawaniu; złe pomijamy (zasady są wtedy węższe, nie szersze)
+    static func codeFolders(_ list: [String], what: String = "folder z kodem") -> [String] {
         var out: [String] = []
         for raw in list {
             let p = Store.normalizedFolder(URL(fileURLWithPath: raw))
-            if let why = Store.folderProblem(p) { Log.write("folder z kodem pominięty (\(raw)): \(why)"); continue }
-            guard ruleSafe(p) else { Log.write("folder z kodem pominięty (\(raw)): ścieżka ma znak *, ?, [, ], \\, \" albo :"); continue }
+            if let why = Store.folderProblem(p) { Log.write("\(what) pominięty (\(raw)): \(why)"); continue }
+            guard ruleSafe(p) else { Log.write("\(what) pominięty (\(raw)): ścieżka ma znak *, ?, [, ], \\, \" albo :"); continue }
             if !out.contains(p) { out.append(p) }
         }
         return out
@@ -267,7 +267,8 @@ enum Policy {
     }
 
     // ---------- bieg „work” ----------
-    static func work(runId: String, prompt: String, mcp: String, token: String, probe: Probe, folders: [String], model: String) throws -> RunPlan {
+    // files = foldery na pliki (kroki „Plik na Macu”): Claude tylko zapisuje tam nowe pliki; bez Read, bez Basha, bez --add-dir
+    static func work(runId: String, prompt: String, mcp: String, token: String, probe: Probe, folders: [String], files: [String] = [], model: String) throws -> RunPlan {
         let work = Store.workDir.path
         guard ruleSafe(work) else { throw PolicyError("Ścieżka katalogu roboczego ma znaki, których zasady nie obsłużą: \(work)") }
         let dirs = [work] + folders
@@ -279,6 +280,7 @@ enum Policy {
         let results = home + "/.claude/projects/" + String(work.map { (c: Character) -> Character in c.isASCII && (c.isLetter || c.isNumber) ? c : "-" })
         if ruleSafe(results) { allow.append("Read(/\(results)/**)") }
         for d in dirs { allow += ["Edit(/\(d)/**)", "Write(/\(d)/**)"] }
+        for d in files { allow += ["Edit(/\(d)/**)", "Write(/\(d)/**)"] }
         allow += conn.read
         if !folders.isEmpty { allow += bashAllow.map { "Bash(\($0):*)" } }
         var deny = conn.write + bashDeny.map { "Bash(\($0):*)" } + secretReadRules()
@@ -294,7 +296,7 @@ enum Policy {
         let perms: [String: Any] = ["defaultMode": "dontAsk", "allow": allow, "deny": deny + [canary]]
         var locked: [String] = []
         for f in folders { locked += protectedInRepo.map { f + "/" + $0 } }
-        let fs: [String: Any] = ["allowWrite": dirs + ["/tmp", "~/.npm"], "denyRead": secretDirs() + secretFiles(), "denyWrite": locked]
+        let fs: [String: Any] = ["allowWrite": dirs + ["/tmp", "~/.npm"], "denyRead": secretDirs() + secretFiles() + files, "denyWrite": locked]
         let net: [String: Any] = ["allowedDomains": npmDomains, "allowLocalBinding": true]
         // piaskownica Basha: zapis tylko w work/, folderach z kodem i tymczasowych; sieć tylko do rejestru npm.
         // Gdy piaskownica nie wstanie, Claude Code kończy bieg (zamiast puszczać polecenia bez niej).
@@ -304,18 +306,24 @@ enum Policy {
         let mcpF = try mcpFile(runId: runId, url: mcp, token: token)
         let setF: URL
         do { setF = try writeFile(settings, name: safeId(runId) + "-settings.json") } catch { remove([mcpF]); throw error }
-        let p = prompt + (folders.isEmpty
+        var p = prompt + (folders.isEmpty
             ? "\n\nNa tym Macu nie ma folderów z kodem: kroki z kodem oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji."
             : "\n\nFoldery z kodem na tym Macu: " + folders.joined(separator: ", "))
+        p += files.isEmpty
+            ? "\n\nNa tym Macu nie ma folderów na pliki: kroki „Plik na Macu” (tool file) oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery na pliki)."
+            : "\n\nFoldery na pliki na tym Macu (tylko nowe pliki narzędziem Write; bez czytania i bez poleceń): " + files.joined(separator: ", ")
         var args: [String] = ["-p", p, "--output-format", "stream-json", "--verbose", "--permission-mode", "dontAsk",
                               "--mcp-config", mcpF.path, "--settings", setF.path, "--allowedTools"]
         args += allow
         args.append("--disallowedTools")
         args += deny
-        if !folders.isEmpty { args.append("--add-dir"); args += folders }
+        // foldery na pliki też jako katalogi robocze (inaczej Claude Code pyta o zapis poza nimi, a w dontAsk pytanie = odmowa);
+        // czytania w nich pilnuje strażnik (TASKHUB_FILE_DIRS) i denyRead piaskownicy
+        if !folders.isEmpty || !files.isEmpty { args.append("--add-dir"); args += folders + files }
         args += common(probe, tools: builtins, model: model)
         var env = ClaudeCLI.env()
-        env["TASKHUB_ALLOWED_DIRS"] = dirs.joined(separator: ":")
+        env["TASKHUB_ALLOWED_DIRS"] = (dirs + files).joined(separator: ":")
+        env["TASKHUB_FILE_DIRS"] = files.joined(separator: ":")
         return RunPlan(args: args, env: env, files: [mcpF, setF], canary: canary, mustLack: conn.write + (hasBash ? [] : ["Bash"]) + extra,
                        known: Set(probe.info.tools))
     }

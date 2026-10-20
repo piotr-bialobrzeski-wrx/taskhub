@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var loginItem = SettingsView.loginEnabled()
     @State private var loginError = ""
     @State private var folderInfo = ""
+    @State private var fileFolderInfo = ""
 
     static func loginEnabled() -> Bool {
         if #available(macOS 13.0, *) { return SMAppService.mainApp.status == .enabled }
@@ -78,6 +79,30 @@ struct SettingsView: View {
                 Text("Tylko w tych folderach Claude może zmieniać pliki i uruchamiać testy w krokach z kodem. Dodaj główny folder repozytorium (ten z katalogiem .git).")
                     .font(.system(size: 11.5)).foregroundColor(Theme.sub)
                 if store.cfg.codeFolders.contains(where: SettingsView.isProtected) {
+                    Text("Dokumenty, Biurko i Pobrane macOS chroni osobno: przy pierwszym biegu może zapytać, czy Task Hub ma do nich dostęp.")
+                        .font(.system(size: 11.5)).foregroundColor(Theme.sub)
+                }
+            }
+            Section("Foldery na pliki") {
+                ForEach(store.cfg.fileFolders, id: \.self) { f in
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc").foregroundColor(Theme.sub)
+                        Text(f).lineLimit(1).truncationMode(.middle)
+                        if !SettingsView.isFolder(f) { Text("nie ma go").font(.system(size: 11.5)).foregroundColor(Theme.danger) }
+                        Spacer()
+                        Button("Usuń") { removeFileFolder(f) }
+                    }
+                }
+                if store.cfg.fileFolders.isEmpty {
+                    Text("Brak. Kroki „Plik na Macu” wrócą do Ciebie z prośbą o dodanie folderu.").font(.system(size: 12)).foregroundColor(Theme.sub)
+                }
+                HStack(spacing: 10) {
+                    Button("Dodaj folder…") { addFileFolders() }
+                    if !fileFolderInfo.isEmpty { Text(fileFolderInfo).font(.system(size: 12)).foregroundColor(Theme.danger).lineLimit(2) }
+                }
+                Text("Tu Claude zapisuje pliki z kroków „Plik na Macu”, np. story do folderu roboczego. Tylko nowe pliki: bez czytania folderu i bez poleceń. Nie dodawaj folderów udostępnianych innym (Dysk Google, Dropbox, iCloud).")
+                    .font(.system(size: 11.5)).foregroundColor(Theme.sub)
+                if store.cfg.fileFolders.contains(where: SettingsView.isProtected) {
                     Text("Dokumenty, Biurko i Pobrane macOS chroni osobno: przy pierwszym biegu może zapytać, czy Task Hub ma do nich dostęp.")
                         .font(.system(size: 11.5)).foregroundColor(Theme.sub)
                 }
@@ -187,6 +212,33 @@ struct SettingsView: View {
     @MainActor private func removeFolder(_ path: String) {
         store.cfg.codeFolders.removeAll { $0 == path }
         folderInfo = ""
+    }
+
+    // foldery na pliki: jak foldery z kodem, ale bez wymogu .git
+    @MainActor private func addFileFolders() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = false
+        p.canChooseDirectories = true
+        p.allowsMultipleSelection = true
+        p.canCreateDirectories = true
+        p.prompt = "Dodaj"
+        p.message = "Wskaż folder, w którym Claude może zapisywać nowe pliki (np. robocze/dev-ready)."
+        guard p.runModal() == .OK else { return }
+        var list = store.cfg.fileFolders
+        var refused: [String] = []
+        for u in p.urls {
+            let path = Store.normalizedFolder(u)
+            if let why = Store.folderProblem(path) { refused.append("\((path as NSString).lastPathComponent): \(why)"); continue }
+            if !list.contains(path) { list.append(path) }
+        }
+        if list != store.cfg.fileFolders { store.cfg.fileFolders = list }
+        fileFolderInfo = refused.isEmpty ? "" : "Nie dodałem: " + refused.joined(separator: "; ")
+        if !refused.isEmpty { Log.write("foldery na pliki: odrzucone \(refused.joined(separator: "; "))") }
+    }
+
+    @MainActor private func removeFileFolder(_ path: String) {
+        store.cfg.fileFolders.removeAll { $0 == path }
+        fileFolderInfo = ""
     }
 
     @MainActor private func setLogin(_ on: Bool) {

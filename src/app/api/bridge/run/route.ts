@@ -4,7 +4,7 @@
 // na Macu (git), a wiadomość wysyła Claude Code tylko konektorem docelowej aplikacji (servers) z tokenem, który zna ten jeden krok.
 import * as repo from "@/lib/repo";
 import { listSendable, type Sendable } from "@/lib/agent/work";
-import { isExternalApp } from "@/lib/agent/approval";
+import { isExternalApp, isLocalFile } from "@/lib/agent/approval";
 import { RUN_MAX_MIN, RUN_STALE_MIN, SEND_MAX_MIN, appKey, authBridge, bridgePrompt, bridgeWorkPrompt, gitSend, isGitDraft, mcpUrl, protocolOf, sendPrompt, sendServers, type BridgeAuth } from "@/lib/bridge";
 import { normalizeTool, toolLabel } from "@/lib/schema";
 import { shortTitle } from "@/lib/auto";
@@ -52,6 +52,8 @@ async function sendRun(a: BridgeAuth, bridge: string): Promise<Response> {
   // Zatwierdzonego promptu dla agenta tu nie ma (listSendable go pomija): wykonuje go bieg pracy
   let s: Sendable | undefined;
   for (const x of await listSendable(a.ownerId)) {
+    // szkic do „pliku” sprzed paczki 7: nic go nie wyśle; zgoda wraca z notatką, plik zapisuje krok „Plik na Macu”
+    if (isLocalFile(x.draft.target.app)) { await repo.clearApproval(a.ownerId, x.step.id, { note: `Nie wysłałem „${shortTitle(x.step.title, 60)}”: to plik na Macu, nie wysyłka. Plik zapisuje krok „Plik na Macu”.` }); continue; }
     if (isGitDraft(x.draft, x.step.blocks) || isExternalApp(x.draft.target.app)) { s = x; break; }
     if (await repo.markSendStarted(a.ownerId, x.step.id)) await repo.completeSend(a.ownerId, x.step.id, { summary: "Zatwierdzone; ten szkic nie idzie do żadnej aplikacji zewnętrznej." });
   }

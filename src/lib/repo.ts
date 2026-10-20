@@ -231,7 +231,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     estMin: Number(r.estMin), spentSec: Number(r.spentSec), spentManual: !!r.spentManual, link: (r.link as string) ?? null,
     handoffAt: iso(r.handoffAt), doneAt: iso(r.doneAt), report: (r.report as string) ?? null, output: (r.output as string) ?? "",
     review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), hasPrevBlocks: r.blocksPrev != null, logged: !!r.logged,
-    pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, connectionId: (r.connectionId as string) ?? null,
+    pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, connectionId: (r.connectionId as string) ?? null, filePath: (r.filePath as string) ?? null,
     approvedAt: iso(r.approvedAt), approvedSig: (r.approvedSig as string) ?? null, sendStartedAt: iso(r.sendStartedAt),
   };
 }
@@ -290,7 +290,7 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
   const created: { id: string }[] = [];
   for (const s of steps) {
     const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id)
-      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval}, ${roundQ(s.estMin ?? Q)}, ${isHttpUrl(s.link) ? s.link.trim() : null}, ${s.connectionId ?? null}) returning id`;
+      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval && normalizeTool(s.tool) !== "file"}, ${roundQ(s.estMin ?? Q)}, ${isHttpUrl(s.link) ? s.link.trim() : null}, ${s.connectionId ?? null}) returning id`;
     created.push({ id: r.id as string });
   }
   // zależności: "n2" / indeks w tej paczce albo id istniejącego kroku
@@ -359,7 +359,7 @@ export async function purgeTask(ownerId: string, id: string): Promise<void> {
   await sql()`delete from tasks where id = ${id} and owner_id = ${ownerId}`;
 }
 
-export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null }>;
+export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null; filePath: string | null }>;
 const parseBlocks = (v: unknown): Block[] | null => { if (!v) return null; const p = Blocks.safeParse(v); return p.success ? p.data : null; };
 const isApproved = (b: Block) => b.type === "draft" && b.status === "approved";
 const demote = (blocks: Block[]) => blocks.map((b): Block => (b.type === "draft" && b.status === "approved" ? { ...b, status: "proposed" } : b));
@@ -386,7 +386,7 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
   const p: Row = {};
   if (patch.title !== undefined) p.title = patch.title.slice(0, 200);
   if (patch.detail !== undefined) p.detail = patch.detail;
-  if (patch.tool !== undefined) p.tool = normalizeTool(patch.tool);
+  if (patch.tool !== undefined) { p.tool = normalizeTool(patch.tool); if (p.tool === "file") p.needs_approval = false; }   // plik na Macu nigdy nie czeka na zgodę
   if (patch.status !== undefined) p.status = patch.status;
   if (patch.prevStatus !== undefined) p.prev_status = patch.prevStatus;
   if (patch.needsApproval !== undefined) p.needs_approval = patch.needsApproval;
@@ -429,6 +429,7 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
   if (patch.position !== undefined) p.position = patch.position;
   if (patch.logged !== undefined) p.logged = patch.logged;
   if (patch.connectionId !== undefined) p.connection_id = patch.connectionId;
+  if (patch.filePath !== undefined) p.file_path = patch.filePath?.trim().slice(0, 500) || null;
   if (!Object.keys(p).length) return;
   await sql()`update steps set ${sql()(p)} where id = ${id}`;
 }

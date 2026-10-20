@@ -16,8 +16,8 @@ import { originOf, wwwAuthenticate } from "@/lib/oauth";
 import { externalLink as externalLinkOf } from "@/lib/links";
 import { appUrl } from "@/lib/session";
 import { securityReport } from "@/lib/security";
-import { isHttpUrl } from "@/lib/safeurl";
-import { approvalValid, coerceAgentDrafts, draftOf, isExternalApp, isGitDraft, isPromptDraft, isSendable } from "@/lib/agent/approval";
+import { isFilePath, isHttpUrl } from "@/lib/safeurl";
+import { approvalValid, coerceAgentDrafts, draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable, type Draft } from "@/lib/agent/approval";
 
 // link kroku to adres elementu w zewnętrznej aplikacji (tylko http/https); adres samego Task Hub nie jest linkiem kroku
 const externalLink = (link: string | undefined | null) => (isHttpUrl(link) ? externalLinkOf(link, appUrl()) : undefined);
@@ -54,6 +54,14 @@ function buildHandler(auth: repo.TokenAuth) {
   const needsDraft = (s: Step) => audience !== "bridge-v1" && audience !== "send" && s.needsApproval && isExternalApp(s.tool) && !sends(s);
   // nazwa albo id połączenia z rejestru → id; pusty napis albo brak = null (agent wybiera sam)
   const connectionIdOf = async (ref: string | undefined): Promise<string | null> => (ref?.trim() ? (await repo.findConnection(ownerId, ref))?.id ?? null : null);
+  // szkic, którego nic nie wyśle (plik na Macu to nie wysyłka): odmowa z instrukcją dla tego, kto pyta; nil = szkic może się zapisać
+  const agentBlocker = (nd: Draft | null, was: Step): string | null => {
+    if (!nd || nd.status !== "proposed" || nd.stale || was.status === "done") return null;
+    if (isLocalFile(nd.target.app)) return audience === "work"
+      ? "Nie zapisałem: „Plik na Macu” to nie szkic do zatwierdzenia. Zmień narzędzie kroku na file (update_step z tool \"file\"), zapisz plik narzędziem Write w folderze z linii „Foldery na pliki”, potem complete_step z polem file."
+      : "Nie zapisałem: „Plik na Macu” to nie szkic do zatwierdzenia. Zmień narzędzie kroku na file (update_step z tool \"file\") i zostaw krok; plik zapisze aplikacja Task Hub 0.1.7 na Macu.";
+    return null;
+  };
   // krok właściciela świeżo z bazy (z danymi o zgodzie); null = nie jego albo nie ma
   const stepById = async (stepId: string): Promise<Step | null> => { const taskId = await ownedStep(ownerId, stepId); return taskId ? (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === stepId) ?? null : null; };
   return createMcpHandler((server) => {
@@ -114,7 +122,7 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("create_task", {
-      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. title: 2–6 słów, samo sedno (nie cała wiadomość); title kroku od czasownika, 2–6 słów, bez identyfikatorów. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, whatsapp, sheets, docs, est w minutach (wielokrotność 5), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
+      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. title: 2–6 słów, samo sedno (nie cała wiadomość); title kroku od czasownika, 2–6 słów, bez identyfikatorów. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, whatsapp, sheets, docs, file (Plik na Macu: zapis pliku na Macu Piotra, bez zgody, robi go tylko mostek), est w minutach (wielokrotność 5), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
       inputSchema: z.object({
         title: z.string(), summary: z.string().optional(), source: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().optional(), project: z.string().optional(),
         steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })).optional(),
@@ -186,6 +194,8 @@ function buildHandler(auth: repo.TokenAuth) {
       const nd = draftOf({ blocks }), od = draftOf(was);
       if (was.status !== "done" && (was.approvedAt || was.sendStartedAt) && (!nd || nd.status !== od?.status))
         return text("Nie zapisałem: Piotr zatwierdził już szkic tego kroku i czeka on na wysyłkę, więc jego treść, adresat i miejsce zostają bez zmian. Zapisz kartkę z tym samym blokiem draft (SZKIC KROKU w get_task) albo, gdy szkic jest nieaktualny, napisz to Piotrowi przez reply_chat ze stepId tego kroku; on zdecyduje.");
+      const blocker = agentBlocker(nd, was);
+      if (blocker) return text(blocker);
       // dwa kroki z tym samym szkicem (ten sam ticket i czynność) wysłałyby to samo dwa razy: zatrzymaj, zanim powstanie drugi
       if (!a.sameTargetOk) {
         const all = (await repo.getTask(ownerId, taskId))?.steps ?? [];
@@ -212,11 +222,14 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("complete_step", {
-      title: "Krok gotowy", description: "Zgłasza wynik kroku: summary = 1–2 zdania o efekcie (Piotr czyta je w raporcie kroku; w rozmowie zobaczy tylko „Zrobione: tytuł kroku”), link do wyniku, opcjonalnie czas w minutach. Krok z kodem: changes = zmienione pliki (path, status, diff, note), repo, branch, preview = adres podglądu (http albo file://); trafiają na kartkę kroku jako blok zmian. Gdy to ostatni krok, zadanie się kończy i agent pisze notatkę końcową.",
-      inputSchema: z.object({ stepId: z.string(), summary: z.string().max(4000), link: z.string().optional(), spentMin: z.number().int().optional(), repo: z.string().max(200).optional(), branch: z.string().max(200).optional(), preview: z.string().max(1000).optional(), changes: z.array(ChangedFile).max(60).optional() }),
+      title: "Krok gotowy", description: "Zgłasza wynik kroku: summary = 1–2 zdania o efekcie (Piotr czyta je w raporcie kroku; w rozmowie zobaczy tylko „Zrobione: tytuł kroku”), link do wyniku, opcjonalnie czas w minutach. Krok z kodem: changes = zmienione pliki (path, status, diff, note), repo, branch, preview = adres podglądu (http albo file://); trafiają na kartkę kroku jako blok zmian. Gdy to ostatni krok, zadanie się kończy i agent pisze notatkę końcową. Krok „Plik na Macu” (tool file): file = pełna ścieżka zapisanego pliku (np. ~/Documents/…/2026-10-20-us-podglad-rol.md), nie w link.",
+      inputSchema: z.object({ stepId: z.string(), summary: z.string().max(4000), link: z.string().optional(), spentMin: z.number().int().optional(), repo: z.string().max(200).optional(), branch: z.string().max(200).optional(), preview: z.string().max(1000).optional(), changes: z.array(ChangedFile).max(60).optional(), file: z.string().max(500).optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId);
       if (!taskId) return text("Nie ma takiego kroku.");
+      // plik na Macu zapisuje tylko bieg pracy mostka (w folderze na pliki); ścieżka to tekst, nie link
+      if (a.file !== undefined && audience !== "work") return text("Nie zamknąłem kroku: plik na Macu zapisuje tylko bieg mostka na Macu (aplikacja Task Hub 0.1.7).");
+      if (a.file !== undefined && !isFilePath(a.file)) return text("Nie zamknąłem kroku: file to pełna ścieżka pliku na Macu (zaczyna się od / albo ~/).");
       // szkic czekający na zgodę Piotra nie może się zamknąć: kartka pokazałaby „Wysłano”, a kroki po nim ruszyłyby, choć nic nie poleciało
       const cur = await stepById(a.stepId);
       // bieg wysyłki zamyka tylko szkic, który wziął, i tylko póki zgoda jest ważna (Piotr mógł zatrzymać wysyłkę)
@@ -231,6 +244,7 @@ function buildHandler(auth: repo.TokenAuth) {
         return text("Nie zamknąłem kroku: wymaga zgody Piotra, bo zmienia coś w aplikacji zewnętrznej. Przygotuj szkic przez set_blocks (blok draft, status proposed); po zatwierdzeniu wyśle go mostek Task Hub. Jeśli krok stał się zbędny, zamknij go przez skip_step z powodem.");
       const r = await finishStep(ownerId, taskId, a.stepId, { report: a.summary, link: externalLink(a.link), addSpentSec: a.spentMin ? a.spentMin * 60 : 0 });
       const st = r.task.steps.find((x) => x.id === a.stepId);
+      if (st && a.file) await repo.updateStep(st.id, { filePath: a.file });
       // zmiany w kodzie na kartce kroku: jeden blok changes (zastępuje poprzedni), reszta klocków zostaje
       if (st && (a.changes?.length || a.preview)) {
         const d0 = draftOf(st), old = (st.blocks ?? []).find((b) => b.type === "changes");
@@ -256,6 +270,7 @@ function buildHandler(auth: repo.TokenAuth) {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
       const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
       if (st.status === "done") return text("Ten krok jest już zrobiony.");
+      if (st.tool === "file" && audience !== "work") return text("Nie zacząłem: krok „Plik na Macu” robi tylko aplikacja Task Hub 0.1.7 na Macu. Zostaw go.");
       // szkic czeka na decyzję Piotra: start_step nie może go przepchnąć dalej (stan „w toku” po szkicu wyglądał kiedyś jak zgoda)
       if (st.status === "draft") return text("Nie zacząłem: szkic tego kroku czeka na zatwierdzenie Piotra. Niczego nie wysyłaj; poprawki szkicu zapisuj przez set_blocks, a po zatwierdzeniu wyśle go mostek Task Hub.");
       if (st.approvedAt || st.sendStartedAt || draftOf(st)?.status === "approved") return text(sends(st) ? "Krok w toku." : "Nie zacząłem: zatwierdzony szkic tego kroku wysyła mostek Task Hub w osobnym biegu wysyłki. Niczego tu nie wysyłaj.");

@@ -190,6 +190,7 @@ export const Step = z.object({
   pos: z.object({ x: z.number(), y: z.number() }).nullable(),
   dependsOn: z.array(z.string()),
   connectionId: z.string().nullable(),   // przez które połączenie (konto, firma) zrobić ten krok; null = agent wybiera
+  filePath: z.string().nullable().optional(),   // krok „Plik na Macu”: ścieżka zapisanego pliku (tekst do skopiowania, nigdy link)
   approvedAt: z.string().nullable().optional(),     // zgoda Piotra na szkic (tylko jego kliknięcie „Zatwierdź”)
   approvedSig: z.string().nullable().optional(),    // podpis zatwierdzonej treści; inna treść = brak zgody
   sendStartedAt: z.string().nullable().optional(),  // bieg wysyłki wziął szkic (najwyżej raz)
@@ -322,7 +323,7 @@ export type TimeSample = z.infer<typeof TimeSample>;
 export const TOOL_LABELS: Record<string, string> = {
   slack: "Slack", gmail: "E-mail", clickup: "ClickUp", calendar: "Kalendarz", claude: "Dokument",
   claudeapp: "Claude", code: "Claude Code", manual: "Ty", browser: "Przeglądarka", github: "GitHub", figma: "Figma",
-  whatsapp: "WhatsApp", sheets: "Arkusz Google", docs: "Dokument Google",
+  whatsapp: "WhatsApp", sheets: "Arkusz Google", docs: "Dokument Google", file: "Plik na Macu",
 };
 export const toolLabel = (tool: string) => TOOL_LABELS[tool] ?? tool;
 export const TOOL_KEYS = Object.keys(TOOL_LABELS);
@@ -337,6 +338,7 @@ const TOOL_ALIASES: Record<string, string> = {
   "przegladarka": "browser", web: "browser",
   arkusz: "sheets", "google sheets": "sheets", "google docs": "docs",
   git: "github",
+  plik: "file",   // tylko „plik”: „dysk” to Dysk Google
 };
 const LABEL_KEYS: Record<string, string> = Object.fromEntries(Object.entries(TOOL_LABELS).map(([k, l]) => [l.toLowerCase(), k]));
 export function normalizeTool(input: string | null | undefined, fallback = "manual"): string {

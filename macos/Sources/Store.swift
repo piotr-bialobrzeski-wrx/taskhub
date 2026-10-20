@@ -12,6 +12,7 @@ struct Config: Codable, Equatable {
     var bridge = true       // czy mostek ma pracować
     var autoUpdate = true   // czy aplikacja ma się sama aktualizować (wydania przez Task Hub)
     var codeFolders: [String] = []   // foldery z kodem (ścieżki bezwzględne): tylko tu Claude zmienia pliki w krokach z kodem
+    var fileFolders: [String] = []   // foldery na pliki: tylko tu Claude zapisuje nowe pliki kroków „Plik na Macu”
 
     init() {}
 
@@ -26,6 +27,7 @@ struct Config: Codable, Equatable {
         bridge = try c.decodeIfPresent(Bool.self, forKey: .bridge) ?? true
         autoUpdate = try c.decodeIfPresent(Bool.self, forKey: .autoUpdate) ?? true
         codeFolders = (try? c.decodeIfPresent([String].self, forKey: .codeFolders)) ?? []
+        fileFolders = (try? c.decodeIfPresent([String].self, forKey: .fileFolders)) ?? []
     }
 }
 

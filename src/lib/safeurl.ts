@@ -26,6 +26,16 @@ export function safeHref(u: string | null | undefined): string | undefined {
 // file:// albo ścieżka na dysku: tylko jako tekst do skopiowania (podgląd zmian w kodzie), nigdy jako link
 export const isLocalPath = (u: unknown): u is string => typeof u === "string" && (/^file:\/\//i.test(u.trim()) || u.trim().startsWith("/"));
 
+// ścieżka pliku na Macu (krok „Plik na Macu”): od / albo ~/, bez znaków sterujących i bez „..”; nigdy nie trafia do href
+export function isFilePath(p: unknown): p is string {
+  if (typeof p !== "string") return false;
+  const t = p.trim();
+  if (!t || t.length > 500 || !(t.startsWith("/") || t.startsWith("~/"))) return false;
+  if (/[\u0000-\u001f\u007f]/.test(t)) return false;
+  return !t.split("/").some((seg) => seg === "..");
+}
+export const fileName = (p: string) => p.trim().replace(/\/+$/, "").split("/").pop() || p.trim();
+
 // czyści adresy we wszystkich klockach przed zapisem, w głąb (źródła faktów, elementy list, linki, wiadomości):
 // każde pole „url” spoza http(s) znika; media mogą też wskazywać plik Task Hub, a podgląd zmian w kodzie ścieżkę na dysku.
 // Element listy linków albo mediów bez poprawnego adresu wypada w całości (bez adresu nie ma czego pokazać).

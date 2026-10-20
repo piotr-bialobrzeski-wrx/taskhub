@@ -13,7 +13,7 @@ import { runChat } from "@/lib/agent/chat";
 import { bridgeHold, busyWith, newTaskText, noStepsWho, shortTitle, type Queue, type Worker } from "@/lib/auto";
 import { liveActivity } from "@/lib/live";
 import { BRIDGE_ALIVE_MS, isGitDraft } from "@/lib/bridge";
-import { draftOf, isExternalApp, isPromptDraft, shownSig } from "@/lib/agent/approval";
+import { draftOf, isExternalApp, isLocalFile, isPromptDraft, shownSig } from "@/lib/agent/approval";
 import type { Connection, Rule, Sphere, Step } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -240,6 +240,12 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
   const shown = edited !== null ? fd?.get("seen") : fd?.get("seenFull") ?? fd?.get("seen");
   const seen = typeof shown === "string" && shown ? shown : null;
   if (step.status === "done") { refresh(taskId); return; }
+  // szkic do „pliku” sprzed paczki 7: nic go nie wyśle, plik zapisuje krok „Plik na Macu”
+  const d0 = draftOf(step);
+  if (d0 && isLocalFile(d0.target.app)) {
+    await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(step.title, 60)}”: to plik na Macu, nie wysyłka, więc ten szkic nigdzie nie pójdzie. Plik zapisuje krok „Plik na Macu”.`, { stepId });
+    refresh(taskId); return;
+  }
   if (!step.needsApproval) {
     if (edited !== null) await writeDraftBody(stepId, step, edited);
     await finishStep(o.id, taskId, stepId); refresh(taskId); return;

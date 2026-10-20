@@ -11,9 +11,9 @@ import { calEst, calibrationFor, estOf, fmtMin, spentMin, taskEst, taskSpent, to
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
-import { isHttpUrl, safeHref } from "@/lib/safeurl";
+import { fileName, isHttpUrl, safeHref } from "@/lib/safeurl";
 import { allDoneWaitText, bridgeHold, bridgeLabel, busyWith, noStepsWho, queueWho, yourMsgsNom, type Worker } from "@/lib/auto";
-import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
+import { BRIDGE_ALIVE_MS, protocolOf } from "@/lib/bridge";
 import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
 import { Activity } from "@/components/Activity";
@@ -24,6 +24,7 @@ import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed } from "@/lib/feed";
 import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
+import { CopyButton } from "@/components/CopyButton";
 import { Timer } from "@/components/Timer";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
 import { GrowTextarea } from "@/components/GrowTextarea";
@@ -174,7 +175,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const connections = b.connections.filter((c) => c.sphere === sphere).map((c) => ({ id: c.id, label: c.label, app: c.app, account: c.account, company: c.companyId ? b.companies.find((x) => x.id === c.companyId)?.name ?? null : null, sphere: c.sphere, active: c.state === "active" }));
   const company = cur.project?.companyId ? b.companies.find((x) => x.id === cur.project!.companyId)?.name ?? null : null;
   const ctx = { color: cur.project ? projColor(cur.project.color) : "var(--sub)", text: [cur.project?.name ?? "bez projektu", company ?? (sphere === "private" ? "prywatne" : "zawodowe")].join(" · ") };
-  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} />; });
+  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} oldMac={protocolOf(bridge.meta.v) < 2} />; });
 
   return (
     <>
@@ -191,16 +192,16 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
-function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity }: {
+function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, oldMac }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null; company: string | null;
-  connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null;
+  connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null; oldMac: boolean;
 }) {
   // szczegóły są już w sekcji „Co”, więc blok tekstu z tą samą treścią odpada
   const blocks = (s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
   const cal = calibrationFor(samples, s.tool);
   const calOn = !!cal && state !== "done" && Math.abs(cal.k - 1) >= 0.1;
-  const ext = EXTERNAL_TOOLS.has(s.tool);
+  const ext = EXTERNAL_TOOLS.has(s.tool) || s.tool === "file";   // plik na Macu robi tylko mostek: bez „Przygotuj”
   const runnable = s.tool !== "manual";
   const link = externalLink(s.link, origin);
   const prompt = s.status === "handoff" ? handoffPrompt(t, s, rules, { appUrl: origin, companyId, attachments: attachments.filter((a) => a.analysis) }) : null;
@@ -226,7 +227,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const kinds = kindsOf(material);
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}`, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
-  const meta = done ? `${toolLabel(s.tool)} · ${spentMin(s) ? fmtMin(spentMin(s)) : `~${fmtMin(estOf(s))}`}` : state === "ready" && !mode ? `${toolLabel(s.tool)} · ~${fmtMin(estOf(s))}` : null;
+  const meta = done && s.filePath ? `Zapisano na Macu · ${fileName(s.filePath)}` : done ? `${toolLabel(s.tool)} · ${spentMin(s) ? fmtMin(spentMin(s)) : `~${fmtMin(estOf(s))}`}` : state === "ready" && !mode ? `${toolLabel(s.tool)} · ~${fmtMin(estOf(s))}` : null;
 
   const now = (
     <div className={"zone ans now " + head.cls}>
@@ -236,7 +237,9 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
         {meta ? <small>· {meta}</small> : null}
         {target && isHttpUrl(target.url) ? <><span className="sp" /><a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
+        {done && s.filePath ? <><span className="sp" /><CopyButton text={s.filePath} label="Kopiuj ścieżkę" /></> : null}
       </div>
+      {s.tool === "file" && s.status === "todo" && oldMac ? <div className="note">Ten krok zapisze plik aplikacja Task Hub na Macu od wersji 0.1.7. Zaktualizuj ją w menu aplikacji.</div> : null}
       {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity}
         waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} /> : null}
       {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
