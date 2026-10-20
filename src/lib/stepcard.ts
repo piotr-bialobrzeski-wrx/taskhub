@@ -1,6 +1,6 @@
 // Karta kroku „Teraz · Co · Skąd” (paczka 2, punkt 8): stały porządek sekcji, wynik na wierzchu, nic nie pokazuje się dwa razy.
 // Czysta logika bez React, żeby dało się ją testować; składanie w JSX jest w src/app/tasks/[id]/page.tsx.
-import { appName, doneByOf, EXTERNAL_TOOLS, inApp, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step } from "./schema";
+import { appName, doneByOf, EXTERNAL_TOOLS, inApp, isOwnerStep, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step } from "./schema";
 import { draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft } from "./agent/approval";
 import { fileName, safeHref } from "./safeurl";
 import { fmtTime } from "./clock";
@@ -118,6 +118,37 @@ export function tileDest(d: Dest | null, s: Pick<Step, "status" | "doneAt" | "bl
 export const tileDestHref = (d: Dest | null, s: Pick<Step, "status" | "link">): string | null => (d?.kind === "send" && s.status === "done" ? safeHref(s.link) ?? null : null);
 // kto zamknął krok: Piotr („Ty”) albo Claude; kroki sprzed paczki 7 wg narzędzia
 export const whoDid = (s: Pick<Step, "tool" | "doneBy">): "Ty" | "Claude" => (doneByOf(s) === "owner" ? "Ty" : "Claude");
+
+// ---------- rodzaj kroku: jeden zestaw przycisków na rodzaj (paczka 7, punkt 1) ----------
+// approval = szkic do zatwierdzenia (karta publikacji); agent = krok Claude'a (Przygotuj / Uruchom); decision = krok Piotra z pytaniem na kartce
+// (odpowiedź zamyka krok); reading = „Przeczytaj …” (jeden przycisk „Przeczytane”); offline = krok Piotra poza aplikacją („Zrobione” z pytaniem o czas)
+export type StepKind = "approval" | "agent" | "decision" | "reading" | "offline";
+export const READ_RE = /^(przeczytaj|przejrzyj|zapoznaj się)(?=\s|$)/i;   // (?=\s|$), nie \b: po „ę” granica słowa nie działa
+type QuestionB = Extract<Block, { type: "question" }>;
+export function stepKind(s: Pick<Step, "tool" | "title" | "blocks">): StepKind {
+  if (draftOf(s)) return "approval";
+  if (!isOwnerStep(s)) return "agent";
+  if (s.blocks?.some((b) => b.type === "question")) return "decision";
+  return READ_RE.test(s.title.trim()) ? "reading" : "offline";
+}
+export const openQuestions = (s: Pick<Step, "blocks">): QuestionB[] => (s.blocks ?? []).filter((b): b is QuestionB => b.type === "question" && !b.answer);
+// wynik kroku-decyzji zapisany w output: jedna odpowiedź wprost, kilka z treścią pytań
+export function decisionText(s: Pick<Step, "blocks">): string {
+  const qs = (s.blocks ?? []).filter((b): b is QuestionB => b.type === "question" && !!b.answer);
+  if (!qs.length) return "";
+  return qs.length === 1 ? `Decyzja: ${qs[0].answer}` : `Decyzje: ${qs.map((q) => `„${q.text}”: ${q.answer}`).join("; ")}`;
+}
+// odpowiedzi na kartce pochodzą tylko od Piotra: agent zapisujący kartkę (set_blocks) nie może ich dopisać ani zdjąć. Pytanie o tej samej treści
+// zachowuje zapisaną odpowiedź (i poprzednią po zmianie decyzji); pytanie o innej treści wchodzi bez odpowiedzi
+export function keepOwnerAnswers(was: Block[] | null | undefined, incoming: Block[]): Block[] {
+  const stored = (was ?? []).filter((b): b is QuestionB => b.type === "question");
+  return incoming.map((b): Block => {
+    if (b.type !== "question") return b;
+    const { answer: _a, prev: _p, ...rest } = b;
+    const m = stored.find((q) => q.text === b.text);
+    return { ...rest, ...(m?.answer ? { answer: m.answer } : {}), ...(m?.prev ? { prev: m.prev } : {}) };
+  });
+}
 // linia w rozmowie zadania po zamknięciu kroku
 export function doneChat(s: Pick<Step, "title" | "tool" | "blocks"> & { filePath?: string | null }, closed: boolean): string {
   const d = destOf(s), tail = closed ? " Zadanie ukończone." : "";

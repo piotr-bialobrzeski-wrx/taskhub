@@ -2,12 +2,12 @@
 // Edycja w miejscu: pole kroku zmienia się tam, gdzie je widać (tytuł, szczegóły, narzędzie, szacunek, czas, zgoda, zależności, link), bez osobnego formularza.
 // Klik otwiera pole, Enter albo zejście z pola zapisuje, Esc cofa. Szczegóły: Ctrl/Cmd+Enter zapisuje (Enter robi nową linię).
 import { useState, useTransition, type KeyboardEvent } from "react";
-import { linkSteps, patchStep } from "@/app/actions";
+import { doneWithTime, linkSteps, patchStep } from "@/app/actions";
 import { Picker } from "@/components/canvas/widgets";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { Icon } from "@/components/canvas/ui";
 import { isGoogleApp, TOOL_LABELS } from "@/lib/schema";
-import { Q, fmtMin } from "@/lib/time";
+import { Q, fmtMin, roundQ } from "@/lib/time";
 
 type Patch = Parameters<typeof patchStep>[2];
 type Field = "title" | "detail" | "link";
@@ -100,6 +100,25 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
         </div>
       </div>
     </>
+  );
+}
+
+// „Zrobione” kroku Piotra poza aplikacją: po kliknięciu pyta, ile to zajęło (chipy wokół szacunku, ten równy szacunkowi wyróżniony, albo „Pomiń”),
+// a wybór zamyka krok z tym czasem. Zamiast stopera: Piotr i tak robi takie kroki poza aplikacją
+export function DoneAsk({ taskId, stepId, est }: { taskId: string; stepId: string; est: number }) {
+  const [ask, setAsk] = useState(false);
+  const [picked, setPicked] = useState<number | null | undefined>(undefined);
+  const [pending, start] = useTransition();
+  const finish = (min: number | null) => { setPicked(min); start(() => doneWithTime(taskId, stepId, min)); };
+  if (!ask) return <button type="button" className="btn primary" onClick={() => setAsk(true)}>Zrobione</button>;
+  const base = roundQ(est), mins = [...new Set([roundQ(est / 2), base, roundQ(est * 2)])];
+  const label = (m: number | null, txt: string) => (pending && picked === m ? "Zapisuję…" : txt);
+  return (
+    <div className="actions ask-time" role="group" aria-label="Ile to zajęło?">
+      <span className="lbl">Ile to zajęło?</span>
+      {mins.map((m) => <button key={m} type="button" className={"btn" + (m === base ? " primary" : "")} disabled={pending} onClick={() => finish(m)}>{label(m, fmtMin(m))}</button>)}
+      <button type="button" className="btn" disabled={pending} title="Zamknij krok bez zapisu czasu" onClick={() => finish(null)}>{label(null, "Pomiń")}</button>
+    </div>
   );
 }
 

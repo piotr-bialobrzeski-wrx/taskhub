@@ -1,7 +1,8 @@
 // Karta kroku „Teraz · Co · Skąd”: podział klocków, zwijanie według stanu, raport bez powtórek, linki bez dubli. Czysta logika, bez bazy.
 import { describe, it, expect } from "vitest";
-import { approveLabel, destHint, destOf, doneChat, draftPlace, foldsFor, kindsOf, nowHeading, reportLines, resultLinks, sentWord, splitBlocks, targetLink, tileDest, sameTarget } from "@/lib/stepcard";
+import { approveLabel, decisionText, destHint, destOf, doneChat, draftPlace, foldsFor, keepOwnerAnswers, kindsOf, nowHeading, openQuestions, reportLines, resultLinks, sentWord, splitBlocks, stepKind, targetLink, tileDest, sameTarget, whoDid } from "@/lib/stepcard";
 import type { Block } from "@/lib/schema";
+import { step } from "./helpers";
 
 const changes: Block = { type: "changes", repo: "wlrx/custom-cookies", branch: "intake", preview: "file:///Users/osobiste/prototype.html#catalog", summary: "W menu po lewej jest moduł Catalog Items: 17 pozycji. Format drugiej części kodu to założenie do potwierdzenia.", files: [{ path: "a.js" }] } as Block;
 const facts: Block = { type: "facts", facts: [{ label: "Format", value: "2-12" }] } as Block;
@@ -155,5 +156,39 @@ describe("sameTarget: dwa kroki, które wysłałyby to samo", () => {
   it("opis i komentarz w tym samym tickecie to różne czynności", () => {
     const steps = [step("a", "draft", "869dxk3h9", "update"), step("b", "draft", "869dxk3h9", "comment")];
     expect(sameTarget(steps, "a", (steps[0] as { blocks: never }).blocks).open).toEqual([]);
+  });
+});
+
+// paczka 7, punkt 1: rodzaj kroku decyduje o przyciskach; odpowiedź Piotra na kartce zamyka jego krok-decyzję, a agent nie może jej podrobić
+describe("rodzaj kroku", () => {
+  const q: Block = { type: "question", text: "Co scalić?", options: [{ label: "A" }, { label: "B" }] };
+  const draft = { type: "draft", target: { app: "slack", action: "send" }, body: "x", status: "proposed" } as Block;
+  it("szkic → zgoda (także na kroku Piotra); krok Claude'a → agent; krok Piotra z pytaniem → decyzja; „Przeczytaj / Przejrzyj / Zapoznaj się” → czytanie; inny → poza aplikacją", () => {
+    expect(stepKind(step({ tool: "manual", blocks: [draft] }))).toBe("approval");
+    expect(stepKind(step({ tool: "code", title: "Napraw test" }))).toBe("agent");
+    expect(stepKind(step({ tool: "manual", title: "Zdecyduj o wersji", blocks: [q] }))).toBe("decision");
+    expect(stepKind(step({ tool: "manual", title: "Przeczytaj raport duplikatów" }))).toBe("reading");
+    expect(stepKind(step({ tool: "manual", title: "Zapoznaj się z raportem" }))).toBe("reading");
+    expect(stepKind(step({ tool: "manual", title: "Przejrzyj wątek" }))).toBe("reading");
+    expect(stepKind(step({ tool: "manual", title: "Przeczytajcie to" }))).toBe("offline");   // całe słowo, nie przedrostek
+    expect(stepKind(step({ tool: "manual", title: "Zadzwoń do Kingi" }))).toBe("offline");
+    expect(stepKind(step({ tool: "claude", title: "Przeczytaj wątek #dev" }))).toBe("agent");
+  });
+  it("otwarte pytania, tekst decyzji w wyniku kroku, kto zrobił", () => {
+    const a = { ...q, answer: "A" } as Block, b = { type: "question", text: "Którą wersję?", options: [{ label: "v1" }, { label: "v2" }], answer: "v2" } as Block;
+    expect(openQuestions({ blocks: [q, a] })).toEqual([q]);
+    expect(openQuestions({ blocks: null })).toEqual([]);
+    expect(decisionText({ blocks: [a] })).toBe("Decyzja: A");
+    expect(decisionText({ blocks: [{ type: "text", body: "x" }, a, b] })).toBe("Decyzje: „Co scalić?”: A; „Którą wersję?”: v2");
+    expect(decisionText({ blocks: [q] })).toBe("");
+    expect(whoDid(step({ tool: "manual" }))).toBe("Ty"); expect(whoDid(step({ tool: "code" }))).toBe("Claude"); expect(whoDid(step({ tool: "code", doneBy: "owner" }))).toBe("Ty");
+  });
+  it("odpowiedzi na kartce tylko od Piotra: agent nie dopisze ani nie zdejmie odpowiedzi, inne pytanie wchodzi bez odpowiedzi", () => {
+    const stored: Block[] = [{ ...q, answer: "A", prev: "B" } as Block];
+    expect(keepOwnerAnswers(stored, [{ ...q, answer: "B" } as Block])).toEqual([{ ...q, answer: "A", prev: "B" }]);
+    expect(keepOwnerAnswers(stored, [q])).toEqual([{ ...q, answer: "A", prev: "B" }]);
+    expect(keepOwnerAnswers(null, [{ ...q, answer: "A" } as Block])).toEqual([q]);
+    expect(keepOwnerAnswers(stored, [{ ...q, text: "Inne?", answer: "A" } as Block])).toEqual([{ ...q, text: "Inne?" }]);
+    expect(keepOwnerAnswers(stored, [{ type: "text", body: "x" }])).toEqual([{ type: "text", body: "x" }]);
   });
 });

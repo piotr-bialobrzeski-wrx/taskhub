@@ -14,7 +14,7 @@ import { bridgeHold, busyWith, newTaskText, noStepsWho, shortTitle, type Queue, 
 import { liveActivity } from "@/lib/live";
 import { BRIDGE_ALIVE_MS, connectorIssue, isGitDraft } from "@/lib/bridge";
 import { draftOf, isExternalApp, isLocalFile, isPromptDraft, shownSig } from "@/lib/agent/approval";
-import { destOf } from "@/lib/stepcard";
+import { decisionText, destOf, openQuestions, stepKind } from "@/lib/stepcard";
 import type { Connection, Rule, Sphere, Step } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -305,10 +305,12 @@ export async function saveOutput(fd: FormData) {
   await repo.updateStep(stepId, { output: str(fd, "output") });
   refresh(taskId);
 }
-export async function addSpent(taskId: string, stepId: string, sec: number) {
+// „Zrobione” kroku Piotra poza aplikacją: minuty z pytania „Ile to zajęło?” (null = pominięte), potem krok się zamyka
+export async function doneWithTime(taskId: string, stepId: string, min: number | null) {
   const o = await requireOwner();
-  const { step } = await stepOf(o.id, taskId, stepId);
-  if (sec > 0 && sec < 60 * 60 * 24) await repo.updateStep(stepId, { spentSec: step.spentSec + Math.round(sec) });
+  await stepOf(o.id, taskId, stepId);
+  if (min != null && Number.isFinite(min) && min > 0 && min < 60 * 24) await repo.updateStep(stepId, { spentSec: Math.round(min * 60), spentManual: true });
+  await finishStep(o.id, taskId, stepId, { by: "owner" });
   refresh(taskId);
 }
 
@@ -544,14 +546,33 @@ export async function dismissQuestion(taskId: string, questionId: string) {
   await repo.deleteQuestion(o.id, questionId);
   refresh(taskId);
 }
+// odpowiedź na pytanie z kartki. Krok-decyzja Piotra (jego krok z pytaniem) zamyka się ostatnią odpowiedzią; wiadomość w rozmowie idzie przed
+// zamknięciem, żeby zadanie nie skończyło się, zanim agent zastosuje decyzję w krokach, które od niej zależą (odpowiada reply_chat)
 export async function answerBlockForm(fd: FormData) {
   const o = await requireOwner();
   const taskId = str(fd, "taskId"), stepId = str(fd, "stepId");
-  await stepOf(o.id, taskId, stepId);
+  const { task, step } = await stepOf(o.id, taskId, stepId);
   const answer = str(fd, "answer") || str(fd, "option"); if (!answer) return;
-  const q = await repo.answerBlockQuestion(stepId, num(fd, "index", 0), answer);
+  const index = num(fd, "index", 0), qText = str(fd, "q") || undefined;
+  // poprzednia odpowiedź (po „Zmień odpowiedź”) do wiadomości o zmianie; to samo pytanie, które dostanie odpowiedź
+  const at = step.blocks?.[index];
+  const before = at?.type === "question" && (!qText || at.text === qText) ? at : step.blocks?.find((b) => b.type === "question" && b.text === qText);
+  const prev = before?.type === "question" ? before.prev : undefined;
+  const q = await repo.answerBlockQuestion(stepId, index, answer, qText);
+  if (!q) { refresh(taskId); return; }
+  const s = (await repo.getTask(o.id, taskId))?.steps.find((x) => x.id === stepId);
+  const closes = !!s && s.status !== "done" && stepKind(s) === "decision" && !openQuestions(s).length;
+  const title = shortTitle(step.title, 60);
   // kartka żyje, dopóki krok nie jest zrobiony: odpowiedź idzie do agenta jak wiadomość przy kroku, a on poprawia kartkę albo mówi, czemu nie
-  if (q) await repo.addChat(o.id, taskId, "user", `Odpowiedź na pytanie z kartki „${q}”: ${answer}`, { stepId });
+  const msg = !closes ? `Odpowiedź na pytanie z kartki „${q}”: ${answer}`
+    : prev && prev !== answer ? `Zmieniam decyzję w kroku „${title}”: ${answer} (wcześniej: ${prev}). Pytanie z kartki: „${q}”.`
+    : `Decyzja w kroku „${title}”: ${answer}. Pytanie z kartki: „${q}”.`;
+  await repo.addChat(o.id, taskId, "user", msg, { stepId });
+  if (closes && s) {
+    await finishStep(o.id, taskId, stepId, { output: decisionText(s), by: "owner" });
+    // kroki „Przeczytaj …”, na które decyzja czekała: przeczytane, skoro decyzja zapadła
+    for (const d of task.steps) if (s.dependsOn.includes(d.id) && d.status !== "done" && stepKind(d) === "reading") await finishStep(o.id, taskId, d.id, { by: "owner" });
+  }
   refresh(taskId);
 }
 export async function restoreBlocksForm(fd: FormData) {

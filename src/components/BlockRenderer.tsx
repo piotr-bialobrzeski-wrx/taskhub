@@ -187,9 +187,10 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
           </div>
         );
       }
+      // q = treść pytania: gdy kartka zmieni się między wyświetleniem a kliknięciem, odpowiedź i tak trafi do tego pytania, nie do klocka pod tym indeksem
       return (
         <form className="block q" action={answerBlockForm}>
-          <input type="hidden" name="taskId" value={form.taskId} /><input type="hidden" name="stepId" value={form.stepId} /><input type="hidden" name="index" value={index ?? 0} />
+          <input type="hidden" name="taskId" value={form.taskId} /><input type="hidden" name="stepId" value={form.stepId} /><input type="hidden" name="index" value={index ?? 0} /><input type="hidden" name="q" value={b.text} />
           <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
           <p>{b.text}</p>
           <div className="opts">{b.options.map((o, i) => <button key={i} type="submit" name="option" value={o.label} className={"btn" + (b.recommended === i ? " primary" : "")} title={o.note}>{o.label}</button>)}</div>
@@ -202,6 +203,7 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
   }
 }
 
-export function BlocksView({ blocks, form }: { blocks: Block[]; form?: BlockForm }) {
-  return <div className="stack">{blocks.map((b, i) => <BlockView key={i} b={b} form={form} index={i} />)}</div>;
+// indexOf: pozycja klocka na całej kartce (formularz pytania zapisuje odpowiedź pod tym indeksem), gdy blocks to tylko jej część
+export function BlocksView({ blocks, form, indexOf }: { blocks: Block[]; form?: BlockForm; indexOf?: (b: Block) => number }) {
+  return <div className="stack">{blocks.map((b, i) => <BlockView key={i} b={b} form={form} index={indexOf ? indexOf(b) : i} />)}</div>;
 }

@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { Block } from "@/lib/schema";
 
 vi.mock("next/cache", () => ({ revalidatePath: () => undefined }));
+vi.mock("@/lib/session", async (orig) => ({ ...(await orig<typeof import("@/lib/session")>()), requireOwner: async () => (await import("@/lib/repo")).ensureOwner() }));
 
 describe.skipIf(!process.env.TEST_DATABASE_URL)("czas Claude'a i czas Piotra", async () => {
   const repo = await import("@/lib/repo");
@@ -10,7 +11,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("czas Claude'a i czas Piotra", a
   const run = await import("@/app/api/bridge/run/route");
   const runId = await import("@/app/api/bridge/run/[id]/route");
   const mcp = await import("@/app/api/mcp/route");
+  const actions = await import("@/app/actions");
   let owner = "", tok = "", client = "";
+  const fd = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.set(k, v); return f; };
+  const q = (text: string): Block => ({ type: "question", text, options: [{ label: "A" }, { label: "B" }], recommended: 0 });
+  const lastChat = async (taskId: string) => (await repo.listChat(owner, taskId)).at(-1)?.text;
   const H = (t: string) => ({ Authorization: `Bearer ${t}` });
   const call = async (t: string, name: string, args: Record<string, unknown>) => {
     const r = await mcp.POST(new Request("http://x/api/mcp", { method: "POST", headers: { authorization: `Bearer ${t}`, "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) }));
@@ -113,5 +118,78 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("czas Claude'a i czas Piotra", a
     const t3 = await repo.createTask(owner, { title: "Klient", steps: [{ title: "Policz", tool: "code" }] });
     expect(await call(client, "complete_step", { stepId: t3.steps[0].id, summary: "ok", spentMin: 7 })).toContain("Krok zapisany");
     expect(await step(t3.id, t3.steps[0].id)).toMatchObject({ doneBy: "agent", agentSec: 420, spentSec: 0 });
+  });
+
+  // ---------- punkt 1: kroki Piotra ----------
+  it("odpowiedź na kartce zamyka krok-decyzję Piotra (wynik „Decyzja: A”, zamknął Piotr), rozmowa dostaje „Decyzja w kroku”, zadanie zostaje otwarte; krok Claude'a z pytaniem zostaje otwarty", async () => {
+    const t = await repo.createTask(owner, { title: "Decyzja", steps: [{ title: "Zdecyduj, co scalić", tool: "manual" }] });
+    const dec = t.steps[0].id;
+    await repo.updateStep(dec, { blocks: [{ type: "text", body: "fakty" }, q("Co scalić?")] });
+    await actions.answerBlockForm(fd({ taskId: t.id, stepId: dec, index: "1", q: "Co scalić?", option: "A" }));   // indeks z wyrenderowanej kartki
+    expect(await step(t.id, dec)).toMatchObject({ status: "done", doneBy: "owner", output: "Decyzja: A" });
+    expect(await lastChat(t.id)).toBe("Decyzja w kroku „Zdecyduj, co scalić”: A. Pytanie z kartki: „Co scalić?”.");
+    expect((await repo.getTask(owner, t.id))!.doneAt).toBeNull();   // wiadomość czeka na agenta: on zastosuje decyzję, dopiero wtedy zadanie się zamknie
+    const t2 = await repo.createTask(owner, { title: "Pytanie Claude'a", steps: [{ title: "Zrób X", tool: "code" }] });
+    await repo.updateStep(t2.steps[0].id, { blocks: [q("Którą wersję?")] });
+    await actions.answerBlockForm(fd({ taskId: t2.id, stepId: t2.steps[0].id, index: "0", q: "Którą wersję?", answer: "B" }));
+    expect((await step(t2.id, t2.steps[0].id)).status).toBe("todo");
+    expect(await lastChat(t2.id)).toBe("Odpowiedź na pytanie z kartki „Którą wersję?”: B");
+  });
+  it("decyzja zamyka też krok „Przeczytaj …”, na który czekała; dwa pytania zamyka druga odpowiedź; „Zmień odpowiedź” → nowa odpowiedź z „wcześniej”", async () => {
+    const t = await repo.createTask(owner, { title: "Dwa pytania", steps: [{ title: "Przeczytaj raport", tool: "manual" }, { title: "Zdecyduj o wersji", tool: "manual", dependsOn: ["n1"] }] });
+    const [read, dec] = t.steps.map((s) => s.id);
+    await repo.updateStep(dec, { blocks: [q("P1?"), q("P2?")] });
+    await actions.answerBlockForm(fd({ taskId: t.id, stepId: dec, index: "0", q: "P1?", option: "A" }));
+    expect((await step(t.id, dec)).status).toBe("todo");
+    expect(await lastChat(t.id)).toBe("Odpowiedź na pytanie z kartki „P1?”: A");
+    await actions.answerBlockForm(fd({ taskId: t.id, stepId: dec, index: "1", q: "P2?", option: "B" }));
+    expect(await step(t.id, dec)).toMatchObject({ status: "done", output: "Decyzje: „P1?”: A; „P2?”: B" });
+    expect(await step(t.id, read)).toMatchObject({ status: "done", doneBy: "owner" });
+    await actions.reopen(t.id, dec);
+    let s = await step(t.id, dec);
+    expect(s.status).toBe("todo"); expect(s.hasPrevBlocks).toBe(false);
+    expect(s.blocks?.map((b) => (b as { prev?: string }).prev)).toEqual(["A", "B"]); expect(s.blocks?.[0]).not.toHaveProperty("answer");
+    // indeks nie trafia (kartka przebudowana): odpowiedź idzie po treści; ta sama odpowiedź co wcześniej nie jest zmianą
+    await actions.answerBlockForm(fd({ taskId: t.id, stepId: dec, index: "0", q: "P2?", option: "B" }));
+    s = await step(t.id, dec);
+    expect(s.status).toBe("todo"); expect(s.blocks?.[1]).toMatchObject({ answer: "B" });
+    await actions.answerBlockForm(fd({ taskId: t.id, stepId: dec, index: "0", q: "P1?", option: "B" }));
+    expect(await step(t.id, dec)).toMatchObject({ status: "done", output: "Decyzje: „P1?”: B; „P2?”: B" });
+    expect(await lastChat(t.id)).toBe("Zmieniam decyzję w kroku „Zdecyduj o wersji”: B (wcześniej: A). Pytanie z kartki: „P1?”.");
+  });
+  it("„Zrobione” z pytaniem o czas: 30 min zapisuje czas Piotra, „Pomiń” zamyka bez czasu", async () => {
+    const t = await repo.createTask(owner, { title: "Poza aplikacją", steps: [{ title: "Zadzwoń do Kingi", tool: "manual", estMin: 15 }, { title: "Wyślij umowę pocztą", tool: "manual", estMin: 15 }] });
+    await actions.doneWithTime(t.id, t.steps[0].id, 30);
+    expect(await step(t.id, t.steps[0].id)).toMatchObject({ status: "done", doneBy: "owner", spentSec: 1800, spentManual: true });
+    await actions.doneWithTime(t.id, t.steps[1].id, null);
+    expect(await step(t.id, t.steps[1].id)).toMatchObject({ status: "done", doneBy: "owner", spentSec: 0 });
+    expect((await repo.getTask(owner, t.id))!.doneAt).not.toBeNull();
+  });
+  it("add_steps z done: krok od razu zrobiony przez Claude z czasem biegu; done z manual, file albo needsApproval odmawia; uwaga przy „Przeczytaj …” dla Piotra", async () => {
+    const t = await repo.createTask(owner, { title: "Rozpisanie z done" });
+    const b = await workRun();
+    await ago("mark_at", "bridge_runs", b.run.id, 5);
+    expect(await call(b.token, "add_steps", { taskId: t.id, steps: [{ title: "Przeczytaj wątek #dev", tool: "slack", done: "W wątku są 3 wymagania." }, { title: "Zdecyduj o zakresie", tool: "manual" }] })).toContain("\"done\": true");
+    const ts = (await repo.getTask(owner, t.id))!;
+    expect(ts.steps[0]).toMatchObject({ status: "done", doneBy: "agent", report: "W wątku są 3 wymagania." });
+    expect(ts.steps[0].agentSec).toBeGreaterThanOrEqual(295); expect(ts.steps[0].agentSec).toBeLessThanOrEqual(305);
+    expect(ts.steps[1].status).toBe("todo"); expect(ts.doneAt).toBeNull();
+    expect(await lastChat(t.id)).toBe("Rozpisałem 2 kroki: „Przeczytaj wątek #dev”, „Zdecyduj o zakresie”. Od razu zrobiłem: „Przeczytaj wątek #dev”.");
+    expect(await call(b.token, "add_steps", { taskId: t.id, steps: [{ title: "Zadzwoń", tool: "manual", done: "zadzwoniłem" }] })).toContain("ma done, a tool manual");
+    expect(await call(b.token, "add_steps", { taskId: t.id, steps: [{ title: "Zapisz plik", tool: "file", done: "zapisane" }] })).toContain("ma done, a tool file");
+    expect(await call(b.token, "add_steps", { taskId: t.id, steps: [{ title: "Napisz na #dev", tool: "slack", needsApproval: true, done: "wysłane" }] })).toContain("ma done i needsApproval");
+    expect((await repo.getTask(owner, t.id))!.steps).toHaveLength(2);
+    expect(await call(b.token, "add_steps", { taskId: t.id, steps: [{ title: "Przeczytaj raport", tool: "manual" }] })).toContain("nie twórz Piotrowi kroków „Przeczytaj …”");
+    expect((await repo.getTask(owner, t.id))!.steps).toHaveLength(3);
+    await endRun(b.run.id);
+  });
+  it("set_blocks nie podrabia odpowiedzi Piotra: answer od agenta znika, zapisana odpowiedź na to samo pytanie zostaje", async () => {
+    const t = await repo.createTask(owner, { title: "Podrobiona odpowiedź", steps: [{ title: "Zdecyduj", tool: "manual" }] });
+    const sid = t.steps[0].id;
+    expect(await call(client, "set_blocks", { stepId: sid, blocks: [{ ...q("Co?"), answer: "A" }] })).not.toContain("Nie zapisałem");
+    expect((await step(t.id, sid)).blocks?.[0]).not.toHaveProperty("answer");
+    await repo.answerBlockQuestion(sid, 0, "B");
+    expect(await call(client, "set_blocks", { stepId: sid, blocks: [{ type: "text", body: "fakty" }, q("Co?")] })).not.toContain("Nie zapisałem");
+    expect((await step(t.id, sid)).blocks?.[1]).toMatchObject({ type: "question", answer: "B" });
   });
 });

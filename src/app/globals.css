@@ -269,6 +269,8 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .detail p { margin: 0; color: var(--sub); white-space: pre-wrap; overflow-wrap: anywhere; }   /* bez limitu szerokości: jedna kolumna zawsze wypełnia panel (paczka 3, punkt 1) */
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .actions > .note { flex-basis: 100%; }   /* ostrzeżenie pod przyciskami karty: cała szerokość, jak linia celu */
+.actions.ask-time { gap: 6px; }   /* „Ile to zajęło?”: etykieta i chipy w jednym rzędzie zamiast przycisku „Zrobione” */
+.actions.ask-time .lbl { margin: 0 4px 0 0; }
 .time-row { display: flex; flex-wrap: wrap; gap: var(--s-4); }
 .time-row > div { display: flex; flex-direction: column; gap: 6px; }
 .time-row .chip { height: 34px; }

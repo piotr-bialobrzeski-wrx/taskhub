@@ -8,8 +8,8 @@ import { rulesText } from "@/lib/agent/context";
 import { audienceOf, workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago, connectorProblem, knownApp } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
-import { appName, Blocks, ChangedFile, Fact, isOwnerStep, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
-import { destOf, doneChat, sameTarget } from "@/lib/stepcard";
+import { appName, Blocks, ChangedFile, Fact, isOwnerStep, normalizeTool, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
+import { destOf, doneChat, keepOwnerAnswers, READ_RE, sameTarget } from "@/lib/stepcard";
 import { shortTitle } from "@/lib/auto";
 import { sql } from "@/lib/db";
 import { originOf, wwwAuthenticate } from "@/lib/oauth";
@@ -150,7 +150,7 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("create_task", {
-      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. title: 2–6 słów, samo sedno (nie cała wiadomość); title kroku od czasownika, 2–6 słów, bez identyfikatorów. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, whatsapp, sheets, docs, file (Plik na Macu: zapis pliku na Macu Piotra, bez zgody, robi go tylko mostek), est w minutach (wielokrotność 5), needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
+      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. title: 2–6 słów, samo sedno (nie cała wiadomość); title kroku od czasownika, 2–6 słów, bez identyfikatorów. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, whatsapp, sheets, docs, file (Plik na Macu: zapis pliku na Macu Piotra, bez zgody, robi go tylko mostek), est: ile minut zajmie Piotrowi (wielokrotność 5), tylko dla kroków manual; czas kroków Claude'a mierzy się sam, needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
       inputSchema: z.object({
         title: z.string(), summary: z.string().optional(), source: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().optional(), project: z.string().optional(),
         steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })).optional(),
@@ -176,24 +176,42 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("add_steps", {
-      title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. before: id kroku, przed którym nowe kroki mają wejść (np. krok publikacji, wysyłki, commitu): dziedziczą jego zależności, on zaczyna zależeć od nich, a jego szkic (gdy czekał na zgodę) staje się nieaktualny i krok wraca do zrobienia. Bez before kroki idą na koniec. Termin zadania ustaw osobno przez update_task(due).",
-      inputSchema: z.object({ taskId: z.string(), steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })), before: z.string().optional() }),
+      title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. before: id kroku, przed którym nowe kroki mają wejść (np. krok publikacji, wysyłki, commitu): dziedziczą jego zależności, on zaczyna zależeć od nich, a jego szkic (gdy czekał na zgodę) staje się nieaktualny i krok wraca do zrobienia. Bez before kroki idą na koniec. Termin zadania ustaw osobno przez update_task(due). done: dla pracy, którą już zrobiłeś przy rozpisaniu (przeczytane aplikacje, zebrane dane, raport, analiza): 1–2 zdania wyniku; krok wchodzi od razu jako zrobiony przez Claude (tool = aplikacja, z której czytałeś, albo claude; nie manual, nie file, bez needsApproval), a pełny wynik połóż potem na jego kartce przez set_blocks. Nie twórz Piotrowi kroków „Przeczytaj …”: to, co ma wiedzieć do decyzji, leży na kartce kroku „Zdecyduj …”.",
+      inputSchema: z.object({ taskId: z.string(), steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional(), done: z.string().min(3).max(4000).optional() })), before: z.string().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
       const bef = a.before ? t.steps.find((s) => s.id === a.before) ?? null : null;
       if (a.before && !bef) return text("Nie ma takiego kroku (before) w tym zadaniu.");
+      // done tylko dla pracy Claude'a, która nic nie zmienia na zewnątrz: krok Piotra zostaje do zrobienia, plik zapisuje osobny krok, wysyłka czeka na zgodę
+      for (const s of a.steps) {
+        if (s.done === undefined) continue;
+        const tool = normalizeTool(s.tool), q = `„${shortTitle(s.title, 60)}”`;
+        if (tool === "manual") return text(`Nie dodałem kroków: krok ${q} ma done, a tool manual. Pole done jest tylko dla pracy, którą już zrobiłeś; kroki Piotra zostają do zrobienia.`);
+        if (tool === "file") return text(`Nie dodałem kroków: krok ${q} ma done, a tool file. Plik zapisuje osobny krok, potem complete_step z file.`);
+        if (s.needsApproval) return text(`Nie dodałem kroków: krok ${q} ma done i needsApproval. Krok, który zmienia coś na zewnątrz, kończy się dopiero po zgodzie Piotra i wysyłce: dodaj go bez done i przygotuj szkic przez set_blocks.`);
+      }
       const fresh = t.steps.length === 0;
-      const steps = await repo.addSteps(t.id, await Promise.all(a.steps.map(async (s) => ({ ...s, link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection) }))), { before: bef?.id ?? null });
+      const steps = await repo.addSteps(t.id, await Promise.all(a.steps.map(async ({ done: _d, ...s }) => ({ ...s, link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection) }))), { before: bef?.id ?? null });
+      // praca zrobiona przy rozpisaniu: kroki od razu zamknięte przez Claude, z czasem biegu od ostatniego znacznika podzielonym po równo
+      const doneSteps = steps.filter((_, i) => a.steps[i]?.done !== undefined);
+      const each = doneSteps.length ? Math.round((await agentSecFor(doneSteps[0])) / doneSteps.length) : 0;
+      for (const [i, s] of steps.entries()) if (a.steps[i]?.done !== undefined) await finishStep(ownerId, t.id, s.id, { report: a.steps[i].done, by: "agent", addAgentSec: each });
       // przed krokiem ze szkicem (czekającym na zgodę albo już zatwierdzonym) weszła nowa praca: szkic jest nieaktualny, zgoda przepada,
-      // krok wraca do zrobienia i dostanie nowy szkic po nowych krokach
-      const reset = !!bef && bef.status !== "done" && !bef.sendStartedAt && (bef.status === "draft" || !!bef.approvedAt);
+      // krok wraca do zrobienia i dostanie nowy szkic po nowych krokach (same kroki już zrobione niczego nie zmieniają: szkic zostaje)
+      const reset = !!bef && doneSteps.length < steps.length && bef.status !== "done" && !bef.sendStartedAt && (bef.status === "draft" || !!bef.approvedAt);
       if (bef && reset) await repo.updateStep(bef.id, { status: "todo", prevStatus: null, handoffAt: null, blocks: (bef.blocks ?? []).map((b): Block => (b.type === "draft" ? { ...b, status: "proposed", stale: true } : b)) });
       // w rozmowie tylko fakt: ile kroków i gdzie; tytuły, gdy jest ich mało (szczegóły są na kafelkach)
       const n = steps.length, word = n === 1 ? "krok" : n < 5 ? "kroki" : "kroków";
-      const list = n <= 4 ? ": " + steps.map((s) => `„${shortTitle(s.title, 40)}”`).join(", ") : "";
-      await repo.addChat(ownerId, t.id, "agent", `${fresh ? "Rozpisałem" : "Dodałem"} ${n} ${word}${bef ? ` przed „${shortTitle(bef.title, 40)}”` : ""}${list}.`, { stepId: steps[0]?.id });
+      const q = (s: Step) => `„${shortTitle(s.title, 40)}”`;
+      const list = n <= 4 ? ": " + steps.map(q).join(", ") : "";
+      const didNow = doneSteps.length ? (n > 4 ? ` Od razu zrobiłem ${doneSteps.length}.` : ` Od razu zrobiłem: ${doneSteps.map(q).join(", ")}.`) : "";
+      await repo.addChat(ownerId, t.id, "agent", `${fresh ? "Rozpisałem" : "Dodałem"} ${n} ${word}${bef ? ` przed „${shortTitle(bef.title, 40)}”` : ""}${list}.${didNow}`, { stepId: steps[0]?.id });
       await markRun();
-      return json({ steps: steps.map((s) => ({ id: s.id, title: s.title })), ...(bef ? { before: { id: bef.id, title: bef.title, draftReset: reset } } : {}) });
+      const out = json({ steps: steps.map((s, i) => ({ id: s.id, title: s.title, ...(a.steps[i]?.done !== undefined ? { done: true } : {}) })), ...(bef ? { before: { id: bef.id, title: bef.title, draftReset: reset } } : {}) });
+      // krok „Przeczytaj …” dla Piotra: łagodna uwaga, kroki zostają (Piotr może je zamknąć jednym „Przeczytane”)
+      if (a.steps.some((s) => s.done === undefined && normalizeTool(s.tool) === "manual" && READ_RE.test(s.title.trim())))
+        out.content.push({ type: "text", text: "Uwaga: nie twórz Piotrowi kroków „Przeczytaj …”: wynik zapisz jako swój krok zrobiony (done), a fakty potrzebne do decyzji połóż na kartce kroku „Zdecyduj …”." });
+      return out;
     });
 
     server.registerTool("update_step", {
@@ -217,8 +235,8 @@ function buildHandler(auth: repo.TokenAuth) {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
       const was = await stepById(a.stepId); if (!was) return text("Nie ma takiego kroku.");
       if (a.blocks.filter((b) => b.type === "draft").length > 1) return text("Nie zapisałem: krok ma jeden szkic (jeden blok draft). Drugą wysyłkę zapisz jako osobny krok (add_steps) z własnym szkicem.");
-      // szkic od agenta sam nie jest zatwierdzony ani wysłany; ta sama treść co zapisany szkic zachowuje jego stan
-      const blocks = coerceAgentDrafts(was, a.blocks);
+      // szkic od agenta sam nie jest zatwierdzony ani wysłany; ta sama treść co zapisany szkic zachowuje jego stan; odpowiedzi na pytania tylko od Piotra
+      const blocks = keepOwnerAnswers(was.blocks, coerceAgentDrafts(was, a.blocks));
       // zatwierdzony szkic (czeka na wysyłkę albo właśnie się wysyła) zostaje taki, jaki Piotr zatwierdził
       const nd = draftOf({ blocks }), od = draftOf(was);
       if (was.status !== "done" && (was.approvedAt || was.sendStartedAt) && (!nd || nd.status !== od?.status))
@@ -254,7 +272,7 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("complete_step", {
-      title: "Krok gotowy", description: "Zgłasza wynik kroku: summary = 1–2 zdania o efekcie (Piotr czyta je w raporcie kroku; w rozmowie zobaczy tylko „Zrobione: tytuł kroku”), link do wyniku, opcjonalnie czas w minutach. Krok z kodem: changes = zmienione pliki (path, status, diff, note), repo, branch, preview = adres podglądu (http albo file://); trafiają na kartkę kroku jako blok zmian. Gdy to ostatni krok, zadanie się kończy i agent pisze notatkę końcową. Krok „Plik na Macu” (tool file): file = pełna ścieżka zapisanego pliku (np. ~/Documents/…/2026-10-20-us-podglad-rol.md), nie w link.",
+      title: "Krok gotowy", description: "Zgłasza wynik kroku: summary = 1–2 zdania o efekcie (Piotr czyta je w raporcie kroku; w rozmowie zobaczy tylko „Zrobione: tytuł kroku”), link do wyniku; spentMin tylko, gdy zamykasz krok Piotra (manual) z jego słów; czas Claude'a liczy się sam od start_step. Krok z kodem: changes = zmienione pliki (path, status, diff, note), repo, branch, preview = adres podglądu (http albo file://); trafiają na kartkę kroku jako blok zmian. Gdy to ostatni krok, zadanie się kończy i agent pisze notatkę końcową. Krok „Plik na Macu” (tool file): file = pełna ścieżka zapisanego pliku (np. ~/Documents/…/2026-10-20-us-podglad-rol.md), nie w link.",
       inputSchema: z.object({ stepId: z.string(), summary: z.string().max(4000), link: z.string().optional(), spentMin: z.number().int().optional(), repo: z.string().max(200).optional(), branch: z.string().max(200).optional(), preview: z.string().max(1000).optional(), changes: z.array(ChangedFile).max(60).optional(), file: z.string().max(500).optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId);
@@ -300,7 +318,7 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("start_step", {
-      title: "Zaczynam krok", description: "Oznacza krok jako w toku: Piotr widzi na kafelku, że Claude nad nim pracuje. Wywołaj tuż przed robieniem kroku. Po zrobieniu zgłoś complete_step; gdy nie da się go zrobić (brak narzędzia, brak dostępu), oddaj go przez leave_step z powodem.",
+      title: "Zaczynam krok", description: "Oznacza krok jako w toku i zaczyna liczyć czas Claude'a na nim (do complete_step albo leave_step): Piotr widzi na kafelku, że Claude nad nim pracuje. Wywołaj tuż przed robieniem kroku. Po zrobieniu zgłoś complete_step; gdy nie da się go zrobić (brak narzędzia, brak dostępu), oddaj go przez leave_step z powodem.",
       inputSchema: z.object({ stepId: z.string() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");

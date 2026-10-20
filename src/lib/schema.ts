@@ -151,6 +151,7 @@ export const QuestionBlock = z.object({
   options: z.array(z.object({ label: z.string(), note: z.string().optional() })).min(2).max(6),
   recommended: z.number().int().min(0).optional(),
   answer: z.string().optional(),
+  prev: z.string().optional(),   // poprzednia odpowiedź po „Zmień odpowiedź”: agent widzi, co się zmieniło
 });
 export const Block = z.discriminatedUnion("type", [
   TextBlock, FactsBlock, ThreadBlock, DraftBlock, ListBlock, MediaBlock, LinkBlock, QuestionBlock, MailBlock, CommentBlock, TableBlock, FreeBlock, ChangesBlock,

@@ -283,4 +283,28 @@ describe.skipIf(!DB)("repo", async () => {
     await repo.restorePrevBlocks(sid);
     expect((await repo.getTask(owner, t.id))!.steps[0].blocks?.[0]).toMatchObject({ type: "text" });   // drugie cofnięcie wraca do zmiany
   });
+
+  it("„Zmień odpowiedź”: ponowne otwarcie kroku-decyzji przenosi odpowiedź do prev i czyści poprzednią wersję kartki; krok Claude'a z pytaniem bez zmian; odpowiedź po treści, gdy indeks nie trafia", async () => {
+    const t = await repo.createTask(owner, { title: "Decyzja", steps: [{ title: "Zdecyduj", tool: "manual" }, { title: "Zrób", tool: "code" }] });
+    const [dec, code] = t.steps.map((s) => s.id);
+    const q = (text: string) => ({ type: "question" as const, text, options: [{ label: "A" }, { label: "B" }] });
+    await repo.updateStep(dec, { blocks: [{ type: "text", body: "v1" }] });
+    await repo.updateStep(dec, { blocks: [q("Co?")] });   // jest poprzednia wersja do cofnięcia
+    expect(await repo.answerBlockQuestion(dec, 3, "A", "Co?")).toBe("Co?");   // zły indeks: odpowiedź trafia po treści pytania
+    expect(await repo.answerBlockQuestion(dec, 0, "A", "Inne?")).toBeNull();   // indeks dobry, treść inna: nie ma takiego pytania
+    let s = (await repo.getTask(owner, t.id))!.steps[0];
+    expect(s.hasPrevBlocks).toBe(true); expect(s.blocks?.[0]).toMatchObject({ answer: "A" });
+    await repo.completeStep(owner, t, s, { output: "Decyzja: A" });
+    await repo.reopenStep(owner, t.id, (await repo.getTask(owner, t.id))!.steps[0]);
+    s = (await repo.getTask(owner, t.id))!.steps[0];
+    expect(s.status).toBe("todo"); expect(s.hasPrevBlocks).toBe(false);
+    expect(s.blocks?.[0]).toMatchObject({ type: "question", prev: "A" }); expect(s.blocks?.[0]).not.toHaveProperty("answer");
+    await repo.answerBlockQuestion(dec, 0, "B");   // nowa odpowiedź zdejmuje prev
+    s = (await repo.getTask(owner, t.id))!.steps[0];
+    expect(s.blocks?.[0]).toMatchObject({ answer: "B" }); expect(s.blocks?.[0]).not.toHaveProperty("prev");
+    await repo.updateStep(code, { blocks: [{ ...q("Jak?"), answer: "A" }] });
+    await repo.completeStep(owner, t, (await repo.getTask(owner, t.id))!.steps[1], { report: "ok" });
+    await repo.reopenStep(owner, t.id, (await repo.getTask(owner, t.id))!.steps[1]);
+    expect((await repo.getTask(owner, t.id))!.steps[1].blocks?.[0]).toMatchObject({ answer: "A" });
+  });
 });

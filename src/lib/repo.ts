@@ -6,7 +6,7 @@ import { type Company, type Connection, Blocks, type Block, type Fact, type Proj
 import { agentMinOf, elapsedSec, Q, roundQ, spentMin } from "./time";
 import { isHttpUrl, sanitizeBlocks } from "./safeurl";
 import { approvalSig, approvalValid, isGitDraft, isSendable, shownSig, type Draft } from "./agent/approval";
-import { doneChat } from "./stepcard";
+import { doneChat, stepKind } from "./stepcard";
 import { shortTitle } from "./auto";
 export { approvalSig, approvalValid, draftOf, isSendable } from "./agent/approval";
 
@@ -474,6 +474,11 @@ export async function reopenStep(ownerId: string, taskId: string, step: Step): P
   await sql().begin(async (tx) => {
     // ponowne otwarcie nie przywraca zgody: szkic trzeba zatwierdzić od nowa
     await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null, done_by = null, agent_started_at = null, approved_at = null, approved_sig = null, send_started_at = null where id = ${step.id}`;
+    // „Zmień odpowiedź”: pytania na kartce wracają do zadania, poprzednia odpowiedź zostaje w prev (agent widzi zmianę); cofanie kartki nie ma do czego wracać
+    if (stepKind(step) === "decision") {
+      const blocks = (step.blocks ?? []).map((b): Block => (b.type === "question" && b.answer ? { ...b, answer: undefined, prev: b.answer } : b));
+      await tx`update steps set blocks = ${tx.json(sanitizeBlocks(blocks) as never)}, blocks_prev = null where id = ${step.id}`;
+    }
     await tx`delete from time_samples where step_id = ${step.id}`;
     await tx`update tasks set done_at = null where id = ${taskId} and owner_id = ${ownerId}`;
   });
@@ -997,12 +1002,16 @@ export async function markQuestionsSeen(ownerId: string, ids: string[]): Promise
 export async function deleteQuestion(ownerId: string, id: string): Promise<void> { await sql()`delete from questions where id = ${id} and owner_id = ${ownerId}`; }
 
 // odpowiedź na blok "question" w panelu kroku (agent wbudowany albo konektor ułożył pytanie w blokach)
-// odpowiedź na pytanie z kartki; zwraca treść pytania (null = nie ma takiego pytania), żeby odpowiedź poszła też do agenta
-export async function answerBlockQuestion(stepId: string, index: number, answer: string): Promise<string | null> {
+// odpowiedź na pytanie z kartki; zwraca treść pytania (null = nie ma takiego pytania), żeby odpowiedź poszła też do agenta.
+// text: treść pytania z formularza; gdy pod indeksem jest co innego (kartka zmieniła się po wyświetleniu), odpowiedź trafia do pytania o tej treści
+export async function answerBlockQuestion(stepId: string, index: number, answer: string, text?: string): Promise<string | null> {
   const [r] = await sql()`select blocks from steps where id = ${stepId}`;
   const p = r?.blocks ? Blocks.safeParse(r.blocks) : null; if (!p || !p.success) return null;
-  const b = p.data[index]; if (!b || b.type !== "question") return null;
-  b.answer = answer.slice(0, 2000);
+  const isQ = (x: Block | undefined): x is Extract<Block, { type: "question" }> => !!x && x.type === "question";
+  let b: Block | undefined = p.data[index];
+  if (!isQ(b) || (text && b.text !== text)) b = text ? p.data.find((x) => isQ(x) && x.text === text) : undefined;
+  if (!isQ(b)) return null;
+  b.answer = answer.slice(0, 2000); delete b.prev;
   await sql()`update steps set blocks = ${sql().json(sanitizeBlocks(p.data) as never)} where id = ${stepId}`;   // treść szkicu bez zmian: zgoda zostaje
   return b.text;
 }

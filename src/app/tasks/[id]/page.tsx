@@ -6,7 +6,7 @@ import * as repo from "@/lib/repo";
 import { bundle } from "@/lib/services";
 import { composeStatic } from "@/lib/agent/compose";
 import { breakdownPrompt, handoffPrompt, claudeUrl } from "@/lib/agent/handoff";
-import { EXTERNAL_TOOLS, isOwnerStep, sphereOf, toolLabel, type Question, type Step, type Task } from "@/lib/schema";
+import { EXTERNAL_TOOLS, isOwnerStep, sphereOf, toolLabel, type Block, type Question, type Step, type Task } from "@/lib/schema";
 import { agentMinOf, calEst, calibrationFor, estOf, fmtMin, remainEst, spentMin, taskAgent, taskSpent, todayISO } from "@/lib/time";
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
@@ -23,19 +23,18 @@ import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estTe
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed } from "@/lib/feed";
-import { destOf, foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink, whoDid, type CardState } from "@/lib/stepcard";
+import { decisionText, destOf, foldsFor, kindsOf, nowHeading, openQuestions, reportLines, resultLinks, splitBlocks, stepKind, targetLink, whoDid, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
-import { Timer } from "@/components/Timer";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
 import { GrowTextarea } from "@/components/GrowTextarea";
-import { ConfirmButton, InlineText, PromptBox, StepMeta, type StepConnection } from "@/components/StepFields";
+import { ConfirmButton, DoneAsk, InlineText, PromptBox, StepMeta, type StepConnection } from "@/components/StepFields";
 import { agentLabel, indexFrom } from "@/lib/search";
 import { Icon, plural } from "@/components/canvas/ui";
 import { InlineDate, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
 import { projColor } from "@/components/canvas/ui";
 import { PublishCard, cardModeOf } from "@/components/PublishCard";
-import { addSpent, answerQuestionForm, restoreBlocksForm, backToTodo, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, removeStep, reopen, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
+import { answerQuestionForm, restoreBlocksForm, backToTodo, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, removeStep, reopen, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -212,7 +211,11 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const cal = own ? calibrationFor(samples, s.tool, "owner") : null;
   const calOn = !!cal && state !== "done" && Math.abs(cal.k - 1) >= 0.1;
   const ext = EXTERNAL_TOOLS.has(s.tool) || s.tool === "file";   // plik na Macu robi tylko mostek: bez „Przygotuj”
-  const runnable = s.tool !== "manual";
+  // jeden zestaw przycisków na rodzaj kroku: krok Claude'a (Przygotuj / Uruchom), decyzja Piotra (odpowiedź na kartce zamyka krok),
+  // „Przeczytaj …” (Przeczytane), krok poza aplikacją (Zrobione z pytaniem o czas); szkic ma kartę publikacji
+  const kind = stepKind(s);
+  const open = kind === "decision" ? openQuestions(s) : [];
+  const indexOf = (b: Block) => s.blocks?.indexOf(b) ?? -1;
   const link = externalLink(s.link, origin);
   const prompt = s.status === "handoff" ? handoffPrompt(t, s, rules, { appUrl: origin, companyId, attachments: attachments.filter((a) => a.analysis) }) : null;
   const review = s.review as { summary?: string; links?: string[]; fits?: boolean; warning?: string; pending?: boolean } | null;
@@ -221,7 +224,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const done = s.status === "done";
   // trzy stałe sekcje (paczka 2, punkt 8): „Teraz” = stan i jedyny wyróżniony blok (akcje, czynność Claude, karta publikacji albo wynik),
   // „Co” = brief, „Skąd” = materiały; wynik kroku (blok zmian w kodzie) idzie do „Teraz”, nie między materiały; po zrobieniu „Co” i „Skąd” zwijają się do linii
-  const { result, material } = splitBlocks(blocks);
+  const { result, material: material0 } = splitBlocks(blocks);
+  const material = open.length ? material0.filter((b) => !(open as Block[]).includes(b)) : material0;   // otwarte pytania decyzji stoją w „Teraz”, nie między materiałami
   const form = s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined;
   const folds = foldsFor(state as CardState, mode);
   const head = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined);
@@ -254,7 +258,9 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} issue={issue}
         waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} /> : null}
       {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
-      {done && result.length ? <BlocksView blocks={result} form={form} /> : null}
+      {open.length && !done ? <BlocksView blocks={open} form={form} indexOf={indexOf} /> : null}
+      {done && kind === "decision" && decisionText(s) ? <div className="note">{decisionText(s)}</div> : null}
+      {done && result.length ? <BlocksView blocks={result} form={form} indexOf={indexOf} /> : null}
       {done && lines.length ? <div className="stack">{lines.map((l, i) => l.confirm
         ? <div key={i} className="confirm"><b>Do potwierdzenia:</b><span>{l.text.replace(/^do potwierdzenia:\s*/i, "")}</span></div>
         : <div key={i} className="note">{l.text}</div>)}</div> : null}
@@ -262,16 +268,18 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {review?.summary ? <div className={"review" + (review.fits === false || review.warning ? " warn" : "")}>{review.warning ? <div><b>Uwaga:</b> {review.warning}</div> : null}<div>{review.summary}</div>{review.links?.filter(isHttpUrl).length ? <div className="deps">{review.links.filter(isHttpUrl).map((u) => <a key={u} className="chip" href={u} target="_blank" rel="noopener"><span>{u.replace(/^https?:\/\//, "").slice(0, 40)}</span></a>)}</div> : null}</div> : null}
       {!mode || mode === "sent" || mode === "unsent" ? (
         <div className="actions">
-          {s.status === "todo" ? (<>
-            {aiOn && !ext && runnable ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Agent przygotowuje…">Przygotuj</PendingButton></form> : null}
+          {s.status === "todo" && kind === "agent" ? (<>
+            {aiOn && !ext ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Agent przygotowuje…">Przygotuj</PendingButton></form> : null}
             {aiOn ? <form action={compose.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Składam…" title="Agent składa panel z faktów, migawek i załączników">Pokaż kontekst</PendingButton></form> : null}
-            {!aiOn && runnable && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
-            <Timer stepId={s.id} onStop={addSpent.bind(null, t.id, s.id)} />
-            <form action={markDone.bind(null, t.id, s.id)}><PendingButton className={"btn" + (!runnable ? " primary" : "")}>Oznacz jako zrobione</PendingButton></form>
+            {!aiOn && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
           </>) : null}
+          {s.status === "todo" && kind === "offline" ? <DoneAsk taskId={t.id} stepId={s.id} est={estOf(s)} /> : null}
+          {s.status === "todo" && kind === "reading" ? <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Zapisuję…">Przeczytane</PendingButton></form> : null}
+          {s.status === "todo" && kind === "decision" && !open.length ? <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Zapisuję…" title="Odpowiedzi już są; krok sprzed paczki 7 zamyka ten przycisk">Zrobione</PendingButton></form> : null}
           {s.status === "handoff" ? <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Krok wraca do zrobienia; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form> : null}
           {links.filter((l) => isHttpUrl(l.url)).map((l, i) => <a key={l.url} className={"btn ico" + (done && i === 0 ? " primary" : "")} href={l.url} target="_blank" rel="noopener" title={l.url}>{l.label}<Icon k="ext" size={13} sw={1.6} /></a>)}
-          {done ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Przywróć do zrobienia</PendingButton></form> : null}
+          {done && kind === "decision" ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Otwieram…" title="Pytanie wraca na kartkę; nowa odpowiedź zamknie krok od nowa, a Claude poprawi to, co po niej przygotował"><Icon k="undo" size={13} sw={1.9} /> Zmień odpowiedź</PendingButton></form> : null}
+          {done && kind !== "decision" ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Przywróć do zrobienia</PendingButton></form> : null}
         </div>
       ) : null}
       {s.status === "handoff" && prompt ? (
@@ -298,8 +306,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
     <form action={restoreBlocksForm} className="undo"><input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} /><button type="submit" className="btn sm">Cofnij zmianę kartki</button></form>
   ) : null;
   const skad = material.length ? (folds.material
-    ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span>{undo}</div><BlocksView blocks={material} form={form} /></div>
-    : <details className="fold"><summary><span className="k">Skąd</span><span className="t">{kinds}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView blocks={material} form={form} /></details>) : null;
+    ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span>{undo}</div><BlocksView blocks={material} form={form} indexOf={indexOf} /></div>
+    : <details className="fold"><summary><span className="k">Skąd</span><span className="t">{kinds}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView blocks={material} form={form} indexOf={indexOf} /></details>) : null;
   return (
     <>
       <div className="pctx" title={`Zadanie: ${t.title}`}><span className="d" style={{ ["--c" as string]: ctx.color }} /><span><b>{t.title}</b> · {ctx.text}</span></div>

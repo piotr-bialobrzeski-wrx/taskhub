@@ -138,7 +138,7 @@ export function cardText(steps: Pick<Step, "id" | "title" | "status" | "blocks">
       case "facts": return `${h}: ${b.facts.map((f) => `${f.label} = ${f.value}`).join("; ")}`;
       case "table": return `${h} (${b.columns.join(" | ")}):\n${b.rows.map((r) => `  ${r.join(" | ")}`).join("\n")}`;
       case "list": return `${h}:\n${b.items.map((x) => `  - ${x.title}${x.note ? `: ${x.note}` : ""}${x.done ? " (zrobione)" : ""}`).join("\n")}`;
-      case "question": return `${h}: ${b.text} | opcje: ${b.options.map((o) => o.label).join(" / ")}${b.answer ? ` | ODPOWIEDŹ PIOTRA: ${b.answer}` : " | bez odpowiedzi"}`;
+      case "question": return `${h}: ${b.text} | opcje: ${b.options.map((o) => o.label).join(" / ")}${b.answer ? ` | ODPOWIEDŹ PIOTRA: ${b.answer}` : ` | bez odpowiedzi${b.prev ? ` | WCZEŚNIEJ: ${b.prev}` : ""}`}`;
       case "free": return `${h}:\n${b.markdown}`;
       case "thread": return `${h}: ${b.messages.map((m) => `${m.author}: ${m.text}`).join(" / ")}`;
       case "mail": return `${h}: ${b.messages.map((m) => `${m.from}: ${m.text}`).join(" / ")}`;
