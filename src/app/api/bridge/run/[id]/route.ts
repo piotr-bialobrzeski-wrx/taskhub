@@ -20,8 +20,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const note = typeof body.note === "string" ? body.note : undefined;
   if (!body.outcome) {
     const ok = await repo.touchBridgeRun(a.ownerId, id, note);   // z którym krokiem i zadaniem bieg jest związany, zapisuje serwer MCP przy wywołaniach
-    // cancel: Piotr wycofał zgodę na szkic tego biegu wysyłki („Zatrzymaj” na karcie), więc aplikacja przerywa bieg
-    const cancel = ok && (await repo.sendWithdrawn(a.ownerId, id));
+    // cancel: Piotr zatrzymał ten bieg w Task Hub („Zatrzymaj” w dymku pracy) albo wycofał zgodę na szkic tego biegu wysyłki („Zatrzymaj” na karcie), więc aplikacja przerywa bieg
+    const cancel = ok && (await repo.runCancelled(a.ownerId, id));
     return Response.json(cancel ? { ok, cancel } : { ok }, { status: ok ? 200 : 404 });
   }
   if (!OUTCOMES.has(body.outcome)) return Response.json({ ok: false }, { status: 404 });

@@ -265,13 +265,13 @@ final class Bridge: ObservableObject {
         var body: [String: Any] = [:]
         if let n = note { body["note"] = String(n.prefix(200)) }
         guard let r = try? await request("PATCH", "/api/bridge/run/\(id)", body: body) else { return }
-        // cancel: Piotr wycofał w Task Hub zgodę na szkic tej wysyłki („Zatrzymaj” na karcie), więc bieg kończy się od razu
+        // cancel: Piotr zatrzymał ten bieg w Task Hub („Zatrzymaj” w dymku pracy) albo wycofał zgodę na szkic tej wysyłki („Zatrzymaj” na karcie), więc bieg kończy się od razu
         if (r.1["cancel"] as? Bool) == true, isRunningNow, runId == id, !serverStopped, !userStopped {
             serverStopped = true
             current?.kill("zatrzymany w Task Hub")
             gitSend?.cancel()
-            detail = "zatrzymuję bieg (zgoda wycofana w Task Hub)…"
-            Log.write("bieg: zatrzymany w Task Hub (zgoda na szkic wycofana)")
+            detail = "zatrzymuję bieg (zatrzymany w Task Hub)…"
+            Log.write("bieg: zatrzymany w Task Hub")
         }
     }
 
@@ -446,11 +446,11 @@ final class Bridge: ObservableObject {
             detail = "zatrzymany przez Ciebie"
             note = "zatrzymany przez właściciela na Macu"
         } else if serverStopped {
-            // zgoda wycofana w Task Hub: tylko ten bieg, bez przerwy w pracy mostka
+            // zatrzymany w Task Hub: tylko ten bieg; przerwę w pracy (po „Zatrzymaj” w dymku) liczy serwer, więc /api/bridge/work zgłasza brak pracy
             outcome = .stopped
             state = .idle
             detail = ""
-            note = "zatrzymany w Task Hub (zgoda na szkic wycofana)"
+            note = "zatrzymany w Task Hub"
         } else if result.ok {
             state = .idle
             until = nil

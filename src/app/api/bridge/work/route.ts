@@ -22,10 +22,12 @@ export async function GET(req: Request) {
     return Response.json({ ok: true, pending: w.total, counts: w.counts, run: st.run, pollMs: pollMs(), version: 1, time: new Date().toISOString() });
   }
   const [w, sends, st] = await Promise.all([workSummary(a.ownerId, { peek: true, audience: "work" }), listSendable(a.ownerId), repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS)]);
+  // po „Zatrzymaj” w Task Hub mostek nie bierze pracy do końca przerwy (albo do wiadomości Piotra); zatwierdzone szkice wysyła dalej
+  const work = st.pause ? 0 : w.total;
   // key: odcisk listy pracy; ten sam po udanym biegu = bieg niczego nie ruszył (np. krok oddany przez leave_step), aplikacja nie powtarza go od razu
-  const key = w.total ? createHash("sha256").update(w.text).digest("hex").slice(0, 16) : "";
+  const key = work ? createHash("sha256").update(w.text).digest("hex").slice(0, 16) : "";
   return Response.json({
-    ok: true, pending: w.total + sends.length, work: w.total, sends: sends.length, key, counts: { ...w.counts, approved: sends.length },
+    ok: true, pending: work + sends.length, work, sends: sends.length, key, counts: { ...w.counts, approved: sends.length }, ...(st.pause ? { pause: st.pause } : {}),
     run: st.run, pollMs: pollMs(), version: BRIDGE_VERSION, time: new Date().toISOString(),
   });
 }

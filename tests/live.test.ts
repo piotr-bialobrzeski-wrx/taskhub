@@ -2,9 +2,10 @@
 import { describe, it, expect } from "vitest";
 import { activityText, liveActivity, liveKey, type LiveActivity } from "@/lib/live";
 import { nextAutoAt } from "@/lib/clock";
-import { allDoneWaitText, bridgeHold, busyWith, chatWho, msgCount, noStepsWho, newTaskText, queueWho, yourMsgsNom } from "@/lib/auto";
+import { bridgeHold, busyWith, chatWho, msgCount, noStepsWho, newTaskText, queueWho, yourMsgsNom, type Worker } from "@/lib/auto";
 import { stepTile } from "@/lib/canvas/vm";
-import { agentFeed } from "@/lib/feed";
+import { agentFeed, workBubble, workFoot } from "@/lib/feed";
+import type { ChatMessage } from "@/lib/repo";
 import { task, step } from "./helpers";
 
 const run = (note: string | null, extra: Partial<Parameters<typeof liveActivity>[0] & object> = {}) => ({ id: "r1", bridge: "Mac", startedAt: "2026-10-18T09:00:00Z", touchedAt: "2026-10-18T09:01:00Z", endedAt: null, outcome: null, note, taskId: null, stepId: null, ...extra });
@@ -98,7 +99,6 @@ describe("kolejka wiadomości Piotra w zadaniu", () => {
     expect(limit).toEqual({ kind: "limit", until: "2026-10-18T23:00:00Z" });
     const q = queueWho({ alive: true, name: "Mac", run: null, hold: limit }, "t1", 1);
     expect(q).toMatchObject({ kind: "held", text: "1 wiadomość czeka · mostek stoi: limit Claude do 01:00", short: "Czeka: limit Claude do 01:00" });
-    expect(allDoneWaitText(q)).toContain("czeka na mostek");
     expect(queueWho({ alive: true, name: null, run: null, hold: bridgeHold({ state: "auth" }) }, "t1", 2).text).toContain("Claude Code wylogowany");
     expect(noStepsWho({ alive: true, name: null, run: null, hold: limit }, "t1").kind).toBe("held");
     expect(chatWho({ alive: true, name: null, run: null, hold: limit }, "t1")).toContain("stoi: limit Claude do 01:00");
@@ -111,10 +111,49 @@ describe("kolejka wiadomości Piotra w zadaniu", () => {
     expect(stopped).toEqual({ kind: "stopped", until: "2026-10-18T09:10:00Z" });
     expect(chatWho({ alive: true, name: null, run: null, hold: stopped }, "t1")).toContain("stoi: zatrzymany przez Ciebie, wraca o 11:10");
   });
-  it("pasek po ostatnim kroku i odmiana liczebników", () => {
-    expect(allDoneWaitText(queueWho({ alive: true, name: "Mac", run: null }, "t1", 2))).toBe("Kroki zrobione · 2 Twoje wiadomości czekają na mostek");
-    expect(allDoneWaitText(queueWho({ alive: false, name: null, run: null }, "t1", 1))).toBe("Kroki zrobione · Twoja wiadomość czeka na Claude");
+  it("zatrzymanie w Task Hub („Zatrzymaj” w dymku): przerwa z serwera ma pierwszeństwo przed stanem z Maca", () => {
+    expect(bridgeHold({ state: "idle" }, "2026-10-18T09:10:00Z")).toEqual({ kind: "stopped", until: "2026-10-18T09:10:00Z" });
+    expect(bridgeHold({ state: "limit", until: "2026-10-18T23:00:00Z" }, "2026-10-18T09:10:00Z")).toEqual({ kind: "stopped", until: "2026-10-18T09:10:00Z" });
+    expect(bridgeHold({ state: "limit", until: "2026-10-18T23:00:00Z" }, null)?.kind).toBe("limit");
+  });
+  it("odmiana liczebników", () => {
     expect([1, 2, 5, 22].map(msgCount)).toEqual(["1 wiadomość", "2 wiadomości", "5 wiadomości", "22 wiadomości"]);
     expect([1, 2].map(yourMsgsNom)).toEqual(["Twoja wiadomość", "2 Twoje wiadomości"]);
+  });
+});
+
+describe("dymek pracy nad polem czatu", () => {
+  const msg = (p: Partial<ChatMessage> = {}): ChatMessage => ({ id: "m1", role: "user", text: "Dodaj ticket", actions: null, createdAt: "2026-10-18T17:41:00Z", seenAt: null, answeredAt: null, ...p });
+  const now = new Date("2026-10-18T09:33:00Z");   // 11:33 w Warszawie: automat o 12:07
+  const t = task({ id: "t1", steps: [step({ id: "s1" }), step({ id: "s2" }), step({ id: "s3" }), step({ id: "s4" })] });
+  const ts = { first: "2026-10-18T17:35:00Z", at: "2026-10-18T17:43:00Z", what: "poprawił kartkę" };
+  const live = (extra: Partial<LiveActivity> = {}): LiveActivity => ({ text: "układa kartkę kroku", detail: null, since: "2026-10-18T17:30:00Z", stepId: "s3", taskId: "t1", bridge: "MacBook Piotra", runId: "r1", kind: "work", steps: { s1: ts, s2: ts, s4: ts }, stoppable: true, ...extra });
+  it("wysłane: kto weźmie wiadomość i kiedy; cytat i podpis „Ty · 19:41”", () => {
+    const pending = [msg()];
+    const sent = (w: Worker, busy: string | null = null) => workBubble({ task: t, w, pending, busy, now });
+    expect(sent({ alive: true, name: "Mac", run: live({ kind: "send", taskId: "t9", stepId: null, steps: {} }) })).toMatchObject({ kind: "sent", id: "m1", title: "Wysłane, Claude zacznie po bieżącej wysyłce", line: null, quote: "Dodaj ticket", at: "19:41" });
+    expect(sent({ alive: true, name: "Mac", run: live({ taskId: "t9", stepId: null, steps: {} }) }, "Zmień etykietę daty")).toMatchObject({ title: "Wysłane, Claude zacznie po bieżącej pracy", line: "Teraz kończy: „Zmień etykietę daty”" });
+    expect(sent({ alive: true, name: "Mac", run: null, hold: { kind: "limit", until: "2026-10-18T23:00:00Z" } })).toMatchObject({ title: "Wysłane, ale Mac stoi: limit Claude do 01:00" });
+    expect(sent({ alive: true, name: "Mac", run: null, hold: { kind: "stopped", until: "2026-10-18T09:43:00Z" } })).toMatchObject({ title: "Wysłane, ale Mac stoi: zatrzymany przez Ciebie, wraca o 11:43" });
+    expect(sent({ alive: true, name: null, run: null })).toMatchObject({ title: "Wysłane, Claude zaraz zacznie", line: null });
+    expect(workBubble({ task: t, w: { alive: false, name: null, run: null }, pending: [msg({ seenAt: "2026-10-18T17:45:00Z" })], busy: null, now })).toMatchObject({ title: "Claude w chmurze wziął to o 19:45" });
+    expect(sent({ alive: false, name: null, run: null })).toMatchObject({ title: "Mac śpi, weźmie to automat o 12:07" });
+    expect(sent({ alive: false, name: "MacBook Piotra", run: null })).toMatchObject({ title: "MacBook Piotra śpi, weźmie to automat o 12:07" });
+  });
+  it("w toku: cytat wziętej wiadomości, co teraz z numerem kroku, krok „teraz” pierwszy, dwa chipy + reszta, stopka, „Zatrzymaj” tylko dla biegu v2", () => {
+    const pending = [msg({ id: "m1", seenAt: "2026-10-18T17:31:00Z" }), msg({ id: "m2", text: "I jeszcze jeden", createdAt: "2026-10-18T17:50:00Z" })];
+    const b = workBubble({ task: t, w: { alive: true, name: "Mac", run: live() }, pending, busy: null, now });
+    expect(b).toMatchObject({ kind: "working", runId: "r1", quote: "Dodaj ticket", now: "układa kartkę kroku 03", detail: null, more: 2, where: "MacBook Piotra", at: "19:30", later: 1, stoppable: true });
+    if (b?.kind !== "working") throw new Error("dymek w toku");
+    expect(b.chips).toEqual([{ id: "s3", label: "03", now: true }, { id: "s1", label: "01", now: false }]);
+    expect(workFoot(b)).toBe("MacBook Piotra · od 19:30 · potem 1 wiadomość");
+    // bieg bez kroku „teraz” nad zadaniem bez kroków (rozpisuje); bieg v1 bez „Zatrzymaj”; nic nie czeka: bez cytatu i bez „potem”
+    expect(workBubble({ task: task({ id: "t1", steps: [] }), w: { alive: true, name: "Mac", run: live({ stepId: null, steps: {}, stoppable: false }) }, pending: [], busy: null, now })).toMatchObject({ kind: "working", now: "rozpisuje kroki", chips: [], more: 0, quote: null, later: 0, stoppable: false });
+    expect(workFoot(workBubble({ task: t, w: { alive: true, name: "Mac", run: live({ stepId: null, steps: {} }) }, pending: [], busy: null, now }) as Extract<ReturnType<typeof workBubble>, { kind: "working" }>)).toBe("MacBook Piotra · od 19:30");
+    // bieg nad innym zadaniem, który wziął wiadomość z tego: kończy inne zadanie (z tytułem tamtej pracy)
+    expect(workBubble({ task: t, w: { alive: true, name: "Mac", run: live({ taskId: "t9", stepId: null, steps: {} }) }, pending: [msg({ seenAt: "2026-10-18T17:31:00Z" })], busy: "Zmień etykietę daty", now })).toMatchObject({ kind: "working", now: "kończy inne zadanie", detail: "Zmień etykietę daty", chips: [] });
+    // bieg gdzie indziej i nic nie czeka, albo nikt nie pracuje i nic nie czeka: bez dymka
+    expect(workBubble({ task: t, w: { alive: true, name: "Mac", run: live({ taskId: "t9", stepId: null, steps: {} }) }, pending: [], busy: null, now })).toBeNull();
+    expect(workBubble({ task: t, w: { alive: true, name: "Mac", run: null }, pending: [], busy: null, now })).toBeNull();
   });
 });

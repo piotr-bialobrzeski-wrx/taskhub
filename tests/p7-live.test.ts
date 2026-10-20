@@ -11,6 +11,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("ślad biegu: krok „teraz”, 
   const { sql } = await import("@/lib/db");
   const run = await import("@/app/api/bridge/run/route");
   const runId = await import("@/app/api/bridge/run/[id]/route");
+  const work = await import("@/app/api/bridge/work/route");
+  const { bridgeHold } = await import("@/lib/auto");
+  const { liveActivity } = await import("@/lib/live");
   const mcp = await import("@/app/api/mcp/route");
   const actions = await import("@/app/actions");
   let owner = "", tok = "", client = "";
@@ -117,5 +120,53 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("ślad biegu: krok „teraz”, 
     await repo.markAgentSteps([s2]);
     await repo.stepOpened(owner, t.id, s2);
     expect((await step(t.id, s2)).openedAt! > o1).toBe(true);
+  });
+
+  it("„Zatrzymaj”: token biegu gaśnie, sygnał z Maca dostaje cancel, wiadomość wraca do kolejki, mostek ma przerwę do wiadomości Piotra; bieg v1 i wysyłka bez zatrzymania", async () => {
+    const t = await repo.createTask(owner, { title: "Zatrzymaj pracę", steps: [{ title: "A", tool: "code" }] });
+    const s1 = t.steps[0].id;
+    await sql()`delete from bridge_runs where owner_id = ${owner}`;   // stare biegi z poprzednich testów nie liczą się do przerwy
+    await repo.addChat(owner, t.id, "user", "Zrób to teraz");
+    const b = await workRun();
+    expect(await call(b.token, "list_work", {})).toContain("Zrób to teraz");   // bieg bierze wiadomość (seen_at)
+    expect((await repo.listPendingChat(owner, t.id))[0].seenAt).not.toBeNull();
+    const getWork = async () => (await work.GET(new Request("http://x/api/bridge/work?host=mini&v=2", { headers: H(tok) }))).json();
+    expect((await getWork()).work).toBeGreaterThanOrEqual(1);
+    // „Zatrzymaj” w dymku
+    const until = await actions.stopWork(t.id, b.run.id);
+    expect(until).toMatch(/^Zatrzymane\. Claude wróci o \d\d:\d\d albo od razu, gdy napiszesz\.$/);
+    expect(await repo.tokenForSecret(b.token)).toBeNull();
+    const st = await repo.bridgeStatus(owner, 0);
+    expect(st.run?.id).toBe(b.run.id); expect(st.run?.stopAt).not.toBeNull(); expect(st.run?.stoppable).toBe(false);
+    expect(liveActivity(st.run)).toBeNull();   // zatrzymany bieg już nie „pracuje”, choć Mac jeszcze nie zgłosił końca
+    expect(st.pause).not.toBeNull(); expect(bridgeHold(st.meta, st.pause)).toEqual({ kind: "stopped", until: st.pause });
+    expect(await actions.stopWork(t.id, b.run.id)).toBe("Ta praca już się skończyła.");   // drugi raz: nic do zatrzymania
+    // wygaszony token nie działa; zatrzymany bieg nie zapisuje śladu; sygnał z Maca dostaje cancel
+    await call(b.token, "start_step", { stepId: s1 });
+    expect((await step(t.id, s1)).agentStartedAt).toBeNull();
+    expect(await repo.runTouch(owner, b.run.id, { stepId: s1, taskId: t.id })).toBe(false);
+    expect(await (await patch(b.run.id, { note: "Bash: npm test" })).json()).toEqual({ ok: true, cancel: true });
+    // przerwa: /work bez pracy (wysyłki idą dalej), aż Piotr napisze
+    expect(await getWork()).toMatchObject({ work: 0, pending: 0, pause: st.pause });
+    expect((await patch(b.run.id, { outcome: "stopped", note: "zatrzymany w Task Hub" })).status).toBe(200);
+    expect((await repo.listPendingChat(owner, t.id))[0].seenAt).toBeNull();   // wiadomość wraca do kolejki
+    expect((await getWork()).work).toBe(0);
+    await repo.addChat(owner, t.id, "user", "Jednak zrób");
+    expect((await repo.bridgeStatus(owner, 0)).pause).toBeNull();
+    const w2 = await getWork();
+    expect(w2.work).toBeGreaterThanOrEqual(1); expect(w2.pause).toBeUndefined();
+    // bieg v1 (bez tokenu biegu) i bieg wysyłki: „Zatrzymaj” nic nie robi
+    const v1 = await (await postRun({ bridge: "mini" })).json();
+    expect(await repo.stopRun(owner, v1.run.id)).toBeNull();
+    expect((await patch(v1.run.id, { outcome: "done" })).status).toBe(200);
+    const t2 = await repo.createTask(owner, { title: "Wysyłka", steps: [{ title: "Wyślij", tool: "slack", needsApproval: true }] });
+    await repo.updateStep(t2.steps[0].id, { status: "draft", blocks: [draft()] });
+    expect(await repo.approveDraft(owner, t2.steps[0].id)).toBe(true);
+    const snd = await (await postRun({ bridge: "mini", v: 2, kind: "send" })).json();
+    expect(snd.kind).toBe("send");
+    expect(await repo.stopRun(owner, snd.run.id)).toBeNull();
+    expect(await repo.tokenForSecret(snd.token)).not.toBeNull();
+    expect(await (await patch(snd.run.id, { note: "get_task" })).json()).toEqual({ ok: true });
+    expect((await patch(snd.run.id, { outcome: "done", sent: { summary: "poszło" } })).status).toBe(200);
   });
 });

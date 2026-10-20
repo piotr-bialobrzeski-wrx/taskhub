@@ -878,7 +878,8 @@ export type RunKind = "work" | "send";
 export type RunStep = { first: string; at: string; what: string };
 export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null; kind?: RunKind; markAt?: string | null; steps?: Record<string, RunStep>; stopAt?: string | null; stoppable?: boolean };
 const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null, kind: r.kind === "send" ? "send" : "work", markAt: iso(r.markAt), steps: (r.steps as Record<string, RunStep>) ?? {}, stopAt: iso(r.stopAt), stoppable: r.stoppable === true });
-export type BridgeStatus = { alive: boolean; seenAt: string | null; name: string | null; meta: Record<string, unknown>; run: BridgeRun | null };
+// pause: Piotr zatrzymał bieg w Task Hub („Zatrzymaj” w dymku pracy): mostek nie bierze nowej pracy do tej chwili, chyba że Piotr napisze wcześniej
+export type BridgeStatus = { alive: boolean; seenAt: string | null; name: string | null; meta: Record<string, unknown>; run: BridgeRun | null; pause: string | null };
 
 export async function bridgeSeen(tokenId: string, meta: Record<string, unknown>): Promise<void> {
   await sql()`update api_tokens set seen_at = now(), last_used_at = now(), meta = meta || ${sql().json(meta as never)} where id = ${tokenId} and kind = 'bridge'`;
@@ -887,7 +888,7 @@ export async function bridgeStatus(ownerId: string, aliveMs: number): Promise<Br
   const [t] = await sql()`select name, seen_at, meta from api_tokens where owner_id = ${ownerId} and kind = 'bridge' and seen_at is not null order by seen_at desc limit 1`;
   const [r] = await sql()`select b.*, exists(select 1 from api_tokens k where k.kind = 'run' and k.scope->>'runId' = b.id::text and k.scope->>'kind' = 'work') as stoppable from bridge_runs b where b.owner_id = ${ownerId} and b.ended_at is null limit 1`;
   const seenAt = t ? (iso(t.seenAt) as string) : null;
-  return { alive: !!seenAt && Date.now() - new Date(seenAt).getTime() < aliveMs, seenAt, name: t ? (t.name as string) : null, meta: t ? ((t.meta as Record<string, unknown>) ?? {}) : {}, run: r ? rowToRun(r) : null };
+  return { alive: !!seenAt && Date.now() - new Date(seenAt).getTime() < aliveMs, seenAt, name: t ? (t.name as string) : null, meta: t ? ((t.meta as Record<string, unknown>) ?? {}) : {}, run: r ? rowToRun(r) : null, pause: await stopPause(ownerId) };
 }
 export async function expireBridgeRuns(ownerId: string, staleMin: number): Promise<number> {
   const rows = await sql()`update bridge_runs set ended_at = now(), outcome = 'stale' where owner_id = ${ownerId} and ended_at is null and touched_at < now() - make_interval(mins => ${staleMin}) returning id, started_at, kind, step_id, outcome, note`;
@@ -923,11 +924,30 @@ async function afterRuns(ownerId: string, runs: Row[]): Promise<void> {
     await addChat(ownerId, s.taskId as string, "agent", why ? `Commit nie wyszedł: ${why} Szkic wrócił do zatwierdzenia; zatwierdź go ponownie, gdy to poprawisz.` : unconfirmedSendNote(d?.target.app ?? "aplikacji docelowej"), { stepId });
   }
 }
-// bieg wysyłki, którego zgodę Piotr wycofał w Task Hub („Zatrzymaj” kasuje znacznik wysyłki) albo który sam oddał krok:
-// przy najbliższym sygnale aplikacja go przerywa (stara aplikacja bez tego doczeka do końca, a krok i tak się nie zamknie)
-export async function sendWithdrawn(ownerId: string, runId: string): Promise<boolean> {
-  const [r] = await sql()`select s.status, s.send_started_at from bridge_runs b join steps s on s.id = b.step_id where b.id = ${runId} and b.owner_id = ${ownerId} and b.ended_at is null and b.kind = 'send'`;
-  return !!r && r.status !== "done" && !r.sendStartedAt;
+// bieg, który aplikacja na Macu ma przerwać przy najbliższym sygnale: zatrzymany w Task Hub (stop_at) albo bieg wysyłki, którego zgodę Piotr wycofał
+// („Zatrzymaj” na karcie kasuje znacznik wysyłki) lub który sam oddał krok (stara aplikacja bez tego doczeka do końca, a krok i tak się nie zamknie)
+export async function runCancelled(ownerId: string, runId: string): Promise<boolean> {
+  const [r] = await sql()`select b.stop_at, b.kind, s.status, s.send_started_at from bridge_runs b left join steps s on s.id = b.step_id where b.id = ${runId} and b.owner_id = ${ownerId} and b.ended_at is null`;
+  if (!r) return false;
+  return !!r.stopAt || (r.kind === "send" && !!r.status && r.status !== "done" && !r.sendStartedAt);
+}
+// „Zatrzymaj” w dymku pracy: bieg pracy v2 dostaje stop_at, jego token gaśnie (konektor Task Hub przestaje odpowiadać, Claude Code kończy), aplikacja
+// na Macu przerywa go przy najbliższym sygnale, a mostek bierze nową pracę po przerwie (STOP_PAUSE_MIN) albo od razu, gdy Piotr napisze.
+// Zwraca koniec przerwy; null dla biegu v1 (bez tokenu biegu), wysyłki, skończonego albo już zatrzymanego
+export const STOP_PAUSE_MIN = 10;
+const pauseEnd = (stopAt: Date | string) => new Date(new Date(stopAt).getTime() + STOP_PAUSE_MIN * 60_000).toISOString();
+export async function stopRun(ownerId: string, runId: string): Promise<string | null> {
+  const [r] = await sql()`update bridge_runs b set stop_at = now(), touched_at = now() where b.id = ${runId} and b.owner_id = ${ownerId} and b.ended_at is null and b.stop_at is null and b.kind = 'work'
+    and exists(select 1 from api_tokens k where k.owner_id = ${ownerId} and k.kind = 'run' and k.scope->>'runId' = b.id::text and k.scope->>'kind' = 'work') returning b.stop_at`;
+  if (!r) return null;
+  await revokeRunTokens(ownerId, runId);
+  return pauseEnd(r.stopAt as Date);
+}
+// przerwa po „Zatrzymaj”: do STOP_PAUSE_MIN od zatrzymania, chyba że Piotr od tego czasu napisał (wtedy mostek rusza od razu); koniec przerwy albo null
+export async function stopPause(ownerId: string): Promise<string | null> {
+  const [r] = await sql()`select b.stop_at from bridge_runs b where b.owner_id = ${ownerId} and b.stop_at > now() - make_interval(mins => ${STOP_PAUSE_MIN})
+    and not exists(select 1 from chat_messages m where m.owner_id = ${ownerId} and m.role = 'user' and m.created_at > b.stop_at) order by b.stop_at desc limit 1`;
+  return r ? pauseEnd(r.stopAt as Date) : null;
 }
 // note: co mostek robi teraz („start_step: id”, „Bash: npm test”); z którym zadaniem i krokiem bieg jest związany, zapisuje serwer MCP (runTouch)
 export async function touchBridgeRun(ownerId: string, id: string, note?: string): Promise<boolean> {

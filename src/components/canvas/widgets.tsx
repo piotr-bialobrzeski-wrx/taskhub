@@ -6,8 +6,8 @@ import { createPortal, useFormStatus } from "react-dom";
 import { LEVELS } from "@/lib/priority";
 import { loadChat, type ChatVM } from "@/app/actions";
 import type { Queue } from "@/lib/auto";
-import type { FeedItem } from "@/lib/feed";
-import { Activity } from "@/components/Activity";
+import { workFoot, type FeedItem, type WorkBubble } from "@/lib/feed";
+import { Activity, useMinutes } from "@/components/Activity";
 import { safeHref } from "@/lib/safeurl";
 import { Icon, Lvl, projColor, type ProjectVM } from "./ui";
 
@@ -344,8 +344,9 @@ export function InlineName({ name, label, onRename }: { name: string; label: str
 }
 
 // Dymki agenta w lewym dolnym rogu: najnowszy na samym dole, starsze wyżej; każdy zamyka się X (zapamiętane w tej przeglądarce)
-export function AgentFeed({ items, stepLabel, onStep, className = "", style }: {
-  items: FeedItem[]; stepLabel?: (stepId: string) => string | null; onStep?: (stepId: string) => void; className?: string; style?: React.CSSProperties;
+// work: dymek pracy (ostatni, nad polem czatu): Claude pracuje nad tym zadaniem albo wysłana wiadomość czeka; onStop: „Zatrzymaj” bieg pracy v2
+export function AgentFeed({ items, work = null, onStop, stepLabel, onStep, className = "", style }: {
+  items: FeedItem[]; work?: WorkBubble | null; onStop?: (runId: string) => Promise<unknown> | void; stepLabel?: (stepId: string) => string | null; onStep?: (stepId: string) => void; className?: string; style?: React.CSSProperties;
 }) {
   const KEY = "th-feed-off";
   const [off, setOff] = useState<Set<string> | null>(null);   // null do montażu: serwer nie zna zamkniętych, więc nic nie miga
@@ -356,7 +357,9 @@ export function AgentFeed({ items, stepLabel, onStep, className = "", style }: {
     return n;
   });
   const shown = off ? items.filter((m) => !off.has(m.id)) : [];
-  if (!shown.length) return null;
+  // dymek „wysłane” zamyka się jak odpowiedź (klucz po wiadomości); dymek „Claude pracuje” nie ma X, znika z końcem pracy
+  const card = work && off && !(work.kind === "sent" && off.has("w:" + work.id)) ? work : null;
+  if (!shown.length && !card) return null;
   return (
     <div className={"feed " + className} style={style} role="log" aria-live="polite" aria-label="Odpowiedzi Claude">
       {shown.map((m) => {
@@ -378,6 +381,42 @@ export function AgentFeed({ items, stepLabel, onStep, className = "", style }: {
           </div>
         );
       })}
+      {card ? <WorkCard b={card} onStop={onStop} onStep={onStep} onClose={() => { if (card.kind === "sent") close("w:" + card.id); }} /> : null}
+    </div>
+  );
+}
+// dymek pracy: „wysłane” (kropka, tytuł, cytat, „Ty · 19:41”, X) albo „Claude pracuje” (kropki, minuty, cytat, co teraz, chipy kroków, stopka, „Zatrzymaj”)
+function WorkCard({ b, onStop, onStep, onClose }: { b: WorkBubble; onStop?: (runId: string) => Promise<unknown> | void; onStep?: (stepId: string) => void; onClose: () => void }) {
+  const min = useMinutes(b.kind === "working" ? b.since : "");
+  const [busy, setBusy] = useState(false);
+  if (b.kind === "sent") return (
+    <div className="fb glass work sent">
+      <div className="wk-h"><i className="wk-dot" aria-hidden="true" />{b.title}</div>
+      {b.line ? <div className="wk-line">{b.line}</div> : null}
+      <div className="wk-q">{b.quote}</div>
+      <span className="ans-t">Ty · {b.at}</span>
+      <button className="icobtn ans-x" type="button" aria-label="Zamknij" title="Zamknij" onClick={onClose}><Icon k="x" size={12} sw={2} /></button>
+    </div>
+  );
+  return (
+    <div className="fb glass work on">
+      <div className="wk-h"><span className="dots" aria-hidden="true"><i /><i /><i /></span><span className="wk-t">Claude pracuje</span>{min !== null && min >= 1 ? <span className="act-m">{min} min</span> : null}</div>
+      {b.quote ? <div className="wk-q">{b.quote}</div> : null}
+      <div className="wk-now" aria-live="off">Teraz: {b.now}{b.detail ? <span className="act-d"> · {b.detail}</span> : null}</div>
+      {b.chips.length ? (
+        <div className="wk-chips">
+          <span className="lbl">W tej pracy:</span>
+          {b.chips.map((c) => <button key={c.id} type="button" className={"chip" + (c.now ? " now" : "")} title={`Otwórz krok ${c.label}`} onClick={() => onStep?.(c.id)}>Krok {c.label}</button>)}
+          {b.more ? <span className="chip">+{b.more}</span> : null}
+        </div>
+      ) : null}
+      <div className="wk-foot">
+        <span className="wk-ft">{workFoot(b)}</span><span className="sp" />
+        {b.stoppable && onStop ? (
+          <button className="btn sm ico" type="button" disabled={busy} title="Przerywa bieżącą pracę Claude na Macu. Wróci za 10 minut albo od razu, gdy napiszesz."
+            onClick={async () => { setBusy(true); try { await onStop(b.runId); } finally { setBusy(false); } }}><Icon k="stop" size={12} sw={1.6} />{busy ? "Zatrzymuję…" : "Zatrzymaj"}</button>
+        ) : null}
+      </div>
     </div>
   );
 }

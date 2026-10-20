@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   await repo.addChat(a.ownerId, null, "user", text);
   const t = await repo.createTask(a.ownerId, { title: text.slice(0, 120), source: text });
   const st = await repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS);
-  const w = { alive: st.alive, name: st.name, run: liveActivity(st.run), hold: bridgeHold(st.meta) };
+  const w = { alive: st.alive, name: st.name, run: liveActivity(st.run), hold: bridgeHold(st.meta, st.pause) };
   const message = newTaskText(t.title, noStepsWho(w, t.id, busyWith(w.run, await repo.listTasks(a.ownerId))));
   await repo.addChat(a.ownerId, null, "agent", message);
   return Response.json({ id: t.id, url: `${appUrl()}/tasks/${t.id}`, message });

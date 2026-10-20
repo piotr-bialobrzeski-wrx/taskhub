@@ -12,7 +12,7 @@ import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
 import { fileName, isHttpUrl, safeHref } from "@/lib/safeurl";
-import { allDoneWaitText, bridgeHold, bridgeLabel, busyWith, noStepsWho, queueWho, yourMsgsNom, type Worker } from "@/lib/auto";
+import { bridgeHold, bridgeLabel, busyWith, noStepsWho, queueWho, type Worker } from "@/lib/auto";
 import { BRIDGE_ALIVE_MS, connectorIssue, protocolOf } from "@/lib/bridge";
 import { draftOf } from "@/lib/agent/approval";
 import { liveActivity, liveKey } from "@/lib/live";
@@ -22,7 +22,7 @@ import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
-import { agentFeed } from "@/lib/feed";
+import { agentFeed, workBubble } from "@/lib/feed";
 import { decisionText, destOf, foldsFor, kindsOf, nowHeading, openQuestions, reportLines, resultLinks, splitBlocks, stepKind, targetLink, whoDid, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
@@ -60,28 +60,24 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const feed = agentFeed(chatLog);
   const origin = appUrl();
   // kto pracuje teraz (mostek na komputerze z bieżącym biegiem albo automat o pełnej godzinie) i nad czym
-  const w: Worker = { alive: bridge.alive, name: bridge.name, run: liveActivity(bridge.run), hold: bridgeHold(bridge.meta) };
+  const w: Worker = { alive: bridge.alive, name: bridge.name, run: liveActivity(bridge.run), hold: bridgeHold(bridge.meta, bridge.pause) };
   const busy = busyWith(w.run, b.tasks);
   const tiles = t.steps.map((s) => stepTile(t, s, b.tasks, w.run));
   const stateOf = (s: Step) => tiles.find((x) => x.id === s.id)!.state;
   const waits = taskWaits(t, b.tasks);
   const bp = !t.steps.length && !t.doneAt ? breakdownPrompt(t, b.rules, { appUrl: origin, projectName: cur.project?.name, companyId: cur.project?.companyId ?? null }) : null;
 
-  // ---------- pasek nad kanwą: tylko to, co wymaga uwagi (stan kroków widać po kolorach kafelków) ----------
-  // zadanie bez kroków: kto je rozpisze i kiedy; gdy mostek właśnie to robi, pasek pulsuje jak krok w toku.
-  // Bieg mostka związany z tym zadaniem pokazuje się tu zawsze (czyta zadanie, analizuje wiadomości, układa kartkę), nie tylko bez kroków;
-  // wiadomości Piotra bez odpowiedzi: kto je weźmie i kiedy, a po ostatnim kroku „czekam, aż mostek odpowie”
+  // ---------- dymek pracy nad polem czatu i pasek nad kanwą ----------
+  // Dymek: mostek pracuje nad tym zadaniem (co robi teraz, które kroki, „Zatrzymaj”) albo wysłana wiadomość czeka (kto ją weźmie i kiedy).
+  // Pasek: tylko to, czego dymek nie mówi (stan kroków widać po kolorach kafelków): czeka na inne zadanie, trwa wysyłka z tego zadania, zadanie bez kroków
   const who = bp ? noStepsWho(w, t.id, busy) : null;
   const queue = pending.length ? queueWho(w, t.id, pending.length, busy) : null;
-  const bridgeAct = w.run && w.run.taskId === t.id ? w.run : null;
-  const allDone = t.steps.length > 0 && t.steps.every((s) => s.status === "done");
+  const bubble = workBubble({ task: t, w, pending, busy });
+  const sending = w.run && w.run.kind === "send" && w.run.taskId === t.id ? w.run : null;
   // pasek ma zawsze jedną krótką linię; pełne zdanie i szczegóły (ścieżki, polecenia) są w podpowiedzi po najechaniu
   const runbar = waits.length ? <span className="rb-t" title={waits.map((x) => x.title).join(", ")}><b>Czeka na zadanie:</b> {waits.map((x) => x.title).join(", ")}</span>
-    : who && who.kind === "decomposing" && w.run ? <Activity text="rozpisuje kroki" detail={w.run.detail} since={w.run.since} who={who.who} big />
-    : bridgeAct ? <><Activity text={bridgeAct.text} detail={bridgeAct.detail} since={bridgeAct.since} who={bridgeLabel(w)} big />{queue ? <span className="rb-t">· {yourMsgsNom(queue.n)}</span> : null}</>
-    : queue && allDone && !t.doneAt ? <span className="rb-t">{allDoneWaitText(queue)}</span>
-    : queue ? <span className="rb-t" title={queue.text}>{queue.short}</span>
-    : who ? <span className="rb-t" title={who.text}><b>Bez kroków</b> · {aiOn ? "napisz w doku, co ma zrobić agent" : who.short}</span>
+    : sending ? <Activity text={sending.text} detail={sending.detail} since={sending.since} who={bridgeLabel(w)} big />
+    : who && !bubble ? <span className="rb-t" title={who.text}><b>Bez kroków</b> · {aiOn ? "napisz w doku, co ma zrobić agent" : who.short}</span>
     : null;
   const runAction = who && who.kind !== "decomposing" && !aiOn ? { label: "Rozpisz teraz", anchor: "rozpisz" } : null;
 
@@ -186,14 +182,14 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
 
   return (
     <>
-    <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || pending.length > 0 || t.steps.some((s) => s.status === "handoff") || (!!bp && !t.doneAt)} />
+    <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || !!bubble || pending.length > 0 || t.steps.some((s) => s.status === "handoff") || (!!bp && !t.doneAt)} />
     <TaskCanvas
       task={{ id: t.id, title: t.title, base: cur.score.base, eff: cur.score.eff, why: cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; "), state: taskStateOf(t, b.tasks), progress: { done: t.steps.filter((s) => s.status === "done").length, all: t.steps.length }, estText: estTextOf(t), activity: taskActivity(t.id, w.run), pending: pending.length }}
       queue={queue}
       steps={tiles}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
       aiOn={aiOn} agent={agentLabel(providers)} index={indexFrom(b)}
-      feed={feed}
+      feed={feed} work={bubble}
       focus={focus ?? null} runbar={runbar} runAction={runAction} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} />
     </>
   );

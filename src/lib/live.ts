@@ -38,8 +38,9 @@ export function activityText(note: string | null | undefined): Activity | null {
 // to, co mostek robi teraz, w kształcie dla kafelka i panelu; null, gdy nie ma otwartego biegu.
 // steps: kroki, których bieg dotknął (świecą na kanwie); stoppable: bieg pracy v2, który Piotr może zatrzymać w Task Hub
 export type LiveActivity = { text: string; detail: string | null; since: string; stepId: string | null; taskId: string | null; bridge: string; runId?: string; kind?: "work" | "send"; steps?: Record<string, RunStep>; stoppable?: boolean };
+// bieg zatrzymany w Task Hub (stopAt) już nie pracuje, choć aplikacja na Macu jeszcze nie zgłosiła końca
 export function liveActivity(run: BridgeRun | null | undefined): LiveActivity | null {
-  if (!run || run.endedAt) return null;
+  if (!run || run.endedAt || run.stopAt) return null;
   const a = activityText(run.note) ?? { text: "pracuje", detail: null };
   return { text: a.text, detail: a.detail, since: run.startedAt, stepId: run.stepId, taskId: run.taskId, bridge: run.bridge, runId: run.id, kind: run.kind ?? "work", steps: run.steps ?? {}, stoppable: !!run.stoppable };
 }
@@ -51,5 +52,5 @@ export const onTileText = (text: string) => text.replace(/ kroku$/, "");
 export const liveKey = (stamp: string, run: BridgeRun | null | undefined, alive: boolean) => {
   const steps = run?.steps ? Object.values(run.steps) : [];
   const newest = steps.reduce((m, s) => (s.at > m ? s.at : m), "");
-  return `${stamp}|${run && !run.endedAt ? `${run.id}:${run.note ?? ""}:${run.stepId ?? ""}:${steps.length}:${newest}` : ""}|${alive ? 1 : 0}`;
+  return `${stamp}|${run && !run.endedAt && !run.stopAt ? `${run.id}:${run.note ?? ""}:${run.stepId ?? ""}:${steps.length}:${newest}` : ""}|${alive ? 1 : 0}`;
 };

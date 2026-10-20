@@ -26,7 +26,7 @@ export async function bundle(ownerId: string): Promise<Bundle> {
 export async function taskQueue(ownerId: string, taskId: string): Promise<Queue | null> {
   const [pending, st, tasks] = await Promise.all([repo.listPendingChat(ownerId, taskId), repo.bridgeStatus(ownerId, BRIDGE_ALIVE_MS), repo.listTasks(ownerId)]);
   if (!pending.length) return null;
-  const w: Worker = { alive: st.alive, name: st.name, run: liveActivity(st.run), hold: bridgeHold(st.meta) };
+  const w: Worker = { alive: st.alive, name: st.name, run: liveActivity(st.run), hold: bridgeHold(st.meta, st.pause) };
   return queueWho(w, taskId, pending.length, busyWith(w.run, tasks));
 }
 

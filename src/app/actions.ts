@@ -12,6 +12,7 @@ import { Q, roundQ } from "@/lib/time";
 import { runChat } from "@/lib/agent/chat";
 import { bridgeHold, busyWith, newTaskText, noStepsWho, shortTitle, type Queue, type Worker } from "@/lib/auto";
 import { liveActivity } from "@/lib/live";
+import { fmtTime } from "@/lib/clock";
 import { BRIDGE_ALIVE_MS, connectorIssue, isGitDraft } from "@/lib/bridge";
 import { draftOf, isExternalApp, isLocalFile, isPromptDraft, shownSig } from "@/lib/agent/approval";
 import { decisionText, destOf, openQuestions, stepKind } from "@/lib/stepcard";
@@ -79,7 +80,7 @@ export async function chat(fd: FormData) {
       // nowe zadanie z kanwy: kto je rozpisze i kiedy (mostek teraz / po bieżącej pracy / w ciągu minuty, albo automat o pełnej godzinie)
       const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files);
       const [st, tasks] = await Promise.all([repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.listTasks(o.id)]);
-      const w: Worker = { alive: st.alive, name: st.name, run: liveActivity(st.run), hold: bridgeHold(st.meta) };
+      const w: Worker = { alive: st.alive, name: st.name, run: liveActivity(st.run), hold: bridgeHold(st.meta, st.pause) };
       await repo.addChat(o.id, null, "agent", newTaskText(t.title, noStepsWho(w, t.id, busyWith(w.run, tasks)))); goTo = t.id;
     }
   } else {
@@ -306,6 +307,14 @@ export async function saveOutput(fd: FormData) {
   refresh(taskId);
 }
 // Piotr otworzył krok zmieniony przez agenta: kropka „jeszcze nieotwarte” gaśnie (bez odświeżenia: kanwa chowa ją od razu sama)
+// „Zatrzymaj” w dymku pracy: przerywa bieg pracy mostka (token biegu gaśnie, aplikacja na Macu przerywa go przy najbliższym sygnale) i daje mostkowi
+// przerwę; bez notatki w rozmowie (rozmowa jest rozmową z agentem). Zwraca tekst toastu
+export async function stopWork(taskId: string, runId: string): Promise<string> {
+  const o = await requireOwner();
+  const until = await repo.stopRun(o.id, runId);
+  refresh(taskId);
+  return until ? `Zatrzymane. Claude wróci o ${fmtTime(until)} albo od razu, gdy napiszesz.` : "Ta praca już się skończyła.";
+}
 export async function openedStep(taskId: string, stepId: string) {
   const o = await requireOwner();
   await repo.stepOpened(o.id, taskId, stepId);

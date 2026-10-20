@@ -18,8 +18,10 @@ export const shortTitle = (title: string, max = 60) => { const t = title.replace
 export type Hold = { kind: "limit" | "auth" | "error" | "stopped"; until: string | null };
 export type Worker = { alive: boolean; name: string | null; run: LiveActivity | null; hold?: Hold | null };
 export type Who = { kind: "decomposing" | "busy" | "soon" | "held" | "auto"; who: string; text: string; short: string };   // short: jedna krótka linia na pasek nad kanwą
-// stan zgłoszony przez aplikację na Macu przy ostatnim sprawdzeniu pracy (meta tokenu mostka: state, until)
-export function bridgeHold(meta: Record<string, unknown> | null | undefined): Hold | null {
+// stan zgłoszony przez aplikację na Macu przy ostatnim sprawdzeniu pracy (meta tokenu mostka: state, until); pause: Piotr zatrzymał bieg w Task Hub
+// (repo.bridgeStatus().pause, koniec przerwy): ta sama przerwa, co po „Stop” na Macu, więc i to samo zdanie
+export function bridgeHold(meta: Record<string, unknown> | null | undefined, pause: string | null = null): Hold | null {
+  if (pause) return { kind: "stopped", until: pause };
   const st = meta?.state, until = typeof meta?.until === "string" && meta.until ? meta.until : null;
   return st === "limit" || st === "auth" || st === "error" || st === "stopped" ? { kind: st, until } : null;
 }
@@ -82,5 +84,3 @@ export function queueWho(w: Worker, taskId: string, n: number, busy: string | nu
   const a = nextAutoAt(now);
   return { n, kind: "auto", who: `Claude ${a.text}`, text: `${waiting(n)} na Claude · zajrzy ${a.text} (automat ${AUTO_EVERY})`, short: `Czeka na Claude ${a.text}`, activity: null };
 }
-// wszystkie kroki gotowe, ale zadanie nie zamyka się, dopóki agent nie odpowie na wiadomości
-export const allDoneWaitText = (q: Queue) => `Kroki zrobione · ${q.n === 1 ? "Twoja wiadomość czeka" : `${yourMsgsNom(q.n)} czekają`} na ${q.kind === "auto" ? "Claude" : "mostek"}`;
