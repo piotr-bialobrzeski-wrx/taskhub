@@ -157,6 +157,18 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("czas Claude'a i czas Piotra", a
     expect(await step(t.id, dec)).toMatchObject({ status: "done", output: "Decyzje: „P1?”: B; „P2?”: B" });
     expect(await lastChat(t.id)).toBe("Zmieniam decyzję w kroku „Zdecyduj o wersji”: B (wcześniej: A). Pytanie z kartki: „P1?”.");
   });
+  it("zegar karty: porcja sekund dolicza się do kroku Piotra; za duża porcja, krok Claude'a i czas wpisany ręcznie ją pomijają", async () => {
+    const t = await repo.createTask(owner, { title: "Zegar karty", steps: [{ title: "Przejrzyj umowę", tool: "manual", estMin: 15 }, { title: "Policz", tool: "code" }] });
+    const [own, code] = t.steps.map((s) => s.id);
+    await actions.addOwnTime(t.id, own, 90);
+    expect((await step(t.id, own)).spentSec).toBe(90);
+    await actions.addOwnTime(t.id, own, 5000);
+    await actions.addOwnTime(t.id, code, 90);
+    expect((await step(t.id, own)).spentSec).toBe(90); expect((await step(t.id, code)).spentSec).toBe(0);
+    await actions.patchStep(t.id, own, { spentMin: 10 });   // ręczna poprawka wygrywa: zegar już nie dolicza
+    await actions.addOwnTime(t.id, own, 60);
+    expect(await step(t.id, own)).toMatchObject({ spentSec: 600, spentManual: true });
+  });
   it("„Zrobione” z pytaniem o czas: 30 min zapisuje czas Piotra, „Pomiń” zamyka bez czasu", async () => {
     const t = await repo.createTask(owner, { title: "Poza aplikacją", steps: [{ title: "Zadzwoń do Kingi", tool: "manual", estMin: 15 }, { title: "Wyślij umowę pocztą", tool: "manual", estMin: 15 }] });
     await actions.doneWithTime(t.id, t.steps[0].id, 30);

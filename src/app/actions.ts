@@ -15,7 +15,7 @@ import { liveActivity } from "@/lib/live";
 import { BRIDGE_ALIVE_MS, connectorIssue, isGitDraft } from "@/lib/bridge";
 import { draftOf, isExternalApp, isLocalFile, isPromptDraft, shownSig } from "@/lib/agent/approval";
 import { decisionText, destOf, openQuestions, stepKind } from "@/lib/stepcard";
-import type { Connection, Rule, Sphere, Step } from "@/lib/schema";
+import { isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const num = (fd: FormData, k: string, def: number) => { const v = Number(str(fd, k)); return Number.isFinite(v) && str(fd, k) !== "" ? v : def; };
@@ -304,6 +304,13 @@ export async function saveOutput(fd: FormData) {
   await stepOf(o.id, taskId, stepId);
   await repo.updateStep(stepId, { output: str(fd, "output") });
   refresh(taskId);
+}
+// zegar karty (useOwnClock): porcja sekund Piotra na jego otwartym kroku; bez odświeżenia widoku, bo porcje idą w tle co kilka minut
+export async function addOwnTime(taskId: string, stepId: string, sec: number) {
+  const o = await requireOwner();
+  const { step } = await stepOf(o.id, taskId, stepId);
+  if (!(sec > 0 && sec <= 3600) || !isOwnerStep(step) || step.status === "done") return;
+  await repo.addOwnSec(stepId, sec);
 }
 // „Zrobione” kroku Piotra poza aplikacją: minuty z pytania „Ile to zajęło?” (null = pominięte), potem krok się zamyka
 export async function doneWithTime(taskId: string, stepId: string, min: number | null) {

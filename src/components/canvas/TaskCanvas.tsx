@@ -14,6 +14,7 @@ import { AgentFeed, Dock, Namer, TileMenu, Toast, useToast } from "./widgets";
 import type { FeedItem } from "@/lib/feed";
 import { InlineText } from "@/components/StepFields";
 import { Activity } from "@/components/Activity";
+import { useOwnClock } from "@/components/OwnClock";
 import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, saveStepPositions, updateGroupAction } from "@/app/actions";
 
 export type TaskCanvasProps = {
@@ -106,6 +107,9 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const endPull = () => { if (pullRef.current == null) return; pullRef.current = null; if (pull > 110) { setPanel(null); setSel(new Set()); } setPull(0); };
   const widen = () => { const w = !wide; setWide(w); setGripW(null); try { localStorage.setItem("th-wide", w ? "1" : "0"); localStorage.removeItem("th-dw"); } catch { /* brak storage */ } };
   const cur = panel && panel !== "__task" ? byId.get(panel) ?? null : null;
+  // zegar czasu Piotra na otwartym kroku jego własnym (narzędzie „Piotr sam”), póki nie jest zrobiony; jeden hak obsługuje panel i szufladę na telefonie
+  const asideRef = useRef<HTMLElement>(null);
+  useOwnClock(t.id, cur && cur.tool === "manual" && cur.state !== "done" ? cur.id : null, asideRef);
   // kontekst wiadomości wynika z widoku i nie zajmuje miejsca nad polem: otwarty krok, inaczej całe zadanie (ogólny kanwas ma własny dok)
   const ctxGlobal = false;
   const ctxStep = cur;
@@ -204,7 +208,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
       ) : null}
 
       {panel ? (
-        <aside className="detail glass" style={{ ["--dw" as string]: dw + "px", ...(pull ? { transform: `translateY(${pull}px)`, transition: "none" } : {}) }} aria-live="polite" onPointerDown={(e) => e.stopPropagation()}>
+        <aside ref={asideRef} className="detail glass" style={{ ["--dw" as string]: dw + "px", ...(pull ? { transform: `translateY(${pull}px)`, transition: "none" } : {}) }} aria-live="polite" onPointerDown={(e) => e.stopPropagation()}>
           {/* telefon: szuflada od dołu; uchwyt pociągnięty w dół zamyka krok */}
           <div className="dhandle" aria-hidden="true" onPointerDown={onPullDown} onPointerMove={onPullMove} onPointerUp={endPull} onPointerCancel={() => { pullRef.current = null; setPull(0); }} />
           <div className={"grip" + (gripOn ? " on" : "")} title="Przeciągnij, aby zmienić szerokość" onPointerDown={onGrip} onPointerMove={onGripMove} onPointerUp={endGrip} onPointerCancel={endGrip} />

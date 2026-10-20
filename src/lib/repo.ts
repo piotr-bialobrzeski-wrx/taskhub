@@ -706,6 +706,8 @@ export async function listSamples(ownerId: string): Promise<TimeSample[]> {
 // czas Claude'a: start_step stawia znacznik; zamknięcie albo oddanie kroku dolicza sekundy i go kasuje
 export async function markAgentStart(stepId: string): Promise<void> { await sql()`update steps set agent_started_at = now() where id = ${stepId}`; }
 export async function addAgentTime(stepId: string, sec: number): Promise<void> { await sql()`update steps set agent_sec = agent_sec + ${Math.max(0, Math.round(sec))}, agent_started_at = null where id = ${stepId}`; }
+// czas Piotra z zegara karty: dolicza się tylko, póki nie wpisał czasu ręcznie (ręczna poprawka wygrywa)
+export async function addOwnSec(stepId: string, sec: number): Promise<void> { await sql()`update steps set spent_sec = spent_sec + ${Math.max(0, Math.round(sec))}, spent_at = now() where id = ${stepId} and spent_manual = false`; }
 
 // ---------- czat ----------
 // seenAt: agent wziął wiadomość do opracowania w bieżącym biegu; answeredAt: załatwiona (reply_chat albo odpowiedź agenta w aplikacji); obie null = czeka w kolejce
