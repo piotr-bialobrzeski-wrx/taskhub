@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, STEP_SIZE } from "@/lib/canvas/layout";
-import { Icon, Lvl, ST_LABEL, TS_LABEL, plural, toolColor, type GroupVM, type StepTile, type TaskStateKey, type TileActivity } from "./ui";
+import { Icon, Lvl, ST_LABEL, TS_LABEL, ToolChip, plural, type GroupVM, type StepTile, type TaskStateKey, type TileActivity } from "./ui";
 import { msgCount, type Queue } from "@/lib/auto";
 import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
 import { AddButton, AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
@@ -121,7 +121,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {view === "canvas" ? (
         <Canvas zoomKey={"task"} apiRef={api} items={items} size={STEP_SIZE} groups={groups} render={(id) => { const s = byId.get(id)!; return (
             <>
-              <span className="n-top"><span className="n-num">{pad(s.idx)}</span><span className="chip tool" style={{ ["--c" as string]: toolColor(s.tool) }}>{s.toolName}</span><span className={"st " + s.state}>{ST_LABEL[s.state]}</span></span>
+              <span className="n-top"><span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} /><span className={"st " + s.state}>{ST_LABEL[s.state]}</span></span>
               <span className="n-title">{s.title}</span>
               <span className="n-meta">{s.activity ? <Activity text={s.activity.text} detail={s.activity.detail} since={s.activity.since} /> : s.meta}</span>
             </>); }}
@@ -146,7 +146,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
             <button type="button" className="lrow" onClick={() => setPanel("__task")}><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="n-title">{t.title}</span><span className="n-meta" style={{ margin: 0 }}>{t.progress.done}/{t.progress.all}</span></button>
             {p.steps.map((s) => (
               <button key={s.id} type="button" className="lrow" onClick={() => openStep(s.id)}>
-                <span className="n-num">{pad(s.idx)}</span><span className="chip tool" style={{ ["--c" as string]: toolColor(s.tool) }}>{s.toolName}</span>
+                <span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} />
                 <span className="n-title">{s.title}</span><span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span>
               </button>
             ))}

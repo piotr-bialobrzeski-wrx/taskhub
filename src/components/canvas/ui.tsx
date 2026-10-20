@@ -90,6 +90,10 @@ export function Icon({ k, size = 16, sw = 1.5 }: { k: string; size?: number; sw?
   return <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: PATHS[k] ?? PATHS.claude }} />;
 }
 export const ToolIcon = ({ tool, size = 18 }: { tool: string; size?: number }) => <Icon k={PATHS[tool] ? tool : "claude"} size={size} />;
+// chip narzędzia kroku (kafelek i wiersz listy): nazwa w <span>, więc ucina się wielokropkiem w chipie (.chip > span); pełna nazwa w dymku
+export const ToolChip = ({ tool, label }: { tool: string; label: string }) => (
+  <span className="chip tool" style={{ ["--c" as string]: toolColor(tool) }} title={label}><span>{label}</span></span>
+);
 
 // ---------- priorytet: pasek 1–5, strzałka gdy pokazany różni się od ustawionego ----------
 const WIDEST = Object.values(LEVELS).reduce((a, b) => (b.length > a.length ? b : a), "");   // etykieta ma zawsze szerokość najdłuższej nazwy
