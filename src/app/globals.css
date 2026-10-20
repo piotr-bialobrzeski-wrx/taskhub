@@ -886,9 +886,9 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .wk-chips { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
 .wk-chips .lbl { margin: 0; flex: none; }
 .wk-chips .chip { flex: none; cursor: pointer; }
-.wk-chips .chip.now::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--t-claude); margin-right: 5px; }
-.wk-foot { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11px; color: var(--sub); }
-.wk-foot .wk-ft { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-chips .chip.now { background: color-mix(in srgb, var(--t-claude) 16%, transparent); color: var(--t-claude); font-weight: 600; }
+.wk-foot { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11px; line-height: 1.35; color: var(--sub); }
+.wk-foot .wk-ft { min-width: 0; }
 .wk-foot .btn { flex: none; }
 /* dymki stoją na linii pola czatu, obok niego: szerokie do 380 px, gdy obok wyśrodkowanego doku jest miejsce; w węższym oknie mają 260 px,
    a dok (i wszystko, co liczy się od --side) zwęża się symetrycznie, żeby na nie nie wchodzić */

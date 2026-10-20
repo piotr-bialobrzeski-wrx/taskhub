@@ -8,7 +8,8 @@ export const AGENT_MAX_SEC = 45 * 60;   // najdłuższy bieg Claude Code: dłuż
 
 export const roundQ = (min: number) => Math.max(Q, Math.round(min / Q) * Q);
 export const estOf = (s: Pick<Step, "estMin">) => roundQ(s.estMin || Q);
-export const spentMin = (s: Pick<Step, "spentSec">) => { const m = (s.spentSec || 0) / 60; return m <= 0 ? 0 : roundQ(m); };
+// zmierzony czas Piotra w minutach, bez zaokrąglania do kwantu (zegar karty liczy sekundy: pół minuty to nie „5 min”); poniżej minuty 0
+export const spentMin = (s: Pick<Step, "spentSec">) => { const m = (s.spentSec || 0) / 60; return m < 1 ? 0 : Math.round(m); };
 // sekundy od chwili do teraz, nie więcej niż cap; bez chwili 0
 export const elapsedSec = (from: string | null | undefined, cap = AGENT_MAX_SEC, now = Date.now()) => (from ? Math.max(0, Math.min(cap, Math.round((now - new Date(from).getTime()) / 1000))) : 0);
 // czas Claude'a w minutach: dokładny (nie w kwantach), poniżej minuty 1, gdy cokolwiek zmierzono

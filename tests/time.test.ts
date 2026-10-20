@@ -6,9 +6,9 @@ describe("czas i kalibracja", () => {
   it("zaokrągla do kwantów 5 minut, minimum 5", () => {
     expect(roundQ(1)).toBe(5); expect(roundQ(7)).toBe(5); expect(roundQ(8)).toBe(10); expect(roundQ(22)).toBe(20); expect(roundQ(103)).toBe(105);
     expect(estOf(step({ estMin: 0 }))).toBe(5);
-    expect(spentMin(step({ spentSec: 0 }))).toBe(0); expect(spentMin(step({ spentSec: 70 }))).toBe(5);
-    // czas mierzony co do sekundy przez wszystkie przerwy, pokazywany co 5 min, minimum 5 gdy cokolwiek zmierzono
-    expect(spentMin(step({ spentSec: 20 }))).toBe(5); expect(spentMin(step({ spentSec: 250 + 240 }))).toBe(10); expect(spentMin(step({ spentSec: 12 * 60 + 20 }))).toBe(10);
+    expect(spentMin(step({ spentSec: 0 }))).toBe(0); expect(spentMin(step({ spentSec: 70 }))).toBe(1);
+    // czas mierzony co do sekundy przez wszystkie przerwy (zegar karty), pokazywany co do minuty; poniżej minuty nic (kwant 5 min jest dla szacunków)
+    expect(spentMin(step({ spentSec: 20 }))).toBe(0); expect(spentMin(step({ spentSec: 250 + 240 }))).toBe(8); expect(spentMin(step({ spentSec: 12 * 60 + 20 }))).toBe(12);
   });
   it("formatuje minuty czytelnie", () => {
     expect(fmtMin(45)).toBe("45 min"); expect(fmtMin(60)).toBe("1 h"); expect(fmtMin(90)).toBe("1 h 30 min");

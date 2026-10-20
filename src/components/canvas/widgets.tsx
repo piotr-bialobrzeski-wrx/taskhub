@@ -406,7 +406,7 @@ function WorkCard({ b, onStop, onStep, onClose }: { b: WorkBubble; onStop?: (run
       {b.chips.length ? (
         <div className="wk-chips">
           <span className="lbl">W tej pracy:</span>
-          {b.chips.map((c) => <button key={c.id} type="button" className={"chip" + (c.now ? " now" : "")} title={`Otwórz krok ${c.label}`} onClick={() => onStep?.(c.id)}>Krok {c.label}</button>)}
+          {b.chips.map((c) => <button key={c.id} type="button" className={"chip" + (c.now ? " now" : "")} title={`Otwórz krok ${c.label}`} onClick={() => onStep?.(c.id)}>{c.now ? <i className="d" style={{ ["--c" as string]: "var(--t-claude)" }} /> : null}<span>Krok {c.label}</span></button>)}
           {b.more ? <span className="chip">+{b.more}</span> : null}
         </div>
       ) : null}
