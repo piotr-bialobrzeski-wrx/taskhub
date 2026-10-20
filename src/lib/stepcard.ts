@@ -1,6 +1,10 @@
 // Karta kroku „Teraz · Co · Skąd” (paczka 2, punkt 8): stały porządek sekcji, wynik na wierzchu, nic nie pokazuje się dwa razy.
 // Czysta logika bez React, żeby dało się ją testować; składanie w JSX jest w src/app/tasks/[id]/page.tsx.
-import { EXTERNAL_TOOLS, toolLabel, type Block, type Step } from "./schema";
+import { EXTERNAL_TOOLS, inApp, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step } from "./schema";
+import { draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft } from "./agent/approval";
+import { fileName, safeHref } from "./safeurl";
+import { fmtTime } from "./clock";
+import { shortTitle } from "./auto";
 
 export const KIND_LABEL: Record<string, string> = {
   text: "notatka", facts: "fakty", thread: "wątek", list: "lista", media: "pliki", link: "linki", mail: "mail", comment: "komentarz", table: "tabela",
@@ -42,15 +46,92 @@ export function resultLinks(s: Pick<Step, "tool">, changes: Pick<Changes, "previ
   const preview = changes?.preview && /^https?:\/\//.test(changes.preview) ? changes.preview : null;
   if (preview) out.push({ label: "Otwórz podgląd", url: preview });
   if (link && link !== preview) {
-    const label = changes && /github\.com/.test(link) ? "Repozytorium" : EXTERNAL_TOOLS.has(s.tool) ? "Otwórz wynik" : s.tool === "manual" || s.tool === "claude" ? "Otwórz link" : `Otwórz w ${toolLabel(s.tool)}`;
+    const label = changes && /github\.com/.test(link) ? "Repozytorium" : EXTERNAL_TOOLS.has(s.tool) ? "Otwórz wynik" : s.tool === "manual" || s.tool === "claude" ? "Otwórz link" : openLabel(normalizeTool(s.tool));
     out.push({ label, url: link });
   }
   return out;
 }
 
+// ---------- dokąd idzie szkic: jedno źródło dla przycisku, linii pod nim, nagłówka po wysyłce, kafelka, listy i rozmowy ----------
+export type DestKind = "send" | "file" | "commit" | "push" | "prompt" | "internal";
+export type Dest = { kind: DestKind; app: string; name: string; in: string; where: string | null; action: string; subject: string | null };
+export const ACTION: Record<string, string> = { send: "wyśle", reply: "odpowie", create: "utworzy", update: "zaktualizuje", comment: "skomentuje", commit: "zapisze commit", push: "wypchnie", other: "wykona" };
+// czasownik na przycisku: mówi, co się stanie po zatwierdzeniu
+export const VERB: Record<string, string> = { send: "wyślij", reply: "wyślij", create: "utwórz", update: "zaktualizuj", comment: "dodaj komentarz", commit: "zapisz commit", push: "opublikuj", other: "wykonaj" };
+const PAST: Record<string, string> = { send: "Wysłałem", reply: "Wysłałem", create: "Utworzyłem", update: "Zaktualizowałem", comment: "Dodałem komentarz" };
+// z tych samych pól szkicu, które wchodzą do podpisu zgody; bez szkicu tylko plik na Macu ma cel
+export function destOf(s: Pick<Step, "tool" | "blocks"> & { filePath?: string | null }): Dest | null {
+  const d = draftOf(s);
+  if (!d) return s.tool === "file" || s.filePath ? { kind: "file", app: "file", name: toolLabel("file"), in: inApp("file"), where: null, action: "create", subject: null } : null;
+  const app = normalizeTool(d.target.app, s.tool), action = d.target.action ?? "send";
+  const kind: DestKind = isGitDraft(d, s.blocks) ? (action === "push" ? "push" : "commit") : isLocalFile(app) ? "file" : isPromptDraft(d, s.blocks) ? "prompt" : isExternalApp(app) ? "send" : "internal";
+  // nieznana aplikacja: nazwa tak, jak napisał ją agent („Notion”), nie klucz małymi literami
+  const name = TOOL_LABELS[app] ? toolLabel(app) : d.target.app.trim() || app;
+  return { kind, app, name, in: TOOL_LABELS[app] ? inApp(app) : `· ${name}`, where: d.target.where?.trim() || null, action, subject: d.subject?.trim() || null };
+}
+export function approveLabel(d: Dest | null, o: { stays: boolean; rows: boolean }): string {
+  if (o.stays || !d || d.kind === "internal" || d.kind === "file") return "Zatwierdź";
+  if (d.kind === "prompt") return "Zatwierdź i uruchom";
+  if (d.kind === "commit") return "Zatwierdź i zapisz commit";
+  if (d.kind === "push") return "Zatwierdź i opublikuj na GitHubie";
+  return `Zatwierdź i ${o.rows && d.action !== "create" ? "dopisz" : VERB[d.action] ?? "wyślij"} ${d.in}`;
+}
+// linia pod przyciskiem: miejsce i co dokładnie się stanie
+export function destHint(d: Dest | null): string | null {
+  if (!d || d.kind === "internal" || d.kind === "file") return null;
+  const hint = d.kind === "commit" ? "commit na Macu, bez pusha" : d.kind === "push" ? "commit i push gałęzi" : d.kind === "prompt" ? "uruchomi ten prompt na Macu"
+    : d.action === "create" ? (d.app === "clickup" ? "utworzy nowy ticket" : d.app === "calendar" ? "utworzy wydarzenie" : "utworzy")
+    : d.action === "update" ? (d.app === "clickup" ? "zmieni ticket" : "zaktualizuje")
+    : d.action === "comment" ? "doda komentarz" : d.action === "reply" ? "odpowie w wątku"
+    : d.action === "send" ? (d.app === "gmail" ? "wyśle maila" : d.app === "slack" ? "wyśle wiadomość" : "wyśle") : "wykona";
+  return `${d.where ?? d.name} · ${hint}`;
+}
+// nagłówek „Teraz” po wysyłce
+export function sentWord(d: Dest): string {
+  switch (d.kind) {
+    case "send": return d.action === "create" ? "Utworzono" : d.action === "update" ? "Zaktualizowano" : d.action === "comment" ? "Dodano komentarz" : d.action === "send" || d.action === "reply" ? "Wysłano" : "Wykonano";
+    case "file": return "Zapisano na Macu";
+    case "commit": return "Zapisano commit na Macu";
+    case "push": return "Wypchnięto na GitHub";
+    case "prompt": return "Wykonano";
+    default: return "Zatwierdzone";
+  }
+}
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const lastSeg = (w: string) => w.split("/").map((x) => x.trim()).filter(Boolean).pop() ?? w;
+// dolna linia kafelka: przed zgodą dokąd pójdzie, po wysyłce dokąd poszło i o której (czas polski)
+export function tileDest(d: Dest | null, s: Pick<Step, "status" | "doneAt" | "blocks"> & { filePath?: string | null }): string | null {
+  if (!d) return null;
+  const draft = draftOf(s);
+  if (s.status === "done") {
+    if (d.kind === "file") return `Plik na Macu${s.filePath ? " · " + fileName(s.filePath) : ""}`;
+    if (draft?.status !== "sent") return null;
+    const t = s.doneAt ? fmtTime(s.doneAt) : null;
+    if (d.kind === "send") return [cap(d.in), d.where ? lastSeg(d.where) : null, t].filter(Boolean).join(" · ");
+    if (d.kind === "commit") return ["Commit na Macu", t].filter(Boolean).join(" · ");
+    if (d.kind === "push") return ["Na GitHubie", d.where, t].filter(Boolean).join(" · ");
+    return null;
+  }
+  if (draft?.status !== "proposed") return null;
+  return `${d.kind === "commit" ? "Commit" : d.name}${d.where ? " · " + d.where : ""}`;
+}
+// adres do kliknięcia z dolnej linii: tylko po wysyłce do aplikacji, tylko http(s)
+export const tileDestHref = (d: Dest | null, s: Pick<Step, "status" | "link">): string | null => (d?.kind === "send" && s.status === "done" ? safeHref(s.link) ?? null : null);
+// linia w rozmowie zadania po zamknięciu kroku
+export function doneChat(s: Pick<Step, "title" | "tool" | "blocks"> & { filePath?: string | null }, closed: boolean): string {
+  const d = destOf(s), tail = closed ? " Zadanie ukończone." : "";
+  const q = (x: string) => `„${shortTitle(x, 70)}”`;
+  if (d?.kind === "send") return `${PAST[d.action] ?? "Zrobiłem"} ${d.in}: ${q(d.subject ?? s.title)}${d.where ? ` · ${d.where}` : ""}.${tail}`;
+  if (d?.kind === "file") return `Zapisałem plik na Macu: ${s.filePath ? fileName(s.filePath) : q(s.title)}.${tail}`;
+  if (d?.kind === "commit") return `Zapisałem commit na Macu: ${q(s.title)}.${tail}`;
+  if (d?.kind === "push") return `Wypchnąłem na GitHub: ${q(s.title)}.${tail}`;
+  return `Zrobione: ${q(s.title)}.${tail}`;
+}
+
 const steps = (n: number) => (n === 1 ? "1 krok" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? `${n} kroki` : `${n} kroków`);
-// nagłówek sekcji „Teraz”: stan słowami i kolor bloku
-export function nowHeading(state: CardState, mode: string | null, deps: number, waits: boolean): { title: string; cls: string } {
+// nagłówek sekcji „Teraz”: stan słowami i kolor bloku; po wysyłce słowo z celu („Utworzono”, „Wysłano”), strona dokłada godzinę
+export function nowHeading(state: CardState, mode: string | null, deps: number, waits: boolean, dest?: Dest | null): { title: string; cls: string } {
+  if (mode === "sent" && dest) return { title: sentWord(dest), cls: "done" };
   if (mode === "proposed") return { title: "Do zatwierdzenia", cls: "draft" };
   if (mode === "sending") return { title: "W toku", cls: "handoff" };
   if (mode === "parked") return { title: "Odłożony szkic", cls: "draft" };
@@ -63,12 +144,12 @@ export function nowHeading(state: CardState, mode: string | null, deps: number, 
 
 // dokąd prowadzi krok jeszcze przed wysyłką: ticket, wątek albo dokument, w którym coś się zmieni. Kolejność: adres podany przez agenta w szkicu,
 // adres albo id ClickUp w polu „dokąd”, potem źródło z kartki z tej samej aplikacji (ticket, wątek, komentarz, z którego krok wyrósł)
-const NO_TARGET = new Set(["manual", "claude", "claudeapp", "code"]);
+const NO_TARGET = new Set(["manual", "claude", "claudeapp", "code", "file"]);
 const HTTP = /https?:\/\/[^\s)>\]]+/;
 export function targetLink(s: Pick<Step, "tool" | "title">, blocks: Block[] | null | undefined): { label: string; url: string } | null {
   const draft = blocks?.find((b) => b.type === "draft") as Extract<Block, { type: "draft" }> | undefined;
-  const app = draft?.target.app ?? s.tool;
-  const label = `Otwórz w ${toolLabel(app)}`;
+  const app = normalizeTool(draft?.target.app ?? s.tool, s.tool);
+  const label = openLabel(app);
   const given = draft?.target.url?.trim();
   if (given && /^https?:\/\//.test(given)) return { label, url: given };
   if (NO_TARGET.has(app)) return null;   // prompt dla agenta, zmiany w kodzie, krok ręczny: miejscem jest podgląd albo repozytorium z bloku zmian
@@ -95,7 +176,9 @@ export function draftPlace(s: Pick<Step, "tool" | "title">, blocks: Block[] | nu
   if (!url) return null;
   const app = draft.target.app.toLowerCase(), act = draft.target.action ?? "send";
   const kind = COMMENTISH.has(app) && (act === "reply" || act === "send") ? "comment" : act;
-  return `${url.replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase()} ${kind}`;
+  // kilka nowych ticketów na jednej liście to różne rzeczy: przy tworzeniu miejsce rozróżnia tytuł
+  const subject = act === "create" ? " " + (draft.subject ?? s.title).replace(/\s+/g, " ").trim().toLowerCase() : "";
+  return `${url.replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase()} ${kind}${subject}`;
 }
 // inne kroki zadania z szkicem do tego samego miejsca: otwarte (dwa szkice tego samego) i już wysłane (to samo poszło wcześniej)
 export function sameTarget(steps: Step[], stepId: string, blocks: Block[] | null | undefined): { open: Step[]; sent: Step[] } {

@@ -123,7 +123,9 @@ export function TaskCanvas(p: TaskCanvasProps) {
             <>
               <span className="n-top"><span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} /><span className={"st " + s.state}>{ST_LABEL[s.state]}</span></span>
               <span className="n-title">{s.title}</span>
-              <span className="n-meta">{s.activity ? <Activity text={s.activity.text} detail={s.activity.detail} since={s.activity.since} /> : s.meta}</span>
+              <span className="n-meta">{s.activity ? <Activity text={s.activity.text} detail={s.activity.detail} since={s.activity.since} />
+                : s.destHref ? <a className="n-dest" href={s.destHref} target="_blank" rel="noopener" title={s.destHref} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>{s.meta}</a>
+                : s.meta}</span>
             </>); }}
           origin={{ cls: "task " + t.state, node: (
             <>
@@ -147,7 +149,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
             {p.steps.map((s) => (
               <button key={s.id} type="button" className="lrow" onClick={() => openStep(s.id)}>
                 <span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} />
-                <span className="n-title">{s.title}</span><span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span>
+                <span className="n-title">{s.title}</span>{s.dest ? <span className="n-dest">{s.dest}</span> : null}<span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span>
               </button>
             ))}
             {p.steps.length ? null : <p className="sub">Brak kroków.</p>}

@@ -3,6 +3,7 @@ import type { Scored } from "../agent/context";
 import { dueLeftH, isComplete, whyText } from "../priority";
 import { estOf, fmtMin, spentMin, taskEst, taskSpent } from "../time";
 import { toolLabel, type Step, type Task } from "../schema";
+import { destOf, tileDest, tileDestHref } from "../stepcard";
 import type { StepStateKey, StepTile, TaskStateKey, TaskTile } from "@/components/canvas/ui";
 
 export { fmtDate, fmtTime } from "../clock";   // zawsze czas polski (serwer liczy w UTC)
@@ -61,9 +62,17 @@ export function stepTile(t: Task, s: Step, all: Task[], live: LiveActivity | nul
   const state = stepStateOf(t, s, all);
   // bieg mostka związany z tym krokiem (start_step), albo jedyny krok w toku w zadaniu, nad którym mostek pracuje
   const mine = !!live && state === "handoff" && (live.stepId === s.id || (!live.stepId && live.taskId === t.id && t.steps.filter((x) => x.status === "handoff").length === 1));
-  const deps = s.dependsOn.map((d) => t.steps.findIndex((x) => x.id === d) + 1).filter((n) => n > 0);
-  const meta = state === "handoff" && s.handoffAt
-    ? `Pracuje od ${fmtTime(s.handoffAt)}`
-    : `${deps.length ? "Po kroku " + deps.join(", ") : "Start od razu"} · ${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}${s.needsApproval ? " · zatw." : ""}`;
-  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, meta, pos: s.pos, dependsOn: s.dependsOn, activity: mine ? { text: live!.text, detail: live!.detail, since: live!.since } : null };
+  const m = tileMeta(t, s, state);
+  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, ...m, pos: s.pos, dependsOn: s.dependsOn, activity: mine ? { text: live!.text, detail: live!.detail, since: live!.since } : null };
+}
+
+// jedna dolna linia kafelka i wiersza listy: praca w toku → dokąd poszło albo pójdzie → plan (po czym, szacunek)
+export function tileMeta(t: Task, s: Step, state: StepStateKey): { meta: string; dest: string | null; destHref: string | null } {
+  if (state === "handoff" && s.handoffAt) return { meta: `Pracuje od ${fmtTime(s.handoffAt)}`, dest: null, destHref: null };
+  const d = destOf(s);
+  const dest = tileDest(d, s);
+  if (dest) return { meta: dest, dest, destHref: tileDestHref(d, s) };
+  const deps = s.dependsOn.map((x) => t.steps.findIndex((y) => y.id === x) + 1).filter((n) => n > 0);
+  const meta = `${deps.length ? "Po kroku " + deps.join(", ") : "Start od razu"} · ${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}${s.needsApproval && s.status !== "done" ? " · zatw." : ""}`;
+  return { meta, dest: null, destHref: null };
 }

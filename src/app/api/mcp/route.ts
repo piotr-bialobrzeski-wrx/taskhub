@@ -9,7 +9,7 @@ import { audienceOf, workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
 import { Blocks, ChangedFile, Fact, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
-import { sameTarget } from "@/lib/stepcard";
+import { doneChat, sameTarget } from "@/lib/stepcard";
 import { shortTitle } from "@/lib/auto";
 import { sql } from "@/lib/db";
 import { originOf, wwwAuthenticate } from "@/lib/oauth";
@@ -182,7 +182,7 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("set_blocks", {
-      title: "Ułóż panel kroku", description: "Zapisuje kartkę kroku z klocków: najpierw kontekst (thread = wątek jako dymki, mail = wątek maili z from/to/subject, comment = jeden komentarz z miejscem, facts, table = wiersze, list, media = zrzuty i pliki z opisem, link, free = markdown gdy nic nie pasuje, text = krótka notatka), potem jeden draft (to, co powstaje: target.app, target.where, target.url = adres miejsca, gdzie treść trafi lub co zmieni: ticket, wątek, kanał, dokument; Piotr otwiera go przyciskiem przed wysyłką, action, subject, body w Markdown: nagłówki #, **pogrubienie**, *kursywa*, listy - i 1., linki [tekst](url); Piotr widzi i edytuje je sformatowane, przy wysyłce get_task poda wersję w formacie aplikacji docelowej; dla wierszy arkusza columns + rows; dla promptu dla agenta target.app code). Każdy klocek kontekstu ma source {app, ref = miejsce, url}. Pokaż tylko to, co ważne dla tego kroku; długi wątek daj cały, aplikacja pokaże ostatnie 3. rememberFor: nazwa aplikacji źródłowej, jeśli ten układ ma być wzorem dla podobnych kroków.",
+      title: "Ułóż panel kroku", description: "Zapisuje kartkę kroku z klocków: najpierw kontekst (thread = wątek jako dymki, mail = wątek maili z from/to/subject, comment = jeden komentarz z miejscem, facts, table = wiersze, list, media = zrzuty i pliki z opisem, link, free = markdown gdy nic nie pasuje, text = krótka notatka), potem jeden draft (to, co powstaje: target.app, target.where, target.url = adres miejsca, gdzie treść trafi lub co zmieni: ticket, wątek, kanał, dokument; Piotr otwiera go przyciskiem przed wysyłką, action, subject, body w Markdown: nagłówki #, **pogrubienie**, *kursywa*, listy - i 1., linki [tekst](url); Piotr widzi i edytuje je sformatowane, przy wysyłce get_task poda wersję w formacie aplikacji docelowej; dla wierszy arkusza columns + rows; dla promptu dla agenta target.app code). Każdy klocek kontekstu ma source {app, ref = miejsce, url}. Pokaż tylko to, co ważne dla tego kroku; długi wątek daj cały, aplikacja pokaże ostatnie 3. rememberFor: nazwa aplikacji źródłowej, jeśli ten układ ma być wzorem dla podobnych kroków. target.app = klucz aplikacji albo nazwa połączenia z list_connections. Jeden szkic = jedna rzecz w miejscu docelowym (jeden ticket: tytuł w subject, opis w body, typ, priorytet, osoba i status w fields); columns + rows tylko dla wierszy arkusza.",
       inputSchema: z.object({ stepId: z.string(), blocks: Blocks, rememberFor: z.string().optional(), sameTargetOk: z.string().max(300).optional().describe("tylko gdy celowo drugi raz to samo miejsce i czynność (np. kolejny komentarz w tym samym tickecie): jednym zdaniem czemu") }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
@@ -256,7 +256,7 @@ function buildHandler(auth: repo.TokenAuth) {
         }
       }
       // w rozmowie tylko fakt; opis, pliki i adresy są na kartce kroku („Otwórz krok”)
-      await repo.addChat(ownerId, taskId, "agent", `Zrobione: „${shortTitle(st?.title ?? "", 70)}”.${r.closed ? " Zadanie ukończone." : ""}`, { stepId: a.stepId, link: externalLink(a.link) ?? undefined });
+      await repo.addChat(ownerId, taskId, "agent", st ? doneChat({ ...st, filePath: a.file ?? st.filePath }, r.closed) : `Zrobione.${r.closed ? " Zadanie ukończone." : ""}`, { stepId: a.stepId, link: externalLink(a.link) ?? undefined });
       // po wysyłce: inne otwarte kroki ze szkicem do tego samego miejsca są pewnie zbędne; agent sprawdza je teraz, a nie zostawia Piotrowi do zatwierdzenia
       const twins = st ? sameTarget(r.task.steps, st.id, st.blocks).open : [];
       const hint = twins.length ? ` Inne otwarte kroki ze szkicem do tego samego miejsca: ${twins.map((x) => `[${x.id}] „${x.title}”`).join(", ")}. Sprawdź, czy po tej wysyłce nie są zbędne; zbędne zamknij przez skip_step z powodem.` : "";

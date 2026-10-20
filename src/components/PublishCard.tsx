@@ -1,7 +1,9 @@
 // Karta publikacji: trzyma razem dokąd poleci treść (aplikacja, kanał/adresat, konto z rejestru połączeń), jak będzie wyglądać po wysłaniu
 // i przycisk decyzji. Zastępuje blok szkicu w panelu kroku; po wysłaniu zostaje jako zapis. Bez kolorów i logotypów aplikacji: tylko tokeny Task Hub.
 import type { Block, Step, Task } from "@/lib/schema";
-import { toolLabel } from "@/lib/schema";
+import { normalizeTool, openLabel, toolLabel } from "@/lib/schema";
+import { ACTION, approveLabel, destHint, destOf } from "@/lib/stepcard";
+import { fileName } from "@/lib/safeurl";
 import { fmtTime } from "@/lib/canvas/vm";
 import { toolColor } from "@/components/canvas/ui";
 import { Icon } from "@/components/canvas/ui";
@@ -31,9 +33,6 @@ export function cardModeOf(s: Step): CardMode | null {
   return null;
 }
 
-const ACTION: Record<string, string> = { send: "wyśle", reply: "odpowie", create: "utworzy", update: "zaktualizuje", comment: "skomentuje", commit: "zapisze commit", push: "wypchnie", other: "wykona" };
-// etykieta głównego przycisku: mówi, co się stanie po zatwierdzeniu
-const VERB: Record<string, string> = { send: "wyślij", reply: "wyślij", create: "utwórz", update: "dopisz", comment: "dodaj komentarz", commit: "zapisz commit", push: "opublikuj", other: "wykonaj" };
 const PROMPT_APPS = new Set(["claudeapp", "code", "claude"]);
 const COMMENT_APPS = new Set(["figma", "github", "clickup"]);
 
@@ -56,16 +55,20 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   const isCommit = action === "commit" || action === "push";
   const isPrompt = PROMPT_APPS.has(app), isRows = !!d?.rows?.length, isComment = action === "comment" || (COMMENT_APPS.has(app) && (action === "reply" || action === "send"));
   const stale = !!d?.stale;
-  const mainLabel = stays ? "Zatwierdź" : isPrompt ? "Zatwierdź i uruchom" : `Zatwierdź i ${isRows && action !== "create" ? "dopisz" : VERB[action] ?? "wyślij"}`;
+  const body = d?.body ?? s.output;
+  // dokąd idzie szkic (jedno źródło dla przycisku, linii pod nim i nagłówka po wysyłce); stary szkic bez bloku (sama treść) liczy się jak przy zgodzie
+  const dest = destOf(s) ?? (body?.trim() ? destOf({ ...s, blocks: [...(s.blocks ?? []), { type: "draft", target: { app: s.tool, action: "send" }, body, status: "proposed" }] }) : null);
+  const mainLabel = approveLabel(dest, { stays, rows: isRows });
+  const hint = stays ? null : destHint(dest);
+  // nagłówek: po wysyłce samo miejsce (słowo i godzina stoją w nagłówku „Teraz”); przed decyzją sama aplikacja (miejsce jest pod przyciskiem)
   const head = mode === "unsent" ? <><b>Nie wysłano</b> · zamknięty bez zatwierdzenia</>
-    : mode === "sent" ? <><b>{isPrompt ? "Wykonano" : isCommit ? "Opublikowano" : "Wysłano"}</b> · {name}{where ? ` · ${where}` : ""}</>
+    : mode === "sent" ? (dest?.kind === "file" ? <><b>Plik na Macu</b>{s.filePath ? ` · ${fileName(s.filePath)}` : where ? ` · ${where}` : ""}</> : <><b>{dest?.name ?? name}</b>{where ? ` · ${where}` : ""}</>)
     : mode === "sending" ? <><b>{isPrompt || isCommit ? "Claude pracuje" : "Claude wysyła"}</b> · {name}{where ? ` · ${where}` : ""}</>
     : stays ? <><b>Szkic</b> · zostaje w zadaniu</>
     : mode === "parked" ? <><b>{stale ? "Nieaktualny szkic" : "Odłożony szkic"}</b> · {name}{where ? ` · ${where}` : ""}</>
-    : <><b>{name}</b>{where ? ` · ${where}` : ""}{isPrompt ? " · uruchomi" : d && d.target.action !== "send" ? ` · ${ACTION[d.target.action] ?? d.target.action}` : ""}</>;
+    : <b>{dest?.name ?? name}</b>;
 
   // podgląd: jak to będzie wyglądać po drugiej stronie (wiadomość w wątku, e-mail z nadawcą i tematem, komentarz/ticket)
-  const body = d?.body ?? s.output;
   const who = app === "gmail" ? `Od: ${conn?.account ?? "Twoje konto"} · Do: ${where ?? "adresat z treści"}`
     : isCommit ? `${where ?? changes?.repo ?? name}${changes?.branch && !where?.includes(changes.branch) ? ` · ${changes.branch}` : ""} · ${action === "push" ? "push" : "commit"} · jako ${me}`
     : isComment ? `Komentarz w: ${where ?? name} · jako ${me}`
@@ -112,7 +115,8 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
         <span className="sp" />
         {mode === "proposed" || mode === "parked" ? (stays ? null : <ConnectionHead taskId={t.id} stepId={s.id} app={app} connectionId={s.connectionId} connections={connections} company={company} />)
           : account ? <span className="pub-acc">{account}</span> : null}
-        {mode === "sent" && sentHref ? <a className="btn ico" href={sentHref} target="_blank" rel="noopener" title={sentHref}>Otwórz w {name}<Icon k="ext" size={13} sw={1.6} /></a> : null}
+        {mode === "sent" && sentHref ? <a className="btn ico" href={sentHref} target="_blank" rel="noopener" title={sentHref}>{openLabel(normalizeTool(app))}<Icon k="ext" size={13} sw={1.6} /></a> : null}
+        {mode === "sent" && s.filePath ? <CopyButton text={s.filePath} label="Kopiuj ścieżkę" /> : null}
       </div>
       {stale ? <div className="note warn">Szkic sprzed zmiany zakresu: przed tym krokiem weszły nowe kroki, Claude przygotuje go od nowa, gdy je zrobi.</div> : null}
       {changes ? (
@@ -125,15 +129,17 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       {preview}
       {mode === "proposed" ? (
         <div className="actions">
-          <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} title={stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść`}>{mainLabel}</PendingButton></form>
+          <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} title={stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dest?.kind === "send" ? " " + dest.in : ""}`}>{mainLabel}</PendingButton></form>
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Szkic zostaje, krok wraca do zrobienia">Odłóż</PendingButton></form>
+          {hint ? <p className="pub-dest">{hint}</p> : null}
         </div>
       ) : mode === "parked" ? (
         <div className="actions">
-          <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"}>{mainLabel}</PendingButton></form>
+          <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} title={stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dest?.kind === "send" ? " " + dest.in : ""}`}>{mainLabel}</PendingButton></form>
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn" title="Zamknij krok bez wysyłania">Zamknij bez wysyłki</PendingButton></form>
+          {hint ? <p className="pub-dest">{hint}</p> : null}
         </div>
       ) : mode === "sending" ? (
         <div className="actions">

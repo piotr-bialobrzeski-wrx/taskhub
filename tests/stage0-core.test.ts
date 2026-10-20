@@ -343,7 +343,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("Etap 0: zgoda Piotra, tokeny bi
     s = await get(a.taskId, a.stepId);
     expect(s).toMatchObject({ status: "done", report: "commit abc1234 na main", link: "https://github.com/o/r/commit/abc1234" });
     expect(repo.draftOf(s)?.status).toBe("sent");
-    expect((await repo.listChat(owner, a.taskId)).at(-1)?.text).toContain("Zrobione:");
+    expect((await repo.listChat(owner, a.taskId)).at(-1)?.text).toContain("Wysłałem na Slacku:");
   });
 
   it("agent podnosi „wymaga zgody” dla szkicu do aplikacji zewnętrznej; linki kroków tylko http(s)", async () => {

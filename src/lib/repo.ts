@@ -6,6 +6,7 @@ import { type Company, type Connection, Blocks, type Block, type Fact, type Proj
 import { Q, roundQ, spentMin } from "./time";
 import { isHttpUrl, sanitizeBlocks } from "./safeurl";
 import { approvalSig, approvalValid, isGitDraft, isSendable, shownSig, type Draft } from "./agent/approval";
+import { doneChat } from "./stepcard";
 import { shortTitle } from "./auto";
 export { approvalSig, approvalValid, draftOf, isSendable } from "./agent/approval";
 
@@ -539,7 +540,7 @@ export async function completeSend(ownerId: string, stepId: string, sent: { summ
   const link = isHttpUrl(sent.link) ? sent.link.trim() : undefined;
   await completeStep(ownerId, task, step, { report: sent.summary?.trim().slice(0, 4000) || undefined, link });
   const closed = !!(await getTask(ownerId, task.id))?.doneAt;
-  await addChat(ownerId, task.id, "agent", `Zrobione: „${shortTitle(step.title, 70)}”.${closed ? " Zadanie ukończone." : ""}`, { stepId, link });
+  await addChat(ownerId, task.id, "agent", doneChat(step, closed), { stepId, link });
   return true;
 }
 

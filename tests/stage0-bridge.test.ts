@@ -35,6 +35,9 @@ describe("prompty mostka", () => {
     // paczka 7: plik na Macu zapisuje tylko bieg pracy v2; stary mostek nic o nim nie wie
     expect(p).toContain("sekcja PLIKI NA MACU"); expect(p).toContain("plik w Dysku Google"); expect(p).toContain("Foldery na pliki");
     expect(bridgePrompt()).not.toContain("PLIKI NA MACU"); expect(bridgePrompt()).not.toContain("plik w Dysku Google");
+    // rozpisanie w v2: dokąd ma trafić wynik (jeden ticket = jeden krok, jedno pytanie o miejsce) i plik na Macu jako krok file; v1 bez zmian
+    expect(p).toContain("jeden ticket"); expect(p).toContain("Plik na Macu"); expect(p).toContain("osobne tickety z innym tytułem");
+    expect(bridgePrompt()).toContain("nie krok „Zdecyduj”"); expect(bridgePrompt()).not.toContain("jeden ticket");
   });
   it("v2 bieg wysyłki: jeden szkic z get_task, tylko podany konektor, raz, przy wątpliwości leave_step", () => {
     const p = sendPrompt({ stepId: "S1", taskId: "T1", app: "slack", action: "reply", servers: ["claude.ai Slack"] });

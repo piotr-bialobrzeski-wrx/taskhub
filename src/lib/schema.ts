@@ -326,6 +326,13 @@ export const TOOL_LABELS: Record<string, string> = {
   whatsapp: "WhatsApp", sheets: "Arkusz Google", docs: "Dokument Google", file: "Plik na Macu",
 };
 export const toolLabel = (tool: string) => TOOL_LABELS[tool] ?? tool;
+// „w ClickUpie”, „na Slacku”: dokąd idzie treść, odmienione; nieznana aplikacja dostaje „· Nazwa”
+export const TOOL_IN: Record<string, string> = {
+  clickup: "w ClickUpie", slack: "na Slacku", gmail: "mailem", calendar: "w kalendarzu", github: "na GitHubie", figma: "w Figmie", whatsapp: "na WhatsAppie",
+  sheets: "w arkuszu Google", docs: "w dokumencie Google", file: "na Macu",
+};
+export const inApp = (app: string) => TOOL_IN[app] ?? `· ${toolLabel(app)}`;
+export const openLabel = (app: string) => "Otwórz " + (app === "gmail" ? "w Gmailu" : TOOL_IN[app] ?? "w " + toolLabel(app));
 export const TOOL_KEYS = Object.keys(TOOL_LABELS);
 // Klucz narzędzia przy zapisie: agent i formularze podają czasem etykietę („Claude Code”, „Ty”) albo alias (claude-code, e-mail);
 // bez tego ten sam agent liczył się jako dwa narzędzia, a chip kroku był szary. Nieznany napis zostaje (małymi literami).

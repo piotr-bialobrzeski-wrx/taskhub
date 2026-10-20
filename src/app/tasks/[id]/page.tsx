@@ -22,7 +22,7 @@ import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estTe
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed } from "@/lib/feed";
-import { foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink, type CardState } from "@/lib/stepcard";
+import { destOf, foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { Timer } from "@/components/Timer";
@@ -214,7 +214,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const { result, material } = splitBlocks(blocks);
   const form = s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined;
   const folds = foldsFor(state as CardState, mode);
-  const head = nowHeading(state as CardState, mode, s.dependsOn.length, waits);
+  const head = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined);
   const draft = s.blocks?.find((b) => b.type === "draft") as { body?: string } | undefined;
   // raport bez powtórki streszczenia bloku zmian ani treści szkicu; „Do potwierdzenia: …” jako osobna linia
   const lines = reportLines(s.report, [...result.map((b) => b.summary), draft?.body]);

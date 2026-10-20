@@ -1,7 +1,7 @@
 // Układ kanwy i modele kafelków: czysta logika, bez bazy.
 import { describe, it, expect } from "vitest";
 import { computePositions, gridFor, membership, OX, OY, STEP_SIZE, TASK_SIZE, GX, GY } from "@/lib/canvas/layout";
-import { stepStateOf, taskStateOf, dueOf } from "@/lib/canvas/vm";
+import { stepStateOf, taskStateOf, dueOf, stepTile } from "@/lib/canvas/vm";
 import { externalLink } from "@/lib/links";
 import { step, task } from "./helpers";
 
@@ -87,5 +87,33 @@ describe("linki kroków", () => {
     expect(externalLink("nie-url", app)).toBeUndefined();
     expect(externalLink("https://mail.google.com/mail/u/0/#inbox/abc", app)).toBe("https://mail.google.com/mail/u/0/#inbox/abc");
     expect(externalLink(null, app)).toBeUndefined();
+  });
+});
+
+describe("dolna linia kafelka: dokąd pójdzie albo poszło (paczka 7)", () => {
+  const clickup = { type: "draft", target: { app: "clickup", action: "create", where: "PirxeyOS / Full Backlog" }, subject: "[US] Podgląd ról", body: "x", status: "proposed" } as const;
+  it("szkic do zatwierdzenia pokazuje aplikację i miejsce; po wysyłce dokąd poszło, o której, z linkiem", () => {
+    const s1 = step({ tool: "clickup", status: "draft", needsApproval: true, blocks: [clickup] });
+    const t = task({ steps: [s1] });
+    const a = stepTile(t, s1, [t]);
+    expect(a.meta).toBe("ClickUp · PirxeyOS / Full Backlog"); expect(a.dest).toBe(a.meta); expect(a.destHref).toBeNull();
+    const s2 = step({ tool: "clickup", status: "done", needsApproval: true, doneAt: "2026-10-20T16:52:00Z", link: "https://app.clickup.com/t/abc", blocks: [{ ...clickup, status: "sent" }] });
+    const t2 = task({ steps: [s2] });
+    const b = stepTile(t2, s2, [t2]);
+    expect(b.meta).toBe("W ClickUpie · Full Backlog · 18:52"); expect(b.destHref).toBe("https://app.clickup.com/t/abc");
+  });
+  it("plik na Macu po zapisie; zrobiony krok ze zgodą bez szkicu nie ma „· zatw.”; praca w toku bez zmian", () => {
+    const f = step({ tool: "file", status: "done", filePath: "~/Documents/robocze/us-access-roles-podglad.md" });
+    const tf = task({ steps: [f] });
+    expect(stepTile(tf, f, [tf]).meta).toBe("Plik na Macu · us-access-roles-podglad.md");
+    const d = step({ tool: "slack", status: "done", needsApproval: true, estMin: 10 });
+    const td = task({ steps: [d] });
+    expect(stepTile(td, d, [td]).meta).toBe("Start od razu · 10 min");
+    const h = step({ tool: "slack", status: "handoff", handoffAt: "2026-10-20T08:00:00Z" });
+    const th = task({ steps: [h] });
+    expect(stepTile(th, h, [th]).meta).toBe("Pracuje od 10:00");
+    const r = step({ tool: "slack", status: "todo", needsApproval: true, estMin: 10 });
+    const tr = task({ steps: [r] });
+    expect(stepTile(tr, r, [tr]).meta).toBe("Start od razu · 10 min · zatw.");
   });
 });
