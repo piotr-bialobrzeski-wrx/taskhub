@@ -71,7 +71,7 @@ export const msgCount = (n: number) => `${n} ${n === 1 ? "wiadomość" : "wiadom
 export const yourMsgs = (n: number) => (n === 1 ? "Twoją wiadomość" : `Twoje ${n} wiadomości`);          // biernik: „odpowie na …”
 export const yourMsgsNom = (n: number) => (n === 1 ? "Twoja wiadomość" : `${n} Twoje wiadomości`);        // mianownik: dopisek w pasku
 const overMsgs = (n: number) => (n === 1 ? "Twoją wiadomością" : `Twoimi ${n} wiadomościami`);            // narzędnik: „pracuje nad …”
-const waiting = (n: number) => (n === 1 ? "1 wiadomość czeka" : `${n} wiadomości czekają`);
+export const waiting = (n: number) => (n === 1 ? "1 wiadomość czeka" : `${n} wiadomości czekają`);   // „3 wiadomości czekają”: kafelek zadania, pasek nad kanwą
 // stan kolejki: kto zajmie się wiadomościami bez odpowiedzi i kiedy. text = linia na karcie nad dokiem i w pasku nad kanwą (z czynnością mostka obok, gdy pracuje),
 // short = linia pod dymkiem w historii; activity = bieg mostka nad tym zadaniem (kropki i minuty)
 export type Queue = { n: number; kind: "working" | "busy" | "soon" | "held" | "auto"; who: string; text: string; short: string; activity: LiveActivity | null };

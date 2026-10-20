@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, STEP_SIZE } from "@/lib/canvas/layout";
 import { Icon, Lvl, ST_LABEL, TS_LABEL, ToolChip, plural, type GroupVM, type StepTile, type TaskStateKey, type TileActivity } from "./ui";
-import { msgCount, type Queue } from "@/lib/auto";
+import { waiting, type Queue } from "@/lib/auto";
 import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
 import { AddButton, AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
@@ -145,7 +145,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
               <span className="n-top"><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="st" style={{ marginLeft: "auto", background: "rgba(255,255,255,.2)", color: "#fff" }}>{TS_LABEL[t.state]}</span></span>
               <span className="n-title" style={{ WebkitLineClamp: 3 }}>{t.title}</span>
               <span className="n-meta">{t.activity ? <Activity text={t.activity.text} detail={null} since={t.activity.since} who="Claude" />
-                : t.pending ? <span title="Twoje wiadomości czekają na odpowiedź agenta">{msgCount(t.pending)} czeka · {t.progress.done}/{t.progress.all} kroków</span>
+                : t.pending ? <span title="Twoje wiadomości czekają na odpowiedź agenta">{waiting(t.pending)} · {t.progress.done}/{t.progress.all} kroków</span>
                 : `${t.progress.done}/${t.progress.all} kroków · ${t.estText}`}</span>
             </>) }}
           selected={sel} onSelect={(s) => { setSel(s); setConfirm(false); if (!s.size) setPanel(null); }} selectedGroup={selGroup} onSelectGroup={setSelGroup} renaming={renaming} onRename={(id, name) => setRenaming(name == null ? null : id)}
