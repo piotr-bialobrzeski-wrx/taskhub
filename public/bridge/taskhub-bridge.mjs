@@ -2,8 +2,11 @@
 // Mostek Task Hub (wzorzec z Project Hub). Ten sam mechanizm siedzi w aplikacji Task Hub na Maca; ten skrypt to wersja
 // bez aplikacji (serwer, Linux, testy): odpytuje Task Hub tanim HTTP (zero tokenów), a gdy czeka praca, uruchamia
 // Claude Code (`claude -p`) na subskrypcji z konektorem Task Hub i zgłasza przebieg. Bez zależności, Node 20+.
+// Zasady biegu (protokół v2): tryb dontAsk z listą dozwolonych narzędzi (Task Hub, czytanie w sieci; bez terminala, zapisu plików
+// i konektorów innych aplikacji), krótki token biegu od serwera w pliku 0600 (nigdy w argumentach), bez wysyłek: zatwierdzone
+// szkice wysyła aplikacja Task Hub na Maca osobnym biegiem wysyłki.
 //
-//   node taskhub-bridge.mjs --install --url https://… --token th_…   # macOS: usługa launchd startująca po zalogowaniu
+//   TASKHUB_BRIDGE_TOKEN=th_… node taskhub-bridge.mjs --install --url https://…   # macOS: usługa launchd startująca po zalogowaniu
 //   node taskhub-bridge.mjs                                          # praca w tym oknie (Ctrl-C kończy)
 //   node taskhub-bridge.mjs --once | --status | --uninstall | --help
 import { spawn, spawnSync } from "node:child_process";
@@ -12,11 +15,12 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const VERSION = "1";
+export const VERSION = "2";
 const HOME = os.homedir();
 const DIR = process.env.TASKHUB_BRIDGE_DIR || path.join(HOME, ".taskhub-bridge");
 const CONFIG = path.join(DIR, "config.json");
 const WORK = path.join(DIR, "work");          // katalog roboczy Claude Code: poza Dokumentami (TCC), bez cudzych ustawień projektu
+const RUN_DIR = path.join(DIR, "run");        // pliki jednego biegu (konfiguracja MCP z tokenem biegu): 0600, poza katalogiem roboczym, kasowane po biegu
 const LOCK = path.join(DIR, "bridge.lock");
 const LABEL = "com.taskhub.bridge";
 const PLIST = path.join(HOME, "Library", "LaunchAgents", `${LABEL}.plist`);
@@ -65,7 +69,7 @@ export function loadConfig(args = {}, env = process.env, file = readConfigFile()
     runner: String(args.runner || env.TASKHUB_RUNNER || file.runner || "claude"),     // claude | command
     command: Array.isArray(file.command) ? file.command : null,                        // własny silnik, np. Codex: ["codex","exec","--full-auto","{prompt}"]
     claude: String(args.claude || env.CLAUDE_BIN || file.claude || ""),
-    permission: String(args.permission || env.TASKHUB_PERMISSION || file.permission || "bypassPermissions"),
+    permission: permissionMode(args.permission || env.TASKHUB_PERMISSION || file.permission),
     model: String(args.model || env.TASKHUB_MODEL || file.model || ""),
     pollMs: Number(args.poll || env.TASKHUB_POLL_MS || file.pollMs) || 0,              // 0 = tyle, ile mówi serwer
     mock: args.mock === true || env.TASKHUB_MOCK === "1",
@@ -82,17 +86,37 @@ export function findClaude(cfg) {
   if (cfg.claude) return cfg.claude;
   return [path.join(HOME, ".local", "bin", "claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude"].find((p) => fs.existsSync(p)) || "claude";
 }
-// argumenty jednego biegu Claude Code: konektor Task Hub podany wprost (bez `claude mcp add`), bez pytań o zgodę (nikt nie siedzi przy klawiaturze)
-export function claudeArgs(prompt, cfg, mcp) {
-  const mcpConfig = { mcpServers: { "task-hub": { type: "http", url: mcp, headers: { Authorization: `Bearer ${cfg.token}` } } } };
-  const a = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", cfg.permission, "--mcp-config", JSON.stringify(mcpConfig)];
+// tryb bez pytań z listą dozwolonych narzędzi; bypassPermissions (i inne tryby, które przepuszczają wszystko) nie wchodzi w grę, także ze starego config.json
+const MODES = new Set(["dontAsk", "default", "plan"]);
+export const permissionMode = (p) => (MODES.has(String(p || "")) ? String(p) : "dontAsk");
+// dozwolone: Task Hub (token biegu) i czytanie w sieci; czytanie plików tylko w katalogu roboczym (domyślnie w dontAsk);
+// terminal i zapis plików zablokowane, konektory innych aplikacji nieładowane (--strict-mcp-config), więc nic nie wychodzi na zewnątrz
+export const ALLOWED_TOOLS = ["mcp__task-hub", "TodoWrite", "ToolSearch", "WebSearch", "WebFetch"];
+export const DISALLOWED_TOOLS = ["Bash", "Monitor", "PowerShell", "Edit", "Write", "NotebookEdit"];
+// dopisek do promptu: ten mostek nie ma folderów z kodem ani konektorów innych aplikacji
+export const SCRIPT_NOTE = "\n\nTen komputer uruchamia mostek bez aplikacji (skrypt): w tym biegu nie ma folderów z kodem ani konektorów aplikacji zewnętrznych. Kroki z kodem i kroki, które wymagają takich konektorów, oddaj przez leave_step z powodem „Zrobi to aplikacja Task Hub na Macu”.";
+// konfiguracja MCP biegu w pliku 0600 (katalog 0700, poza katalogiem roboczym): token nie trafia do argumentów procesu
+export function writeMcpConfig(dir, id, mcp, token) {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(dir, 0o700); } catch {}
+  const file = path.join(dir, `${String(id).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 60) || "bieg"}-mcp.json`);
+  fs.rmSync(file, { force: true });
+  fs.writeFileSync(file, JSON.stringify({ mcpServers: { "task-hub": { type: "http", url: mcp, headers: { Authorization: `Bearer ${token}` } } } }), { mode: 0o600, flag: "wx" });
+  return file;
+}
+// argumenty jednego biegu Claude Code: konektor Task Hub z pliku (bez `claude mcp add`), bez pytań o zgodę (nikt nie siedzi przy klawiaturze), tylko narzędzia z listy
+export function claudeArgs(prompt, cfg, mcpFile) {
+  const a = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", permissionMode(cfg.permission),
+    "--mcp-config", mcpFile, "--strict-mcp-config", "--allowedTools", ALLOWED_TOOLS.join(","), "--disallowedTools", DISALLOWED_TOOLS.join(",")];
   if (cfg.model) a.push("--model", cfg.model);
   return a;
 }
-export function runnerCommand(cfg, prompt, mcp) {
-  if (cfg.runner === "claude") return { bin: findClaude(cfg), args: claudeArgs(prompt, cfg, mcp), json: true };
+// własny silnik dostaje {prompt}, {mcp} i {mcpConfig} (plik 0600); token tylko w zmiennej środowiska TASKHUB_MCP_TOKEN, nigdy w argumentach
+export function runnerCommand(cfg, prompt, mcp, mcpFile = "") {
+  if (cfg.runner === "claude") return { bin: findClaude(cfg), args: claudeArgs(prompt, cfg, mcpFile), json: true };
   if (cfg.command?.length) {
-    const sub = (s) => String(s).replaceAll("{prompt}", prompt).replaceAll("{mcp}", mcp).replaceAll("{token}", cfg.token);
+    if (cfg.command.some((s) => String(s).includes("{token}"))) throw new Error("token nie idzie w argumentach komendy: użyj {mcpConfig} (plik z konfiguracją MCP) albo zmiennej środowiska TASKHUB_MCP_TOKEN");
+    const sub = (s) => String(s).replaceAll("{prompt}", prompt).replaceAll("{mcp}", mcp).replaceAll("{mcpConfig}", mcpFile);
     return { bin: sub(cfg.command[0]), args: cfg.command.slice(1).map(sub), json: false };
   }
   throw new Error(`nieznany silnik „${cfg.runner}”: claude albo własna komenda w config.json ("runner": "command", "command": [...])`);
@@ -146,9 +170,9 @@ function labelTool(b) {
   return hint ? `${name}: ${String(hint).slice(0, 60)}` : name;
 }
 // jeden proces silnika: stream-json z claude (wynik w zdarzeniu result), zwykły tekst z własnej komendy
-export function runProcess(bin, args, { cwd, onStep, maxMs, json }) {
+export function runProcess(bin, args, { cwd, onStep, maxMs, json, env: extra = {} }) {
   return new Promise((resolve) => {
-    const env = { ...process.env };
+    const env = { ...process.env, ...extra };
     delete env.ANTHROPIC_API_KEY;                      // subskrypcja, nie faktura za tokeny
     env.PATH = [path.join(HOME, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", env.PATH || "/usr/bin:/bin"].join(":");
     let child;
@@ -184,7 +208,8 @@ export function runProcess(bin, args, { cwd, onStep, maxMs, json }) {
   });
 }
 export async function runOnce(cfg) {
-  const { status, data } = await api(cfg, "POST", "/api/bridge/run", { bridge: cfg.name });
+  // bieg pracy (v2): serwer daje prompt bez wysyłek i krótki token biegu; wysyłki robi aplikacja na Macu osobnym biegiem
+  const { status, data } = await api(cfg, "POST", "/api/bridge/run", { bridge: cfg.name, v: Number(VERSION), kind: "work" });
   if (status === 409) { log(`bieg zajęty (${data.run?.bridge ?? "inny mostek"}), czekam`); return "busy"; }
   if (status !== 200) throw new Error(`run → HTTP ${status} ${data.error || ""}`);
   const id = data.run.id;
@@ -192,12 +217,18 @@ export async function runOnce(cfg) {
   log(`▶ bieg ${id.slice(0, 8)}`);
   const touch = (note) => api(cfg, "PATCH", `/api/bridge/run/${id}`, note === undefined ? {} : { note }).catch(() => {});
   const keep = setInterval(() => touch(), 30_000);
-  let res;
+  let res, mcpFile = "";
   try {
     if (cfg.mock) { await touch("(próba) udaję pracę"); await sleep(1500); res = { ok: true, reply: "(próba) mostek działa, Claude nie był uruchamiany" }; }
-    else { const { bin, args, json } = runnerCommand(cfg, data.prompt, data.mcp); res = await runProcess(bin, args, { cwd: WORK, onStep: (s) => { log("  ·", s); touch(s); }, maxMs: (data.maxMinutes || 45) * 60_000, json }); }
+    else {
+      const token = data.token || cfg.token;   // starszy serwer nie daje tokenu biegu: wtedy token mostka, jak dawniej
+      mcpFile = writeMcpConfig(RUN_DIR, id, data.mcp, token);
+      const { bin, args, json } = runnerCommand(cfg, String(data.prompt) + SCRIPT_NOTE, data.mcp, mcpFile);
+      const env = cfg.runner === "claude" ? {} : { TASKHUB_MCP_URL: data.mcp, TASKHUB_MCP_TOKEN: token, TASKHUB_MCP_CONFIG: mcpFile };
+      res = await runProcess(bin, args, { cwd: WORK, onStep: (s) => { log("  ·", s); touch(s); }, maxMs: (data.maxMinutes || 45) * 60_000, json, env });
+    }
   } catch (e) { res = { ok: false, error: e.message }; }
-  finally { clearInterval(keep); }
+  finally { clearInterval(keep); if (mcpFile) { try { fs.rmSync(mcpFile, { force: true }); } catch {} } }
   let outcome = "done", note = String(res.reply || "").slice(0, 600);
   if (!res.ok) {
     note = String(res.error || "").slice(0, 600);
@@ -211,7 +242,7 @@ export async function runOnce(cfg) {
   return outcome;
 }
 export async function loop(cfg, { once = false } = {}) {
-  let lastErr = "";
+  let lastErr = "", lastSends = 0;
   for (;;) {
     let wait = cfg.pollMs || 15_000;
     try {
@@ -219,7 +250,11 @@ export async function loop(cfg, { once = false } = {}) {
       const w = await poll(cfg);
       if (!cfg.pollMs && w.pollMs) wait = w.pollMs;
       lastErr = "";
-      if (w.pending > 0 && !w.run && !state.until) {
+      // v2: tylko praca (work); szkice do wysłania (sends) czekają na aplikację na Macu, ten skrypt ich nie wysyła
+      const todo = typeof w.work === "number" ? w.work : w.pending;
+      if (w.sends !== lastSends && w.sends > 0) log(`zatwierdzone szkice do wysłania: ${w.sends} (wyśle je aplikacja Task Hub na Macu)`);
+      lastSends = w.sends || 0;
+      if (todo > 0 && !w.run && !state.until) {
         const o = await runOnce(cfg);
         if (o === "done" && !once) continue;        // od razu sprawdź, czy coś jeszcze czeka
       }
@@ -249,7 +284,7 @@ function claimLock() {
 // ---------- polecenia ----------
 function launchctl(...a) { return spawnSync("launchctl", a, { encoding: "utf8" }); }
 async function install(cfg, script) {
-  if (!cfg.url || !cfg.token) throw new Error("podaj --url i --token (token mostka z Ustawień Task Hub)");
+  if (!cfg.url || !cfg.token) throw new Error("podaj --url i token mostka z Ustawień Task Hub (zmienna TASKHUB_BRIDGE_TOKEN albo --token)");
   const w = await poll(cfg);
   log(`połączono z ${cfg.url}: czeka ${w.pending} ${w.pending === 1 ? "rzecz" : "rzeczy"}`);
   const bin = findClaude(cfg);
@@ -280,7 +315,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const script = process.argv[1];
   if (args.help) {
-    console.log(`Mostek Task Hub (v${VERSION})\n  --install --url URL --token TOKEN   zainstaluj jako usługę (macOS) i uruchom\n  --uninstall                         wyłącz usługę\n  --status                            stan usługi i log\n  --once                              jeden przebieg (test)\n  --mock                              bez Claude (sprawdzenie połączenia)\n  bez argumentów                      praca w tym oknie\nopcje: --name NAZWA --claude ŚCIEŻKA --runner claude|command --permission TRYB --model MODEL --poll MS`);
+    console.log(`Mostek Task Hub (v${VERSION})\n  --install --url URL                 zainstaluj jako usługę (macOS) i uruchom (token w TASKHUB_BRIDGE_TOKEN)\n  --uninstall                         wyłącz usługę\n  --status                            stan usługi i log\n  --once                              jeden przebieg (test)\n  --mock                              bez Claude (sprawdzenie połączenia)\n  bez argumentów                      praca w tym oknie\nopcje: --name NAZWA --claude ŚCIEŻKA --runner claude|command --permission dontAsk|default|plan --model MODEL --poll MS`);
     return;
   }
   const cfg = loadConfig(args);
@@ -290,6 +325,7 @@ async function main() {
   if (!cfg.url || !cfg.token) throw new Error("brak adresu albo tokenu: uruchom z --install --url … --token … (token mostka z Ustawień Task Hub)");
   fs.mkdirSync(WORK, { recursive: true });
   claimLock();
+  try { for (const f of fs.readdirSync(RUN_DIR)) fs.rmSync(path.join(RUN_DIR, f), { force: true }); } catch {}   // pliki biegów sprzed awarii
   log(`mostek Task Hub v${VERSION} → ${cfg.url} · komputer: ${cfg.name} · silnik: ${cfg.runner}${cfg.mock ? " (próba, bez Claude)" : ""}`);
   await loop(cfg, { once: args.once === true });
 }

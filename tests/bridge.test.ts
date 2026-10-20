@@ -1,6 +1,8 @@
 // Mostek na komputerze: skrypt (czyste funkcje) i serwer (token mostka, puls, biegi, punkty wejścia /api/bridge). Część z bazą pomijana bez TEST_DATABASE_URL.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { parseLimit, parseAuth, claudeArgs, loadConfig, plistFor, runnerCommand, parseArgs, runProcess } from "../public/bridge/taskhub-bridge.mjs";
+import { parseLimit, parseAuth, claudeArgs, loadConfig, plistFor, runnerCommand, parseArgs, runProcess, writeMcpConfig, permissionMode, ALLOWED_TOOLS } from "../public/bridge/taskhub-bridge.mjs";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const DB = !!process.env.TEST_DATABASE_URL;
@@ -16,20 +18,38 @@ describe("mostek: skrypt", () => {
     expect(parseAuth("OAuth token has expired")).toBe(true);
     expect(parseAuth("ok")).toBe(false);
   });
-  it("argumenty claude: prompt, stream-json, tryb bez pytań, konektor Task Hub z tokenem", () => {
+  it("argumenty claude: prompt, stream-json, dontAsk z listą narzędzi, konektor Task Hub z pliku 0600 (token nigdy w argumentach)", () => {
     const cfg = loadConfig({ url: "https://x.app/", token: "th_1" }, {}, {});
-    const a = claudeArgs("PROMPT", cfg, "https://x.app/api/mcp");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "th-run-"));
+    const file = writeMcpConfig(path.join(dir, "run"), "bieg-1", "https://x.app/api/mcp", "th_run");
+    const a = claudeArgs("PROMPT", cfg, file);
     expect(a.slice(0, 2)).toEqual(["-p", "PROMPT"]);
     expect(a).toContain("stream-json");
-    expect(a).toContain("--permission-mode");
-    const mcp = JSON.parse(a[a.indexOf("--mcp-config") + 1]);
-    expect(mcp.mcpServers["task-hub"]).toEqual({ type: "http", url: "https://x.app/api/mcp", headers: { Authorization: "Bearer th_1" } });
+    expect(a[a.indexOf("--permission-mode") + 1]).toBe("dontAsk");
+    expect(a[a.indexOf("--mcp-config") + 1]).toBe(file);
+    expect(a).toContain("--strict-mcp-config");
+    expect(a[a.indexOf("--allowedTools") + 1].split(",")).toEqual(ALLOWED_TOOLS);
+    expect(a[a.indexOf("--disallowedTools") + 1].split(",")).toEqual(expect.arrayContaining(["Bash", "Edit", "Write"]));
+    expect(a.join(" ")).not.toMatch(/th_1|th_run|bypassPermissions/);
+    expect(JSON.parse(fs.readFileSync(file, "utf8")).mcpServers["task-hub"]).toEqual({ type: "http", url: "https://x.app/api/mcp", headers: { Authorization: "Bearer th_run" } });
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+    fs.rmSync(dir, { recursive: true, force: true });
     expect(cfg.url).toBe("https://x.app");
     expect(cfg.runner).toBe("claude");
   });
-  it("własny silnik (np. Codex) dostaje prompt, adres i token przez podstawienie", () => {
+  it("tryb uprawnień: bypassPermissions ze starego config.json albo argumentu zamienia się na dontAsk", () => {
+    expect(loadConfig({}, {}, { url: "https://x.app", token: "t", permission: "bypassPermissions" }).permission).toBe("dontAsk");
+    expect(loadConfig({ permission: "bypassPermissions" }, {}, {}).permission).toBe("dontAsk");
+    expect(permissionMode("acceptEdits")).toBe("dontAsk");
+    expect(permissionMode("plan")).toBe("plan");
+    expect(loadConfig({}, {}, {}).permission).toBe("dontAsk");
+  });
+  it("własny silnik (np. Codex) dostaje prompt, adres i plik konfiguracji przez podstawienie, token tylko w zmiennej środowiska", () => {
     const cfg = loadConfig({}, {}, { url: "https://x.app", token: "th_2", runner: "command", command: ["codex", "exec", "--full-auto", "{prompt}"] });
     expect(runnerCommand(cfg, "P", "https://x.app/api/mcp")).toEqual({ bin: "codex", args: ["exec", "--full-auto", "P"], json: false });
+    expect(runnerCommand({ ...cfg, command: ["eng", "--mcp", "{mcpConfig}", "{prompt}"] }, "P", "m", "/r/1-mcp.json").args).toEqual(["--mcp", "/r/1-mcp.json", "P"]);
+    expect(() => runnerCommand({ ...cfg, command: ["eng", "--token", "{token}"] }, "P", "m")).toThrow(/TASKHUB_MCP_TOKEN/);   // token nie idzie w argumentach
     expect(() => runnerCommand({ ...cfg, command: null }, "P", "m")).toThrow(/silnik/);
   });
   it("usługa launchd woła node bezpośrednio, startuje po zalogowaniu, bez klucza API", () => {
@@ -164,10 +184,11 @@ describe.skipIf(!DB)("mostek: serwer", async () => {
     expect(await repo.closeIfDone(owner, t.id)).toBe(true);
     expect((await repo.getTask(owner, t.id))!.doneAt).not.toBeNull();
     expect(await repo.closeIfDone(owner, t.id)).toBe(false);                  // już zamknięte
-    // agent dopisuje kroki do zamkniętego zadania: wraca do pracy, a zatwierdzony szkic trafia do listy pracy
+    // agent dopisuje kroki do zamkniętego zadania: wraca do pracy, a zatwierdzony (kliknięciem Piotra) szkic trafia do listy pracy starego mostka
     const [pub] = await repo.addSteps(t.id, [{ title: "Opublikuj opis", tool: "clickup", needsApproval: true }]);
     expect((await repo.getTask(owner, t.id))!.doneAt).toBeNull();
-    await repo.updateStep(pub.id, { status: "handoff", prevStatus: "draft", handoffAt: new Date().toISOString(), blocks: [{ type: "draft", target: { app: "clickup", action: "update" }, body: "x", status: "approved" }] });
+    await repo.updateStep(pub.id, { status: "draft", blocks: [{ type: "draft", target: { app: "clickup", action: "update" }, body: "x", status: "proposed" }] });
+    expect(await repo.approveDraft(owner, pub.id)).toBe(true);
     expect((await workSummary(owner, { peek: true })).text).toContain("ZATWIERDZONE SZKICE DO WYSŁANIA");
     // zatwierdzony szkic, przed którym jest niezrobiony krok, czeka z wysyłką
     const [pre] = await repo.addSteps(t.id, [{ title: "Najpierw to", tool: "clickup" }]);

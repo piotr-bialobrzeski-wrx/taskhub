@@ -5,6 +5,7 @@ import { Blocks, Fact, type Block, type Rule, type Step, type Task, toolLabel, E
 import { Ai } from "../ai";
 import * as repo from "../repo";
 import { capText, rulesText } from "./context";
+import { coerceAgentDrafts } from "./approval";
 
 export const ComposeResult = z.object({
   blocks: Blocks,
@@ -35,7 +36,9 @@ export function composeStatic(step: Step, facts: Fact[], attachments: repo.Attac
   if (step.output) blocks.push(step.needsApproval && step.status !== "done"
     ? { type: "draft", target: { app: step.tool, action: "send" }, body: step.output, status: "proposed" }
     : { type: "text", title: step.status === "done" ? "Wynik" : "Szkic", body: step.output });
-  const media = attachments.filter((a) => a.url).map((a) => ({ kind: a.kind, url: a.url!, name: a.name ?? undefined, caption: a.caption ?? undefined, analysis: a.analysis ?? undefined, mime: a.mime ?? undefined }));
+  // SVG (także zapisane dawniej jako obrazek) to plik do pobrania: /api/files nie pokazuje go w przeglądarce
+  const svg = (a: repo.Attachment) => a.mime === "image/svg+xml" || /\.svg$/i.test(a.name ?? "");
+  const media = attachments.filter((a) => a.url).map((a) => ({ kind: svg(a) && a.kind === "image" ? "file" as const : a.kind, url: a.url!, name: a.name ?? undefined, caption: a.caption ?? undefined, analysis: a.analysis ?? undefined, mime: a.mime ?? undefined }));
   if (media.length) blocks.push({ type: "media", items: media });
   return blocks;
 }
@@ -65,7 +68,8 @@ ${step.needsApproval ? "Ten krok wysyła coś na zewnątrz: przygotuj blok draft
 ${attachments.length ? `ZAŁĄCZNIKI ZADANIA:\n${attachments.map((a) => `- ${a.kind} ${a.name ?? ""} ${a.url ?? "(bez adresu)"}${a.analysis ? ": " + a.analysis.slice(0, 300) : ""}`).join("\n")}\n` : ""}${memory ? `OSTATNI UKŁAD DLA ${toolLabel(step.tool)} (zachowaj kolejność i rodzaje bloków, jeśli pasują):\n${JSON.stringify(memory.map((b) => b.type))}\n` : ""}
 Złóż panel tego kroku.`;
   const r = await deps.ai.json({ system: SYSTEM, prompt, schema: ComposeResult, effort: "medium" });
-  const blocks = r.blocks.slice(0, 6);
+  // szkic z modelu jest zawsze propozycją (migawki z zewnątrz mogą podsunąć „approved”); zgodę daje tylko Piotr
+  const blocks = coerceAgentDrafts(step, r.blocks.slice(0, 6));
   await Promise.all([
     repo.updateStep(step.id, { blocks }),
     repo.replaceFacts({ stepId: step.id }, r.facts.map((f) => ({ ...f, source: f.source ?? { app: step.tool } }))),

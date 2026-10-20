@@ -28,7 +28,7 @@ Testy: `npm test` (testy bazy odpalają się tylko z `TEST_DATABASE_URL=postgres
 ## Wdrożenie: Supabase + Vercel (darmowe plany wystarczą)
 
 1. **Supabase** (baza): [supabase.com](https://supabase.com) → New project, region Frankfurt (eu-central-1), zapisz hasło bazy; w sekcji Security wyłącz Data API (aplikacja łączy się bezpośrednio). Kliknij **Connect** → zakładka **Transaction pooler** → skopiuj URI, wstaw hasło w miejsce `[YOUR-PASSWORD]`; to jest `DATABASE_URL`. „Direct connection” nie działa z Vercela (tylko IPv6).
-2. **Migracje** uruchamiają się same przy każdym buildzie (`npm run build` najpierw wykonuje `migrate --if-configured`). Skrypt zapisuje w tabeli `schema_migrations`, które pliki już poszły, więc kolejne wdrożenia niczego nie psują. Lokalnie: `DATABASE_URL=... npm run db:migrate`. Warstwa wektorowa (pgvector) jest opcjonalna: gdy rozszerzenia nie ma, ta jedna migracja jest pomijana z ostrzeżeniem.
+2. **Migracje** uruchamiają się same przy buildzie produkcyjnym (`npm run build` najpierw wykonuje `migrate --if-configured`); build podglądu (Preview) na Vercelu je pomija i zostawia o tym wpis w logu. Wdrażaj produkcję pushem na `main`: „Promote to Production” gotowego podglądu nie buduje od nowa, więc nowe migracje by nie poszły. Skrypt zapisuje w tabeli `schema_migrations`, które pliki już poszły, więc kolejne wdrożenia niczego nie psują. Lokalnie: `DATABASE_URL=... npm run db:migrate`. Warstwa wektorowa (pgvector) jest opcjonalna: gdy rozszerzenia nie ma, ta jedna migracja jest pomijana z ostrzeżeniem.
 3. **Vercel** (hosting): [vercel.com](https://vercel.com) → Add New Project → wskaż repo GitHub. W *Environment Variables* wpisz zmienne z `.env.example` (`DATABASE_URL`, `TASKHUB_OWNER_EMAIL`, `TASKHUB_PASSWORD`, `TASKHUB_SECRET`, opcjonalnie klucz `ANTHROPIC_API_KEY` i/lub `OPENAI_API_KEY` dla agenta wbudowanego; `APP_URL` można dodać po pierwszym wdrożeniu, gdy znasz adres). Deploy. Każdy push na `main` wdraża nową wersję. Funkcje działają we Frankfurcie (`vercel.json`), blisko bazy.
 4. Wejdź na adres aplikacji, zaloguj się hasłem z `TASKHUB_PASSWORD`.
 
@@ -52,7 +52,7 @@ Typowy przebieg: w Task Hub klikasz „Zrób w Claude” przy kroku → otwiera 
 
 ## Kopie zapasowe
 
-Supabase robi codzienne kopie na płatnych planach; na Free zrób własne: `pg_dump "$DATABASE_URL" > taskhub-$(date +%F).sql` z crona na własnym komputerze albo z GitHub Actions z sekretem. Przywracanie: `psql "$DATABASE_URL" < plik.sql`.
+Co noc `.github/workflows/backup.yml` robi kopię bazy (`pg_dump`), szyfruje ją kluczami age i wysyła do Backblaze B2, a drugi krok od razu próbuje ją odtworzyć w czystym Postgresie. Działa dopiero po dodaniu sekretów w GitHubie (Settings → Secrets and variables → Actions); ich listę i opis ma nagłówek tego pliku. Bez nich przebieg kończy się uwagą „pominięta”. Ręczne odtworzenie: `age -d -i klucz.txt -o taskhub.dump plik.dump.age`, potem `pg_restore --no-owner --no-privileges -d "$DATABASE_URL" taskhub.dump`.
 
 ## Układ kodu
 

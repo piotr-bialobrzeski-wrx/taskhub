@@ -5,6 +5,8 @@ import { answerBlockForm } from "@/app/actions";
 import { Markdown } from "@/lib/markdown";
 import { plural } from "@/components/canvas/ui";
 import { GrowTextarea } from "@/components/GrowTextarea";
+import { CopyButton } from "@/components/CopyButton";
+import { isHttpUrl, isLocalPath, isMediaUrl, safeHref } from "@/lib/safeurl";
 
 // gdzie blok pytania ma zapisać odpowiedź (panel kroku); bez tego pytanie jest tylko do odczytu
 export type BlockForm = { taskId: string; stepId: string };
@@ -15,13 +17,14 @@ export const toolColor = (app: string) => TOOL_COLORS[app] ?? "var(--sub)";
 // nagłówek klocka kontekstu: kropka aplikacji, nazwa, miejsce (ref), licznik, „Otwórz” gdy jest adres; ten sam dla wątku, maila, komentarza, tabeli i wolnej treści
 export function SrcHead({ s, title, meta }: { s?: Provenance; title?: string; meta?: string }) {
   if (!s && !title && !meta) return null;
+  const href = safeHref(s?.url);   // adresy z danych tylko przez safeHref: javascript:, file:, taskhub: zostają bez linku
   return (
     <div className="src-h">
       {s ? <><span className="tool-dot" style={{ ["--c" as string]: toolColor(s.app) }} /><b>{toolLabel(s.app)}</b></> : null}
       {title ? <span>{s ? " · " : ""}{title}</span> : s?.ref ? <span> · {s.ref}</span> : null}
       {meta ? <span> · {meta}</span> : null}
       <span className="sp" />
-      {s?.url ? <a className="chip" href={s.url} target="_blank" rel="noopener">Otwórz</a> : null}
+      {href ? <a className="chip" href={href} target="_blank" rel="noopener">Otwórz</a> : null}
     </div>
   );
 }
@@ -32,7 +35,8 @@ export function Source({ s }: { s?: Provenance }) {
   if (!s) return null;
   const label = `${toolLabel(s.app)}${s.ref ? ` · ${s.ref}` : ""}`;
   const inner = <><span className="tool-dot" style={{ ["--c" as string]: toolColor(s.app) }} /><span>{label}</span></>;
-  return s.url ? <a className="src chip" href={s.url} target="_blank" rel="noopener" title={label}>{inner}</a> : <span className="src chip" title={label}>{inner}</span>;
+  const href = safeHref(s.url);
+  return href ? <a className="src chip" href={href} target="_blank" rel="noopener" title={label}>{inner}</a> : <span className="src chip" title={label}>{inner}</span>;
 }
 const FILE_STATUS: Record<string, string> = { added: "nowy", modified: "zmieniony", deleted: "usunięty", renamed: "przeniesiony" };
 
@@ -124,34 +128,42 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
     case "list":
       return (
         <div className="block kctx">{b.title ? <SrcHead title={b.title} /> : null}
-          <ul className="list">{b.items.map((it, i) => <li key={i} style={{ textDecoration: it.done ? "line-through" : "none" }}>{it.url ? <a href={it.url} target="_blank" rel="noopener">{it.title}</a> : it.title}{it.note ? <span className="sub"> · {it.note}</span> : null} <Source s={it.source} /></li>)}</ul>
+          <ul className="list">{b.items.map((it, i) => { const href = safeHref(it.url); return <li key={i} style={{ textDecoration: it.done ? "line-through" : "none" }}>{href ? <a href={href} target="_blank" rel="noopener">{it.title}</a> : it.title}{it.note ? <span className="sub"> · {it.note}</span> : null} <Source s={it.source} /></li>; })}</ul>
         </div>
       );
     case "media":
       return (
         <div className="block">{b.title ? <h4>{b.title}</h4> : null}
           <div className="media">
-            {b.items.map((m, i) => (
+            {b.items.map((m, i) => {
+              // obrazek tylko z http(s) albo pliku Task Hub; SVG nie jest wyświetlany w miejscu (serwer oddaje go jako plik do pobrania)
+              const href = safeHref(m.url), img = m.kind === "image" && isMediaUrl(m.url) && !/\.svg$/i.test(m.name ?? m.url);
+              const chip = <span>{m.kind === "file" ? "📎" : "🔗"} {m.name ?? m.url}</span>;
+              return (
               <div key={i}>
-                {m.kind === "image" ? <a href={m.url} target="_blank" rel="noopener"><img src={m.url} alt={m.caption ?? m.name ?? ""} /></a> : <a className="chip" href={m.url} target="_blank" rel="noopener" title={m.name ?? m.url}><span>{m.kind === "file" ? "📎" : "🔗"} {m.name ?? m.url}</span></a>}
+                {img ? <a href={href} target="_blank" rel="noopener"><img src={m.url.trim()} alt={m.caption ?? m.name ?? ""} /></a> : href ? <a className="chip" href={href} target="_blank" rel="noopener" title={m.name ?? m.url}>{chip}</a> : <span className="chip" title={m.name ?? m.url}>{chip}</span>}
                 {m.caption ? <div className="cap">{m.caption}</div> : null}
                 {m.analysis ? <details><summary className="sub">Analiza agenta</summary><p className="sub" style={{ whiteSpace: "pre-wrap" }}>{m.analysis}</p></details> : null}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       );
     case "link":
-      return <div className="links">{b.links.map((l, i) => <a key={i} className="btn" href={l.url} target="_blank" rel="noopener">{l.source ? <span className="tool-dot" style={{ ["--c" as string]: toolColor(l.source.app) }} /> : null}{l.title ?? l.url} ↗</a>)}</div>;
+      return <div className="links">{b.links.map((l, i) => {
+        const href = safeHref(l.url), dot = l.source ? <span className="tool-dot" style={{ ["--c" as string]: toolColor(l.source.app) }} /> : null;
+        return href ? <a key={i} className="btn" href={href} target="_blank" rel="noopener">{dot}{l.title ?? l.url} ↗</a> : <span key={i} className="btn" title={l.url}>{dot}{l.title ?? l.url}</span>;
+      })}</div>;
     case "changes": {
       // zmiany w kodzie: repozytorium i gałąź, podgląd, lista plików z diffem po rozwinięciu (karta publikacji prowadzi tu przez „Zobacz zmiany”)
-      const n = b.files.length, http = b.preview && /^https?:\/\//.test(b.preview) ? b.preview : undefined;
+      const n = b.files.length, http = isHttpUrl(b.preview) ? b.preview.trim() : undefined;
       const place = [b.repo, b.branch].filter(Boolean).join(" · ") || undefined;
       return (
         <div className="block kctx" id={form ? "zm-" + form.stepId : undefined}>
           <SrcHead s={{ app: "github", ref: place, url: http }} title={b.title ?? "Zmiany w kodzie"} meta={`${n} ${plural(n, "plik", "pliki", "plików")}`} />
           {b.summary ? <p>{b.summary}</p> : null}
-          {b.preview && !http ? <p className="sub">Podgląd: <code>{b.preview}</code></p> : null}
+          {b.preview && !http ? <p className="sub">Podgląd: <code>{b.preview}</code>{isLocalPath(b.preview) ? <> <CopyButton text={b.preview.trim()} label="Kopiuj ścieżkę" /></> : null}</p> : null}
           {n ? (
             <div className="files">{b.files.map((f, i) => (
               <details key={i} className="file">

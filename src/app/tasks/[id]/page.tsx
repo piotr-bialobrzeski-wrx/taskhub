@@ -11,6 +11,7 @@ import { calEst, calibrationFor, estOf, fmtMin, spentMin, taskEst, taskSpent, to
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
+import { isHttpUrl, safeHref } from "@/lib/safeurl";
 import { allDoneWaitText, bridgeHold, bridgeLabel, busyWith, noStepsWho, queueWho, yourMsgsNom, type Worker } from "@/lib/auto";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import { liveActivity, liveKey } from "@/lib/live";
@@ -127,12 +128,16 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       ) : null}
       {attachments.length ? (
         <div><div className="lbl">Grafiki i pliki</div>
-          <div className="gal">{attachments.map((a) => (
+          <div className="gal">{attachments.map((a) => {
+            // adres pliku tylko http(s) albo /api/files/<id>; SVG nie jako obrazek (serwer oddaje go do pobrania), tylko jako plik
+            const href = safeHref(a.url), img = a.kind === "image" && !!href && !/svg/i.test(a.mime ?? "") && !/\.svg$/i.test(a.name ?? "");
+            return (
             <div key={a.id} className="gal-item">
-              {a.kind === "image" && a.url ? <a href={a.url} target="_blank" rel="noopener"><img src={a.url} alt={a.caption ?? a.name ?? ""} /></a> : <div className="ph">{a.kind === "file" ? "Plik" : "Link"}</div>}
-              <div><b>{a.caption ?? a.name ?? "Załącznik"}</b>{a.url && a.kind !== "image" ? <a className="chip" href={a.url} target="_blank" rel="noopener">{a.name ?? a.url}</a> : null}{a.analysis ? <details><summary>Analiza agenta</summary><div className="an">{a.analysis}</div></details> : null}</div>
+              {img ? <a href={href} target="_blank" rel="noopener"><img src={href} alt={a.caption ?? a.name ?? ""} /></a> : <div className="ph">{a.kind === "link" ? "Link" : "Plik"}</div>}
+              <div><b>{a.caption ?? a.name ?? "Załącznik"}</b>{href && !img ? <a className="chip" href={href} target="_blank" rel="noopener">{a.name ?? a.url}</a> : null}{a.analysis ? <details><summary>Analiza agenta</summary><div className="an">{a.analysis}</div></details> : null}</div>
             </div>
-          ))}</div>
+            );
+          })}</div>
         </div>
       ) : null}
       {t.dependsOn.length ? (
@@ -230,7 +235,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           : <span className="working" title={prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />Claude pracuje{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>)
           : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
         {meta ? <small>· {meta}</small> : null}
-        {target ? <><span className="sp" /><a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
+        {target && isHttpUrl(target.url) ? <><span className="sp" /><a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
       </div>
       {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity}
         waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} /> : null}
@@ -240,7 +245,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         ? <div key={i} className="confirm"><b>Do potwierdzenia:</b><span>{l.text.replace(/^do potwierdzenia:\s*/i, "")}</span></div>
         : <div key={i} className="note">{l.text}</div>)}</div> : null}
       {outputExtra ? <div className="note">{outputExtra}</div> : null}
-      {review?.summary ? <div className={"review" + (review.fits === false || review.warning ? " warn" : "")}>{review.warning ? <div><b>Uwaga:</b> {review.warning}</div> : null}<div>{review.summary}</div>{review.links?.length ? <div className="deps">{review.links.map((u) => <a key={u} className="chip" href={u} target="_blank" rel="noopener"><span>{u.replace(/^https?:\/\//, "").slice(0, 40)}</span></a>)}</div> : null}</div> : null}
+      {review?.summary ? <div className={"review" + (review.fits === false || review.warning ? " warn" : "")}>{review.warning ? <div><b>Uwaga:</b> {review.warning}</div> : null}<div>{review.summary}</div>{review.links?.filter(isHttpUrl).length ? <div className="deps">{review.links.filter(isHttpUrl).map((u) => <a key={u} className="chip" href={u} target="_blank" rel="noopener"><span>{u.replace(/^https?:\/\//, "").slice(0, 40)}</span></a>)}</div> : null}</div> : null}
       {!mode || mode === "sent" || mode === "unsent" ? (
         <div className="actions">
           {s.status === "todo" ? (<>
@@ -251,7 +256,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
             <form action={markDone.bind(null, t.id, s.id)}><PendingButton className={"btn" + (!runnable ? " primary" : "")}>Oznacz jako zrobione</PendingButton></form>
           </>) : null}
           {s.status === "handoff" ? <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Krok wraca do zrobienia; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form> : null}
-          {links.map((l, i) => <a key={l.url} className={"btn ico" + (done && i === 0 ? " primary" : "")} href={l.url} target="_blank" rel="noopener" title={l.url}>{l.label}<Icon k="ext" size={13} sw={1.6} /></a>)}
+          {links.filter((l) => isHttpUrl(l.url)).map((l, i) => <a key={l.url} className={"btn ico" + (done && i === 0 ? " primary" : "")} href={l.url} target="_blank" rel="noopener" title={l.url}>{l.label}<Icon k="ext" size={13} sw={1.6} /></a>)}
           {done ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Przywróć do zrobienia</PendingButton></form> : null}
         </div>
       ) : null}

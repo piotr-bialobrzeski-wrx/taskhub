@@ -1,0 +1,191 @@
+# Nocna kopia bazy Task Hub (schemat public, z załącznikami) do Backblaze B2, zaszyfrowana kluczami age, i próba jej odtworzenia.
+# 1) backup: pg_dump -Fc z BACKUP_DATABASE_URL → age (klucz Piotra + klucz CI) → B2 jako taskhub/RRRR/MM/taskhub-<czas UTC>.dump.age
+# 2) restore-test: pobiera tę samą kopię, odszyfrowuje kluczem CI, odtwarza w czystym Postgresie 17 z pgvector i liczy wiersze;
+#    każdy błąd odtwarzania albo pusta tabela zadań kończy przebieg na czerwono (GitHub wysyła wtedy maila).
+# Bez kompletu sekretów nic się nie dzieje: przebieg zostawia uwagę „pominięta” i kończy się sukcesem.
+# Sekrety (Settings → Secrets and variables → Actions):
+#   BACKUP_DATABASE_URL  adres Session pooler z Supabase (port 5432, runnery GitHuba nie mają IPv6) dla użytkownika postgres;
+#                        rola bez BYPASSRLS przerwie pg_dump, bo tabele mają włączone RLS
+#   AGE_RECIPIENT_OWNER  klucz publiczny age Piotra (age1…); prywatny tylko u Piotra, poza GitHubem
+#   AGE_RECIPIENT_CI     klucz publiczny age do próby odtworzenia (age1…)
+#   AGE_IDENTITY_CI      jego klucz prywatny (AGE-SECRET-KEY-1…)
+#   B2_KEY_ID, B2_APP_KEY  klucz aplikacji B2 tylko do tego kubełka: writeFiles, readFiles, listFiles, bez deleteFiles
+#   B2_BUCKET            nazwa kubełka (z Object Lock i domyślną retencją, np. 30 dni, plus reguła cyklu życia kasująca starsze)
+#   B2_S3_ENDPOINT       adres S3 kubełka, np. https://s3.eu-central-003.backblazeb2.com
+# Odtworzenie ręczne: age -d -i klucz.txt -o taskhub.dump plik.dump.age, potem pg_restore --no-owner --no-privileges (jak w restore-test).
+name: Kopia bazy
+
+on:
+  schedule:
+    - cron: "17 1 * * *"   # 03:17 w Warszawie latem (02:17 zimą)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+env:
+  PGBIN: /usr/lib/postgresql/17/bin
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required    # B2 nie przyjmuje nowych domyślnych sum kontrolnych aws-cli
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+  AWS_EC2_METADATA_DISABLED: "true"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.s.outputs.ready }}
+    steps:
+      - name: Czy są wszystkie sekrety
+        id: s
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          AGE_RECIPIENT_OWNER: ${{ secrets.AGE_RECIPIENT_OWNER }}
+          AGE_RECIPIENT_CI: ${{ secrets.AGE_RECIPIENT_CI }}
+          AGE_IDENTITY_CI: ${{ secrets.AGE_IDENTITY_CI }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+          B2_S3_ENDPOINT: ${{ secrets.B2_S3_ENDPOINT }}
+        run: |
+          missing=""
+          for n in BACKUP_DATABASE_URL AGE_RECIPIENT_OWNER AGE_RECIPIENT_CI AGE_IDENTITY_CI B2_KEY_ID B2_APP_KEY B2_BUCKET B2_S3_ENDPOINT; do
+            [ -n "${!n}" ] || missing="$missing $n"
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice title=Kopia bazy pominięta::Brakuje sekretów:$missing. Dodaj je w Settings → Secrets and variables → Actions (opis na górze backup.yml)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  backup:
+    needs: check
+    if: needs.check.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      stamp: ${{ steps.up.outputs.stamp }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.B2_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_APP_KEY }}
+      B2_BUCKET: ${{ secrets.B2_BUCKET }}
+      B2_S3_ENDPOINT: ${{ secrets.B2_S3_ENDPOINT }}
+    steps:
+      - name: pg_dump 17 (PGDG) i age
+        run: |
+          set -euo pipefail
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor --yes -o /usr/share/keyrings/pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17 age >/dev/null
+          "$PGBIN/pg_dump" --version
+          age --version
+
+      - name: Zrzut, szyfrowanie, wysyłka do B2
+        id: up
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          AGE_RECIPIENT_OWNER: ${{ secrets.AGE_RECIPIENT_OWNER }}
+          AGE_RECIPIENT_CI: ${{ secrets.AGE_RECIPIENT_CI }}
+          PGSSLMODE: require
+        run: |
+          set -euo pipefail
+          umask 077
+          read -r Y M STAMP < <(date -u '+%Y %m %Y%m%dT%H%M%SZ')
+          KEY="taskhub/$Y/$M/taskhub-$STAMP.dump.age"
+          F="$RUNNER_TEMP/backup.dump.age"
+          # niezaszyfrowany zrzut nie trafia na dysk: pg_dump idzie od razu do age
+          "$PGBIN/pg_dump" --dbname="$BACKUP_DATABASE_URL" -Fc -n public --no-owner --no-privileges --no-publications --no-subscriptions \
+            | age -r "$AGE_RECIPIENT_OWNER" -r "$AGE_RECIPIENT_CI" -o "$F"
+          SIZE=$(stat -c %s "$F")
+          [ "$SIZE" -gt 1024 ] || { echo "::error::Zrzut ma tylko $SIZE B, coś jest nie tak"; exit 1; }
+          EP="$B2_S3_ENDPOINT"; [[ "$EP" == http* ]] || EP="https://$EP"
+          REGION=$(echo "$EP" | sed -nE 's#^https?://s3\.([a-z0-9-]+)\.backblazeb2\.com.*#\1#p'); export AWS_DEFAULT_REGION="${REGION:-us-east-1}"
+          MD5=$(openssl dgst -md5 -binary "$F" | base64)   # Content-MD5: kubełek z Object Lock wymaga sumy przy zapisie
+          aws s3api put-object --endpoint-url "$EP" --bucket "$B2_BUCKET" --key "$KEY" --body "$F" --content-md5 "$MD5" --no-cli-pager >/dev/null
+          rm -f "$F"
+          echo "stamp=$STAMP" >> "$GITHUB_OUTPUT"   # sam znacznik czasu: wyjście z nazwą kubełka GitHub by zamaskował
+          echo "### Kopia bazy" >> "$GITHUB_STEP_SUMMARY"
+          echo "Zapisano $KEY ($((SIZE / 1024)) KB)." >> "$GITHUB_STEP_SUMMARY"
+
+  restore-test:
+    needs: backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      pg:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: restore
+          POSTGRES_DB: restore
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.B2_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_APP_KEY }}
+      B2_BUCKET: ${{ secrets.B2_BUCKET }}
+      B2_S3_ENDPOINT: ${{ secrets.B2_S3_ENDPOINT }}
+      STAMP: ${{ needs.backup.outputs.stamp }}
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: restore
+      PGDATABASE: restore
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: pg_restore 17 (PGDG) i age
+        run: |
+          set -euo pipefail
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor --yes -o /usr/share/keyrings/pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17 age >/dev/null
+
+      - name: Pobierz i odszyfruj tę kopię
+        env:
+          AGE_IDENTITY_CI: ${{ secrets.AGE_IDENTITY_CI }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [ -n "$STAMP" ] || { echo "::error::Brak znacznika kopii z poprzedniego kroku"; exit 1; }
+          KEY="taskhub/${STAMP:0:4}/${STAMP:4:2}/taskhub-$STAMP.dump.age"
+          EP="$B2_S3_ENDPOINT"; [[ "$EP" == http* ]] || EP="https://$EP"
+          REGION=$(echo "$EP" | sed -nE 's#^https?://s3\.([a-z0-9-]+)\.backblazeb2\.com.*#\1#p'); export AWS_DEFAULT_REGION="${REGION:-us-east-1}"
+          aws s3api get-object --endpoint-url "$EP" --bucket "$B2_BUCKET" --key "$KEY" "$RUNNER_TEMP/b.dump.age" --no-cli-pager >/dev/null
+          printf '%s\n' "$AGE_IDENTITY_CI" > "$RUNNER_TEMP/id.txt"
+          age -d -i "$RUNNER_TEMP/id.txt" -o "$RUNNER_TEMP/b.dump" "$RUNNER_TEMP/b.dump.age"
+          rm -f "$RUNNER_TEMP/id.txt" "$RUNNER_TEMP/b.dump.age"
+
+      - name: Odtwórz w czystym Postgresie 17
+        run: |
+          set -euo pipefail
+          D="$RUNNER_TEMP/b.dump"
+          # zrzut samego public nie ma CREATE EXTENSION: pgvector idzie do schematu, który wskazują typy w zrzucie (public albo extensions)
+          VS=$("$PGBIN/pg_restore" -s -f - "$D" | grep -oE '\b[a-z_]+\.vector\(' | head -1 | cut -d. -f1 || true)
+          VS="${VS:-public}"
+          psql -v ON_ERROR_STOP=1 -q -c "create schema if not exists extensions; create extension if not exists pgcrypto with schema extensions; create schema if not exists \"$VS\"; create extension if not exists vector with schema \"$VS\";"
+          # schemat public już jest w czystej bazie: jego CREATE SCHEMA i komentarz wypadają z listy, reszta musi przejść bez jednego błędu
+          "$PGBIN/pg_restore" -l "$D" | grep -v -E '; [0-9]+ [0-9]+ (SCHEMA - public|COMMENT - SCHEMA public) ' > "$RUNNER_TEMP/toc.list"
+          "$PGBIN/pg_restore" --no-owner --no-privileges --exit-on-error -L "$RUNNER_TEMP/toc.list" -d restore "$D"
+          rm -f "$D"
+
+      - name: Sprawdź dane
+        run: |
+          set -euo pipefail
+          q() { psql -v ON_ERROR_STOP=1 -Atc "$1"; }
+          TASKS=$(q "select count(*) from tasks"); STEPS=$(q "select count(*) from steps"); FILES=$(q "select count(*) from attachments")
+          LAST=$(q "select max(name) from schema_migrations"); NEWEST=$(ls supabase/migrations | grep -E '\.sql$' | sort | tail -1)
+          {
+            echo "### Próba odtworzenia"
+            echo "Zadania: $TASKS, kroki: $STEPS, załączniki: $FILES, ostatnia migracja: $LAST (w repozytorium: $NEWEST)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$TASKS" -gt 0 ] || { echo "::error::Odtworzona baza nie ma żadnych zadań"; exit 1; }
+          [ "$LAST" = "$NEWEST" ] || echo "::warning::Ostatnia migracja w kopii ($LAST) różni się od najnowszej w repozytorium ($NEWEST)"
+          echo "Kopia odtwarza się poprawnie."

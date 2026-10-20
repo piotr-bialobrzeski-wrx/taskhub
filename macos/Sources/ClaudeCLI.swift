@@ -1,5 +1,6 @@
 // Claude Code na tym Macu: gdzie go szukać, z jakim środowiskiem uruchamiać (bez klucza API, subskrypcja),
-// konektor Task Hub w pliku mcp.json oraz rozpoznawanie limitu i wylogowania (te same wzorce, co w skrypcie mostka).
+// próba (co Claude Code ma: narzędzia, konektory, tryb) oraz rozpoznawanie limitu i wylogowania (te same wzorce, co w skrypcie mostka).
+// Pliki biegu (konektor Task Hub z tokenem biegu, ustawienia) pisze Policy do run/, poza katalogiem roboczym.
 import Foundation
 
 enum BridgeError: LocalizedError {
@@ -15,7 +16,7 @@ enum BridgeError: LocalizedError {
 }
 
 enum ClaudeCLI {
-    static let bridgeVersion = "1"
+    static let bridgeVersion = "2"   // v2: osobne biegi „work” i „send”, token biegu, zasady zamiast bypassPermissions
     static var userAgent: String { "TaskHubMac/\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0")" }
 
     static func candidates() -> [String] {
@@ -39,15 +40,19 @@ enum ClaudeCLI {
         return e
     }
 
-    // konektor Task Hub podany wprost (bez `claude mcp add`); plik tylko dla właściciela, token nie trafia do listy procesów
-    static func writeMcpConfig(url: String, token: String) throws -> URL {
-        let f = Store.workDir.appendingPathComponent("mcp.json")
-        let cfg: [String: Any] = ["mcpServers": ["task-hub": ["type": "http", "url": url, "headers": ["Authorization": "Bearer \(token)"]]]]
-        let d = try JSONSerialization.data(withJSONObject: cfg)
-        try FileManager.default.createDirectory(at: Store.workDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        try d.write(to: f, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: f.path)
-        return f
+    // próba: Claude Code rusza bez zadania i bez serwerów z naszego pliku, zgłasza narzędzia, konektory i tryb uprawnień,
+    // a my kończymy go zaraz po zdarzeniu startowym (przed pierwszym zapytaniem do modelu, więc bez kosztu)
+    static func probe(_ bin: String, restricted: Bool) async -> ProcessResult {
+        let f: URL
+        do { f = try Policy.writeFile(["mcpServers": [String: Any]()], name: "probe-mcp.json") } catch {
+            return ProcessResult(ok: false, text: error.localizedDescription)
+        }
+        var args = ["-p", "ok", "--output-format", "stream-json", "--verbose", "--max-turns", "1", "--no-session-persistence",
+                    "--permission-mode", "dontAsk", "--mcp-config", f.path]
+        // tak jak w biegu: bez ustawień projektu z work/ (agent mógłby tam podłożyć hak, który uruchomiłby się już przy próbie)
+        if restricted { args.append("--restricted") } else { args += ["--setting-sources", "user"] }
+        let runner = ProcessRunner(bin: bin, args: args, cwd: Store.workDir.path, env: env(), maxSeconds: 120, stallSeconds: 120, stopAfterInit: true)
+        return await runner.run { _ in }
     }
 
     // `claude --version` z limitem czasu; nil = nie da się uruchomić

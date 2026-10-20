@@ -1,5 +1,6 @@
 // Główne okno: aplikacja webowa Task Hub w WKWebView z trwałym logowaniem. Linki poza Task Hub idą do przeglądarki,
 // link taskhub://connect z Ustawień Task Hub łapiemy sami, okienka JS (alert/confirm/plik) dostają natywne panele.
+// Na zewnątrz wychodzą tylko http(s), mailto i tel; innych schematów (file:, inne aplikacje) okno nie otwiera.
 import AppKit
 import WebKit
 
@@ -14,6 +15,7 @@ final class WebWindowController: NSWindowController, WKNavigationDelegate, WKUID
         let conf = WKWebViewConfiguration()
         conf.websiteDataStore = WKWebsiteDataStore.default()
         conf.applicationNameForUserAgent = ClaudeCLI.userAgent
+        conf.preferences.javaScriptCanOpenWindowsAutomatically = false   // nowe okna tylko po kliknięciu
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1280, height: 860), configuration: conf)
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 860), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = "Task Hub"
@@ -63,29 +65,41 @@ final class WebWindowController: NSWindowController, WKNavigationDelegate, WKUID
     // ---------- nawigacja ----------
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.allow); return }
-        if url.scheme == "taskhub" {
-            onConnectURL?(url)
+        let scheme = (url.scheme ?? "").lowercased()
+        if scheme == "taskhub" {
             decisionHandler(.cancel)
+            // okno dialogowe dopiero po odpowiedzi dla WebKitu
+            DispatchQueue.main.async { [weak self] in self?.onConnectURL?(url) }
             return
         }
-        let scheme = url.scheme ?? ""
         if scheme == "mailto" || scheme == "tel" {
-            NSWorkspace.shared.open(url)
             decisionHandler(.cancel)
+            if navigationAction.navigationType == .linkActivated { NSWorkspace.shared.open(url) }   // tylko po kliknięciu
             return
         }
-        if navigationAction.navigationType == .linkActivated, let host = url.host, let base = URL(string: store.baseURL), host != base.host, scheme == "http" || scheme == "https" {
+        let web = scheme == "http" || scheme == "https"
+        if navigationAction.navigationType == .linkActivated, web, let host = url.host, let base = URL(string: store.baseURL), host != base.host {
+            decisionHandler(.cancel)
             NSWorkspace.shared.open(url)
+            return
+        }
+        // główna ramka (albo nowe okno) tylko na http(s) i about: (strona zastępcza); reszta zostaje w miejscu
+        let main = navigationAction.targetFrame?.isMainFrame ?? true
+        if main && !web && scheme != "about" {
+            Log.write("okno: zablokowany adres \(scheme):")
             decisionHandler(.cancel)
             return
         }
         decisionHandler(.allow)
     }
 
-    // target=_blank i window.open: do przeglądarki
+    // target=_blank i window.open: http(s) i mailto do przeglądarki/poczty, taskhub do nas, reszta nigdzie
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url {
-            if url.scheme == "taskhub" { onConnectURL?(url) } else { NSWorkspace.shared.open(url) }
+        guard let url = navigationAction.request.url else { return nil }
+        switch (url.scheme ?? "").lowercased() {
+        case "taskhub": DispatchQueue.main.async { [weak self] in self?.onConnectURL?(url) }
+        case "http", "https", "mailto": NSWorkspace.shared.open(url)
+        default: Log.write("okno: nie otwieram nowego okna z \(url.scheme ?? "?"):")
         }
         return nil
     }

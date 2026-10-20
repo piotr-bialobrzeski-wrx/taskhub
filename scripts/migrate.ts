@@ -1,19 +1,20 @@
 // Uruchamia migracje z supabase/migrations po kolei i zapisuje, które już poszły.
 // Użycie: DATABASE_URL=... npm run db:migrate   (opcja --skip-vectors pomija 0002, gdy brak pgvector)
 // Przy buildzie na Vercelu: --if-configured (bez DATABASE_URL tylko informuje i nie przerywa builda).
+// Build podglądu na Vercelu (VERCEL_ENV inne niż production) pomija migracje: baza produkcyjna zmienia się tylko przy wdrożeniu produkcji.
 import postgres from "postgres";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { migrationSkip, sslOptions } from "../src/lib/db";
 
 const url = process.env.DATABASE_URL;
 const ifConfigured = process.argv.includes("--if-configured");
-if (!url) {
-  if (ifConfigured) { console.log("migracje: brak DATABASE_URL, pomijam"); process.exit(0); }
-  console.error("Brak DATABASE_URL"); process.exit(1);
-}
+const skip = migrationSkip(process.env, ifConfigured);
+if (skip) { console.log(`migracje: ${skip}, pomijam`); process.exit(0); }
+if (!url) { console.error("Brak DATABASE_URL"); process.exit(1); }
 const skipVectors = process.argv.includes("--skip-vectors");
 
-const sql = postgres(url, { max: 1, prepare: false, onnotice: () => {} });   // prepare:false dla poolera Supabase
+const sql = postgres(url, { max: 1, prepare: false, onnotice: () => {}, ...sslOptions(url) });   // prepare:false dla poolera Supabase; TLS jak w aplikacji (src/lib/db.ts)
 const dir = path.join(process.cwd(), "supabase", "migrations");
 
 async function main() {

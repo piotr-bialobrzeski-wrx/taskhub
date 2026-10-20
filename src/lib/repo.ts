@@ -2,8 +2,12 @@
 import { randomUUID } from "node:crypto";
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "./db";
-import { type Company, type Connection, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample, appOfLabel, normalizeTool } from "./schema";
+import { type Company, type Connection, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample, appOfLabel, normalizeTool, toolLabel } from "./schema";
 import { Q, roundQ, spentMin } from "./time";
+import { isHttpUrl, sanitizeBlocks } from "./safeurl";
+import { approvalSig, approvalValid, isGitDraft, isSendable, shownSig, type Draft } from "./agent/approval";
+import { shortTitle } from "./auto";
+export { approvalSig, approvalValid, draftOf, isSendable } from "./agent/approval";
 
 type Row = Record<string, unknown>;
 const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : v == null ? null : String(v));
@@ -23,17 +27,43 @@ export async function ensureOwner(): Promise<{ id: string; email: string; name: 
 
 // ---------- tokeny MCP ----------
 export const hashToken = (t: string) => createHash("sha256").update(t).digest("hex");
-export type TokenKind = "client" | "bridge";
-export async function createApiToken(ownerId: string, name: string, kind: TokenKind = "client"): Promise<string> {
+// client: konektor OAuth i automat co godzinę; bridge: aplikacja mostka na Macu; run: krótki token jednego biegu mostka (Claude Code w tym biegu)
+export type TokenKind = "client" | "bridge" | "run";
+// zakres tokenu biegu: work = praca bez wysyłek, send = jeden zatwierdzony szkic (stepId w zadaniu taskId)
+export type RunScope = { kind: "work" | "send"; runId: string; stepId?: string | null; taskId?: string | null };
+export async function createApiToken(ownerId: string, name: string, kind: Exclude<TokenKind, "run"> = "client"): Promise<string> {
   const token = "th_" + randomBytes(24).toString("base64url");
   await sql()`insert into api_tokens (owner_id, name, token_hash, kind) values (${ownerId}, ${name}, ${hashToken(token)}, ${kind})`;
   return token;
 }
-export type TokenAuth = { id: string; ownerId: string; kind: TokenKind; name: string };
-// użycie tokenu mostka (także przez Claude Code, który mostek uruchomił) jest zarazem jego pulsem
+export type TokenAuth = { id: string; ownerId: string; kind: TokenKind; name: string; scope: RunScope | null };
+// użycie tokenu mostka (także przez Claude Code, który mostek uruchomił, tokenem biegu) jest zarazem jego pulsem.
+// Token biegu działa tylko do wygaśnięcia i tylko póki jego bieg jest otwarty.
 export async function tokenForSecret(token: string): Promise<TokenAuth | null> {
-  const [r] = await sql()`update api_tokens set last_used_at = now(), seen_at = case when kind = 'bridge' then now() else seen_at end where token_hash = ${hashToken(token)} returning id, owner_id, kind, name`;
-  return r ? { id: r.id as string, ownerId: r.ownerId as string, kind: (r.kind as TokenKind) ?? "client", name: r.name as string } : null;
+  const [r] = await sql()`update api_tokens set last_used_at = now(), seen_at = case when kind = 'bridge' then now() else seen_at end
+    where token_hash = ${hashToken(token)} and (expires_at is null or expires_at > now())
+      and (kind <> 'run' or exists (select 1 from bridge_runs b where b.id::text = api_tokens.scope->>'runId' and b.ended_at is null))
+    returning id, owner_id, kind, name, scope`;
+  if (!r) return null;
+  const kind = (r.kind as TokenKind) ?? "client";
+  const scope = kind === "run" ? ((r.scope as RunScope | null) ?? null) : null;
+  if (kind === "run" && !scope?.runId) return null;
+  if (scope) await sql()`update api_tokens set seen_at = now(), last_used_at = now() where kind = 'bridge' and id = (select token_id from bridge_runs where id::text = ${scope.runId})`;
+  return { id: r.id as string, ownerId: r.ownerId as string, kind, name: r.name as string, scope };
+}
+// token biegu: sekret tylko raz (w bazie skrót), wygasa po minutes; stare wygasłe tokeny biegów sprzątamy przy okazji
+export async function createRunToken(ownerId: string, scope: RunScope, minutes: number): Promise<string> {
+  const token = "th_" + randomBytes(24).toString("base64url");
+  const s: RunScope = { kind: scope.kind, runId: scope.runId, stepId: scope.stepId ?? null, taskId: scope.taskId ?? null };
+  await sql()`delete from api_tokens where owner_id = ${ownerId} and kind = 'run' and expires_at < now() - interval '1 day'`;
+  await sql()`insert into api_tokens (owner_id, name, token_hash, kind, expires_at, scope)
+    values (${ownerId}, ${scope.kind === "send" ? "Bieg wysyłki" : "Bieg mostka"}, ${hashToken(token)}, 'run', now() + make_interval(mins => ${Math.max(1, Math.round(minutes))}), ${sql().json(s as never)})`;
+  return token;
+}
+// koniec biegu: jego tokeny przestają działać od razu
+export async function revokeRunTokens(ownerId: string, runId: string): Promise<number> {
+  const rows = await sql()`delete from api_tokens where owner_id = ${ownerId} and kind = 'run' and scope->>'runId' = ${runId} returning id`;
+  return rows.length;
 }
 export async function ownerForToken(token: string): Promise<string | null> {
   return (await tokenForSecret(token))?.ownerId ?? null;
@@ -84,7 +114,12 @@ export async function updateProject(ownerId: string, id: string, patch: Partial<
   if (patch.color !== undefined) p.color = patch.color;
   if (patch.companyId !== undefined) p.company_id = patch.companyId;
   if (!Object.keys(p).length) return;
+  const [cur] = patch.companyId !== undefined ? await sql()`select company_id from projects where id = ${id} and owner_id = ${ownerId}` : [];
   await sql()`update projects set ${sql()(p)} where id = ${id} and owner_id = ${ownerId}`;
+  if (cur && ((cur.companyId as string) ?? null) !== (patch.companyId ?? null)) {
+    await dropRoutedApprovals(ownerId, await sql()`select s.id, s.title from steps s join tasks t on t.id = s.task_id
+      where t.project_id = ${id} and t.owner_id = ${ownerId} and s.approved_at is not null and s.send_started_at is null and s.status <> 'done' and s.connection_id is null`);
+  }
 }
 export async function deleteProject(ownerId: string, id: string): Promise<void> {
   // zadania zostają, tracą tylko etykietę
@@ -197,6 +232,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     handoffAt: iso(r.handoffAt), doneAt: iso(r.doneAt), report: (r.report as string) ?? null, output: (r.output as string) ?? "",
     review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), hasPrevBlocks: r.blocksPrev != null, logged: !!r.logged,
     pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, connectionId: (r.connectionId as string) ?? null,
+    approvedAt: iso(r.approvedAt), approvedSig: (r.approvedSig as string) ?? null, sendStartedAt: iso(r.sendStartedAt),
   };
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
@@ -254,7 +290,7 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
   const created: { id: string }[] = [];
   for (const s of steps) {
     const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id)
-      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval}, ${roundQ(s.estMin ?? Q)}, ${s.link ?? null}, ${s.connectionId ?? null}) returning id`;
+      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval}, ${roundQ(s.estMin ?? Q)}, ${isHttpUrl(s.link) ? s.link.trim() : null}, ${s.connectionId ?? null}) returning id`;
     created.push({ id: r.id as string });
   }
   // zależności: "n2" / indeks w tej paczce albo id istniejącego kroku
@@ -283,6 +319,16 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
   return rows.map((r) => rowToStep(r, deps.filter((d) => d.stepId === r.id).map((d) => d.dependsOnId as string)));
 }
 export type TaskPatch = Partial<{ title: string; titleOriginal: string | null; summary: string; source: string; level: number; due: string | null; projectId: string | null; pos: { x: number; y: number } | null; deletedAt: string | null; noteText: string | null; noteSummary: string | null }>;
+// firma zadania (przez projekt): od niej zależy konto wysyłki kroku bez wskazanego połączenia
+const taskCompany = async (ownerId: string, id: string): Promise<string | null> =>
+  ((await sql()`select p.company_id from tasks t left join projects p on p.id = t.project_id where t.id = ${id} and t.owner_id = ${ownerId}`)[0]?.companyId as string) ?? null;
+// zatwierdzony szkic bez wskazanego połączenia wysyła konto firmy zadania: po zmianie projektu albo firmy projektu zgoda przepada
+// (treść poleciałaby z konta innej firmy niż to, które Piotr widział na karcie); szkic w trakcie wysyłki zostaje
+async function dropRoutedApprovals(ownerId: string, steps: Row[]): Promise<void> {
+  for (const st of steps) {
+    await clearApproval(ownerId, st.id as string, { note: `Zgoda na szkic „${shortTitle(st.title as string, 60)}” wygasła: zadanie zmieniło projekt albo firmę, więc wysyłka mogłaby pójść z innego konta. Sprawdź konto na karcie szkicu i zatwierdź go ponownie.` });
+  }
+}
 export async function updateTask(ownerId: string, id: string, patch: TaskPatch): Promise<void> {
   const p: Row = {};
   if (patch.title !== undefined) p.title = patch.title.slice(0, 200);
@@ -297,7 +343,11 @@ export async function updateTask(ownerId: string, id: string, patch: TaskPatch):
   if (patch.noteText !== undefined) { p.note_text = patch.noteText; p.note_at = new Date(); }
   if (patch.noteSummary !== undefined) p.note_summary = patch.noteSummary;
   if (!Object.keys(p).length) return;
+  const before = patch.projectId !== undefined ? await taskCompany(ownerId, id) : undefined;
   await sql()`update tasks set ${sql()(p)} where id = ${id} and owner_id = ${ownerId}`;
+  if (before !== undefined && before !== (await taskCompany(ownerId, id))) {
+    await dropRoutedApprovals(ownerId, await sql()`select id, title from steps where task_id = ${id} and approved_at is not null and send_started_at is null and status <> 'done' and connection_id is null`);
+  }
 }
 export async function setTaskDependencies(id: string, dependsOn: string[]): Promise<void> {
   await sql().begin(async (tx) => {
@@ -310,7 +360,29 @@ export async function purgeTask(ownerId: string, id: string): Promise<void> {
 }
 
 export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null }>;
-export async function updateStep(id: string, patch: StepPatch): Promise<void> {
+const parseBlocks = (v: unknown): Block[] | null => { if (!v) return null; const p = Blocks.safeParse(v); return p.success ? p.data : null; };
+const isApproved = (b: Block) => b.type === "draft" && b.status === "approved";
+const demote = (blocks: Block[]) => blocks.map((b): Block => (b.type === "draft" && b.status === "approved" ? { ...b, status: "proposed" } : b));
+// klocki przed zapisem: adresy tylko http(s); „zatwierdzony” zostaje tylko pierwszy szkic z ważnym podpisem Piotra (ta sama treść),
+// „wysłany” tylko przy zamknięciu kroku po wysyłce (sent) albo gdy to bez zmian szkic już wysłany; reszta to propozycja
+function guardBlocks(stepId: string, cur: { blocks: Block[] | null; approvedSig: string | null } | null, next: Block[], sent: boolean): { blocks: Block[]; approved: boolean } {
+  const sentSigs = new Set((cur?.blocks ?? []).filter((b): b is Draft => b.type === "draft" && b.status === "sent").map((d) => approvalSig({ id: stepId, blocks: cur?.blocks }, d)));
+  let approved = false, first = true;
+  const clean = sanitizeBlocks(next);
+  const blocks = clean.map((b): Block => {
+    if (b.type !== "draft") return b;
+    const isFirst = first; first = false;
+    if (b.status === "proposed") return b;
+    const sig = approvalSig({ id: stepId, blocks: clean }, b);
+    if (b.status === "approved" && isFirst && !!cur?.approvedSig && sig === cur.approvedSig) { approved = true; return b; }
+    if (b.status === "sent" && (sent || sentSigs.has(sig))) return b;
+    return { ...b, status: "proposed" };
+  });
+  return { blocks, approved };
+}
+export async function updateStep(id: string, patch: StepPatch): Promise<void> { await writeStep(id, patch); }
+// sent: zapis z completeStep (szkic zatwierdzony → wysłany); każdy inny zapis „wysłanego” szkicu to propozycja
+async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } = {}): Promise<void> {
   const p: Row = {};
   if (patch.title !== undefined) p.title = patch.title.slice(0, 200);
   if (patch.detail !== undefined) p.detail = patch.detail;
@@ -321,17 +393,37 @@ export async function updateStep(id: string, patch: StepPatch): Promise<void> {
   if (patch.estMin !== undefined) p.est_min = roundQ(patch.estMin);
   if (patch.spentSec !== undefined) { p.spent_sec = Math.max(0, Math.round(patch.spentSec)); p.spent_at = new Date(); }
   if (patch.spentManual !== undefined) p.spent_manual = patch.spentManual;
-  if (patch.link !== undefined) p.link = patch.link;
+  if (patch.link !== undefined) p.link = isHttpUrl(patch.link) ? patch.link.trim() : null;   // link kroku tylko http(s)
   if (patch.handoffAt !== undefined) p.handoff_at = patch.handoffAt;
   if (patch.doneAt !== undefined) p.done_at = patch.doneAt;
   if (patch.report !== undefined) p.report = patch.report;
   if (patch.output !== undefined) p.output = patch.output;
   if (patch.review !== undefined) p.review = patch.review === null ? null : sql().json(patch.review as never);
+  // zgoda Piotra trzyma się treści szkicu, stanu „czeka na wysyłkę”, narzędzia i połączenia; zmiana któregoś z nich ją kasuje
+  const watch = patch.blocks !== undefined || patch.status !== undefined || patch.tool !== undefined || patch.connectionId !== undefined;
+  const [cur] = watch ? await sql()`select blocks, approved_sig, status, tool, connection_id from steps where id = ${id}` : [];
+  const curBlocks = cur ? parseBlocks(cur.blocks) : null;
+  const approvedSig = (cur?.approvedSig as string) ?? null;
+  let keep = !!approvedSig;
+  let blocks: Block[] | null | undefined;
   if (patch.blocks !== undefined) {
+    const g = patch.blocks === null ? { blocks: null, approved: false } : guardBlocks(id, { blocks: curBlocks, approvedSig }, patch.blocks, !!opts.sent);
+    blocks = g.blocks; keep &&= g.approved;
+  }
+  if (patch.status !== undefined && patch.status !== "handoff") keep = false;
+  if (patch.tool !== undefined && normalizeTool(patch.tool) !== cur?.tool) keep = false;
+  if (patch.connectionId !== undefined && (patch.connectionId ?? null) !== ((cur?.connectionId as string) ?? null)) keep = false;
+  if (approvedSig && !keep) {
+    p.approved_at = null; p.approved_sig = null; p.send_started_at = null;
+    if (blocks) blocks = demote(blocks);
+    else if (blocks === undefined && curBlocks?.some(isApproved)) { p.blocks = sql().json(demote(curBlocks) as never); p.blocks_at = new Date(); }
+    // krok czekał na wysyłkę: wraca do zatwierdzenia
+    if (patch.status === undefined && cur?.status === "handoff") { p.status = "draft"; p.prev_status = null; p.handoff_at = null; }
+  }
+  if (blocks !== undefined) {
     // poprzednia wersja kartki zostaje do cofnięcia; zapis tej samej treści jej nie nadpisuje
-    const [cur] = await sql()`select blocks from steps where id = ${id}`;
-    if (cur?.blocks && JSON.stringify(cur.blocks) !== JSON.stringify(patch.blocks)) p.blocks_prev = sql().json(cur.blocks as never);
-    p.blocks = patch.blocks === null ? null : sql().json(patch.blocks); p.blocks_at = patch.blocks === null ? null : new Date();
+    if (cur?.blocks && JSON.stringify(cur.blocks) !== JSON.stringify(blocks)) p.blocks_prev = sql().json(cur.blocks as never);
+    p.blocks = blocks === null ? null : sql().json(blocks as never); p.blocks_at = blocks === null ? null : new Date();
   }
   if (patch.pos !== undefined) p.pos = patch.pos === null ? null : sql().json(patch.pos);
   if (patch.position !== undefined) p.position = patch.position;
@@ -354,25 +446,100 @@ export async function completeStep(ownerId: string, task: Task, step: Step, opts
   const patch: StepPatch = { status: "done", prevStatus: step.status === "done" ? step.prevStatus : step.status, spentSec, handoffAt: null, doneAt: new Date().toISOString() };
   if (opts.report !== undefined) { patch.report = opts.report; patch.output = opts.report; }
   if (opts.output !== undefined) patch.output = opts.output;
-  if (opts.link) patch.link = opts.link;
-  // zatwierdzony szkic, który krok właśnie wysłał, zostaje w zadaniu jako zapis wysyłki
-  if (step.blocks?.some((b) => b.type === "draft" && b.status === "approved")) patch.blocks = step.blocks.map((b) => (b.type === "draft" && b.status === "approved" ? { ...b, status: "sent" as const } : b));
+  if (opts.link && isHttpUrl(opts.link)) patch.link = opts.link.trim();
+  // zatwierdzony szkic, który krok właśnie wysłał, zostaje w zadaniu jako zapis wysyłki. Wołający pilnują, kto może tak zamknąć krok:
+  // Piotr, mostek v1 przy ważnej zgodzie, bieg wysyłki tego kroku (MCP complete_step i czat w aplikacji odmawiają pozostałym)
+  if (step.blocks?.some(isApproved)) patch.blocks = step.blocks.map((b) => (b.type === "draft" && b.status === "approved" ? { ...b, status: "sent" as const } : b));
   const sm = spentMin({ spentSec });
   if (sm > 0 && !step.logged) {
     await sql()`insert into time_samples (owner_id, step_id, tool, project_id, est_min, spent_min) values (${ownerId}, ${step.id}, ${step.tool}, ${task.projectId}, ${step.estMin}, ${sm})`;
     patch.logged = true;
   }
-  await updateStep(step.id, patch);
+  await writeStep(step.id, patch, { sent: true });
   // ostatni krok gotowy: zadanie kończy się samo, chyba że jakaś wiadomość Piotra czeka jeszcze na odpowiedź agenta (zamknie je reply_chat)
   await closeIfDone(ownerId, task.id);
 }
 export async function reopenStep(ownerId: string, taskId: string, step: Step): Promise<void> {
   const status = step.prevStatus === "handoff" ? "todo" : step.prevStatus && step.prevStatus !== "done" ? (step.prevStatus as Step["status"]) : step.output ? "draft" : "todo";
   await sql().begin(async (tx) => {
-    await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null where id = ${step.id}`;
+    // ponowne otwarcie nie przywraca zgody: szkic trzeba zatwierdzić od nowa
+    await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null, approved_at = null, approved_sig = null, send_started_at = null where id = ${step.id}`;
     await tx`delete from time_samples where step_id = ${step.id}`;
     await tx`update tasks set done_at = null where id = ${taskId} and owner_id = ${ownerId}`;
   });
+}
+
+// ---------- zgoda na szkic i wysyłka ----------
+// Jedyne miejsce, które zapisuje zgodę: kliknięcie Piotra „Zatwierdź” (akcja approveStep). Treść poprawiona w tym samym kliknięciu (body) zapisuje się
+// razem ze zgodą; stary szkic bez bloku (sama treść w output) dostaje blok. Szkic już wysyłany (bieg wysyłki go wziął) albo wysłany się nie zmienia.
+// seen: podpis szkicu z karty, którą Piotr miał przed oczami (shownSig); inny podpis w bazie = szkic zmienił się po wyświetleniu, zgody nie ma
+export async function approveDraft(ownerId: string, stepId: string, opts: { body?: string | null; seen?: string | null } = {}): Promise<boolean> {
+  return sql().begin(async (tx) => {
+    const [r] = await tx`select s.* from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId} for update of s`;
+    if (!r || r.status === "done" || r.sendStartedAt) return false;
+    const step = rowToStep(r, []);
+    let blocks: Block[] = [...(step.blocks ?? [])];
+    let i = blocks.findIndex((b) => b.type === "draft");
+    if (i >= 0 && opts.seen && shownSig(step, blocks[i] as Draft, opts.body != null) !== opts.seen) return false;
+    if (i < 0) {
+      const body = opts.body ?? step.output;
+      if (!body?.trim()) return false;
+      blocks = [...blocks.slice(0, 11), { type: "draft", target: { app: step.tool, action: "send" }, body, status: "proposed" }];
+      i = blocks.length - 1;
+    }
+    const cur = blocks[i] as Draft;
+    if (cur.status === "sent") return false;
+    const d: Draft = { ...cur, ...(opts.body != null ? { body: opts.body } : {}), status: "approved" };
+    delete d.stale;   // Piotr widział ten szkic i go przyjął
+    blocks[i] = d;
+    blocks = sanitizeBlocks(blocks);
+    const p: Row = {
+      blocks: tx.json(blocks as never), blocks_at: new Date(), status: "handoff", prev_status: "draft", handoff_at: new Date(),
+      approved_at: new Date(), approved_sig: approvalSig({ id: step.id, blocks }, blocks[i] as Draft), send_started_at: null,
+    };
+    if (r.blocks && JSON.stringify(r.blocks) !== JSON.stringify(blocks)) p.blocks_prev = tx.json(r.blocks as never);
+    await tx`update steps set ${tx(p)} where id = ${stepId}`;
+    return true;
+  });
+}
+// zgoda wycofana (Zatrzymaj w biegu wysyłki, brak konektora, bieg wysyłki bez potwierdzenia): szkic wraca do propozycji, krok do zatwierdzenia.
+// Zwraca true, gdy było co cofnąć; tylko wtedy dopisuje notatkę do rozmowy zadania (nic dwa razy).
+export async function clearApproval(ownerId: string, stepId: string, opts: { note?: string } = {}): Promise<boolean> {
+  const [r] = await sql()`select s.* from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId}`;
+  if (!r || r.status === "done") return false;
+  const blocks = parseBlocks(r.blocks);
+  if (!r.approvedAt && !r.approvedSig && !r.sendStartedAt && !blocks?.some(isApproved)) return false;
+  const p: Row = { approved_at: null, approved_sig: null, send_started_at: null };
+  if (blocks?.some(isApproved)) { p.blocks = sql().json(demote(blocks) as never); p.blocks_at = new Date(); }
+  if (r.status === "handoff") { p.status = "draft"; p.prev_status = null; p.handoff_at = null; }
+  await sql()`update steps set ${sql()(p)} where id = ${stepId}`;
+  if (opts.note) await addChat(ownerId, r.taskId as string, "agent", opts.note, { stepId });
+  return true;
+}
+// notatka po biegu wysyłki, który nie potwierdził wysyłki (bez ponawiania: Piotr sprawdza i zatwierdza ponownie)
+export const unconfirmedSendNote = (app: string) => `Wysyłka nie została potwierdzona. Sprawdź w ${toolLabel(app)}, czy poszło, i zatwierdź ponownie, jeśli trzeba.`;
+// bieg wysyłki bierze szkic: atomowo i najwyżej raz (tylko gdy nikt go jeszcze nie wziął, zgoda jest ważna, a kroki przed nim są zrobione)
+export async function markSendStarted(ownerId: string, stepId: string): Promise<boolean> {
+  return sql().begin(async (tx) => {
+    const [r] = await tx`select s.* from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId} and t.deleted_at is null for update of s`;
+    if (!r || !isSendable(rowToStep(r, []))) return false;
+    const [open] = await tx`select 1 from step_dependencies d join steps x on x.id = d.depends_on_id where d.step_id = ${stepId} and x.status <> 'done' limit 1`;
+    if (open) return false;
+    await tx`update steps set send_started_at = now() where id = ${stepId}`;
+    return true;
+  });
+}
+// wysyłka potwierdzona przez bieg wysyłki (np. commit zrobiony przez aplikację na Macu): krok zrobiony, szkic „wysłany”, krótka linia w rozmowie
+export async function completeSend(ownerId: string, stepId: string, sent: { summary?: string | null; link?: string | null } = {}): Promise<boolean> {
+  const [row] = await sql()`select s.task_id from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId}`;
+  const task = row ? await getTask(ownerId, row.taskId as string) : null;
+  const step = task?.steps.find((s) => s.id === stepId);
+  if (!task || !step || !approvalValid(step) || !step.sendStartedAt) return false;
+  const link = isHttpUrl(sent.link) ? sent.link.trim() : undefined;
+  await completeStep(ownerId, task, step, { report: sent.summary?.trim().slice(0, 4000) || undefined, link });
+  const closed = !!(await getTask(ownerId, task.id))?.doneAt;
+  await addChat(ownerId, task.id, "agent", `Zrobione: „${shortTitle(step.title, 70)}”.${closed ? " Zadanie ukończone." : ""}`, { stepId, link });
+  return true;
 }
 
 // ---------- fakty ----------
@@ -394,7 +561,7 @@ export async function replaceFacts(where: { stepId?: string; taskId?: string }, 
     if (where.stepId) await tx`delete from facts where step_id = ${where.stepId}`; else await tx`delete from facts where task_id = ${where.taskId!} and step_id is null`;
     const rows = facts.slice(0, 40).map((f, i) => ({
       task_id: where.taskId ?? null, step_id: where.stepId ?? null, label: f.label.slice(0, 80), value: f.value.slice(0, 2000),
-      source_app: f.source?.app ?? null, source_ref: f.source?.ref ?? null, source_url: f.source?.url ?? null, fetched_at: f.source?.fetchedAt ?? null,
+      source_app: f.source?.app ?? null, source_ref: f.source?.ref ?? null, source_url: isHttpUrl(f.source?.url) ? f.source.url.trim() : null, fetched_at: f.source?.fetchedAt ?? null,
       pinned: pref.get(f.label.toLowerCase())?.pinned ?? !!f.pinned, hidden: pref.get(f.label.toLowerCase())?.hidden ?? !!f.hidden, position: i,
     }));
     if (rows.length) await tx`insert into facts ${tx(rows)}`;
@@ -612,7 +779,7 @@ export async function getLayoutMemory(ownerId: string, app: string): Promise<Blo
   const p = Blocks.safeParse(r.blocks); return p.success ? p.data : null;
 }
 export async function setLayoutMemory(ownerId: string, app: string, blocks: Block[]): Promise<void> {
-  await sql()`insert into layout_memory (owner_id, source_app, kind, blocks) values (${ownerId}, ${app}, 'step', ${sql().json(blocks as never)})
+  await sql()`insert into layout_memory (owner_id, source_app, kind, blocks) values (${ownerId}, ${app}, 'step', ${sql().json(sanitizeBlocks(blocks) as never)})
     on conflict (owner_id, source_app, kind) do update set blocks = excluded.blocks, updated_at = now()`;
 }
 
@@ -668,7 +835,8 @@ export async function purgeExpired(ownerId: string): Promise<number> {
 // ---------- tokeny i ustawienia (widok ustawień) ----------
 export type ApiTokenInfo = { id: string; name: string; kind: TokenKind; createdAt: string; lastUsedAt: string | null; seenAt: string | null; meta: Record<string, unknown> };
 export async function listApiTokens(ownerId: string): Promise<ApiTokenInfo[]> {
-  const rows = await sql()`select id, name, kind, created_at, last_used_at, seen_at, meta from api_tokens where owner_id = ${ownerId} order by created_at desc`;
+  // tokeny biegów żyją kilkadziesiąt minut i nie są do zarządzania: lista ich nie pokazuje
+  const rows = await sql()`select id, name, kind, created_at, last_used_at, seen_at, meta from api_tokens where owner_id = ${ownerId} and kind <> 'run' order by created_at desc`;
   return rows.map((r) => ({ id: r.id as string, name: r.name as string, kind: (r.kind as TokenKind) ?? "client", createdAt: iso(r.createdAt) as string, lastUsedAt: iso(r.lastUsedAt), seenAt: iso(r.seenAt), meta: (r.meta as Record<string, unknown>) ?? {} }));
 }
 export async function deleteApiToken(ownerId: string, id: string): Promise<void> {
@@ -680,9 +848,10 @@ export async function setUserSettings(ownerId: string, patch: Record<string, unk
 
 // ---------- mostek na komputerze ----------
 // Puls: token rodzaju "bridge" ma seen_at i meta (komputer, silnik, stan). Bieg: jeden otwarty na właściciela (unikalny indeks częściowy),
-// więc dwa komputery nie wykonają tej samej pracy; bieg bez sygnału wygasa.
-export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null };
-const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null });
+// więc dwa komputery nie wykonają tej samej pracy; bieg bez sygnału wygasa. Rodzaj biegu: work = praca bez wysyłek, send = jeden zatwierdzony szkic.
+export type RunKind = "work" | "send";
+export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null; kind?: RunKind };
+const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null, kind: r.kind === "send" ? "send" : "work" });
 export type BridgeStatus = { alive: boolean; seenAt: string | null; name: string | null; meta: Record<string, unknown>; run: BridgeRun | null };
 
 export async function bridgeSeen(tokenId: string, meta: Record<string, unknown>): Promise<void> {
@@ -695,18 +864,51 @@ export async function bridgeStatus(ownerId: string, aliveMs: number): Promise<Br
   return { alive: !!seenAt && Date.now() - new Date(seenAt).getTime() < aliveMs, seenAt, name: t ? (t.name as string) : null, meta: t ? ((t.meta as Record<string, unknown>) ?? {}) : {}, run: r ? rowToRun(r) : null };
 }
 export async function expireBridgeRuns(ownerId: string, staleMin: number): Promise<number> {
-  const rows = await sql()`update bridge_runs set ended_at = now(), outcome = 'stale' where owner_id = ${ownerId} and ended_at is null and touched_at < now() - make_interval(mins => ${staleMin}) returning id, started_at`;
+  const rows = await sql()`update bridge_runs set ended_at = now(), outcome = 'stale' where owner_id = ${ownerId} and ended_at is null and touched_at < now() - make_interval(mins => ${staleMin}) returning id, started_at, kind, step_id, outcome, note`;
   for (const r of rows) await requeueChat(ownerId, r.startedAt as Date);
+  await afterRuns(ownerId, rows);
   return rows.length;
 }
-export async function startBridgeRun(ownerId: string, tokenId: string | null, bridge: string): Promise<BridgeRun | null> {
-  const [r] = await sql()`insert into bridge_runs (owner_id, token_id, bridge) values (${ownerId}, ${tokenId}, ${bridge.slice(0, 80)}) on conflict (owner_id) where ended_at is null do nothing returning *`;
+// stepId: krok biegu wysyłki (ustala też zadanie); bieg pracy wiąże się z krokiem sam, z notatek mostka
+export async function startBridgeRun(ownerId: string, tokenId: string | null, bridge: string, kind: RunKind = "work", stepId: string | null = null): Promise<BridgeRun | null> {
+  const [s] = stepId ? await sql()`select s.id, s.task_id from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId}` : [];
+  const [r] = await sql()`insert into bridge_runs (owner_id, token_id, bridge, kind, step_id, task_id) values (${ownerId}, ${tokenId}, ${bridge.slice(0, 80)}, ${kind}, ${s?.id ?? null}, ${s?.taskId ?? null})
+    on conflict (owner_id) where ended_at is null do nothing returning *`;
   return r ? rowToRun(r) : null;
+}
+// po biegu: jego tokeny przestają działać; bieg wysyłki, po którym krok nie jest zrobiony, cofa zgodę, którą wziął, i zostawia notatkę w rozmowie (bez ponawiania).
+// Wysyłkę potwierdzoną przez mostek (completeSend) trzeba zapisać przed zakończeniem biegu.
+async function afterRuns(ownerId: string, runs: Row[]): Promise<void> {
+  for (const r of runs) {
+    await revokeRunTokens(ownerId, r.id as string);
+    if (r.kind !== "send" || !r.stepId) continue;
+    const stepId = r.stepId as string;
+    const [s] = await sql()`select task_id, status, blocks, send_started_at from steps where id = ${stepId}`;
+    if (!s || s.status === "done") continue;
+    // znacznik wysyłki jest tego biegu (jeden otwarty bieg na właściciela): jego zgoda wraca do Piotra. Bez znacznika Piotr już ją cofnął
+    // („Zatrzymaj”) albo zatwierdził szkic od nowa w trakcie biegu: nowej zgody nie ruszamy
+    if (s.sendStartedAt) await clearApproval(ownerId, stepId);
+    // notatka zawsze, bo treść mogła wyjść; nie, gdy bieg sam powiedział w rozmowie, co się stało (leave_step, wysyłka po wycofaniu zgody)
+    const [said] = await sql()`select 1 from chat_messages where owner_id = ${ownerId} and task_id = ${s.taskId as string} and role = 'agent' and created_at >= ${r.startedAt as Date} and actions->>'stepId' = ${stepId} limit 1`;
+    if (said) continue;
+    const d = parseBlocks(s.blocks)?.find((b): b is Draft => b.type === "draft");
+    // commit z aplikacji na Macu: aplikacja wie, co się nie udało (np. commit jest, push nie), więc piszemy powód
+    const why = d && isGitDraft(d, parseBlocks(s.blocks)) && r.outcome === "error" && typeof r.note === "string" && r.note.trim() ? r.note.trim().slice(0, 500).replace(/([^.!?])$/, "$1.") : "";
+    await addChat(ownerId, s.taskId as string, "agent", why ? `Commit nie wyszedł: ${why} Szkic wrócił do zatwierdzenia; zatwierdź go ponownie, gdy to poprawisz.` : unconfirmedSendNote(d?.target.app ?? "aplikacji docelowej"), { stepId });
+  }
+}
+// bieg wysyłki, którego zgodę Piotr wycofał w Task Hub („Zatrzymaj” kasuje znacznik wysyłki) albo który sam oddał krok:
+// przy najbliższym sygnale aplikacja go przerywa (stara aplikacja bez tego doczeka do końca, a krok i tak się nie zamknie)
+export async function sendWithdrawn(ownerId: string, runId: string): Promise<boolean> {
+  const [r] = await sql()`select s.status, s.send_started_at from bridge_runs b join steps s on s.id = b.step_id where b.id = ${runId} and b.owner_id = ${ownerId} and b.ended_at is null and b.kind = 'send'`;
+  return !!r && r.status !== "done" && !r.sendStartedAt;
 }
 // note: co mostek robi teraz („start_step: id”, „Bash: npm test”); link: z którym zadaniem albo krokiem bieg jest związany (krok ustala też zadanie)
 export async function touchBridgeRun(ownerId: string, id: string, note?: string, link: { taskId?: string; stepId?: string } = {}): Promise<boolean> {
   const p: Row = { touched_at: new Date() };
   if (note !== undefined) p.note = note.slice(0, 200);
+  const [run] = await sql()`select kind from bridge_runs where id = ${id} and owner_id = ${ownerId}`;
+  if (run?.kind === "send") link = {};   // bieg wysyłki ma swój krok od startu; notatki go nie przestawiają
   if (link.stepId) {
     const [s] = await sql()`select s.id, s.task_id from steps s join tasks t on t.id = s.task_id where s.id = ${link.stepId} and t.owner_id = ${ownerId}`;
     if (s) { p.step_id = s.id; p.task_id = s.taskId; }
@@ -718,13 +920,25 @@ export async function touchBridgeRun(ownerId: string, id: string, note?: string,
   return rows.length > 0;
 }
 export async function endBridgeRun(ownerId: string, id: string, outcome: string, note?: string): Promise<boolean> {
-  const rows = await sql()`update bridge_runs set ended_at = now(), touched_at = now(), outcome = ${outcome.slice(0, 20)}, note = coalesce(${note?.slice(0, 600) ?? null}, note) where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id, started_at`;
+  const rows = await sql()`update bridge_runs set ended_at = now(), touched_at = now(), outcome = ${outcome.slice(0, 20)}, note = coalesce(${note?.slice(0, 600) ?? null}, note) where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id, started_at, kind, step_id, outcome, note`;
   if (rows.length) await requeueChat(ownerId, rows[0].startedAt as Date);   // wiadomości wzięte w tym biegu bez odpowiedzi wracają do kolejki
+  await afterRuns(ownerId, rows);
   return rows.length > 0;
 }
 export async function listBridgeRuns(ownerId: string, limit = 8): Promise<BridgeRun[]> {
   const rows = await sql()`select * from bridge_runs where owner_id = ${ownerId} order by started_at desc limit ${limit}`;
   return rows.map(rowToRun);
+}
+// --- mostek v2 (punkty wejścia /api/bridge): bieg po id i bieg wysyłki, który nic nie zaczął ---
+export async function getBridgeRun(ownerId: string, id: string): Promise<BridgeRun | null> {
+  const [r] = await sql()`select * from bridge_runs where id = ${id} and owner_id = ${ownerId}`;
+  return r ? rowToRun(r) : null;
+}
+// szkic zmienił stan między wyborem a startem biegu wysyłki (send_started_at się nie ustawił): bieg znika bez śladu, zgoda Piotra zostaje
+export async function discardBridgeRun(ownerId: string, id: string): Promise<boolean> {
+  const rows = await sql()`delete from bridge_runs where id = ${id} and owner_id = ${ownerId} and ended_at is null and kind = 'send' returning id`;
+  if (rows.length) await revokeRunTokens(ownerId, id);
+  return rows.length > 0;
 }
 
 // ---------- położenia na kanwie ----------
@@ -773,11 +987,22 @@ export async function answerBlockQuestion(stepId: string, index: number, answer:
   const p = r?.blocks ? Blocks.safeParse(r.blocks) : null; if (!p || !p.success) return null;
   const b = p.data[index]; if (!b || b.type !== "question") return null;
   b.answer = answer.slice(0, 2000);
-  await sql()`update steps set blocks = ${sql().json(p.data as never)} where id = ${stepId}`;
+  await sql()`update steps set blocks = ${sql().json(sanitizeBlocks(p.data) as never)} where id = ${stepId}`;   // treść szkicu bez zmian: zgoda zostaje
   return b.text;
 }
-// cofnięcie ostatniej zmiany kartki: poprzednia i obecna wersja zamieniają się miejscami (drugie cofnięcie przywraca zmianę)
+// cofnięcie ostatniej zmiany kartki: poprzednia i obecna wersja zamieniają się miejscami (drugie cofnięcie przywraca zmianę).
+// Cofnięcie nie wskrzesza zgody ani wysyłki: przywrócony szkic przechodzi przez tę samą kontrolę co każdy zapis.
 export async function restorePrevBlocks(stepId: string): Promise<boolean> {
-  const r = await sql()`update steps set blocks = blocks_prev, blocks_prev = blocks, blocks_at = now() where id = ${stepId} and blocks_prev is not null returning id`;
-  return r.length > 0;
+  const [r] = await sql()`select blocks, blocks_prev, approved_sig, status from steps where id = ${stepId} and blocks_prev is not null`;
+  const prev = r ? parseBlocks(r.blocksPrev) : null;
+  if (!r || !prev) return false;
+  const approvedSig = (r.approvedSig as string) ?? null;
+  const g = guardBlocks(stepId, { blocks: parseBlocks(r.blocks), approvedSig }, prev, false);
+  const p: Row = { blocks: sql().json((approvedSig && !g.approved ? demote(g.blocks) : g.blocks) as never), blocks_prev: r.blocks == null ? null : sql().json(r.blocks as never), blocks_at: new Date() };
+  if (approvedSig && !g.approved) {
+    p.approved_at = null; p.approved_sig = null; p.send_started_at = null;
+    if (r.status === "handoff") { p.status = "draft"; p.prev_status = null; p.handoff_at = null; }
+  }
+  await sql()`update steps set ${sql()(p)} where id = ${stepId}`;
+  return true;
 }

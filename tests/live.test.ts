@@ -85,6 +85,10 @@ describe("kolejka wiadomości Piotra w zadaniu", () => {
     expect(queueWho({ alive: true, name: "Mac", run: live, hold: limit }, "t1", 1).kind).toBe("working");
     expect([bridgeHold({ state: "idle", until: "2026-10-18T23:00:00Z" }), bridgeHold({ state: "check" }), bridgeHold(null)]).toEqual([null, null, null]);
     expect(bridgeHold({ state: "error", until: "" })).toEqual({ kind: "error", until: null });
+    // Piotr zatrzymał bieg na Macu (aplikacja 0.1.7): przerwa do podanej godziny
+    const stopped = bridgeHold({ state: "stopped", until: "2026-10-18T09:10:00Z" });
+    expect(stopped).toEqual({ kind: "stopped", until: "2026-10-18T09:10:00Z" });
+    expect(chatWho({ alive: true, name: null, run: null, hold: stopped }, "t1")).toContain("stoi: zatrzymany przez Ciebie, wraca o 11:10");
   });
   it("pasek po ostatnim kroku i odmiana liczebników", () => {
     expect(allDoneWaitText(queueWho({ alive: true, name: "Mac", run: null }, "t1", 2))).toBe("Kroki zrobione · 2 Twoje wiadomości czekają na mostek");

@@ -80,12 +80,14 @@ jobs:
 
           Kolejne wersje aplikacja pobiera i instaluje sama (plik `.zip`), bez ponownego przechodzenia przez ten krok.
           EOF
+          # suma kontrolna obok .zip i .pkg (plik <nazwa>.sha256): aktualizacja w aplikacji sprawdza ją przed rozpakowaniem
+          for f in macos/build/*.zip macos/build/*.pkg; do shasum -a 256 "$f" | awk '{print $1}' > "$f.sha256"; done
           if [[ "$PRE" == "true" ]]; then
             gh release delete "$TAG" -y --cleanup-tag 2>/dev/null || true
-            gh release create "$TAG" macos/build/*.pkg macos/build/*.dmg macos/build/*.zip --title "Task Hub na Maca (budowa $VERSION)" --notes-file macos/out/notes.md --prerelease --target "$GITHUB_SHA"
+            gh release create "$TAG" macos/build/*.pkg macos/build/*.dmg macos/build/*.zip macos/build/*.sha256 --title "Task Hub na Maca (budowa $VERSION)" --notes-file macos/out/notes.md --prerelease --target "$GITHUB_SHA"
           elif gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" macos/build/*.pkg macos/build/*.dmg macos/build/*.zip --clobber
+            gh release upload "$TAG" macos/build/*.pkg macos/build/*.dmg macos/build/*.zip macos/build/*.sha256 --clobber
             gh release edit "$TAG" --title "Task Hub na Maca $VERSION" --notes-file macos/out/notes.md --prerelease=false --latest
           else
-            gh release create "$TAG" macos/build/*.pkg macos/build/*.dmg macos/build/*.zip --title "Task Hub na Maca $VERSION" --notes-file macos/out/notes.md --latest --target "$GITHUB_SHA"
+            gh release create "$TAG" macos/build/*.pkg macos/build/*.dmg macos/build/*.zip macos/build/*.sha256 --title "Task Hub na Maca $VERSION" --notes-file macos/out/notes.md --latest --target "$GITHUB_SHA"
           fi

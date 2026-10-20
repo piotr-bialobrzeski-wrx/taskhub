@@ -11,8 +11,11 @@ import { RichField } from "@/components/RichField";
 import { Markdown } from "@/lib/markdown";
 import { ConnectionHead, type StepConnection } from "@/components/StepFields";
 import { Activity } from "@/components/Activity";
+import { CopyButton } from "@/components/CopyButton";
+import { isHttpUrl, isLocalPath, safeHref } from "@/lib/safeurl";
 import type { TileActivity } from "@/components/canvas/ui";
 import { approveStep, backToTodo, markDone, prepare, saveDraftBody } from "@/app/actions";
+import { shownSig } from "@/lib/agent/approval";
 
 export type CardMode = "proposed" | "parked" | "sending" | "sent" | "unsent";
 type Draft = Extract<Block, { type: "draft" }>;
@@ -39,6 +42,10 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
 }) {
   const d = (s.blocks?.find((b) => b.type === "draft") ?? null) as Draft | null;
   const changes = (s.blocks?.find((b) => b.type === "changes") ?? null) as Extract<Block, { type: "changes" }> | null;
+  // podgląd zmian: adres http(s) jako przycisk, ścieżka na dysku tylko jako tekst do skopiowania; wynik też tylko http(s)
+  const previewUrl = isHttpUrl(changes?.preview) ? changes.preview.trim() : null;
+  const previewPath = !previewUrl && isLocalPath(changes?.preview) ? changes.preview.trim() : null;
+  const sentHref = safeHref(link);
   const app = d?.target.app ?? s.tool, name = toolLabel(app), where = d?.target.where ?? null;
   const conn = connections.find((c) => c.id === s.connectionId) ?? null;
   const account = conn ? `${conn.label}${conn.account ? ` · ${conn.account}` : ""}` : null;
@@ -69,6 +76,9 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   // pole z formatowaniem dla zwykłej treści przed decyzją; jego ukryte pole „body” należy do formularza „Zatwierdź”
   const editable = (mode === "proposed" || mode === "parked") && !isRows && !((isPrompt || isCommit) && d);
   const formId = "pub-" + s.id;
+  // podpis szkicu z tej karty: zgoda obejmie tylko tę wersję (miejsce, pola, wiersze, pliki), nawet gdy agent zmieni szkic przed kliknięciem
+  const seen = d ? shownSig(s, d, editable) : null;
+  const seenInput = seen ? <input type="hidden" name="seen" value={seen} /> : null;
   // podgląd według rodzaju odpowiedzi: wiersze do arkusza jako tabela, prompt jako ramka kodu, reszta jako wiadomość „moja”
   const preview = isRows && d ? (
     <div className="thread"><div className="msg mine rows"><div className="who">{who}</div><Table columns={d.columns ?? d.rows![0].map((_, i) => `Kolumna ${i + 1}`)} rows={d.rows!} highlightFrom={0} />{body ? <p className="sub">{body}</p> : null}</div></div>
@@ -99,25 +109,26 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
         <span className="sp" />
         {mode === "proposed" || mode === "parked" ? (stays ? null : <ConnectionHead taskId={t.id} stepId={s.id} app={app} connectionId={s.connectionId} connections={connections} company={company} />)
           : account ? <span className="pub-acc">{account}</span> : null}
-        {mode === "sent" && link ? <a className="btn ico" href={link} target="_blank" rel="noopener" title={link}>Otwórz w {name}<Icon k="ext" size={13} sw={1.6} /></a> : null}
+        {mode === "sent" && sentHref ? <a className="btn ico" href={sentHref} target="_blank" rel="noopener" title={sentHref}>Otwórz w {name}<Icon k="ext" size={13} sw={1.6} /></a> : null}
       </div>
       {stale ? <div className="note warn">Szkic sprzed zmiany zakresu: przed tym krokiem weszły nowe kroki, Claude przygotuje go od nowa, gdy je zrobi.</div> : null}
       {changes ? (
         <div className="actions">
           <a className="btn" href={"#zm-" + s.id} title="Pliki i diffy na kartce kroku">Zobacz zmiany ({changes.files.length})</a>
-          {changes.preview ? <a className="btn ico" href={changes.preview} target="_blank" rel="noopener" title={changes.preview}>Otwórz podgląd<Icon k="ext" size={13} sw={1.6} /></a> : null}
+          {previewUrl ? <a className="btn ico" href={previewUrl} target="_blank" rel="noopener" title={previewUrl}>Otwórz podgląd<Icon k="ext" size={13} sw={1.6} /></a> : null}
+          {previewPath ? <span className="sub" title="Podgląd leży na Macu: otwórz go w Finderze albo w przeglądarce">Podgląd: <code>{previewPath}</code> <CopyButton text={previewPath} label="Kopiuj ścieżkę" /></span> : null}
         </div>
       ) : null}
       {preview}
       {mode === "proposed" ? (
         <div className="actions">
-          <form id={formId} action={approveStep.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} title={stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść`}>{mainLabel}</PendingButton></form>
+          <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} title={stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść`}>{mainLabel}</PendingButton></form>
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Szkic zostaje, krok wraca do zrobienia">Odłóż</PendingButton></form>
         </div>
       ) : mode === "parked" ? (
         <div className="actions">
-          <form id={formId} action={approveStep.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"}>{mainLabel}</PendingButton></form>
+          <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"}>{mainLabel}</PendingButton></form>
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn" title="Zamknij krok bez wysyłania">Zamknij bez wysyłki</PendingButton></form>
         </div>

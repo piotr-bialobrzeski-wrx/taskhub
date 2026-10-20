@@ -62,13 +62,27 @@ const Registration = z.object({
   scope: z.string().optional(),
 }).loose();
 
-const redirectOk = (u: string) => { try { const x = new URL(u); return x.protocol === "https:" || (x.protocol === "http:" && /^(localhost|127\.0\.0\.1)$/.test(x.hostname)); } catch { return false; } };
+// Dokąd wolno odesłać kod zgody: znane adresy Claude i ChatGPT, lokalny port Claude Code (/mcp) i adresy z OAUTH_REDIRECT_ALLOW (po przecinku, dokładnie).
+// Sprawdzane przy rejestracji i przy dokumencie tożsamości; klienci zapisani wcześniej działają dalej (zgoda sprawdza tylko ich zapisaną listę).
+const REDIRECTS = new Set(["https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback", "https://chatgpt.com/connector_platform_oauth_redirect"]);
+export function isAllowedRedirect(u: string, env: Record<string, string | undefined> = process.env): boolean {
+  if (typeof u !== "string" || u.length > 2000) return false;
+  if (REDIRECTS.has(u)) return true;
+  if ((env.OAUTH_REDIRECT_ALLOW ?? "").split(",").map((x) => x.trim()).filter(Boolean).includes(u)) return true;
+  let x: URL;
+  try { x = new URL(u); } catch { return false; }
+  if (x.username || x.password || x.hash) return false;
+  if (x.protocol === "https:" && x.hostname === "chatgpt.com" && !x.port && /^\/aip\/[^/]+\/.*callback$/.test(x.pathname)) return true;   // akcje GPT: /aip/<id>/oauth/callback
+  if (x.protocol === "https:" && x.hostname === "chatgpt.com" && !x.port && !x.search && /^\/connector\/oauth\/[^/]+$/.test(x.pathname)) return true;   // konektor ChatGPT: adres zwrotny na konektor (bez iss z RFC 9207)
+  return x.protocol === "http:" && (x.hostname === "localhost" || x.hostname === "127.0.0.1");
+}
 
 export async function registerClient(body: unknown) {
   const p = Registration.safeParse(body);
   if (!p.success) throw new OAuthError("invalid_client_metadata", "Potrzebne redirect_uris (lista adresów).");
   const uris = p.data.redirect_uris;
-  if (!uris.every(redirectOk)) throw new OAuthError("invalid_redirect_uri", "redirect_uri musi być https (albo http na localhost).");
+  const bad = uris.find((u) => !isAllowedRedirect(u));
+  if (bad) throw new OAuthError("invalid_redirect_uri", `Task Hub nie odsyła zgody na ${bad}. Dozwolone są Claude, ChatGPT, localhost i adresy z OAUTH_REDIRECT_ALLOW.`);
   const method = p.data.token_endpoint_auth_method ?? "none";
   if (!["none", "client_secret_post", "client_secret_basic"].includes(method)) throw new OAuthError("invalid_client_metadata", "Nieobsługiwana metoda uwierzytelnienia klienta.");
   const id = "thc_" + randomBytes(16).toString("base64url");
@@ -108,12 +122,14 @@ export async function registerCimdClient(url: string, doc: unknown): Promise<OAu
   const p = Registration.extend({ client_id: z.string() }).safeParse(doc);
   if (!p.success) throw new OAuthError("invalid_client", "Dokument tożsamości klienta nie ma client_id i redirect_uris.");
   if (p.data.client_id !== url) throw new OAuthError("invalid_client", "client_id w dokumencie tożsamości różni się od jego adresu.");
-  if (!p.data.redirect_uris.every(redirectOk)) throw new OAuthError("invalid_redirect_uri", "redirect_uri w dokumencie tożsamości musi być https.");
+  // dokument publikuje klient (np. Claude) i może mieć więcej adresów: zostają tylko dozwolone, bez żadnego dozwolonego nie ma klienta
+  const uris = p.data.redirect_uris.filter((u) => isAllowedRedirect(u));
+  if (!uris.length) throw new OAuthError("invalid_redirect_uri", `Dokument tożsamości klienta nie podaje adresu, na który Task Hub odsyła zgodę (${p.data.redirect_uris[0]}).`);
   const name = (p.data.client_name ?? "").trim().slice(0, 120) || new URL(url).hostname;
   await sql()`insert into oauth_clients (id, name, redirect_uris, secret_hash, auth_method, metadata, created_at)
-    values (${url}, ${name}, ${sql().json(p.data.redirect_uris)}, null, 'none', ${sql().json({ cimd: true } as never)}, now())
+    values (${url}, ${name}, ${sql().json(uris)}, null, 'none', ${sql().json({ cimd: true } as never)}, now())
     on conflict (id) do update set name = excluded.name, redirect_uris = excluded.redirect_uris, created_at = now()`;
-  return { id: url, name, redirectUris: p.data.redirect_uris, secretHash: null, authMethod: "none" };
+  return { id: url, name, redirectUris: uris, secretHash: null, authMethod: "none" };
 }
 
 // ---------- prośba o zgodę ----------

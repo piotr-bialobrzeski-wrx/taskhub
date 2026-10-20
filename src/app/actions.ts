@@ -10,9 +10,10 @@ import * as repo from "@/lib/repo";
 import { aiFor, composeFlow, finishStep, prepareStep, taskQueue } from "@/lib/services";
 import { Q, roundQ } from "@/lib/time";
 import { runChat } from "@/lib/agent/chat";
-import { bridgeHold, busyWith, newTaskText, noStepsWho, type Queue, type Worker } from "@/lib/auto";
+import { bridgeHold, busyWith, newTaskText, noStepsWho, shortTitle, type Queue, type Worker } from "@/lib/auto";
 import { liveActivity } from "@/lib/live";
-import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
+import { BRIDGE_ALIVE_MS, isGitDraft } from "@/lib/bridge";
+import { draftOf, isExternalApp, isPromptDraft, shownSig } from "@/lib/agent/approval";
 import type { Connection, Rule, Sphere, Step } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -51,7 +52,8 @@ function uploads(fd: FormData): File[] {
 async function attachFiles(taskId: string, files: File[], notes: { caption: string; analysis: string }[] = []) {
   for (const [i, f] of files.entries()) {
     const data = Buffer.from(await f.arrayBuffer());
-    await repo.addAttachment({ taskId }, { kind: f.type.startsWith("image/") ? "image" : "file", name: f.name, mime: f.type || undefined, bytes: f.size, keep: true, data, caption: notes[i]?.caption, analysis: notes[i]?.analysis });
+    // obrazkiem jest tylko to, co /api/files pokazuje w przeglądarce (SVG i reszta idą jako plik do pobrania)
+    await repo.addAttachment({ taskId }, { kind: IMAGE_TYPES.has(f.type) && !/\.svg$/i.test(f.name) ? "image" : "file", name: f.name, mime: f.type || undefined, bytes: f.size, keep: true, data, caption: notes[i]?.caption, analysis: notes[i]?.analysis });
   }
 }
 
@@ -201,6 +203,7 @@ export async function reopen(taskId: string, stepId: string) {
   await repo.reopenStep(o.id, taskId, step);
   refresh(taskId);
 }
+// „Odłóż” i „Zatrzymaj”: krok wraca do zrobienia; zgoda na szkic przepada (repo cofa ją przy każdej zmianie stanu), szkic zostaje do ponownego zatwierdzenia
 export async function backToTodo(taskId: string, stepId: string) {
   const o = await requireOwner();
   await stepOf(o.id, taskId, stepId);
@@ -218,23 +221,41 @@ export async function compose(taskId: string, stepId: string) {
   refresh(taskId);
 }
 // „Uruchom”: krok przechodzi w toku (kafelek pokazuje pracę); Claude z konektora bierze go z list_work i zgłasza wynik przez complete_step
+// tylko krok do zrobienia: szkic idzie dalej wyłącznie przez „Zatwierdź”, a stan „w toku” po szkicu nie może wyglądać jak zgoda
 export async function handoff(taskId: string, stepId: string) {
   const o = await requireOwner();
   const { step } = await stepOf(o.id, taskId, stepId);
-  await repo.updateStep(stepId, { status: "handoff", prevStatus: step.status, handoffAt: new Date().toISOString() });
+  if (step.status === "todo") await repo.updateStep(stepId, { status: "handoff", prevStatus: "todo", handoffAt: new Date().toISOString() });
   refresh(taskId);
 }
-// zatwierdzenie szkicu: krok, który coś wysyła, idzie do wysłania (Claude wyśle dokładnie zatwierdzoną treść); inny szkic jest po prostu gotowy
-// fd: formularz zatwierdzenia niesie treść z pola z formatowaniem (body), więc zatwierdza się to, co Piotr widzi, także bez wcześniejszego zapisu
+// zatwierdzenie szkicu: krok, który coś wysyła, idzie do wysłania (mostek wyśle dokładnie zatwierdzoną treść); inny szkic jest po prostu gotowy
+// fd: formularz zatwierdzenia niesie treść z pola z formatowaniem (body), więc zatwierdza się to, co Piotr widzi, także bez wcześniejszego zapisu.
+// To jedyna droga do zgody: repo.approveDraft zapisuje podpis tej treści; każda późniejsza zmiana treści zgodę kasuje.
 export async function approveStep(taskId: string, stepId: string, fd?: FormData) {
   const o = await requireOwner();
   const { step } = await stepOf(o.id, taskId, stepId);
-  const body = fd?.get("body");
+  const body = fd?.get("body"), shown = fd?.get("seen");
   const edited = typeof body === "string" ? body : null;
-  if (edited !== null) await writeDraftBody(stepId, step, edited);
-  if (!step.needsApproval) { await finishStep(o.id, taskId, stepId); refresh(taskId); return; }
-  const blocks = step.blocks?.map((b) => (b.type === "draft" && b.status === "proposed" ? { ...b, ...(edited !== null ? { body: edited } : {}), status: "approved" as const } : b)) ?? null;
-  await repo.updateStep(stepId, { status: "handoff", prevStatus: "draft", handoffAt: new Date().toISOString(), ...(blocks ? { blocks } : {}) });
+  const seen = typeof shown === "string" && shown ? shown : null;   // podpis szkicu z karty, którą Piotr widział
+  if (step.status === "done") { refresh(taskId); return; }
+  if (!step.needsApproval) {
+    if (edited !== null) await writeDraftBody(stepId, step, edited);
+    await finishStep(o.id, taskId, stepId); refresh(taskId); return;
+  }
+  if (await repo.approveDraft(o.id, stepId, { body: edited, seen })) {
+    // szkic, który nie wychodzi poza Task Hub (krok Piotra, notatka): zgoda go kończy, nie czeka na bieg wysyłki mostka.
+    // Commit wysyła aplikacja na Macu, a zatwierdzony prompt dla agenta wykonuje bieg pracy, więc te czekają
+    const s = (await repo.getTask(o.id, taskId))?.steps.find((x) => x.id === stepId);
+    const d = s ? draftOf(s) : null;
+    if (s && d && !isExternalApp(d.target.app) && !isGitDraft(d, s.blocks) && !isPromptDraft(d, s.blocks) && (await repo.markSendStarted(o.id, stepId)))
+      await repo.completeSend(o.id, stepId, { summary: "Zatwierdzone; ten szkic nie idzie do żadnej aplikacji zewnętrznej." });
+  } else if (seen) {
+    // agent zmienił szkic, zanim Piotr kliknął: zgody nie ma, karta pokaże nową wersję
+    const s = (await repo.getTask(o.id, taskId))?.steps.find((x) => x.id === stepId);
+    const d = s ? draftOf(s) : null;
+    if (s && d && s.status !== "done" && !s.sendStartedAt && shownSig(s, d, edited !== null) !== seen)
+      await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(s.title, 60)}”: szkic zmienił się, zanim go zatwierdziłeś. Sprawdź go jeszcze raz.`, { stepId });
+  }
   refresh(taskId);
 }
 export async function saveReport(fd: FormData) {
@@ -244,7 +265,8 @@ export async function saveReport(fd: FormData) {
   await finishStep(o.id, taskId, stepId, { report, link: url(str(fd, "link")) ?? undefined });
   refresh(taskId);
 }
-// treść szkicu z pola z formatowaniem (Markdown): poprawia blok draft czekający na decyzję albo, gdy szkicu nie ma, wynik kroku
+// treść szkicu z pola z formatowaniem (Markdown): poprawia blok draft czekający na decyzję albo, gdy szkicu nie ma, wynik kroku.
+// Poprawka zatwierdzonego szkicu kasuje zgodę (repo), szkic wraca do zatwierdzenia
 async function writeDraftBody(stepId: string, step: Step, body: string) {
   const d = step.blocks?.find((b) => b.type === "draft");
   if (d && d.status === "sent") return;

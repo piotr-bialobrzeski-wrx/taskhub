@@ -1,9 +1,11 @@
-// Mały, bezpieczny markdown dla klocka „wolna treść”: nagłówki, akapity, listy, pogrubienie, kursywa, kod, linki i obrazki (tylko http/https).
+// Mały, bezpieczny markdown dla klocka „wolna treść”: nagłówki, akapity, listy, pogrubienie, kursywa, kod, linki i obrazki (tylko http/https i pliki Task Hub).
 // Bez surowego HTML: agent nie może wstrzyknąć skryptu ani stylu; wszystko, czego nie rozumiemy, zostaje zwykłym tekstem.
 import type { ReactNode } from "react";
+import { isMediaUrl, safeHref } from "./safeurl";
 
-const SAFE_URL = /^https?:\/\/[^\s<>"')]+$/;
-export const safeUrl = (u: string) => (SAFE_URL.test(u) ? u : null);
+// adresy przez wspólne sito (safeurl.ts): link to http(s), plik Task Hub albo kotwica, obrazek http(s) albo plik Task Hub; reszta zostaje tekstem
+export const safeUrl = (u: string) => safeHref(u) ?? null;
+const imgUrl = (u: string) => (isMediaUrl(u) ? u.trim() : null);
 
 function inline(text: string, key = 0): ReactNode[] {
   const out: ReactNode[] = [];
@@ -13,7 +15,7 @@ function inline(text: string, key = 0): ReactNode[] {
   while ((m = re.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index));
     const k = `${key}-${i++}`;
-    if (m[1] !== undefined) { const u = safeUrl(m[2]); out.push(u ? <img key={k} src={u} alt={m[1]} /> : m[0]); }
+    if (m[1] !== undefined) { const u = imgUrl(m[2]); out.push(u ? <img key={k} src={u} alt={m[1]} /> : m[0]); }
     else if (m[3] !== undefined) { const u = safeUrl(m[4]); out.push(u ? <a key={k} href={u} target="_blank" rel="noopener">{m[3]}</a> : m[3]); }
     else if (m[5] !== undefined) out.push(<b key={k}>{m[5]}</b>);
     else if (m[6] !== undefined) out.push(<i key={k}>{m[6]}</i>);

@@ -4,7 +4,8 @@ import { useActionState } from "react";
 import type { TokenState } from "@/app/actions";
 import { CopyButton } from "./CopyButton";
 
-export const installCommand = (url: string, token: string) => `curl -fsSL ${url}/bridge/taskhub-bridge.mjs -o ~/taskhub-bridge.mjs && node ~/taskhub-bridge.mjs --install --url ${url} --token ${token}`;
+// token w zmiennej środowiskowej, nie w argumentach: nie widać go w liście procesów (ps)
+export const installCommand = (url: string, token: string) => `curl -fsSL ${url}/bridge/taskhub-bridge.mjs -o ~/taskhub-bridge.mjs && TASKHUB_BRIDGE_TOKEN=${token} node ~/taskhub-bridge.mjs --install --url ${url}`;
 // link do aplikacji Task Hub na Macu: przekazuje adres i token bez przepisywania (aplikacja rejestruje schemat taskhub://)
 export const connectLink = (url: string, token: string) => `taskhub://connect?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`;
 
@@ -25,7 +26,7 @@ export function TokenForm({ action, placeholder = "Nazwa klienta, np. Claude Cod
                 <a className="pill primary" href={connectLink(install.url, state.token)}>Połącz aplikację Task Hub na tym Macu</a>
                 <CopyButton text={state.token} label="Kopiuj token" />
               </div>
-              <p className="sub" style={{ margin: "8px 0 0" }}>Przycisk otwiera zainstalowaną aplikację i wpisuje jej adres oraz token. Gdy nic się nie dzieje, wklej token w oknie Ustawień aplikacji.</p>
+              <p className="sub" style={{ margin: "8px 0 0" }}>Przycisk otwiera zainstalowaną aplikację i wpisuje jej adres oraz token; aplikacja zapyta jeszcze, czy połączyć się z tym adresem. Gdy nic się nie dzieje, wklej token w oknie Ustawień aplikacji.</p>
               <details className="edit" style={{ marginTop: 8 }}>
                 <summary>Bez aplikacji: mostek jako usługa z Terminala</summary>
                 <pre className="code" style={{ marginTop: 6 }}>{installCommand(install.url, state.token)}</pre>

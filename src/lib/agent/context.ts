@@ -4,6 +4,7 @@ import { type Company, type Connection, type Project, type Rule, type Sphere, ty
 import { LEVELS, scoreOf, whyText, type Score } from "../priority";
 import { calibrationText, fmtMin, remainEst, taskSpent, todayISO } from "../time";
 import { rulesFor } from "../repo";
+import { isPromptDraft, isSendable, type Approvable } from "./approval";
 
 export type Scored = { task: Task; score: Score; project: Project | null };
 
@@ -159,14 +160,19 @@ export function cardText(steps: Pick<Step, "id" | "title" | "status" | "blocks">
 
 // get_task: szkice kroków w pełnym brzmieniu. Zatwierdzony szkic (ZATWIERDZONE SZKICE DO WYSŁANIA w list_work) agent wysyła dokładnie w tej treści,
 // więc body, temat, pola i wiersze idą bez skracania; odłożony szkic (krok wrócił do todo) i nieaktualny są oznaczone, żeby ich nie wysłać.
-export function draftsText(steps: Pick<Step, "id" | "title" | "status" | "blocks">[]): string {
+// send: czy ten, kto pyta, wysyła szkic tego kroku (stary mostek: ważna zgoda; bieg wysyłki: tylko jego krok; konektor i bieg pracy: nikt).
+// Bez danych o zgodzie (same pola kroku) liczy się stan szkicu i kroku.
+type DraftStep = Pick<Step, "id" | "title" | "status" | "blocks"> & Partial<Pick<Step, "approvedAt" | "approvedSig" | "sendStartedAt">>;
+const legacySend = (s: DraftStep) => !("approvedSig" in s) || isSendable(s as Approvable);
+export function draftsText(steps: DraftStep[], opts: { send?: (s: DraftStep) => boolean } = {}): string {
+  const send = opts.send ?? legacySend;
   const out: string[] = [];
   for (const s of steps) {
     for (const b of s.blocks ?? []) {
       if (b.type !== "draft") continue;
       const state = b.stale ? "NIEAKTUALNY: przygotuj od nowa, nie wysyłaj"
         : b.status === "sent" ? "wysłany"
-        : b.status === "approved" && s.status === "handoff" ? "ZATWIERDZONY: wyślij dokładnie tę treść"
+        : b.status === "approved" && s.status === "handoff" ? (send(s) ? (isPromptDraft(b, s.blocks) ? "ZATWIERDZONY PROMPT: wykonaj dokładnie to polecenie, potem complete_step" : "ZATWIERDZONY: wyślij dokładnie tę treść") : "zatwierdzony przez Piotra: wyśle go mostek Task Hub w osobnym biegu wysyłki; nie wysyłaj")
         : b.status === "approved" ? "zatwierdzony, ale krok nie czeka na wysyłkę: nie wysyłaj"
         : s.status === "draft" ? "czeka na zatwierdzenie Piotra: nie wysyłaj"
         : "odłożony: nie wysyłaj";

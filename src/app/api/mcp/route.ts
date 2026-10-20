@@ -5,7 +5,7 @@ import { z } from "zod";
 import * as repo from "@/lib/repo";
 import { companyOf, contextText, brief, scoreAll, capText, draftsText, cardText } from "@/lib/agent/context";
 import { rulesText } from "@/lib/agent/context";
-import { workSummary } from "@/lib/agent/work";
+import { audienceOf, workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
 import { Blocks, ChangedFile, Fact, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
@@ -16,9 +16,11 @@ import { originOf, wwwAuthenticate } from "@/lib/oauth";
 import { externalLink as externalLinkOf } from "@/lib/links";
 import { appUrl } from "@/lib/session";
 import { securityReport } from "@/lib/security";
+import { isHttpUrl } from "@/lib/safeurl";
+import { approvalValid, coerceAgentDrafts, draftOf, isExternalApp, isGitDraft, isPromptDraft, isSendable } from "@/lib/agent/approval";
 
-// link kroku to adres elementu w zewnętrznej aplikacji; adres samego Task Hub nie jest linkiem kroku
-const externalLink = (link: string | undefined | null) => externalLinkOf(link, appUrl());
+// link kroku to adres elementu w zewnętrznej aplikacji (tylko http/https); adres samego Task Hub nie jest linkiem kroku
+const externalLink = (link: string | undefined | null) => (isHttpUrl(link) ? externalLinkOf(link, appUrl()) : undefined);
 
 export const maxDuration = 60;
 
@@ -30,10 +32,39 @@ async function ownedStep(ownerId: string, stepId: string): Promise<string | null
   return r ? (r.taskId as string) : null;
 }
 
-function buildHandler(ownerId: string, kind: repo.TokenKind) {
+// bieg wysyłki: tylko te narzędzia i tylko dla jego zadania i kroku
+const SEND_TOOLS = new Set(["get_task", "get_rules", "list_connections", "add_facts", "complete_step", "leave_step", "list_work"]);
+const SEND_ONLY = "Ten bieg tylko wysyła jeden zatwierdzony szkic";
+async function sendGuard(ownerId: string, scope: repo.RunScope, name: string, a: Record<string, unknown>): Promise<string | null> {
+  if (!SEND_TOOLS.has(name)) return `${SEND_ONLY}: ${name} nie jest tu dostępne.`;
+  if (name === "get_task" && a.taskId !== scope.taskId) return `${SEND_ONLY}: get_task tylko dla zadania [${scope.taskId}].`;
+  if ((name === "complete_step" || name === "leave_step") && a.stepId !== scope.stepId) return `${SEND_ONLY}: ${name} tylko dla kroku [${scope.stepId}].`;
+  if (name === "add_facts" && (!scope.taskId || (await ownedStep(ownerId, String(a.stepId ?? ""))) !== scope.taskId)) return `${SEND_ONLY}: add_facts tylko w zadaniu [${scope.taskId}].`;
+  if (name === "list_connections" && (a.audit === true || a.audit === "true")) return `${SEND_ONLY}: bez raportu bezpieczeństwa.`;
+  return null;
+}
+
+function buildHandler(auth: repo.TokenAuth) {
+  const { ownerId, kind } = auth;
+  const scope = kind === "run" ? auth.scope : null;
+  const audience = audienceOf(auth);
+  // czy ten, kto pyta, wysyła szkic tego kroku (get_task: „ZATWIERDZONY: wyślij…” tylko wtedy); zatwierdzony prompt dla agenta wykonuje bieg pracy i klient
+  const sends = (s: Step) => audience === "bridge-v1" ? isSendable(s) : audience === "send" ? s.id === scope?.stepId && approvalValid(s) && !!s.sendStartedAt : isSendable(s) && isPromptDraft(draftOf(s), s.blocks);
+  // krok wymagający zgody, który zmienia coś w aplikacji zewnętrznej: konektor i bieg pracy tylko szykują szkic, nie robią go same
+  const needsDraft = (s: Step) => audience !== "bridge-v1" && audience !== "send" && s.needsApproval && isExternalApp(s.tool) && !sends(s);
   // nazwa albo id połączenia z rejestru → id; pusty napis albo brak = null (agent wybiera sam)
   const connectionIdOf = async (ref: string | undefined): Promise<string | null> => (ref?.trim() ? (await repo.findConnection(ownerId, ref))?.id ?? null : null);
+  // krok właściciela świeżo z bazy (z danymi o zgodzie); null = nie jego albo nie ma
+  const stepById = async (stepId: string): Promise<Step | null> => { const taskId = await ownedStep(ownerId, stepId); return taskId ? (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === stepId) ?? null : null; };
   return createMcpHandler((server) => {
+    if (scope?.kind === "send") {
+      // bieg wysyłki: każde narzędzie przechodzi przez sendGuard (lista dozwolonych, jego zadanie i krok)
+      const reg = server.registerTool.bind(server) as (name: string, config: unknown, cb: (args: Record<string, unknown>, extra: unknown) => unknown) => unknown;
+      server.registerTool = ((name: string, config: unknown, cb: (args: Record<string, unknown>, extra: unknown) => unknown) => reg(name, config, async (args, extra) => {
+        const why = await sendGuard(ownerId, scope, name, args ?? {});
+        return why ? { content: [{ type: "text" as const, text: why }], isError: true } : cb(args, extra);
+      })) as unknown as typeof server.registerTool;
+    }
     server.registerTool("list_tasks", {
       title: "Lista zadań", description: "Otwarte zadania z priorytetem efektywnym, stanem, szacunkami i terminami. Opcjonalnie szukaj po tekście.",
       inputSchema: z.object({ query: z.string().optional(), includeDone: z.boolean().optional() }),
@@ -49,11 +80,18 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
     }, async ({ taskId }) => {
       const [tasks, projects, companies, connections, rules, samples, factPrefs] = await Promise.all([repo.listTasks(ownerId, { all: true }), repo.listProjects(ownerId), repo.listCompanies(ownerId), repo.listConnections(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId), repo.factPreferencesText(ownerId)]);
       const t = tasks.find((x) => x.id === taskId); if (!t) return text("Nie ma takiego zadania.");
+      // bieg wysyłki widzi tylko podpisany szkic swojego kroku: kontekst zadania (wątki, czat, fakty) pisze też agent i treść z zewnątrz
+      if (scope?.kind === "send") {
+        const st = t.steps.find((x) => x.id === scope.stepId);
+        if (!st || !sends(st)) return text("Nie ma szkicu do wysłania w tym biegu (zgodę wycofano albo krok jest zrobiony). Niczego nie wysyłaj.");
+        const conn = st.connectionId ? connections.find((c) => c.id === st.connectionId) : null;
+        return text([`ZADANIE [${t.id}] „${t.title}”, KROK [${st.id}] „${st.title}” (${st.tool})${conn ? ` | połączenie: ${conn.label}${conn.account ? ` (${conn.account})` : ""}` : ""}`, draftsText([st], { send: (s) => sends(s as Step) })].join("\n"));
+      }
       const facts = await Promise.all(t.steps.map(async (s) => [s.id, await repo.listFacts({ stepId: s.id })] as const));
       const ctx = contextText({ tasks, projects, companies, connections, rules, samples, factPrefs, currentTaskId: taskId });
       const fx = facts.filter(([, f]) => f.length).map(([id, f]) => `FAKTY KROKU ${id}:\n${f.filter((x) => !x.hidden).map((x) => `- ${x.label}: ${x.value}${x.source ? ` (${x.source.app}${x.source.url ? ", " + x.source.url : ""})` : ""}`).join("\n")}`).join("\n");
       // szkice kroków w pełnej treści: zatwierdzony szkic agent wysyła dokładnie w tym brzmieniu (bez tego mógł go tylko zgadywać)
-      const dx = draftsText(t.steps);
+      const dx = draftsText(t.steps, { send: (s) => sends(s as Step) });
       // kartki niezrobionych kroków: po odpowiedzi Piotra agent je poprawia (set_blocks pełnym zestawem) albo mówi, czemu nie
       const kx = cardText(t.steps);
       const stepRef = (m: { actions: unknown }) => { const id = (m.actions as { stepId?: string } | null)?.stepId; const s = id ? t.steps.find((x) => x.id === id) : null; return s ? ` przy kroku [${s.id}] „${s.title}”` : ""; };
@@ -110,13 +148,15 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       if (a.before && !bef) return text("Nie ma takiego kroku (before) w tym zadaniu.");
       const fresh = t.steps.length === 0;
       const steps = await repo.addSteps(t.id, await Promise.all(a.steps.map(async (s) => ({ ...s, link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection) }))), { before: bef?.id ?? null });
-      // przed krokiem ze szkicem weszła nowa praca: szkic jest nieaktualny, krok wraca do zrobienia i dostanie nowy szkic po nowych krokach
-      if (bef && bef.status === "draft") await repo.updateStep(bef.id, { status: "todo", prevStatus: null, handoffAt: null, blocks: (bef.blocks ?? []).map((b): Block => (b.type === "draft" ? { ...b, stale: true } : b)) });
+      // przed krokiem ze szkicem (czekającym na zgodę albo już zatwierdzonym) weszła nowa praca: szkic jest nieaktualny, zgoda przepada,
+      // krok wraca do zrobienia i dostanie nowy szkic po nowych krokach
+      const reset = !!bef && bef.status !== "done" && !bef.sendStartedAt && (bef.status === "draft" || !!bef.approvedAt);
+      if (bef && reset) await repo.updateStep(bef.id, { status: "todo", prevStatus: null, handoffAt: null, blocks: (bef.blocks ?? []).map((b): Block => (b.type === "draft" ? { ...b, status: "proposed", stale: true } : b)) });
       // w rozmowie tylko fakt: ile kroków i gdzie; tytuły, gdy jest ich mało (szczegóły są na kafelkach)
       const n = steps.length, word = n === 1 ? "krok" : n < 5 ? "kroki" : "kroków";
       const list = n <= 4 ? ": " + steps.map((s) => `„${shortTitle(s.title, 40)}”`).join(", ") : "";
       await repo.addChat(ownerId, t.id, "agent", `${fresh ? "Rozpisałem" : "Dodałem"} ${n} ${word}${bef ? ` przed „${shortTitle(bef.title, 40)}”` : ""}${list}.`, { stepId: steps[0]?.id });
-      return json({ steps: steps.map((s) => ({ id: s.id, title: s.title })), ...(bef ? { before: { id: bef.id, title: bef.title, draftReset: bef.status === "draft" } } : {}) });
+      return json({ steps: steps.map((s) => ({ id: s.id, title: s.title })), ...(bef ? { before: { id: bef.id, title: bef.title, draftReset: reset } } : {}) });
     });
 
     server.registerTool("update_step", {
@@ -126,7 +166,11 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
       const connectionId = a.connection === undefined ? undefined : await connectionIdOf(a.connection);
       if (a.connection?.trim() && !connectionId) return text("Nie ma takiego połączenia (list_connections).");
-      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, tool: a.tool, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null, connectionId }); return text("Zmieniono.");
+      const was = await stepById(a.stepId);
+      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, tool: a.tool, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null, connectionId });
+      // zmiana narzędzia albo połączenia kroku z zatwierdzonym szkicem kasuje zgodę (inne konto, inna aplikacja niż te, które Piotr widział)
+      if (was?.approvedAt && !(await stepById(a.stepId))?.approvedAt) return text("Zmieniono. Zgoda Piotra na szkic tego kroku wygasła (zmienione narzędzie albo połączenie): szkic wrócił do zatwierdzenia.");
+      return text("Zmieniono.");
     });
 
     server.registerTool("set_blocks", {
@@ -134,22 +178,33 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       inputSchema: z.object({ stepId: z.string(), blocks: Blocks, rememberFor: z.string().optional(), sameTargetOk: z.string().max(300).optional().describe("tylko gdy celowo drugi raz to samo miejsce i czynność (np. kolejny komentarz w tym samym tickecie): jednym zdaniem czemu") }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
+      const was = await stepById(a.stepId); if (!was) return text("Nie ma takiego kroku.");
+      if (a.blocks.filter((b) => b.type === "draft").length > 1) return text("Nie zapisałem: krok ma jeden szkic (jeden blok draft). Drugą wysyłkę zapisz jako osobny krok (add_steps) z własnym szkicem.");
+      // szkic od agenta sam nie jest zatwierdzony ani wysłany; ta sama treść co zapisany szkic zachowuje jego stan
+      const blocks = coerceAgentDrafts(was, a.blocks);
+      // zatwierdzony szkic (czeka na wysyłkę albo właśnie się wysyła) zostaje taki, jaki Piotr zatwierdził
+      const nd = draftOf({ blocks }), od = draftOf(was);
+      if (was.status !== "done" && (was.approvedAt || was.sendStartedAt) && (!nd || nd.status !== od?.status))
+        return text("Nie zapisałem: Piotr zatwierdził już szkic tego kroku i czeka on na wysyłkę, więc jego treść, adresat i miejsce zostają bez zmian. Zapisz kartkę z tym samym blokiem draft (SZKIC KROKU w get_task) albo, gdy szkic jest nieaktualny, napisz to Piotrowi przez reply_chat ze stepId tego kroku; on zdecyduje.");
       // dwa kroki z tym samym szkicem (ten sam ticket i czynność) wysłałyby to samo dwa razy: zatrzymaj, zanim powstanie drugi
       if (!a.sameTargetOk) {
         const all = (await repo.getTask(ownerId, taskId))?.steps ?? [];
-        const dup = sameTarget(all, a.stepId, a.blocks);
+        const dup = sameTarget(all, a.stepId, blocks);
         const name = (x: Step) => `[${x.id}] „${x.title}”`;
         if (dup.open.length || dup.sent.length) return text(`Nie zapisałem: ${[
           dup.sent.length ? `to samo miejsce i ta sama czynność już wysłane w ${dup.sent.map(name).join(", ")}` : "",
           dup.open.length ? `inny otwarty krok ma szkic do tego samego miejsca: ${dup.open.map(name).join(", ")}` : "",
         ].filter(Boolean).join("; ")}. Popraw szkic w jednym kroku zamiast dublować, a zbędny krok zamknij przez skip_step z powodem. Jeśli to celowo drugi raz (np. kolejny komentarz), podaj sameTargetOk z powodem.`);
       }
-      await repo.updateStep(a.stepId, { blocks: a.blocks });
-      if (a.rememberFor) await repo.setLayoutMemory(ownerId, a.rememberFor, a.blocks);
+      await repo.updateStep(a.stepId, { blocks });
+      if (a.rememberFor) await repo.setLayoutMemory(ownerId, a.rememberFor, blocks);
       // szkic czekający na zgodę: krok przechodzi do zatwierdzenia, Piotr widzi to na kafelku i w rozmowie zadania
-      const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId);
-      if (st && st.status !== "done" && st.status !== "draft" && a.blocks.some((b) => b.type === "draft" && b.status === "proposed")) {
-        await repo.updateStep(st.id, { status: "draft", prevStatus: st.status === "handoff" ? st.prevStatus : st.status, handoffAt: null });
+      const st = await stepById(a.stepId);
+      const fresh = st ? draftOf(st) : null;
+      if (st && st.status !== "done" && st.status !== "draft" && fresh?.status === "proposed" && !fresh.stale) {
+        // szkic do aplikacji zewnętrznej zawsze czeka na zgodę i po niej leci przez mostek; agent może podnieść „wymaga zgody”, nigdy zdjąć
+        const raise = !st.needsApproval && st.tool !== "manual" && isExternalApp(fresh.target.app);
+        await repo.updateStep(st.id, { status: "draft", prevStatus: st.status === "handoff" ? st.prevStatus : st.status, handoffAt: null, ...(raise ? { needsApproval: true } : {}) });
         await repo.addChat(ownerId, taskId, "agent", `Szkic do zatwierdzenia: „${shortTitle(st.title, 70)}”.`, { stepId: st.id });
         return text("Panel zapisany, krok czeka na zatwierdzenie Piotra. Nie wywołuj complete_step dla tego kroku, dopóki Piotr nie zatwierdzi i nie wyślesz treści.");
       }
@@ -163,15 +218,28 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       const taskId = await ownedStep(ownerId, a.stepId);
       if (!taskId) return text("Nie ma takiego kroku.");
       // szkic czekający na zgodę Piotra nie może się zamknąć: kartka pokazałaby „Wysłano”, a kroki po nim ruszyłyby, choć nic nie poleciało
-      const cur = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId);
+      const cur = await stepById(a.stepId);
+      // bieg wysyłki zamyka tylko szkic, który wziął, i tylko póki zgoda jest ważna (Piotr mógł zatrzymać wysyłkę)
+      if (cur && scope?.kind === "send" && !(approvalValid(cur) && cur.sendStartedAt))
+        return text("Nie zamknąłem kroku: wysyłkę tego szkicu zatrzymano albo zgoda Piotra wygasła. Jeśli treść już poszła, oddaj krok przez leave_step z linkiem w powodzie; Piotr sprawdzi.");
       if (cur && (cur.status === "draft" || cur.blocks?.some((b) => b.type === "draft" && b.status === "proposed")))
-        return text("Nie zamknąłem kroku: jego szkic czeka na zatwierdzenie Piotra. Zostaw krok jako szkic; gdy Piotr zatwierdzi, list_work poda go do wysłania, a complete_step wywołasz po wysyłce. Jeśli krok stał się zbędny (to samo już wysłane, zakres się zmienił), zamknij go przez skip_step z powodem.");
-      const r = await finishStep(ownerId, taskId, a.stepId, { report: a.summary, link: a.link, addSpentSec: a.spentMin ? a.spentMin * 60 : 0 });
+        return text("Nie zamknąłem kroku: jego szkic czeka na zatwierdzenie Piotra. Zostaw krok jako szkic; po zatwierdzeniu wyśle go mostek Task Hub. Jeśli krok stał się zbędny (to samo już wysłane, zakres się zmienił), zamknij go przez skip_step z powodem.");
+      // zatwierdzony szkic zamyka jako wysłany tylko ten, kto go wysyła: stary mostek przy ważnej zgodzie albo bieg wysyłki tego kroku
+      if (cur && draftOf(cur)?.status === "approved" && !sends(cur))
+        return text(audience === "bridge-v1" ? "Nie zamknąłem kroku: zgoda Piotra na ten szkic nie jest już ważna albo szkic wysyła teraz inny bieg. Niczego nie wysyłaj." : "Nie zamknąłem kroku: jego zatwierdzony szkic wysyła mostek Task Hub w osobnym biegu wysyłki. Nie wysyłaj go sam i nie zamykaj tego kroku.");
+      if (cur && cur.status !== "done" && needsDraft(cur))
+        return text("Nie zamknąłem kroku: wymaga zgody Piotra, bo zmienia coś w aplikacji zewnętrznej. Przygotuj szkic przez set_blocks (blok draft, status proposed); po zatwierdzeniu wyśle go mostek Task Hub. Jeśli krok stał się zbędny, zamknij go przez skip_step z powodem.");
+      const r = await finishStep(ownerId, taskId, a.stepId, { report: a.summary, link: externalLink(a.link), addSpentSec: a.spentMin ? a.spentMin * 60 : 0 });
       const st = r.task.steps.find((x) => x.id === a.stepId);
       // zmiany w kodzie na kartce kroku: jeden blok changes (zastępuje poprzedni), reszta klocków zostaje
       if (st && (a.changes?.length || a.preview)) {
-        const rest = (st.blocks ?? []).filter((b) => b.type !== "changes").slice(0, 11);
-        await repo.updateStep(st.id, { blocks: [...rest, { type: "changes", repo: a.repo, branch: a.branch, preview: a.preview, summary: a.summary.slice(0, 2000), files: a.changes ?? [] }] });
+        const d0 = draftOf(st), old = (st.blocks ?? []).find((b) => b.type === "changes");
+        // wysłany commit: pliki na kartce zostają te zatwierdzone (są w podpisie); dochodzi tylko podgląd i opis, inaczej szkic wróciłby do „niewysłany”
+        if (d0?.status === "sent" && old && isGitDraft(d0, st.blocks)) await repo.updateStep(st.id, { blocks: (st.blocks ?? []).map((b): Block => (b === old ? { ...old, preview: a.preview ?? old.preview, summary: a.summary.slice(0, 2000) } : b)) });
+        else {
+          const rest = (st.blocks ?? []).filter((b) => b.type !== "changes").slice(0, 11);
+          await repo.updateStep(st.id, { blocks: [...rest, { type: "changes", repo: a.repo, branch: a.branch, preview: a.preview, summary: a.summary.slice(0, 2000), files: a.changes ?? [] }] });
+        }
       }
       // w rozmowie tylko fakt; opis, pliki i adresy są na kartce kroku („Otwórz krok”)
       await repo.addChat(ownerId, taskId, "agent", `Zrobione: „${shortTitle(st?.title ?? "", 70)}”.${r.closed ? " Zadanie ukończone." : ""}`, { stepId: a.stepId, link: externalLink(a.link) ?? undefined });
@@ -188,6 +256,10 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
       const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
       if (st.status === "done") return text("Ten krok jest już zrobiony.");
+      // szkic czeka na decyzję Piotra: start_step nie może go przepchnąć dalej (stan „w toku” po szkicu wyglądał kiedyś jak zgoda)
+      if (st.status === "draft") return text("Nie zacząłem: szkic tego kroku czeka na zatwierdzenie Piotra. Niczego nie wysyłaj; poprawki szkicu zapisuj przez set_blocks, a po zatwierdzeniu wyśle go mostek Task Hub.");
+      if (st.approvedAt || st.sendStartedAt || draftOf(st)?.status === "approved") return text(sends(st) ? "Krok w toku." : "Nie zacząłem: zatwierdzony szkic tego kroku wysyła mostek Task Hub w osobnym biegu wysyłki. Niczego tu nie wysyłaj.");
+      if (needsDraft(st)) return text("Nie zacząłem: krok wymaga zgody Piotra, bo zmienia coś w aplikacji zewnętrznej. Przeczytaj, co trzeba, i przygotuj szkic przez set_blocks (blok draft, status proposed); niczego nie wysyłaj, po zatwierdzeniu wyśle go mostek Task Hub.");
       if (st.status !== "handoff") await repo.updateStep(st.id, { status: "handoff", prevStatus: st.status, handoffAt: new Date().toISOString() });
       return text("Krok w toku.");
     });
@@ -199,8 +271,9 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
       const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
       if (st.status === "done") return text("Ten krok jest już zamknięty.");
+      if (st.sendStartedAt) return text("Nie zamknąłem: zatwierdzony szkic tego kroku właśnie wysyła mostek. Gdy wysyłka się skończy, sprawdź krok ponownie.");
       // zatwierdzony, ale niewysłany szkic wraca do stanu propozycji: kartka nie może potem udawać, że coś poszło
-      if (st.blocks?.some((b) => b.type === "draft" && b.status === "approved")) await repo.updateStep(st.id, { blocks: st.blocks.map((b): Block => (b.type === "draft" && b.status === "approved" ? { ...b, status: "proposed" } : b)) });
+      await repo.clearApproval(ownerId, st.id);
       const r = await finishStep(ownerId, taskId, st.id, { report: `Zbędny: ${a.reason}` });
       await repo.addChat(ownerId, taskId, "agent", `Zamknąłem jako zbędny: „${shortTitle(st.title, 60)}”. ${a.reason}`, { stepId: st.id });
       return text(r.closed ? "Krok zamknięty jako zbędny, zadanie ukończone." : "Krok zamknięty jako zbędny.");
@@ -213,7 +286,12 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
       const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
       if (st.status === "done") return text("Ten krok jest już zrobiony.");
-      if (st.status === "handoff") await repo.updateStep(st.id, { status: st.prevStatus === "draft" ? "draft" : "todo", prevStatus: null, handoffAt: null });
+      // oddany krok z zatwierdzonym szkicem (np. bieg wysyłki nie znalazł kanału) wraca do zatwierdzenia: bez ponawiania, Piotr decyduje.
+      // Bieg wysyłki bez send_started_at to stary bieg (Piotr zatrzymał i zatwierdził od nowa): nowej zgody nie rusza, zostaje tylko notka
+      const stale = scope?.kind === "send" && !st.sendStartedAt;
+      if (stale) { /* zgoda nie należy do tego biegu */ }
+      else if (st.approvedAt || st.sendStartedAt || draftOf(st)?.status === "approved") await repo.clearApproval(ownerId, st.id);
+      else if (st.status === "handoff") await repo.updateStep(st.id, { status: st.prevStatus === "draft" ? "draft" : "todo", prevStatus: null, handoffAt: null });
       await repo.addChat(ownerId, taskId, "agent", `Nie zrobiłem kroku „${shortTitle(st.title, 70)}”: ${a.reason}`, { stepId: st.id });
       return text("Krok oddany.");
     });
@@ -240,12 +318,12 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       title: "Co czeka na agenta", description: "Lista pracy dla agenta, w kolejności robienia: kroki w toku (zaczęte, dokończ), zatwierdzone szkice do wysłania, zadania bez kroków (rozłóż przez add_steps), odpowiedzi Piotra, kroki do zrobienia bez zgody (start_step → zrób swoimi konektorami → complete_step), kroki wymagające zgody (przygotuj szkic przez set_blocks jako draft, niczego nie wysyłaj). Rób tylko to, do czego masz narzędzia; krok, którego nie możesz zrobić, oddaj przez leave_step. Nigdy niczego nie usuwaj. Gdy mostek na komputerze Piotra jest aktywny, inni agenci dostają „MOSTEK AKTYWNY” i nie robią nic (force: true pokaże pracę mimo to).",
       inputSchema: z.object({ force: z.boolean().optional() }),
     }, async ({ force }) => {
-      // mostek pracuje na bieżąco: automat co godzinę i inni agenci ustępują, żeby nie robić tego samego dwa razy
-      if (kind !== "bridge" && !force) {
+      // mostek pracuje na bieżąco: automat co godzinę i inni agenci ustępują, żeby nie robić tego samego dwa razy (biegi mostka to sam mostek)
+      if (kind === "client" && !force) {
         const st = await repo.bridgeStatus(ownerId, BRIDGE_ALIVE_MS);
         if (st.alive) return text(`MOSTEK AKTYWNY: Claude Code na komputerze Piotra (${st.name ?? "mostek"}) wykonuje pracę na bieżąco (ostatni sygnał ${ago(st.seenAt)}). Nic nie rób i zakończ. list_work z force: true pokaże pracę mimo to.`);
       }
-      return text((await workSummary(ownerId)).text);
+      return text((await workSummary(ownerId, { audience, stepId: scope?.stepId ?? undefined, peek: audience === "send" })).text);
     });
 
     server.registerTool("ask_question", {
@@ -311,7 +389,7 @@ function buildHandler(ownerId: string, kind: repo.TokenKind) {
       title: "Połączenia", description: "Rejestr połączeń: do jakich aplikacji agent ma dostęp, przez co (claude = konektor w Claude, claude-code = Claude Code na komputerze Piotra przez mostek, taskhub = sam Task Hub), na jakim koncie, dla której firmy albo sfery (work | private) i czy działa (active | expired | off). Krok może wskazać połączenie przez pole connection (nazwa); bez wskazania wybierz połączenie pasujące do firmy zadania. Żadnych sekretów: połączenie to rura, nie klucz. audit: true zwraca zamiast tego raport bezpieczeństwa (tokeny, klienci OAuth, mostki, próby logowania, nocne zmiany), tylko na prośbę Piotra o sprawdzenie dostępu.",
       inputSchema: z.object({ audit: z.union([z.boolean(), z.enum(["true", "false"])]).optional() }),   // klient z zapamiętanym starszym schematem przysyła tekst
     }, async (a) => {
-      if (a.audit === true || a.audit === "true") return json(await securityReport(ownerId));
+      if (a.audit === true || a.audit === "true") return kind === "run" ? text("Raport bezpieczeństwa tylko na prośbę Piotra, nie w biegu mostka.") : json(await securityReport(ownerId));
       const [connections, companies] = await Promise.all([repo.listConnections(ownerId), repo.listCompanies(ownerId)]);
       return json(connections.map((c) => ({ id: c.id, label: c.label, app: c.app, account: c.account, company: companies.find((x) => x.id === c.companyId)?.name ?? null, sphere: c.sphere, provider: c.provider, kind: c.kind, state: c.state, host: c.host, seenAt: c.seenAt })));
     });
@@ -403,7 +481,7 @@ async function authorize(req: Request): Promise<repo.TokenAuth | null> {
 async function handle(req: Request): Promise<Response> {
   const auth = await authorize(req);
   if (!auth) return new Response(JSON.stringify({ error: "Brak albo zły token. Połącz konektor przez OAuth (aplikacja Claude: Connectors) albo podaj nagłówek Authorization: Bearer th_..." }), { status: 401, headers: { "content-type": "application/json", "www-authenticate": wwwAuthenticate(originOf(req)) } });
-  return buildHandler(auth.ownerId, auth.kind)(req);
+  return buildHandler(auth)(req);
 }
 
 export { handle as GET, handle as POST, handle as DELETE };

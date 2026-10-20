@@ -1,4 +1,4 @@
-// Ustawienia aplikacji (⌘,): połączenie z Task Hub, mostek, Claude Code, start po zalogowaniu, dziennik.
+// Ustawienia aplikacji (⌘,): połączenie z Task Hub, mostek, Claude Code, foldery z kodem, start po zalogowaniu, dziennik.
 import AppKit
 import ServiceManagement
 import SwiftUI
@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var claudeInfo = ""
     @State private var loginItem = SettingsView.loginEnabled()
     @State private var loginError = ""
+    @State private var folderInfo = ""
 
     static func loginEnabled() -> Bool {
         if #available(macOS 13.0, *) { return SMAppService.mainApp.status == .enabled }
@@ -55,6 +56,31 @@ struct SettingsView: View {
                 if !loginError.isEmpty { Text(loginError).font(.system(size: 12)).foregroundColor(Theme.danger) }
                 Text("Mostek pyta Task Hub co kilkanaście sekund (bez tokenów) i uruchamia Claude Code tylko wtedy, gdy czeka praca. Gdy Mac śpi, pracę przejmuje automat co godzinę.")
                     .font(.system(size: 11.5)).foregroundColor(Theme.sub)
+            }
+            Section("Foldery z kodem") {
+                ForEach(store.cfg.codeFolders, id: \.self) { f in
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder").foregroundColor(Theme.sub)
+                        Text(f).lineLimit(1).truncationMode(.middle)
+                        if !SettingsView.isFolder(f) { Text("nie ma go").font(.system(size: 11.5)).foregroundColor(Theme.danger) }
+                        else if !SettingsView.isRepoRoot(f) { Text("bez .git: to nie główny folder repozytorium").font(.system(size: 11.5)).foregroundColor(Theme.sub) }
+                        Spacer()
+                        Button("Usuń") { removeFolder(f) }
+                    }
+                }
+                if store.cfg.codeFolders.isEmpty {
+                    Text("Brak. Kroki z kodem wrócą do Ciebie z prośbą o dodanie folderu.").font(.system(size: 12)).foregroundColor(Theme.sub)
+                }
+                HStack(spacing: 10) {
+                    Button("Dodaj folder…") { addFolders() }
+                    if !folderInfo.isEmpty { Text(folderInfo).font(.system(size: 12)).foregroundColor(Theme.danger).lineLimit(2) }
+                }
+                Text("Tylko w tych folderach Claude może zmieniać pliki i uruchamiać testy w krokach z kodem. Dodaj główny folder repozytorium (ten z katalogiem .git).")
+                    .font(.system(size: 11.5)).foregroundColor(Theme.sub)
+                if store.cfg.codeFolders.contains(where: SettingsView.isProtected) {
+                    Text("Dokumenty, Biurko i Pobrane macOS chroni osobno: przy pierwszym biegu może zapytać, czy Task Hub ma do nich dostęp.")
+                        .font(.system(size: 11.5)).foregroundColor(Theme.sub)
+                }
             }
             Section("Aktualizacje") {
                 Toggle("Aktualizuj automatycznie (sprawdza co 6 godzin)", isOn: $store.cfg.autoUpdate)
@@ -114,6 +140,53 @@ struct SettingsView: View {
             store.cfg.claude = u.path
             claudeInfo = ""
         }
+    }
+
+    static func isFolder(_ path: String) -> Bool {
+        var d: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &d) && d.boolValue
+    }
+
+    // główny folder repozytorium: ma .git (katalog albo plik); commit z aplikacji podfolderu nie przyjmie
+    static func isRepoRoot(_ path: String) -> Bool {
+        FileManager.default.fileExists(atPath: path + "/.git")
+    }
+
+    // foldery, o które macOS pyta osobno (prywatność): Dokumenty, Biurko, Pobrane
+    static func isProtected(_ path: String) -> Bool {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let names: [String] = ["Documents", "Desktop", "Downloads"]
+        for name in names {
+            let root = home + "/" + name
+            if path == root || path.hasPrefix(root + "/") { return true }
+        }
+        return false
+    }
+
+    @MainActor private func addFolders() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = false
+        p.canChooseDirectories = true
+        p.allowsMultipleSelection = true
+        p.canCreateDirectories = false
+        p.prompt = "Dodaj"
+        p.message = "Wskaż główny folder repozytorium (ten z katalogiem .git). Claude będzie mógł w nim zmieniać pliki i uruchamiać testy."
+        guard p.runModal() == .OK else { return }
+        var list = store.cfg.codeFolders
+        var refused: [String] = []
+        for u in p.urls {
+            let path = Store.normalizedFolder(u)
+            if let why = Store.folderProblem(path) { refused.append("\((path as NSString).lastPathComponent): \(why)"); continue }
+            if !list.contains(path) { list.append(path) }
+        }
+        if list != store.cfg.codeFolders { store.cfg.codeFolders = list }
+        folderInfo = refused.isEmpty ? "" : "Nie dodałem: " + refused.joined(separator: "; ")
+        if !refused.isEmpty { Log.write("foldery z kodem: odrzucone \(refused.joined(separator: "; "))") }
+    }
+
+    @MainActor private func removeFolder(_ path: String) {
+        store.cfg.codeFolders.removeAll { $0 == path }
+        folderInfo = ""
     }
 
     @MainActor private func setLogin(_ on: Bool) {

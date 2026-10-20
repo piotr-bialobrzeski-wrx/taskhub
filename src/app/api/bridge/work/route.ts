@@ -1,7 +1,9 @@
 // Puls mostka i pytanie „czy czeka praca?”: tani odczyt bez modelu, wołany co kilkanaście sekund z komputera Piotra.
+// v2 (aplikacja 0.1.7): osobno work (praca bez wysyłek) i sends (zatwierdzone szkice do wysłania, kroki przed nimi zrobione); pending = jedno i drugie.
+import { createHash } from "node:crypto";
 import * as repo from "@/lib/repo";
-import { workSummary } from "@/lib/agent/work";
-import { BRIDGE_ALIVE_MS, BRIDGE_VERSION, RUN_STALE_MIN, authBridge, pollMs } from "@/lib/bridge";
+import { listSendable, workSummary } from "@/lib/agent/work";
+import { BRIDGE_ALIVE_MS, BRIDGE_VERSION, RUN_STALE_MIN, authBridge, pollMs, protocolOf } from "@/lib/bridge";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +16,16 @@ export async function GET(req: Request) {
   if (meta.state && meta.state !== "check" && !meta.until) meta.until = "";   // stary termin po limicie nie zostaje w meta, gdy mostek już go nie zgłasza
   await repo.bridgeSeen(a.tokenId, meta);
   await repo.expireBridgeRuns(a.ownerId, RUN_STALE_MIN);
-  const [w, st] = await Promise.all([workSummary(a.ownerId, { peek: true }), repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS)]);
-  return Response.json({ ok: true, pending: w.total, counts: w.counts, run: st.run, pollMs: pollMs(), version: BRIDGE_VERSION, time: new Date().toISOString() });
+  if (protocolOf(q.get("v")) < 2) {
+    // v1 bez zmian: zatwierdzone szkice liczą się do pracy, wysyła je ten sam bieg
+    const [w, st] = await Promise.all([workSummary(a.ownerId, { peek: true }), repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS)]);
+    return Response.json({ ok: true, pending: w.total, counts: w.counts, run: st.run, pollMs: pollMs(), version: 1, time: new Date().toISOString() });
+  }
+  const [w, sends, st] = await Promise.all([workSummary(a.ownerId, { peek: true, audience: "work" }), listSendable(a.ownerId), repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS)]);
+  // key: odcisk listy pracy; ten sam po udanym biegu = bieg niczego nie ruszył (np. krok oddany przez leave_step), aplikacja nie powtarza go od razu
+  const key = w.total ? createHash("sha256").update(w.text).digest("hex").slice(0, 16) : "";
+  return Response.json({
+    ok: true, pending: w.total + sends.length, work: w.total, sends: sends.length, key, counts: { ...w.counts, approved: sends.length },
+    run: st.run, pollMs: pollMs(), version: BRIDGE_VERSION, time: new Date().toISOString(),
+  });
 }

@@ -190,6 +190,9 @@ export const Step = z.object({
   pos: z.object({ x: z.number(), y: z.number() }).nullable(),
   dependsOn: z.array(z.string()),
   connectionId: z.string().nullable(),   // przez które połączenie (konto, firma) zrobić ten krok; null = agent wybiera
+  approvedAt: z.string().nullable().optional(),     // zgoda Piotra na szkic (tylko jego kliknięcie „Zatwierdź”)
+  approvedSig: z.string().nullable().optional(),    // podpis zatwierdzonej treści; inna treść = brak zgody
+  sendStartedAt: z.string().nullable().optional(),  // bieg wysyłki wziął szkic (najwyżej raz)
 });
 export type Step = z.infer<typeof Step>;
 

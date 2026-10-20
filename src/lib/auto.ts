@@ -13,19 +13,21 @@ export const BRIDGE_TEXT = "Mostek na Twoim komputerze pracuje na bieżąco: now
 export const shortTitle = (title: string, max = 60) => { const t = title.replace(/\s+/g, " ").trim(); if (t.length <= max) return t; const cut = t.slice(0, max); return (cut.includes(" ") ? cut.slice(0, cut.lastIndexOf(" ")) : cut) + "…"; };
 
 // kto może pracować: mostek (żywy? jak się nazywa? co robi teraz?) albo automat co godzinę
-// hold: mostek się zgłasza, ale nie startuje pracy (limit Claude do godziny resetu, Claude Code wylogowany, ostatni bieg nie wyszedł)
-export type Hold = { kind: "limit" | "auth" | "error"; until: string | null };
+// hold: mostek się zgłasza, ale nie startuje pracy (limit Claude do godziny resetu, Claude Code wylogowany, ostatni bieg nie wyszedł,
+// Piotr zatrzymał bieg na Macu: przerwa 10 minut)
+export type Hold = { kind: "limit" | "auth" | "error" | "stopped"; until: string | null };
 export type Worker = { alive: boolean; name: string | null; run: LiveActivity | null; hold?: Hold | null };
 export type Who = { kind: "decomposing" | "busy" | "soon" | "held" | "auto"; who: string; text: string; short: string };   // short: jedna krótka linia na pasek nad kanwą
 // stan zgłoszony przez aplikację na Macu przy ostatnim sprawdzeniu pracy (meta tokenu mostka: state, until)
 export function bridgeHold(meta: Record<string, unknown> | null | undefined): Hold | null {
   const st = meta?.state, until = typeof meta?.until === "string" && meta.until ? meta.until : null;
-  return st === "limit" || st === "auth" || st === "error" ? { kind: st, until } : null;
+  return st === "limit" || st === "auth" || st === "error" || st === "stopped" ? { kind: st, until } : null;
 }
 // dlaczego mostek stoi, jednym zdaniem: „limit Claude do 02:00”
 export function holdText(h: Hold): string {
   if (h.kind === "limit") return `limit Claude${h.until ? ` do ${fmtTime(h.until)}` : ""}`;
   if (h.kind === "auth") return "Claude Code wylogowany (w Terminalu: claude, potem /login)";
+  if (h.kind === "stopped") return `zatrzymany przez Ciebie, wraca${h.until ? ` o ${fmtTime(h.until)}` : " za kilka minut"}`;
   return `ostatni bieg nie wyszedł, ponowi${h.until ? ` o ${fmtTime(h.until)}` : " za chwilę"}`;
 }   // who = krótka etykieta do paska, text = pełne zdanie
 export const bridgeLabel = (w: Pick<Worker, "name">) => (w.name ? `Mostek (${w.name})` : "Mostek na Twoim komputerze");

@@ -1,12 +1,28 @@
-// Samoaktualizacja: co 6 godzin (i 20 s po starcie) pyta GitHub o najnowsze wydanie app-v…, pobiera archiwum .zip
-// z aplikacją (pobrane przez aplikację nie dostaje kwarantanny, więc Gatekeeper nie pyta), podmienia /Applications/Task Hub.app
-// (stara wersja ląduje w Koszu) i uruchamia aplikację ponownie, gdy nic nie przerywa: okna zamknięte, mostek nie pracuje.
-// Bez prawa zapisu w /Applications otwiera instalator .pkg (poprosi o hasło).
+// Samoaktualizacja: co 6 godzin (i 20 s po starcie) pyta Task Hub (GET /api/bridge/app z tokenem mostka) o najnowsze
+// wydanie app-v…, pobiera archiwum .zip z aplikacją (pobrane przez aplikację nie dostaje kwarantanny, więc Gatekeeper nie pyta),
+// sprawdza sumę SHA-256, podmienia /Applications/Task Hub.app (stara wersja ląduje w Koszu) i uruchamia aplikację ponownie,
+// gdy nic nie przerywa: okna zamknięte, mostek nie pracuje. Bez prawa zapisu w /Applications otwiera instalator .pkg (poprosi o hasło).
+// Publiczny GitHub tylko wtedy, gdy Task Hub nie zna jeszcze tej ścieżki (404, starszy serwer), sam nie dostał wydań z GitHub (502)
+// albo aplikacja nie jest połączona.
 import AppKit
+import CryptoKit
 
 enum UpdateError: LocalizedError {
     case bad(String)
     var errorDescription: String? { if case .bad(let s) = self { return s }; return nil }
+}
+
+// token mostka tylko do Task Hub: przekierowanie na inny host (np. plik z GitHuba) idzie już bez nagłówka Authorization
+final class DropAuthOnRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    let host: String
+    init(host: String) { self.host = host }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest) async -> URLRequest? {
+        var r = request
+        let keep = !host.isEmpty && r.url.map { Store.hostKey($0) == host && Updater.webURL($0) } == true
+        if !keep { r.setValue(nil, forHTTPHeaderField: "Authorization") }
+        return r
+    }
 }
 
 @MainActor
@@ -14,8 +30,14 @@ final class Updater: ObservableObject {
     static let api = "https://api.github.com/repos/piotr-bialobrzeski-wrx/taskhub/releases/latest"
     static let interval: TimeInterval = 6 * 3600
 
+    // jeden plik wydania: adres pobrania i (gdy jest) suma SHA-256
+    struct Asset {
+        var url: URL
+        var sha256: String?
+    }
+
     @Published private(set) var status = ""
-    @Published private(set) var available: String? = nil   // nowsza wersja na GitHubie
+    @Published private(set) var available: String? = nil   // nowsza wersja w wydaniach
     @Published private(set) var ready: String? = nil       // zainstalowana, czeka na ponowne uruchomienie
     @Published private(set) var lastCheck: Date? = nil
     private var busy = false
@@ -52,6 +74,21 @@ final class Updater: ObservableObject {
         return false
     }
 
+    // suma z odpowiedzi albo z pliku .sha256 („<hex>  <nazwa>”): 64 znaki hex małymi literami, inaczej nil
+    nonisolated static func hex(_ s: String?) -> String? {
+        guard let first = s?.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" || $0 == "\r" }).first else { return nil }
+        let h = first.lowercased()
+        return h.count == 64 && h.allSatisfy({ $0.isHexDigit }) ? h : nil
+    }
+
+    nonisolated static func sha256(of file: URL) throws -> String {
+        let fh = try FileHandle(forReadingFrom: file)
+        defer { try? fh.close() }
+        var h = SHA256()
+        while let chunk = try fh.read(upToCount: 1 << 20), !chunk.isEmpty { h.update(data: chunk) }
+        return h.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     func check(auto: Bool) async {
         guard !busy else { return }
         if auto && !store.cfg.autoUpdate { return }
@@ -64,20 +101,7 @@ final class Updater: ObservableObject {
         defer { busy = false }
         status = "Sprawdzam…"
         do {
-            guard let api = URL(string: Updater.api) else { return }
-            var r = URLRequest(url: api)
-            r.timeoutInterval = 20
-            r.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            r.setValue(ClaudeCLI.userAgent, forHTTPHeaderField: "User-Agent")
-            let (data, resp) = try await URLSession.shared.data(for: r)
-            guard (resp as? HTTPURLResponse)?.statusCode == 200,
-                  let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                  let tag = j["tag_name"] as? String else { throw UpdateError.bad("GitHub nie odpowiedział") }
-            let ver = tag.hasPrefix("app-v") ? String(tag.dropFirst(5)) : tag
-            let assets = (j["assets"] as? [[String: Any]]) ?? []
-            func asset(_ suffix: String) -> String? {
-                assets.first { (($0["name"] as? String) ?? "").hasSuffix(suffix) }?["browser_download_url"] as? String
-            }
+            let (ver, zip, pkg) = try await latest()
             lastCheck = Date()
             guard Updater.isNewer(ver, than: currentVersion) else {
                 available = nil
@@ -86,26 +110,124 @@ final class Updater: ObservableObject {
             }
             available = ver
             Log.write("aktualizacja: dostępna \(ver), mam \(currentVersion)")
-            try await install(version: ver, zip: asset(".zip"), pkg: asset(".pkg"))
+            try await install(version: ver, zip: zip, pkg: pkg)
         } catch {
             status = "Aktualizacja: \(error.localizedDescription)"
             Log.write(status)
         }
     }
 
-    private func install(version: String, zip: String?, pkg: String?) async throws {
+    // ---------- skąd wydanie ----------
+    private func latest() async throws -> (String, Asset?, Asset?) {
+        if store.configured, let base = URL(string: store.baseURL), let u = URL(string: store.baseURL + "/api/bridge/app") {
+            var r = URLRequest(url: u)
+            r.timeoutInterval = 20
+            r.setValue("Bearer \(store.cfg.token.trimmingCharacters(in: .whitespaces))", forHTTPHeaderField: "Authorization")
+            r.setValue("application/json", forHTTPHeaderField: "Accept")
+            r.setValue(ClaudeCLI.userAgent, forHTTPHeaderField: "User-Agent")
+            let (data, resp) = try await URLSession.shared.data(for: r, delegate: DropAuthOnRedirect(host: Store.hostKey(base) ?? ""))
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            // 502: Task Hub nie dostał odpowiedzi od GitHub (limit zapytań wspólnych adresów serwera), więc pytamy GitHub sami
+            if code != 404 && code != 502 {
+                if code == 401 { throw UpdateError.bad("Task Hub odrzucił token mostka") }
+                guard code == 200, let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                      let v = j["version"] as? String, !v.isEmpty else { throw UpdateError.bad("Task Hub nie podał wersji (HTTP \(code))") }
+                let ver = v.hasPrefix("app-v") ? String(v.dropFirst(5)) : v
+                return (ver, asset(j["zip"], base: base), asset(j["pkg"], base: base))
+            }
+            Log.write(code == 502 ? "aktualizacja: Task Hub nie dostał listy wydań (HTTP 502), pytam GitHub" : "aktualizacja: Task Hub nie zna /api/bridge/app (starszy serwer), pytam GitHub")
+        }
+        return try await github()
+    }
+
+    // {url, sha256?}; adres względny liczony od Task Hub, tylko https (http wyłącznie lokalnie)
+    private func asset(_ v: Any?, base: URL) -> Asset? {
+        guard let d = v as? [String: Any], let s = d["url"] as? String, !s.isEmpty,
+              let u = URL(string: s, relativeTo: base)?.absoluteURL, Updater.webURL(u) else { return nil }
+        return Asset(url: u, sha256: Updater.hex(d["sha256"] as? String))
+    }
+
+    nonisolated static func webURL(_ u: URL) -> Bool {
+        let s = u.scheme?.lowercased()
+        return s == "https" || (s == "http" && Store.isLocalHost(u.host?.lowercased()))
+    }
+
+    // zapas dla starszego serwera: publiczne API wydań GitHuba (bez tokenu); suma z pliku <nazwa>.sha256, gdy jest w wydaniu
+    private func github() async throws -> (String, Asset?, Asset?) {
+        guard let api = URL(string: Updater.api) else { throw UpdateError.bad("zły adres GitHuba") }
+        var r = URLRequest(url: api)
+        r.timeoutInterval = 20
+        r.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        r.setValue(ClaudeCLI.userAgent, forHTTPHeaderField: "User-Agent")
+        let (data, resp) = try await URLSession.shared.data(for: r)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200,
+              let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let tag = j["tag_name"] as? String else { throw UpdateError.bad("GitHub nie odpowiedział") }
+        let ver = tag.hasPrefix("app-v") ? String(tag.dropFirst(5)) : tag
+        let assets = (j["assets"] as? [[String: Any]]) ?? []
+        func named(_ test: (String) -> Bool) -> (String, URL)? {
+            for a in assets {
+                if let n = a["name"] as? String, test(n), let s = a["browser_download_url"] as? String, let u = URL(string: s), Updater.webURL(u) { return (n, u) }
+            }
+            return nil
+        }
+        func pick(_ suffix: String) async throws -> Asset? {
+            guard let hit = named({ $0.hasSuffix(suffix) }) else { return nil }
+            let (name, url) = hit
+            guard let sumHit = named({ $0 == name + ".sha256" }) else { return Asset(url: url, sha256: nil) }
+            var sr = URLRequest(url: sumHit.1)
+            sr.timeoutInterval = 20
+            sr.setValue(ClaudeCLI.userAgent, forHTTPHeaderField: "User-Agent")
+            let (sd, sresp) = try await URLSession.shared.data(for: sr)
+            guard (sresp as? HTTPURLResponse)?.statusCode == 200, let sum = Updater.hex(String(data: sd, encoding: .utf8)) else { throw UpdateError.bad("nie mogę pobrać sumy kontrolnej \(name)") }
+            return Asset(url: url, sha256: sum)
+        }
+        let zip = try await pick(".zip")
+        let pkg = try await pick(".pkg")
+        return (ver, zip, pkg)
+    }
+
+    // ---------- pobranie i podmiana ----------
+    // pobiera plik; token mostka idzie tylko do hosta Task Hub; gdy jest suma, plik musi się z nią zgadzać
+    private func fetch(_ a: Asset, to file: URL) async throws {
+        var r = URLRequest(url: a.url)
+        r.timeoutInterval = 120
+        r.setValue(ClaudeCLI.userAgent, forHTTPHeaderField: "User-Agent")
+        let tm = URL(string: store.baseURL).flatMap { Store.hostKey($0) }
+        let mine = store.configured && tm != nil && Store.hostKey(a.url) == tm
+        if mine { r.setValue("Bearer \(store.cfg.token.trimmingCharacters(in: .whitespaces))", forHTTPHeaderField: "Authorization") }
+        let (tmp, resp) = try await URLSession.shared.download(for: r, delegate: DropAuthOnRedirect(host: mine ? (tm ?? "") : ""))
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else {
+            try? FileManager.default.removeItem(at: tmp)
+            throw UpdateError.bad("pobieranie nie powiodło się (HTTP \(code))")
+        }
+        try? FileManager.default.removeItem(at: file)
+        try FileManager.default.moveItem(at: tmp, to: file)
+        if let want = a.sha256 {
+            let got = try Updater.sha256(of: file)
+            guard got == want else {
+                try? FileManager.default.removeItem(at: file)
+                Log.write("aktualizacja: suma SHA-256 się nie zgadza (\(a.url.lastPathComponent)): jest \(got), miało być \(want)")
+                throw UpdateError.bad("pobrany plik ma inną sumę kontrolną niż wydanie, przerywam")
+            }
+        } else {
+            Log.write("aktualizacja: wydanie bez sumy SHA-256 dla \(a.url.lastPathComponent)")
+        }
+    }
+
+    private func install(version: String, zip: Asset?, pkg: Asset?) async throws {
         let dir = Store.dir.appendingPathComponent("updates", isDirectory: true)
         let fm = FileManager.default
         try? fm.removeItem(at: dir)
-        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        guard let zip = zip, let zipURL = URL(string: zip) else {
-            if let pkg = pkg { try await openPkg(pkg, dir: dir); return }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        guard let zip = zip else {
+            if let pkg = pkg { try await openPkg(pkg, version: version, dir: dir); return }
             throw UpdateError.bad("wydanie nie ma pliku do pobrania")
         }
         status = "Pobieram \(version)…"
-        let (tmp, _) = try await URLSession.shared.download(from: zipURL)
         let zipFile = dir.appendingPathComponent("app.zip")
-        try fm.moveItem(at: tmp, to: zipFile)
+        try await fetch(zip, to: zipFile)
         status = "Rozpakowuję…"
         let unzip = ProcessRunner(bin: "/usr/bin/ditto", args: ["-x", "-k", zipFile.path, dir.path], cwd: dir.path, env: ProcessInfo.processInfo.environment, maxSeconds: 120, stallSeconds: 120, json: false)
         let r = await unzip.run { _ in }
@@ -121,7 +243,7 @@ final class Updater: ObservableObject {
         } catch {
             Log.write("aktualizacja: podmiana nie powiodła się (\(error.localizedDescription)), otwieram instalator")
             try? fm.removeItem(at: newApp)   // rozpakowana kopia zostawiona obok myliła Instalator: widział już „zainstalowaną” nową wersję
-            if let pkg = pkg { try await openPkg(pkg, dir: dir); return }
+            if let pkg = pkg { try await openPkg(pkg, version: version, dir: dir); return }
             throw error
         }
         ready = version
@@ -130,12 +252,11 @@ final class Updater: ObservableObject {
         maybeRelaunch(version)
     }
 
-    private func openPkg(_ pkg: String, dir: URL) async throws {
-        guard let u = URL(string: pkg) else { throw UpdateError.bad("zły adres instalatora") }
+    // adres z Task Hub kończy się na …/download?asset=…, więc nazwę pliku nadajemy sami (Instalator potrzebuje .pkg)
+    private func openPkg(_ pkg: Asset, version: String, dir: URL) async throws {
         status = "Pobieram instalator…"
-        let (tmp, _) = try await URLSession.shared.download(from: u)
-        let file = dir.appendingPathComponent(u.lastPathComponent)
-        try FileManager.default.moveItem(at: tmp, to: file)
+        let file = dir.appendingPathComponent("Task-Hub-\(version).pkg")
+        try await fetch(pkg, to: file)
         status = "Otwieram instalator (poprosi o hasło)."
         NSWorkspace.shared.open(file)
     }

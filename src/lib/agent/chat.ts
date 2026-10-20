@@ -4,6 +4,7 @@ import { Ai, type ImageInput } from "../ai";
 import * as repo from "../repo";
 import { contextText } from "./context";
 import { Fact, type Task } from "../schema";
+import { draftOf } from "./approval";
 
 const Krok = z.object({
   id: z.string().optional(),
@@ -47,7 +48,7 @@ Gdy dołączono grafiki, dodaj "attachments": [{caption maks. 6 słów, analysis
 Odpowiedz wyłącznie JSON: {"reply": "1-4 zdania po polsku", "actions": [...], "attachments"?: [...]}`;
 
 export type ChatDeps = { ai: Ai; ownerId: string; taskId: string | null; stepId?: string | null; images?: ImageInput[] };
-export type Done = { label: string; taskId?: string };
+export type Done = { label: string; taskId?: string; note?: string };   // note: wyjaśnienie w rozmowie, gdy akcji nie dało się zrobić
 
 export async function runChat(text: string, deps: ChatDeps): Promise<{ reply: string; done: Done[]; result: ChatResult }> {
   const [tasks, projects, companies, connections, rules, samples, factPrefs, hist] = await Promise.all([
@@ -63,6 +64,7 @@ ${text}`;
   const done = await applyActions(result, { ...deps, tasks });
   await repo.addChat(deps.ownerId, deps.taskId, "user", text, undefined, { seen: true });
   await repo.addChat(deps.ownerId, deps.taskId, "agent", result.reply, result.actions);
+  for (const d of done) if (d.note) await repo.addChat(deps.ownerId, d.taskId ?? deps.taskId, "agent", d.note);
   return { reply: result.reply, done, result };
 }
 
@@ -123,7 +125,13 @@ export async function applyActions(r: ChatResult, deps: ChatDeps & { tasks: Task
       // poprawiony szkic trafia też do bloku draft, żeby karta publikacji pokazała nową treść
       const blocks = a.output !== undefined && s.blocks?.some((b) => b.type === "draft") ? s.blocks.map((b) => (b.type === "draft" && b.status !== "sent" ? { ...b, body: a.output!, status: "proposed" as const } : b)) : undefined;
       await repo.updateStep(s.id, { title: a.title, detail: a.detail, output: a.output, link: a.link && /^https?:\/\//.test(a.link) ? a.link : undefined, estMin: a.est, ...(blocks ? { blocks } : {}) });
-      if (a.status === "done" && s.status !== "done") await repo.completeStep(deps.ownerId, cur, s);
+      // stan po zmianie (poprawka treści kasuje zgodę na szkic)
+      const fresh = blocks ? (await repo.getTask(deps.ownerId, cur.id))?.steps.find((x) => x.id === s.id) ?? s : s;
+      if (a.status === "done" && fresh.status !== "done") {
+        // zatwierdzony szkic wysyła mostek w osobnym biegu; czat nie może zamknąć kroku, jakby szkic poszedł
+        if (draftOf(fresh)?.status === "approved" || fresh.approvedAt) { done.push({ label: "Nie zamknięto: " + s.title, taskId: cur.id, note: `Nie zamknąłem kroku „${s.title}”: jego zatwierdzony szkic wysyła mostek po zatwierdzeniu. Gdy wysyłka przejdzie, krok zamknie się sam; żeby go zatrzymać, użyj „Zatrzymaj” na karcie kroku.` }); continue; }
+        await repo.completeStep(deps.ownerId, cur, fresh);
+      }
       if (a.status === "todo" && s.status === "done") await repo.reopenStep(deps.ownerId, cur.id, s);
       done.push({ label: "Zmieniono krok: " + (a.title ?? s.title), taskId: cur.id });
     } else if (a.type === "set_facts" && cur) {

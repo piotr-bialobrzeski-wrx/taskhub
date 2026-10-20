@@ -1,5 +1,5 @@
 // Spina wszystko: menu aplikacji, ikonę w pasku menu, okno z Task Hub, okienko szybkiego zadania, Ustawienia,
-// link taskhub://connect z Ustawień Task Hub i mostek, który pracuje także przy zamkniętym oknie.
+// link taskhub://connect z Ustawień Task Hub (tylko po pytaniu) i mostek, który pracuje także przy zamkniętym oknie.
 import AppKit
 import Combine
 import SwiftUI
@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hotKey: HotKey? = nil
     private var bag = Set<AnyCancellable>()
     private var applied = ""
+    private var connecting = false   // okno „Połączyć…?” już wisi
 
     var version: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "" }
 
@@ -28,6 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         quick = QuickEntryController(bridge: bridge, store: store)
         quick.model.openSettings = { [weak self] in self?.showSettings() }
         setupStatusItem()
+        // powiadomienie „Claude pracuje” z przyciskiem Zatrzymaj (mostek woła runStarted/runEnded)
+        Notifier.shared.onStop = { [weak self] in self?.stopRun() }
+        Notifier.shared.onOpen = { [weak self] in self?.showMain() }
+        Notifier.shared.setup()
         hotKey = HotKey(keyCode: HotKey.keyT, modifiers: HotKey.ctrlAlt) { [weak self] in self?.showQuickEntry() }
         bridge.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in Task { @MainActor in self?.refreshStatusIcon() } }.store(in: &bag)
         store.$cfg.dropFirst().removeDuplicates().debounce(for: .seconds(0.8), scheduler: DispatchQueue.main).sink { [weak self] _ in self?.applyConfig() }.store(in: &bag)
@@ -74,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         bridge.stop()
+        Notifier.shared.runEnded()
         Log.write("Task Hub koniec")
     }
 
@@ -83,26 +89,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func handle(url: URL) {
-        switch url.host ?? "" {
-        case "connect":
-            let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            let base = q.first { $0.name == "url" }?.value ?? ""
-            let token = q.first { $0.name == "token" }?.value ?? ""
-            guard !base.isEmpty, !token.isEmpty else { alert("Link połączenia jest niepełny.", "Utwórz nowy token mostka w Ustawieniach Task Hub i kliknij „Połącz aplikację” jeszcze raz."); return }
-            var c = store.cfg
-            c.url = base
-            c.token = token
-            c.bridge = true
-            store.cfg = c
-            applyConfig()
-            web.load(force: false)
-            showMain()
-            Log.write("połączono przez link: \(store.baseURL)")
-            alert("Połączono z Task Hub", "Mostek pracuje na tym Macu: \(store.cfg.name). Claude Code zajmie się zadaniami, gdy tylko się pojawią. Okienko nowego zadania: ⌃⌥T.")
-        case "reload": web.reload()
+        guard url.scheme?.lowercased() == "taskhub" else { return }
+        switch (url.host ?? "").lowercased() {
+        case "connect": connect(url)
+        case "reload": web.reload()       // ze strony zastępczej w oknie
         case "settings": showSettings()
-        default: break
+        default: Log.write("link taskhub://\(url.host ?? "") pominięty")
         }
+    }
+
+    // Link połączenia zmienia adres i token mostka, więc nigdy nie działa po cichu: tylko https (http wyłącznie lokalnie),
+    // przy połączonej aplikacji tylko ten sam host, zawsze z pytaniem pokazującym adres.
+    private func connect(_ link: URL) {
+        guard !connecting else { return }
+        let q = URLComponents(url: link, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let raw = (q.first { $0.name == "url" }?.value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = (q.first { $0.name == "token" }?.value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty, !token.isEmpty else { alert("Link połączenia jest niepełny.", "Utwórz nowy token mostka w Ustawieniach Task Hub i kliknij „Połącz aplikację” jeszcze raz."); return }
+        guard let u = URL(string: raw), let scheme = u.scheme?.lowercased(), let host = Store.hostKey(u),
+              scheme == "https" || (scheme == "http" && Store.isLocalHost(u.host?.lowercased())) else {
+            Log.write("link połączenia odrzucony: adres \(raw.prefix(80))")
+            alert("Link połączenia ma zły adres.", "Task Hub musi mieć adres https://…. Nic nie zmieniłem.")
+            return
+        }
+        guard token.count <= 256, token.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }) else {
+            Log.write("link połączenia odrzucony: zły token")
+            alert("Link połączenia ma zły token.", "Utwórz nowy token mostka w Ustawieniach Task Hub i kliknij „Połącz aplikację” jeszcze raz.")
+            return
+        }
+        let origin = "\(scheme)://\(host)"
+        let current = store.host
+        if store.configured, let cur = current, cur != host {
+            Log.write("link połączenia odrzucony: \(host), a aplikacja jest połączona z \(cur)")
+            alert("Ten link prowadzi do innego Task Hub.", "Aplikacja jest połączona z \(cur), a link wskazuje \(host). Nic nie zmieniłem. Jeśli naprawdę chcesz przejść na nowy adres, wpisz go razem z nowym tokenem w Ustawieniach aplikacji.")
+            return
+        }
+        if store.configured && store.baseURL == origin && store.cfg.token == token { showMain(); return }   // nic nowego
+
+        let known = host == current || host == Store.defaultHost
+        let a = NSAlert()
+        a.messageText = "Połączyć tę aplikację z Task Hub pod adresem \(host)?"
+        a.informativeText = (known ? "" : "Ten adres różni się od zwykłego (\(Store.defaultHost)). ")
+            + "Mostek na tym Macu (\(store.cfg.name)) będzie brał stamtąd zadania i uruchamiał na nich Claude Code. Połącz tylko wtedy, gdy przed chwilą sam kliknąłeś „Połącz aplikację” w swoim Task Hub."
+        a.alertStyle = known ? .informational : .warning
+        a.addButton(withTitle: "Połącz")
+        a.addButton(withTitle: "Anuluj")
+        if known {
+            a.buttons[1].keyEquivalent = "\u{1b}"
+        } else {
+            // nieznany adres: Enter anuluje
+            a.buttons[0].keyEquivalent = ""
+            a.buttons[1].keyEquivalent = "\r"
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        connecting = true
+        let ok = a.runModal() == .alertFirstButtonReturn
+        connecting = false
+        guard ok else { Log.write("link połączenia: anulowano (\(host))"); return }
+
+        var c = store.cfg
+        c.url = origin
+        c.token = token
+        c.bridge = true
+        store.cfg = c
+        applyConfig()
+        web.load(force: false)
+        showMain()
+        Log.write("połączono przez link: \(store.baseURL)")
+        alert("Połączono z Task Hub", "Mostek pracuje na tym Macu: \(store.cfg.name). Claude Code zajmie się zadaniami, gdy tylko się pojawią. Okienko nowego zadania: ⌃⌥T.")
     }
 
     // ---------- konfiguracja → mostek ----------
@@ -134,6 +188,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let sub = NSMenuItem(title: "ostatni sygnał \(f.string(from: t)) · biegi: \(bridge.runs)", action: nil, keyEquivalent: "")
             sub.isEnabled = false
             menu.addItem(sub)
+        }
+        if bridge.isRunningNow {
+            let stop = item("Zatrzymaj bieg", #selector(stopRun), "")
+            if !bridge.runLabel.isEmpty { stop.toolTip = bridge.runLabel }
+            menu.addItem(stop)
         }
         menu.addItem(.separator())
         menu.addItem(item("Otwórz Task Hub", #selector(showMain), "1"))
@@ -269,6 +328,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func pokeBridge() { bridge.poke() }
+
+    // Zatrzymaj z paska menu albo z powiadomienia: przerywa bieżący bieg, mostek odczeka chwilę
+    @objc func stopRun() {
+        guard bridge.isRunningNow else { return }
+        Log.write("bieg: Zatrzymaj")
+        bridge.cancelRun()
+    }
     @objc func relaunchApp() { updater.relaunch() }
 
     @objc func showLog() {
@@ -299,7 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Task Hub",
             .applicationVersion: version,
-            .credits: NSAttributedString(string: "Zadania z mostkiem do Claude Code na tym Macu.\nhttps://github.com/piotr-bialobrzeski-wrx/taskhub"),
+            .credits: NSAttributedString(string: "Zadania z mostkiem do Claude Code na tym Macu."),
         ])
     }
 
