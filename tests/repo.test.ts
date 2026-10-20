@@ -138,24 +138,32 @@ describe.skipIf(!DB)("repo", async () => {
     expect(await repo.countAttachments([t.id])).toEqual({ [t.id]: 1 });
   });
 
-  it("ukończenie kroku loguje czas do nauki, ponowne otwarcie go cofa, ostatni krok zamyka zadanie", async () => {
-    const t = await repo.createTask(owner, { title: "Jeden krok", steps: [{ title: "Zrób", tool: "code", estMin: 30 }] });
+  it("ukończenie kroku loguje czas do nauki (Piotra albo Claude'a), ponowne otwarcie go cofa, ostatni krok zamyka zadanie", async () => {
+    await sql()`delete from time_samples where owner_id = ${owner}`;
+    const t = await repo.createTask(owner, { title: "Jeden krok", steps: [{ title: "Zrób", tool: "manual", estMin: 30 }] });
     const s = t.steps[0];
     await repo.updateStep(s.id, { spentSec: 50 * 60 });
     await repo.completeStep(owner, t, { ...s, spentSec: 50 * 60 }, { report: "Zrobione: https://example.com/x" });
     let fresh = (await repo.getTask(owner, t.id))!;
-    expect(fresh.steps[0].status).toBe("done");
-    expect(fresh.steps[0].logged).toBe(true);
+    expect(fresh.steps[0]).toMatchObject({ status: "done", logged: true, doneBy: "owner", agentSec: 0 });
     expect(fresh.steps[0].output).toContain("Zrobione");
     expect(fresh.doneAt).not.toBeNull();
     let samples = await repo.listSamples(owner);
-    expect(samples.find((x) => x.tool === "code")).toMatchObject({ estMin: 30, spentMin: 50 });
+    expect(samples.find((x) => x.tool === "manual")).toMatchObject({ estMin: 30, spentMin: 50, who: "owner" });
     await repo.reopenStep(owner, t.id, fresh.steps[0]);
     fresh = (await repo.getTask(owner, t.id))!;
-    expect(fresh.steps[0].status).toBe("todo");
+    expect(fresh.steps[0]).toMatchObject({ status: "todo", doneBy: null, agentStartedAt: null });
     expect(fresh.doneAt).toBeNull();
     samples = await repo.listSamples(owner);
-    expect(samples.find((x) => x.tool === "code")).toBeUndefined();
+    expect(samples.find((x) => x.tool === "manual")).toBeUndefined();
+    // krok Claude'a: czas Claude'a w sekundach, próbka „agent”, kto zamknął = agent
+    const t2 = await repo.createTask(owner, { title: "Krok Claude'a", steps: [{ title: "Sprawdź", tool: "code", estMin: 10 }] });
+    await repo.completeStep(owner, t2, t2.steps[0], { report: "ok", by: "agent", addAgentSec: 1800 });
+    const c = (await repo.getTask(owner, t2.id))!.steps[0];
+    expect(c).toMatchObject({ status: "done", doneBy: "agent", agentSec: 1800, spentSec: 0, logged: true });
+    expect((await repo.listSamples(owner)).find((x) => x.tool === "code")).toMatchObject({ estMin: 10, spentMin: 30, who: "agent" });
+    await repo.reopenStep(owner, t2.id, c);
+    expect((await repo.getTask(owner, t2.id))!.steps[0].doneBy).toBeNull();
   });
 
   it("fakty: podmiana zachowuje przypięte i ukryte po etykiecie", async () => {

@@ -266,7 +266,7 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
     const s = (await repo.getTask(o.id, taskId))?.steps.find((x) => x.id === stepId);
     const d = s ? draftOf(s) : null;
     if (s && d && !isExternalApp(d.target.app) && !isGitDraft(d, s.blocks) && !isPromptDraft(d, s.blocks) && (await repo.markSendStarted(o.id, stepId)))
-      await repo.completeSend(o.id, stepId, { summary: "Zatwierdzone; ten szkic nie idzie do żadnej aplikacji zewnętrznej." });
+      await repo.completeSend(o.id, stepId, { summary: "Zatwierdzone; ten szkic nie idzie do żadnej aplikacji zewnętrznej." }, "owner");
   } else if (seen) {
     // agent zmienił szkic, zanim Piotr kliknął: zgody nie ma, karta pokaże nową wersję
     const s = (await repo.getTask(o.id, taskId))?.steps.find((x) => x.id === stepId);

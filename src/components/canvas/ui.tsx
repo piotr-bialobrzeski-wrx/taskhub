@@ -28,6 +28,7 @@ export type StepTile = {
   id: string; idx: number; title: string; tool: string; state: StepStateKey; meta: string;
   dest: string | null;       // dokąd pójdzie albo poszło (wiersz listy); na kafelku to samo siedzi w meta
   destHref: string | null;   // po wysyłce: adres wyniku (tylko http(s)), dolna linia kafelka jest wtedy linkiem
+  dim: boolean;              // zrobiony przez Claude bez śladu na zewnątrz: przygaszony
   pos: Pos | null; dependsOn: string[];
   activity: TileActivity | null;
 };

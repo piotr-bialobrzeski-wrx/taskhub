@@ -23,12 +23,14 @@ describe("priorytet efektywny", () => {
     expect(scoreOf({ task: task({ level: 1, due: plusDays(-3) }), project: null, blockedCount: 0, samples: [] }).eff).toBe(3);
     expect(scoreOf({ task: task({ level: 2, due: plusDays(1) }), project: null, blockedCount: 0, samples: [] }).eff).toBe(3);
   });
-  it("za dużo pracy na dni do terminu dodaje +1 i liczy czas wg kalibracji", () => {
-    const t = task({ level: 2, due: plusDays(1), steps: [step({ estMin: 240, tool: "code" })] });
-    const samples = Array.from({ length: 3 }, () => ({ tool: "code", projectId: null, estMin: 60, spentMin: 120 }));
+  it("za dużo pracy Piotra na dni do terminu dodaje +1 i liczy czas wg kalibracji; praca Claude'a nie liczy się", () => {
+    const t = task({ level: 2, due: plusDays(1), steps: [step({ estMin: 240, tool: "manual" })] });
+    const samples = Array.from({ length: 3 }, () => ({ tool: "manual", projectId: null, estMin: 60, spentMin: 120, who: "owner" as const }));
     const s = scoreOf({ task: t, project: null, blockedCount: 0, samples });
     expect(s.why.map((w) => w.txt).join(" ")).toContain("wg Twoich czasów");
     expect(s.eff).toBe(4); // 2 + 1 (termin) + 1 (praca)
+    const claude = scoreOf({ task: task({ level: 2, due: plusDays(1), steps: [step({ estMin: 240, tool: "code" })] }), project: null, blockedCount: 0, samples });
+    expect(claude.why.map((w) => w.txt).join(" ")).not.toContain("zostało ~");
   });
   it("blokowanie innych dodaje pół punktu, ukończone zadanie nie dostaje bonusów", () => {
     const s = scoreOf({ task: task({ level: 3 }), project: null, blockedCount: 2, samples: [] });

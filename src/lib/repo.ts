@@ -2,8 +2,8 @@
 import { randomUUID } from "node:crypto";
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "./db";
-import { type Company, type Connection, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample, appOfLabel, normalizeTool, toolLabel } from "./schema";
-import { Q, roundQ, spentMin } from "./time";
+import { type Company, type Connection, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample, appOfLabel, isOwnerStep, normalizeTool, toolLabel } from "./schema";
+import { agentMinOf, elapsedSec, Q, roundQ, spentMin } from "./time";
 import { isHttpUrl, sanitizeBlocks } from "./safeurl";
 import { approvalSig, approvalValid, isGitDraft, isSendable, shownSig, type Draft } from "./agent/approval";
 import { doneChat } from "./stepcard";
@@ -234,6 +234,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), hasPrevBlocks: r.blocksPrev != null, logged: !!r.logged,
     pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, connectionId: (r.connectionId as string) ?? null, filePath: (r.filePath as string) ?? null,
     approvedAt: iso(r.approvedAt), approvedSig: (r.approvedSig as string) ?? null, sendStartedAt: iso(r.sendStartedAt),
+    agentSec: Number(r.agentSec ?? 0), agentStartedAt: iso(r.agentStartedAt), doneBy: (r.doneBy as "owner" | "agent") ?? null,
   };
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
@@ -360,7 +361,7 @@ export async function purgeTask(ownerId: string, id: string): Promise<void> {
   await sql()`delete from tasks where id = ${id} and owner_id = ${ownerId}`;
 }
 
-export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null; filePath: string | null }>;
+export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null; filePath: string | null; agentSec: number; agentStartedAt: string | null; doneBy: "owner" | "agent" | null }>;
 const parseBlocks = (v: unknown): Block[] | null => { if (!v) return null; const p = Blocks.safeParse(v); return p.success ? p.data : null; };
 const isApproved = (b: Block) => b.type === "draft" && b.status === "approved";
 const demote = (blocks: Block[]) => blocks.map((b): Block => (b.type === "draft" && b.status === "approved" ? { ...b, status: "proposed" } : b));
@@ -394,6 +395,9 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
   if (patch.estMin !== undefined) p.est_min = roundQ(patch.estMin);
   if (patch.spentSec !== undefined) { p.spent_sec = Math.max(0, Math.round(patch.spentSec)); p.spent_at = new Date(); }
   if (patch.spentManual !== undefined) p.spent_manual = patch.spentManual;
+  if (patch.agentSec !== undefined) p.agent_sec = Math.max(0, Math.round(patch.agentSec));
+  if (patch.agentStartedAt !== undefined) p.agent_started_at = patch.agentStartedAt;
+  if (patch.doneBy !== undefined) p.done_by = patch.doneBy;
   if (patch.link !== undefined) p.link = isHttpUrl(patch.link) ? patch.link.trim() : null;   // link kroku tylko http(s)
   if (patch.handoffAt !== undefined) p.handoff_at = patch.handoffAt;
   if (patch.doneAt !== undefined) p.done_at = patch.doneAt;
@@ -442,19 +446,23 @@ export async function setStepDependencies(id: string, dependsOn: string[]): Prom
 }
 export async function deleteStep(id: string): Promise<void> { await sql()`delete from steps where id = ${id}`; }
 
-// krok gotowy: zapis czasu do historii (uczenie), status, raport i link
-export async function completeStep(ownerId: string, task: Task, step: Step, opts: { report?: string; link?: string; output?: string; addSpentSec?: number } = {}): Promise<void> {
+// krok gotowy: zapis czasu do historii (uczenie), status, raport i link. by: kto zamknął (Piotr z aplikacji, agent przez MCP albo bieg wysyłki);
+// addSpentSec = czas Piotra, addAgentSec = czas Claude'a; próbka do kalibracji: czas Piotra dla jego kroku, czas Claude'a dla reszty
+export async function completeStep(ownerId: string, task: Task, step: Step, opts: { report?: string; link?: string; output?: string; addSpentSec?: number; addAgentSec?: number; by?: "owner" | "agent" } = {}): Promise<void> {
   const spentSec = step.spentSec + (opts.addSpentSec ?? 0);
-  const patch: StepPatch = { status: "done", prevStatus: step.status === "done" ? step.prevStatus : step.status, spentSec, handoffAt: null, doneAt: new Date().toISOString() };
+  const agentSec = (step.agentSec ?? 0) + Math.max(0, Math.round(opts.addAgentSec ?? 0));
+  const patch: StepPatch = { status: "done", prevStatus: step.status === "done" ? step.prevStatus : step.status, handoffAt: null, doneAt: new Date().toISOString(), doneBy: opts.by ?? "owner", agentStartedAt: null, agentSec };
+  if ((opts.addSpentSec ?? 0) > 0) patch.spentSec = spentSec;
   if (opts.report !== undefined) { patch.report = opts.report; patch.output = opts.report; }
   if (opts.output !== undefined) patch.output = opts.output;
   if (opts.link && isHttpUrl(opts.link)) patch.link = opts.link.trim();
   // zatwierdzony szkic, który krok właśnie wysłał, zostaje w zadaniu jako zapis wysyłki. Wołający pilnują, kto może tak zamknąć krok:
   // Piotr, mostek v1 przy ważnej zgodzie, bieg wysyłki tego kroku (MCP complete_step i czat w aplikacji odmawiają pozostałym)
   if (step.blocks?.some(isApproved)) patch.blocks = step.blocks.map((b) => (b.type === "draft" && b.status === "approved" ? { ...b, status: "sent" as const } : b));
-  const sm = spentMin({ spentSec });
+  const own = isOwnerStep(step);
+  const sm = own ? spentMin({ spentSec }) : agentMinOf({ agentSec });
   if (sm > 0 && !step.logged) {
-    await sql()`insert into time_samples (owner_id, step_id, tool, project_id, est_min, spent_min) values (${ownerId}, ${step.id}, ${step.tool}, ${task.projectId}, ${step.estMin}, ${sm})`;
+    await sql()`insert into time_samples (owner_id, step_id, tool, project_id, est_min, spent_min, who) values (${ownerId}, ${step.id}, ${step.tool}, ${task.projectId}, ${step.estMin}, ${sm}, ${own ? "owner" : "agent"})`;
     patch.logged = true;
   }
   await writeStep(step.id, patch, { sent: true });
@@ -465,7 +473,7 @@ export async function reopenStep(ownerId: string, taskId: string, step: Step): P
   const status = step.prevStatus === "handoff" ? "todo" : step.prevStatus && step.prevStatus !== "done" ? (step.prevStatus as Step["status"]) : step.output ? "draft" : "todo";
   await sql().begin(async (tx) => {
     // ponowne otwarcie nie przywraca zgody: szkic trzeba zatwierdzić od nowa
-    await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null, approved_at = null, approved_sig = null, send_started_at = null where id = ${step.id}`;
+    await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null, done_by = null, agent_started_at = null, approved_at = null, approved_sig = null, send_started_at = null where id = ${step.id}`;
     await tx`delete from time_samples where step_id = ${step.id}`;
     await tx`update tasks set done_at = null where id = ${taskId} and owner_id = ${ownerId}`;
   });
@@ -531,14 +539,15 @@ export async function markSendStarted(ownerId: string, stepId: string): Promise<
     return true;
   });
 }
-// wysyłka potwierdzona przez bieg wysyłki (np. commit zrobiony przez aplikację na Macu): krok zrobiony, szkic „wysłany”, krótka linia w rozmowie
-export async function completeSend(ownerId: string, stepId: string, sent: { summary?: string | null; link?: string | null } = {}): Promise<boolean> {
+// wysyłka potwierdzona przez bieg wysyłki (np. commit zrobiony przez aplikację na Macu): krok zrobiony, szkic „wysłany”, krótka linia w rozmowie.
+// by: agent (bieg wysyłki: czas Claude'a od wzięcia szkicu) albo owner (zgoda Piotra kończy szkic, który nigdzie nie idzie)
+export async function completeSend(ownerId: string, stepId: string, sent: { summary?: string | null; link?: string | null } = {}, by: "owner" | "agent" = "agent"): Promise<boolean> {
   const [row] = await sql()`select s.task_id from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId}`;
   const task = row ? await getTask(ownerId, row.taskId as string) : null;
   const step = task?.steps.find((s) => s.id === stepId);
   if (!task || !step || !approvalValid(step) || !step.sendStartedAt) return false;
   const link = isHttpUrl(sent.link) ? sent.link.trim() : undefined;
-  await completeStep(ownerId, task, step, { report: sent.summary?.trim().slice(0, 4000) || undefined, link });
+  await completeStep(ownerId, task, step, { report: sent.summary?.trim().slice(0, 4000) || undefined, link, by, addAgentSec: by === "agent" ? elapsedSec(step.sendStartedAt) : 0 });
   const closed = !!(await getTask(ownerId, task.id))?.doneAt;
   await addChat(ownerId, task.id, "agent", doneChat(step, closed), { stepId, link });
   return true;
@@ -686,9 +695,12 @@ export async function listRuleVersions(ownerId: string, ruleId?: string, limit =
 
 // ---------- czasy ----------
 export async function listSamples(ownerId: string): Promise<TimeSample[]> {
-  const rows = await sql()`select tool, project_id, est_min, spent_min from time_samples where owner_id = ${ownerId} order by at desc limit 300`;
-  return rows.map((r) => ({ tool: r.tool as string, projectId: (r.projectId as string) ?? null, estMin: Number(r.estMin), spentMin: Number(r.spentMin) }));
+  const rows = await sql()`select tool, project_id, est_min, spent_min, who from time_samples where owner_id = ${ownerId} order by at desc limit 300`;
+  return rows.map((r) => ({ tool: r.tool as string, projectId: (r.projectId as string) ?? null, estMin: Number(r.estMin), spentMin: Number(r.spentMin), who: r.who === "agent" ? "agent" as const : "owner" as const }));
 }
+// czas Claude'a: start_step stawia znacznik; zamknięcie albo oddanie kroku dolicza sekundy i go kasuje
+export async function markAgentStart(stepId: string): Promise<void> { await sql()`update steps set agent_started_at = now() where id = ${stepId}`; }
+export async function addAgentTime(stepId: string, sec: number): Promise<void> { await sql()`update steps set agent_sec = agent_sec + ${Math.max(0, Math.round(sec))}, agent_started_at = null where id = ${stepId}`; }
 
 // ---------- czat ----------
 // seenAt: agent wziął wiadomość do opracowania w bieżącym biegu; answeredAt: załatwiona (reply_chat albo odpowiedź agenta w aplikacji); obie null = czeka w kolejce
@@ -852,8 +864,9 @@ export async function setUserSettings(ownerId: string, patch: Record<string, unk
 // Puls: token rodzaju "bridge" ma seen_at i meta (komputer, silnik, stan). Bieg: jeden otwarty na właściciela (unikalny indeks częściowy),
 // więc dwa komputery nie wykonają tej samej pracy; bieg bez sygnału wygasa. Rodzaj biegu: work = praca bez wysyłek, send = jeden zatwierdzony szkic.
 export type RunKind = "work" | "send";
-export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null; kind?: RunKind };
-const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null, kind: r.kind === "send" ? "send" : "work" });
+// markAt: ostatnie wywołanie MCP, które kończy jakiś etap pracy (get_task, complete_step…): od niego liczy się czas Claude'a na krok bez start_step
+export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null; kind?: RunKind; markAt?: string | null };
+const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null, kind: r.kind === "send" ? "send" : "work", markAt: iso(r.markAt) });
 export type BridgeStatus = { alive: boolean; seenAt: string | null; name: string | null; meta: Record<string, unknown>; run: BridgeRun | null };
 
 export async function bridgeSeen(tokenId: string, meta: Record<string, unknown>): Promise<void> {
@@ -932,6 +945,7 @@ export async function listBridgeRuns(ownerId: string, limit = 8): Promise<Bridge
   return rows.map(rowToRun);
 }
 // --- mostek v2 (punkty wejścia /api/bridge): bieg po id i bieg wysyłki, który nic nie zaczął ---
+export async function markBridgeRun(ownerId: string, id: string): Promise<void> { await sql()`update bridge_runs set mark_at = now() where id = ${id} and owner_id = ${ownerId} and ended_at is null`; }
 export async function getBridgeRun(ownerId: string, id: string): Promise<BridgeRun | null> {
   const [r] = await sql()`select * from bridge_runs where id = ${id} and owner_id = ${ownerId}`;
   return r ? rowToRun(r) : null;

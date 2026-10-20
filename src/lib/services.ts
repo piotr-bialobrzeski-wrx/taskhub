@@ -31,7 +31,7 @@ export async function taskQueue(ownerId: string, taskId: string): Promise<Queue 
 }
 
 // krok gotowy: zapis, uczenie z czasu, odbiór raportu, notatka końcowa gdy to był ostatni krok
-export async function finishStep(ownerId: string, taskId: string, stepId: string, opts: { report?: string; link?: string; output?: string; addSpentSec?: number } = {}): Promise<{ task: Task; closed: boolean }> {
+export async function finishStep(ownerId: string, taskId: string, stepId: string, opts: { report?: string; link?: string; output?: string; addSpentSec?: number; addAgentSec?: number; by?: "owner" | "agent" } = {}): Promise<{ task: Task; closed: boolean }> {
   const task = await repo.getTask(ownerId, taskId); if (!task) throw new Error("Nie ma takiego zadania");
   const step = task.steps.find((s) => s.id === stepId); if (!step) throw new Error("Nie ma takiego kroku");
   await repo.completeStep(ownerId, task, step, opts);

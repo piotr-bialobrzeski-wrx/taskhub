@@ -59,7 +59,7 @@ function NumChip({ value, stepBy, min, label, onSave }: { value: number; stepBy:
 
 export function StepMeta({ taskId, step, steps, calText, connections = [], showConnection = true }: {
   taskId: string;
-  step: { id: string; tool: string; estMin: number; spentMin: number; needsApproval: boolean; dependsOn: string[]; estHint?: string | null; connectionId?: string | null };
+  step: { id: string; tool: string; own: boolean; agentMin: number; estMin: number; spentMin: number; needsApproval: boolean; dependsOn: string[]; estHint?: string | null; connectionId?: string | null };
   steps: { id: string; title: string; done: boolean }[]; calText?: string | null;
   connections?: StepConnection[]; showConnection?: boolean;   // wybór połączenia: w technikaliach tylko, gdy nie ma go w karcie publikacji
 }) {
@@ -77,8 +77,10 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
         <div><div className="lbl">Narzędzie</div>
           <Picker cls="boxed" title="Narzędzie kroku" trigger={<span className="pp-t">{TOOL_LABELS[step.tool] ?? step.tool}</span>} onPick={(k) => patch({ tool: k })}
             options={tools.map(([k, v]) => ({ key: k, on: k === step.tool, node: <span>{v}</span> }))} /></div>
-        <div><div className="lbl">Szacunek{step.estHint ? <span className="hint"> {step.estHint}</span> : null}</div><NumChip value={step.estMin} stepBy={Q} min={Q} label="Szacunek w minutach" onSave={(v) => patch({ estMin: v })} /></div>
-        <div><div className="lbl">Rzeczywiście</div><NumChip value={step.spentMin} stepBy={5} min={0} label="Czas zrobiony w minutach" onSave={(v) => patch({ spentMin: v })} /></div>
+        {step.own ? <>
+          <div><div className="lbl">Szacunek{step.estHint ? <span className="hint"> {step.estHint}</span> : null}</div><NumChip value={step.estMin} stepBy={Q} min={Q} label="Szacunek w minutach" onSave={(v) => patch({ estMin: v })} /></div>
+          <div><div className="lbl">Twój czas</div><NumChip value={step.spentMin} stepBy={5} min={0} label="Twój czas w minutach" onSave={(v) => patch({ spentMin: v })} /></div>
+        </> : <div><div className="lbl">Czas Claude'a</div><span className="pp boxed" title="Liczy się sam: od chwili, gdy Claude zaczął krok, do jego zamknięcia"><span className="pp-t">{step.agentMin ? fmtMin(step.agentMin) : "jeszcze nic"}</span></span></div>}
         <div><div className="lbl">Zgoda</div>
           <Picker cls="boxed" title="Czy krok wysyła coś na zewnątrz i czeka na Twoją zgodę" trigger={<span className="pp-t">{step.needsApproval ? "wymaga zgody" : "bez zgody"}</span>} onPick={(k) => patch({ needsApproval: k === "1" })}
             options={[{ key: "1", on: step.needsApproval, node: <span>wymaga zgody: wysyła coś na zewnątrz</span> }, { key: "0", on: !step.needsApproval, node: <span>bez zgody: Claude robi od razu</span> }]} /></div>

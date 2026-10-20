@@ -1,7 +1,7 @@
 // Układ kanwy i modele kafelków: czysta logika, bez bazy.
 import { describe, it, expect } from "vitest";
 import { computePositions, gridFor, membership, OX, OY, STEP_SIZE, TASK_SIZE, GX, GY } from "@/lib/canvas/layout";
-import { stepStateOf, taskStateOf, dueOf, stepTile } from "@/lib/canvas/vm";
+import { stepStateOf, taskStateOf, dueOf, stepTile, estText } from "@/lib/canvas/vm";
 import { externalLink } from "@/lib/links";
 import { step, task } from "./helpers";
 
@@ -108,12 +108,41 @@ describe("dolna linia kafelka: dokąd pójdzie albo poszło (paczka 7)", () => {
     expect(stepTile(tf, f, [tf]).meta).toBe("Plik na Macu · us-access-roles-podglad.md");
     const d = step({ tool: "slack", status: "done", needsApproval: true, estMin: 10 });
     const td = task({ steps: [d] });
-    expect(stepTile(td, d, [td]).meta).toBe("Start od razu · 10 min");
+    expect(stepTile(td, d, [td]).meta).toBe("Claude");
     const h = step({ tool: "slack", status: "handoff", handoffAt: "2026-10-20T08:00:00Z" });
     const th = task({ steps: [h] });
     expect(stepTile(th, h, [th]).meta).toBe("Pracuje od 10:00");
     const r = step({ tool: "slack", status: "todo", needsApproval: true, estMin: 10 });
     const tr = task({ steps: [r] });
-    expect(stepTile(tr, r, [tr]).meta).toBe("Start od razu · 10 min · zatw.");
+    expect(stepTile(tr, r, [tr]).meta).toBe("Start od razu · Claude · zatw.");
+  });
+  it("zrobione: kto, o której, ile zajęło; krok Claude'a bez śladu na zewnątrz jest przygaszony; plan: Claude albo szacunek Piotra", () => {
+    const a = step({ tool: "code", status: "done", doneAt: "2026-10-20T08:42:00Z", agentSec: 240, doneBy: "agent" });
+    const ta = task({ steps: [a] });
+    expect(stepTile(ta, a, [ta])).toMatchObject({ meta: "Claude · 10:42 · 4 min", dim: true });
+    const o = step({ tool: "manual", status: "done", doneAt: "2026-10-20T08:42:00Z", spentSec: 900, doneBy: "owner" });
+    const to = task({ steps: [o] });
+    expect(stepTile(to, o, [to])).toMatchObject({ meta: "Ty · 10:42 · 15 min", dim: false });
+    // krok sprzed paczki 7 (bez doneBy): wykonawca wg narzędzia
+    const legacy = step({ tool: "manual", status: "done", doneAt: "2026-10-20T08:42:00Z" });
+    const tl = task({ steps: [legacy] });
+    expect(stepTile(tl, legacy, [tl])).toMatchObject({ meta: "Ty · 10:42", dim: false });
+    const sent = step({ tool: "clickup", status: "done", doneAt: "2026-10-20T16:52:00Z", doneBy: "agent", blocks: [{ type: "draft", target: { app: "clickup", action: "create", where: "Backlog" }, body: "x", status: "sent" }] });
+    const ts = task({ steps: [sent] });
+    expect(stepTile(ts, sent, [ts]).dim).toBe(false);
+    const ch = step({ tool: "code", status: "done", doneBy: "agent", blocks: [{ type: "changes", repo: "w/a", branch: "x", files: [] }] });
+    const tc = task({ steps: [ch] });
+    expect(stepTile(tc, ch, [tc]).dim).toBe(false);
+    const rc = step({ tool: "code", status: "todo" });
+    const trc = task({ steps: [rc] });
+    expect(stepTile(trc, rc, [trc]).meta).toBe("Start od razu · Claude");
+    const rm = step({ tool: "manual", status: "todo", estMin: 15 });
+    const trm = task({ steps: [rm] });
+    expect(stepTile(trm, rm, [trm]).meta).toBe("Start od razu · ~15 min");
+    expect(estText(task({ steps: [] }))).toBe("bez kroków");
+    expect(estText(task({ steps: [step({ tool: "manual", estMin: 15 }), step({ tool: "code", agentSec: 600 })] }))).toBe("~15 min");
+    expect(estText(task({ steps: [step({ tool: "manual", estMin: 15, spentSec: 600 })] }))).toBe("~15 min / 10 min");
+    expect(estText(task({ steps: [step({ tool: "code", agentSec: 720 })] }))).toBe("Claude 12 min");
+    expect(estText(task({ steps: [step({ tool: "code" })] }))).toBe("tylko Claude");
   });
 });

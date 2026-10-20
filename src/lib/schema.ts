@@ -194,6 +194,9 @@ export const Step = z.object({
   approvedAt: z.string().nullable().optional(),     // zgoda Piotra na szkic (tylko jego kliknięcie „Zatwierdź”)
   approvedSig: z.string().nullable().optional(),    // podpis zatwierdzonej treści; inna treść = brak zgody
   sendStartedAt: z.string().nullable().optional(),  // bieg wysyłki wziął szkic (najwyżej raz)
+  agentSec: z.number().int().optional(),            // czas Claude'a na ten krok (sekundy, liczony sam: od start_step albo znacznika biegu do zamknięcia)
+  agentStartedAt: z.string().nullable().optional(), // start_step agenta; zamknięcie albo oddanie kroku go kasuje
+  doneBy: z.enum(["owner", "agent"]).nullable().optional(),   // kto zamknął krok; null (sprzed paczki 7) = wg narzędzia
 });
 export type Step = z.infer<typeof Step>;
 
@@ -316,7 +319,7 @@ export const Rule = z.object({
 });
 export type Rule = z.infer<typeof Rule>;
 
-export const TimeSample = z.object({ tool: z.string(), projectId: z.string().nullable(), estMin: z.number(), spentMin: z.number() });
+export const TimeSample = z.object({ tool: z.string(), projectId: z.string().nullable(), estMin: z.number(), spentMin: z.number(), who: z.enum(["owner", "agent"]).optional() });
 export type TimeSample = z.infer<typeof TimeSample>;
 
 // ---------- narzędzia kroków: etykiety do UI, nie schematy ----------
@@ -326,6 +329,9 @@ export const TOOL_LABELS: Record<string, string> = {
   whatsapp: "WhatsApp", sheets: "Arkusz Google", docs: "Dokument Google", file: "Plik na Macu",
 };
 export const toolLabel = (tool: string) => TOOL_LABELS[tool] ?? tool;
+// krok Piotra (narzędzie „Ty”): jego szacunki, jego czas i jego kalibracja; resztę robi Claude i liczy się czas Claude'a
+export const isOwnerStep = (s: Pick<Step, "tool">) => s.tool === "manual";
+export const doneByOf = (s: Pick<Step, "tool" | "doneBy">): "owner" | "agent" => s.doneBy ?? (isOwnerStep(s) ? "owner" : "agent");
 // „w ClickUpie”, „na Slacku”: dokąd idzie treść, odmienione; nieznana aplikacja dostaje „· Nazwa”
 export const TOOL_IN: Record<string, string> = {
   clickup: "w ClickUpie", slack: "na Slacku", gmail: "mailem", calendar: "w kalendarzu", github: "na GitHubie", figma: "w Figmie", whatsapp: "na WhatsAppie",

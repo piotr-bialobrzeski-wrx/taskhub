@@ -74,7 +74,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   }, []);
 
   const byId = useMemo(() => new Map(p.steps.map((s) => [s.id, s])), [p.steps]);
-  const items: CanvasItem[] = useMemo(() => p.steps.map((s) => ({ id: s.id, dependsOn: s.dependsOn, pos: s.pos, cls: s.state + (panel === s.id ? " sel" : ""), done: s.state === "done", aria: `Krok ${s.idx}: ${s.title}` })), [p.steps, panel]);
+  const items: CanvasItem[] = useMemo(() => p.steps.map((s) => ({ id: s.id, dependsOn: s.dependsOn, pos: s.pos, cls: s.state + (panel === s.id ? " sel" : "") + (s.dim ? " dim" : ""), done: s.state === "done", aria: `Krok ${s.idx}: ${s.title}` })), [p.steps, panel]);
   const groups: CanvasGroup[] = useMemo(() => p.groups.map((g) => ({ ...g })), [p.groups]);
   const group = selGroup ? p.groups.find((g) => g.id === selGroup) ?? null : null;
   const ids = [...sel], n = sel.size, word = plural(n, "krok", "kroki", "kroków");
@@ -147,7 +147,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
           <div className="stage-grp">
             <button type="button" className="lrow" onClick={() => setPanel("__task")}><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="n-title">{t.title}</span><span className="n-meta" style={{ margin: 0 }}>{t.progress.done}/{t.progress.all}</span></button>
             {p.steps.map((s) => (
-              <button key={s.id} type="button" className="lrow" onClick={() => openStep(s.id)}>
+              <button key={s.id} type="button" className={"lrow" + (s.dim ? " dim" : "")} onClick={() => openStep(s.id)}>
                 <span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} />
                 <span className="n-title">{s.title}</span>{s.dest ? <span className="n-dest">{s.dest}</span> : null}<span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span>
               </button>

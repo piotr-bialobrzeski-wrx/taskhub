@@ -6,8 +6,8 @@ import * as repo from "@/lib/repo";
 import { bundle } from "@/lib/services";
 import { composeStatic } from "@/lib/agent/compose";
 import { breakdownPrompt, handoffPrompt, claudeUrl } from "@/lib/agent/handoff";
-import { EXTERNAL_TOOLS, sphereOf, toolLabel, type Question, type Step, type Task } from "@/lib/schema";
-import { calEst, calibrationFor, estOf, fmtMin, spentMin, taskEst, taskSpent, todayISO } from "@/lib/time";
+import { EXTERNAL_TOOLS, isOwnerStep, sphereOf, toolLabel, type Question, type Step, type Task } from "@/lib/schema";
+import { agentMinOf, calEst, calibrationFor, estOf, fmtMin, remainEst, spentMin, taskAgent, taskSpent, todayISO } from "@/lib/time";
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
@@ -23,7 +23,7 @@ import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estTe
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed } from "@/lib/feed";
-import { destOf, foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink, type CardState } from "@/lib/stepcard";
+import { destOf, foldsFor, kindsOf, nowHeading, reportLines, resultLinks, splitBlocks, targetLink, whoDid, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { Timer } from "@/components/Timer";
@@ -113,7 +113,8 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       <div className="time-row">
         <div><div className="lbl">Projekt</div><ProjectPicker projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color }))} value={t.projectId} cls="boxed" onPick={setProject.bind(null, t.id)} /></div>
         <div><div className="lbl">Termin</div><InlineDate value={t.due} min={todayISO()} onChange={setDue.bind(null, t.id)} /></div>
-        <div><div className="lbl">Czas</div><div className="chip" style={{ height: 34, padding: "0 14px" }}>~{fmtMin(taskEst(t))}{taskSpent(t) ? ` · ⏱ ${fmtMin(taskSpent(t))}` : ""}</div></div>
+        <div><div className="lbl">Twój czas</div><div className="chip" style={{ height: 34, padding: "0 14px" }} title="Twoje kroki: ile zostało wg szacunków i ile już zmierzyłeś">{[remainEst(t) ? `Zostało ~${fmtMin(remainEst(t))}` : null, taskSpent(t) ? `⏱ ${fmtMin(taskSpent(t))}` : null].filter(Boolean).join(" · ") || "brak"}</div></div>
+        {taskAgent(t) ? <div><div className="lbl">Czas Claude'a</div><div className="chip" style={{ height: 34, padding: "0 14px" }} title="Liczy się sam: od chwili, gdy Claude zaczął krok, do jego zamknięcia">{fmtMin(taskAgent(t))}</div></div> : null}
       </div>
       <Why score={cur.score} />
       {t.doneAt ? (
@@ -206,7 +207,9 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
 }) {
   // szczegóły są już w sekcji „Co”, więc blok tekstu z tą samą treścią odpada
   const blocks = (s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
-  const cal = calibrationFor(samples, s.tool);
+  // kalibracja tylko dla kroków Piotra (jego szacunki); czas Claude'a liczy się sam
+  const own = isOwnerStep(s), agentMin = agentMinOf(s);
+  const cal = own ? calibrationFor(samples, s.tool, "owner") : null;
   const calOn = !!cal && state !== "done" && Math.abs(cal.k - 1) >= 0.1;
   const ext = EXTERNAL_TOOLS.has(s.tool) || s.tool === "file";   // plik na Macu robi tylko mostek: bez „Przygotuj”
   const runnable = s.tool !== "manual";
@@ -233,8 +236,9 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const target = !done && mode !== "sent" ? targetLink(s, s.blocks) : null;
   const kinds = kindsOf(material);
   const deps = s.dependsOn.length;
-  const tech = [toolLabel(s.tool), `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}`, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
-  const meta = done && s.filePath ? `Zapisano na Macu · ${fileName(s.filePath)}` : done ? `${toolLabel(s.tool)} · ${spentMin(s) ? fmtMin(spentMin(s)) : `~${fmtMin(estOf(s))}`}` : state === "ready" && !mode ? `${toolLabel(s.tool)} · ~${fmtMin(estOf(s))}` : null;
+  const tech = [toolLabel(s.tool), own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
+  const took = whoDid(s) === "Ty" ? spentMin(s) : agentMin;
+  const meta = done && s.filePath ? `Zapisano na Macu · ${fileName(s.filePath)}` : done ? `${whoDid(s)}${took ? ` · ${fmtMin(took)}` : ""}` : state === "ready" && !mode ? (own ? `Ty · ~${fmtMin(estOf(s))}` : `${toolLabel(s.tool)} · Claude`) : null;
 
   const now = (
     <div className={"zone ans now " + head.cls}>
@@ -304,10 +308,10 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         <summary><span className="k">Szczegóły techniczne</span> · {tech}</summary>
         <div className="stack">
           <StepMeta taskId={t.id}
-            step={{ id: s.id, tool: s.tool, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null, connectionId: s.connectionId }}
+            step={{ id: s.id, tool: s.tool, own, agentMin, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null, connectionId: s.connectionId }}
             steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title, done: x.status === "done" }))}
             connections={connections} showConnection={!mode}
-            calText={calOn && cal ? `Z Twoich czasów (${cal.scope === "tool" ? toolLabel(s.tool) : "ogólnie"}, ${cal.n} ${plural(cal.n, "krok", "kroki", "kroków")}): takie kroki trwają zwykle ×${String(cal.k).replace(".", ",")}.` : null} />
+            calText={calOn && cal ? `Z Twoich czasów (${cal.n} ${plural(cal.n, "krok", "kroki", "kroków")}): takie kroki trwają zwykle ×${String(cal.k).replace(".", ",")}.` : null} />
           <InlineText taskId={t.id} stepId={s.id} field="link" value={s.link ?? ""} as="small" placeholder="Dodaj link do wyniku (ticket, wydarzenie, mail)…" shown={s.link ? "Link: " + s.link.replace(/^https?:\/\//, "").slice(0, 70) : undefined} />
         </div>
       </details>

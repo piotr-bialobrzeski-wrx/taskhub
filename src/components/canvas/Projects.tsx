@@ -35,8 +35,8 @@ function Stats({ list }: { list: ProjTask[] }) {
   return (
     <span className="a-stats">
       <span>{open.length} {plural(open.length, "otwarte", "otwarte", "otwartych")} · {list.length - open.length} ukończ.</span>
-      {remain ? <span title="Pozostały szacunek">~{fmtMin(remain)} do zrobienia</span> : null}
-      {spent ? <span title="Czas zmierzony">⏱ {fmtMin(spent)}</span> : null}
+      {remain ? <span title="Twoja praca do zrobienia">~{fmtMin(remain)} do zrobienia</span> : null}
+      {spent ? <span title="Twój czas">⏱ {fmtMin(spent)}</span> : null}
     </span>
   );
 }

@@ -8,7 +8,7 @@ import { rulesText } from "@/lib/agent/context";
 import { audienceOf, workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago, connectorProblem, knownApp } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
-import { appName, Blocks, ChangedFile, Fact, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
+import { appName, Blocks, ChangedFile, Fact, isOwnerStep, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
 import { destOf, doneChat, sameTarget } from "@/lib/stepcard";
 import { shortTitle } from "@/lib/auto";
 import { sql } from "@/lib/db";
@@ -17,6 +17,7 @@ import { externalLink as externalLinkOf } from "@/lib/links";
 import { appUrl } from "@/lib/session";
 import { securityReport } from "@/lib/security";
 import { isFilePath, isHttpUrl } from "@/lib/safeurl";
+import { AGENT_MAX_SEC, elapsedSec } from "@/lib/time";
 import { approvalValid, coerceAgentDrafts, draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable, type Draft } from "@/lib/agent/approval";
 
 // link kroku to adres elementu w zewnętrznej aplikacji (tylko http/https); adres samego Task Hub nie jest linkiem kroku
@@ -74,6 +75,22 @@ function buildHandler(auth: repo.TokenAuth) {
   };
   // krok właściciela świeżo z bazy (z danymi o zgodzie); null = nie jego albo nie ma
   const stepById = async (stepId: string): Promise<Step | null> => { const taskId = await ownedStep(ownerId, stepId); return taskId ? (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === stepId) ?? null : null; };
+  // ---------- czas Claude'a ----------
+  // bieg tego wywołania (v2: token biegu pracy); znacznik biegu = ostatnie wywołanie, które kończy jakiś etap (get_task, complete_step…)
+  const runIdOf = async (): Promise<string | null> => (scope?.kind === "work" ? scope.runId : null);
+  const runOf = async () => { const id = await runIdOf(); return id ? repo.getBridgeRun(ownerId, id) : null; };
+  const markRun = async () => { const id = await runIdOf(); if (id) await repo.markBridgeRun(ownerId, id); };
+  const clampSec = (ms: number) => Math.max(0, Math.min(AGENT_MAX_SEC, Math.round(ms / 1000)));
+  // sekundy Claude'a na krok: bieg wysyłki od wzięcia szkicu; inaczej od start_step (nigdy sprzed startu tego biegu); bez start_step w biegu
+  // od ostatniego znacznika biegu (albo jego startu); bez biegu i bez startu czas podany przez agenta (spentMin) albo 0
+  const agentSecFor = async (s: Step, o: { fallbackMin?: number; runClock?: boolean } = {}): Promise<number> => {
+    if (scope?.kind === "send") return elapsedSec(s.sendStartedAt);
+    const run = await runOf(), now = Date.now();
+    const floor = run ? new Date(run.startedAt).getTime() : 0;
+    if (s.agentStartedAt) return clampSec(now - Math.max(new Date(s.agentStartedAt).getTime(), floor));
+    if (run && o.runClock !== false) return clampSec(now - new Date(run.markAt ?? run.startedAt).getTime());
+    return o.fallbackMin ? Math.max(0, Math.round(o.fallbackMin * 60)) : 0;
+  };
   return createMcpHandler((server) => {
     if (scope?.kind === "send") {
       // bieg wysyłki: każde narzędzie przechodzi przez sendGuard (lista dozwolonych, jego zadanie i krok)
@@ -120,6 +137,7 @@ function buildHandler(auth: repo.TokenAuth) {
       // rozmowa w zadaniu: Piotr dopisuje tu wymagania i pytania; NOWE = jeszcze bez odpowiedzi agenta
       const chat = await repo.listChat(ownerId, taskId, 12);
       const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy; NOWE [id] = Piotr napisał, nikt nie odpowiedział: zrób, o co prosi, i odpowiedz przez reply_chat z messageIds = [id] tej wiadomości, osobno po każdej załatwionej prośbie; gdy prośba zmienia zakres, najpierw add_steps z before):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${m.role === "user" ? stepRef(m) : ""}${m.role === "user" && !m.answeredAt ? ` NOWE [${m.id}]` : ""}: ${capText(m.text)}`).join("\n") : "";
+      await markRun();
       return text(ctx + (fx ? "\n" + fx : "") + (kx ? "\n" + kx : "") + (dx ? "\n" + dx : "") + (qx ? "\n" + qx : "") + (ax ? "\n" + ax : "") + (cx ? "\n" + cx : ""));
     });
 
@@ -174,6 +192,7 @@ function buildHandler(auth: repo.TokenAuth) {
       const n = steps.length, word = n === 1 ? "krok" : n < 5 ? "kroki" : "kroków";
       const list = n <= 4 ? ": " + steps.map((s) => `„${shortTitle(s.title, 40)}”`).join(", ") : "";
       await repo.addChat(ownerId, t.id, "agent", `${fresh ? "Rozpisałem" : "Dodałem"} ${n} ${word}${bef ? ` przed „${shortTitle(bef.title, 40)}”` : ""}${list}.`, { stepId: steps[0]?.id });
+      await markRun();
       return json({ steps: steps.map((s) => ({ id: s.id, title: s.title })), ...(bef ? { before: { id: bef.id, title: bef.title, draftReset: reset } } : {}) });
     });
 
@@ -225,7 +244,10 @@ function buildHandler(auth: repo.TokenAuth) {
         // szkic do aplikacji zewnętrznej zawsze czeka na zgodę i po niej leci przez mostek; agent może podnieść „wymaga zgody”, nigdy zdjąć
         const raise = !st.needsApproval && st.tool !== "manual" && isExternalApp(fresh.target.app);
         await repo.updateStep(st.id, { status: "draft", prevStatus: st.status === "handoff" ? st.prevStatus : st.status, handoffAt: null, ...(raise ? { needsApproval: true } : {}) });
+        // przygotowanie szkicu to praca Claude'a: liczy się do czasu kroku, choć krok czeka jeszcze na zgodę
+        await repo.addAgentTime(st.id, await agentSecFor(st));
         await repo.addChat(ownerId, taskId, "agent", `Szkic do zatwierdzenia: „${shortTitle(st.title, 70)}”.`, { stepId: st.id });
+        await markRun();
         return text("Panel zapisany, krok czeka na zatwierdzenie Piotra. Nie wywołuj complete_step dla tego kroku, dopóki Piotr nie zatwierdzi i nie wyślesz treści.");
       }
       return text("Panel zapisany.");
@@ -252,7 +274,10 @@ function buildHandler(auth: repo.TokenAuth) {
         return text(audience === "bridge-v1" ? "Nie zamknąłem kroku: zgoda Piotra na ten szkic nie jest już ważna albo szkic wysyła teraz inny bieg. Niczego nie wysyłaj." : "Nie zamknąłem kroku: jego zatwierdzony szkic wysyła mostek Task Hub w osobnym biegu wysyłki. Nie wysyłaj go sam i nie zamykaj tego kroku.");
       if (cur && cur.status !== "done" && needsDraft(cur))
         return text("Nie zamknąłem kroku: wymaga zgody Piotra, bo zmienia coś w aplikacji zewnętrznej. Przygotuj szkic przez set_blocks (blok draft, status proposed); po zatwierdzeniu wyśle go mostek Task Hub. Jeśli krok stał się zbędny, zamknij go przez skip_step z powodem.");
-      const r = await finishStep(ownerId, taskId, a.stepId, { report: a.summary, link: externalLink(a.link), addSpentSec: a.spentMin ? a.spentMin * 60 : 0 });
+      // krok Piotra: jego czas (spentMin) i on jako wykonawca; krok Claude'a: czas liczony sam (spentMin tylko, gdy nie ma z czego liczyć)
+      const own = !!cur && isOwnerStep(cur);
+      const addAgentSec = cur && !own ? await agentSecFor(cur, { fallbackMin: a.spentMin }) : 0;
+      const r = await finishStep(ownerId, taskId, a.stepId, { report: a.summary, link: externalLink(a.link), by: own ? "owner" : "agent", addSpentSec: own && a.spentMin ? a.spentMin * 60 : 0, addAgentSec });
       const st = r.task.steps.find((x) => x.id === a.stepId);
       if (st && a.file) await repo.updateStep(st.id, { filePath: a.file });
       // zmiany w kodzie na kartce kroku: jeden blok changes (zastępuje poprzedni), reszta klocków zostaje
@@ -270,6 +295,7 @@ function buildHandler(auth: repo.TokenAuth) {
       // po wysyłce: inne otwarte kroki ze szkicem do tego samego miejsca są pewnie zbędne; agent sprawdza je teraz, a nie zostawia Piotrowi do zatwierdzenia
       const twins = st ? sameTarget(r.task.steps, st.id, st.blocks).open : [];
       const hint = twins.length ? ` Inne otwarte kroki ze szkicem do tego samego miejsca: ${twins.map((x) => `[${x.id}] „${x.title}”`).join(", ")}. Sprawdź, czy po tej wysyłce nie są zbędne; zbędne zamknij przez skip_step z powodem.` : "";
+      await markRun();
       return text((r.closed ? "Krok zapisany, zadanie ukończone." : "Krok zapisany.") + hint);
     });
 
@@ -283,9 +309,17 @@ function buildHandler(auth: repo.TokenAuth) {
       if (st.tool === "file" && audience !== "work") return text("Nie zacząłem: krok „Plik na Macu” robi tylko aplikacja Task Hub 0.1.7 na Macu. Zostaw go.");
       // szkic czeka na decyzję Piotra: start_step nie może go przepchnąć dalej (stan „w toku” po szkicu wyglądał kiedyś jak zgoda)
       if (st.status === "draft") return text("Nie zacząłem: szkic tego kroku czeka na zatwierdzenie Piotra. Niczego nie wysyłaj; poprawki szkicu zapisuj przez set_blocks, a po zatwierdzeniu wyśle go mostek Task Hub.");
-      if (st.approvedAt || st.sendStartedAt || draftOf(st)?.status === "approved") return text(sends(st) ? "Krok w toku." : "Nie zacząłem: zatwierdzony szkic tego kroku wysyła mostek Task Hub w osobnym biegu wysyłki. Niczego tu nie wysyłaj.");
+      if (st.approvedAt || st.sendStartedAt || draftOf(st)?.status === "approved") {
+        if (!sends(st)) return text("Nie zacząłem: zatwierdzony szkic tego kroku wysyła mostek Task Hub w osobnym biegu wysyłki. Niczego tu nie wysyłaj.");
+        // zatwierdzony prompt wykonuje bieg pracy: od teraz liczy się czas Claude'a
+        if (!st.agentStartedAt) await repo.markAgentStart(st.id);
+        await markRun();
+        return text("Krok w toku.");
+      }
       if (needsDraft(st)) return text("Nie zacząłem: krok wymaga zgody Piotra, bo zmienia coś w aplikacji zewnętrznej. Przeczytaj, co trzeba, i przygotuj szkic przez set_blocks (blok draft, status proposed); niczego nie wysyłaj, po zatwierdzeniu wyśle go mostek Task Hub.");
       if (st.status !== "handoff") await repo.updateStep(st.id, { status: "handoff", prevStatus: st.status, handoffAt: new Date().toISOString() });
+      if (st.status !== "handoff" || !st.agentStartedAt) await repo.markAgentStart(st.id);
+      await markRun();
       return text("Krok w toku.");
     });
 
@@ -299,8 +333,9 @@ function buildHandler(auth: repo.TokenAuth) {
       if (st.sendStartedAt) return text("Nie zamknąłem: zatwierdzony szkic tego kroku właśnie wysyła mostek. Gdy wysyłka się skończy, sprawdź krok ponownie.");
       // zatwierdzony, ale niewysłany szkic wraca do stanu propozycji: kartka nie może potem udawać, że coś poszło
       await repo.clearApproval(ownerId, st.id);
-      const r = await finishStep(ownerId, taskId, st.id, { report: `Zbędny: ${a.reason}` });
+      const r = await finishStep(ownerId, taskId, st.id, { report: `Zbędny: ${a.reason}`, by: "agent", addAgentSec: elapsedSec(st.agentStartedAt) });
       await repo.addChat(ownerId, taskId, "agent", `Zamknąłem jako zbędny: „${shortTitle(st.title, 60)}”. ${a.reason}`, { stepId: st.id });
+      await markRun();
       return text(r.closed ? "Krok zamknięty jako zbędny, zadanie ukończone." : "Krok zamknięty jako zbędny.");
     });
 
@@ -317,7 +352,10 @@ function buildHandler(auth: repo.TokenAuth) {
       if (stale) { /* zgoda nie należy do tego biegu */ }
       else if (st.approvedAt || st.sendStartedAt || draftOf(st)?.status === "approved") await repo.clearApproval(ownerId, st.id);
       else if (st.status === "handoff") await repo.updateStep(st.id, { status: st.prevStatus === "draft" ? "draft" : "todo", prevStatus: null, handoffAt: null });
+      // czas od start_step liczy się mimo oddania (Claude próbował); bez start_step nic, bo oddany krok mógł nie być nawet zaczęty
+      await repo.addAgentTime(st.id, await agentSecFor(st, { runClock: false }));
       await repo.addChat(ownerId, taskId, "agent", `Nie zrobiłem kroku „${shortTitle(st.title, 70)}”: ${a.reason}`, { stepId: st.id });
+      await markRun();
       return text("Krok oddany.");
     });
 
@@ -372,6 +410,7 @@ function buildHandler(auth: repo.TokenAuth) {
       const closed = await repo.closeIfDone(ownerId, t.id);
       if (closed) await repo.addChat(ownerId, t.id, "agent", "Wszystkie kroki zrobione, zadanie ukończone.");
       const left = (await repo.listPendingChat(ownerId, t.id)).length;
+      await markRun();
       return text(`Odpowiedź zapisana${answers.length ? ` (załatwione wiadomości: ${answers.length})` : ""}.${left ? ` Bez odpowiedzi zostało: ${left}.` : ""}${closed ? " Zadanie ukończone." : ""}`);
     });
 

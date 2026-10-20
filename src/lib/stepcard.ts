@@ -1,6 +1,6 @@
 // Karta kroku „Teraz · Co · Skąd” (paczka 2, punkt 8): stały porządek sekcji, wynik na wierzchu, nic nie pokazuje się dwa razy.
 // Czysta logika bez React, żeby dało się ją testować; składanie w JSX jest w src/app/tasks/[id]/page.tsx.
-import { appName, EXTERNAL_TOOLS, inApp, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step } from "./schema";
+import { appName, doneByOf, EXTERNAL_TOOLS, inApp, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step } from "./schema";
 import { draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft } from "./agent/approval";
 import { fileName, safeHref } from "./safeurl";
 import { fmtTime } from "./clock";
@@ -116,6 +116,8 @@ export function tileDest(d: Dest | null, s: Pick<Step, "status" | "doneAt" | "bl
 }
 // adres do kliknięcia z dolnej linii: tylko po wysyłce do aplikacji, tylko http(s)
 export const tileDestHref = (d: Dest | null, s: Pick<Step, "status" | "link">): string | null => (d?.kind === "send" && s.status === "done" ? safeHref(s.link) ?? null : null);
+// kto zamknął krok: Piotr („Ty”) albo Claude; kroki sprzed paczki 7 wg narzędzia
+export const whoDid = (s: Pick<Step, "tool" | "doneBy">): "Ty" | "Claude" => (doneByOf(s) === "owner" ? "Ty" : "Claude");
 // linia w rozmowie zadania po zamknięciu kroku
 export function doneChat(s: Pick<Step, "title" | "tool" | "blocks"> & { filePath?: string | null }, closed: boolean): string {
   const d = destOf(s), tail = closed ? " Zadanie ukończone." : "";

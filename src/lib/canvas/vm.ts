@@ -1,9 +1,9 @@
 // Modele kafelków liczone na serwerze: stan, etykiety, teksty czasu i terminu. Klient tylko rysuje.
 import type { Scored } from "../agent/context";
 import { dueLeftH, isComplete, whyText } from "../priority";
-import { estOf, fmtMin, spentMin, taskEst, taskSpent } from "../time";
-import { toolLabel, type Step, type Task } from "../schema";
-import { destOf, tileDest, tileDestHref } from "../stepcard";
+import { agentMinOf, estOf, fmtMin, spentMin, taskAgent, taskEst, taskSpent } from "../time";
+import { isOwnerStep, toolLabel, type Step, type Task } from "../schema";
+import { destOf, tileDest, tileDestHref, whoDid } from "../stepcard";
 import type { StepStateKey, StepTile, TaskStateKey, TaskTile } from "@/components/canvas/ui";
 
 export { fmtDate, fmtTime } from "../clock";   // zawsze czas polski (serwer liczy w UTC)
@@ -34,7 +34,13 @@ export function stepStateOf(t: Task, s: Step, all: Task[]): StepStateKey {
   return s.dependsOn.every((d) => t.steps.find((x) => x.id === d)?.status === "done") ? "ready" : "blocked";
 }
 
-export const estText = (t: Task) => (t.steps.length ? `~${fmtMin(taskEst(t))}${taskSpent(t) ? ` / ${fmtMin(taskSpent(t))}` : ""}` : "bez kroków");
+// czas na kafelku zadania: szacunek i czas Piotra (jego kroki); zadanie bez kroków Piotra pokazuje czas Claude'a
+export function estText(t: Task): string {
+  if (!t.steps.length) return "bez kroków";
+  if (t.steps.some(isOwnerStep)) return `~${fmtMin(taskEst(t))}${taskSpent(t) ? ` / ${fmtMin(taskSpent(t))}` : ""}`;
+  const a = taskAgent(t);
+  return a ? `Claude ${fmtMin(a)}` : "tylko Claude";
+}
 
 // activity: co mostek robi teraz, gdy pracuje nad tym zadaniem (kafelek pokazuje to zamiast licznika); pending: wiadomości Piotra bez odpowiedzi
 export function taskTile(s: Scored, all: Task[], questions: number, live: LiveActivity | null = null, pending = 0): TaskTile {
@@ -63,16 +69,24 @@ export function stepTile(t: Task, s: Step, all: Task[], live: LiveActivity | nul
   // bieg mostka związany z tym krokiem (start_step), albo jedyny krok w toku w zadaniu, nad którym mostek pracuje
   const mine = !!live && state === "handoff" && (live.stepId === s.id || (!live.stepId && live.taskId === t.id && t.steps.filter((x) => x.status === "handoff").length === 1));
   const m = tileMeta(t, s, state);
-  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, ...m, pos: s.pos, dependsOn: s.dependsOn, activity: mine ? { text: live!.text, detail: live!.detail, since: live!.since } : null };
+  // krok zrobiony przez Claude bez śladu na zewnątrz (wysyłka, zmiany w kodzie) jest przygaszony: kroki Piotra widać od razu
+  const dim = state === "done" && whoDid(s) === "Claude" && !(s.blocks ?? []).some((b) => (b.type === "draft" && b.status === "sent") || b.type === "changes");
+  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, ...m, dim, pos: s.pos, dependsOn: s.dependsOn, activity: mine ? { text: live!.text, detail: live!.detail, since: live!.since } : null };
 }
 
-// jedna dolna linia kafelka i wiersza listy: praca w toku → dokąd poszło albo pójdzie → plan (po czym, szacunek)
+// jedna dolna linia kafelka i wiersza listy: praca w toku → dokąd poszło albo pójdzie → kto zrobił, o której, ile to zajęło → plan
+// (po czym; krok Piotra: szacunek i jego czas, krok Claude'a: „Claude” i jego czas)
 export function tileMeta(t: Task, s: Step, state: StepStateKey): { meta: string; dest: string | null; destHref: string | null } {
   if (state === "handoff" && s.handoffAt) return { meta: `Pracuje od ${fmtTime(s.handoffAt)}`, dest: null, destHref: null };
   const d = destOf(s);
   const dest = tileDest(d, s);
   if (dest) return { meta: dest, dest, destHref: tileDestHref(d, s) };
+  if (state === "done") {
+    const who = whoDid(s), took = who === "Ty" ? spentMin(s) : agentMinOf(s);
+    return { meta: [who, s.doneAt ? fmtTime(s.doneAt) : null, took ? fmtMin(took) : null].filter(Boolean).join(" · "), dest: null, destHref: null };
+  }
   const deps = s.dependsOn.map((x) => t.steps.findIndex((y) => y.id === x) + 1).filter((n) => n > 0);
-  const meta = `${deps.length ? "Po kroku " + deps.join(", ") : "Start od razu"} · ${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}${s.needsApproval && s.status !== "done" ? " · zatw." : ""}`;
-  return { meta, dest: null, destHref: null };
+  const plan = deps.length ? "Po kroku " + deps.join(", ") : "Start od razu";
+  const time = isOwnerStep(s) ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : `Claude${agentMinOf(s) ? " " + fmtMin(agentMinOf(s)) : ""}`;
+  return { meta: `${plan} · ${time}${s.needsApproval ? " · zatw." : ""}`, dest: null, destHref: null };
 }

@@ -55,7 +55,7 @@ async function sendRun(a: BridgeAuth, bridge: string): Promise<Response> {
     // szkic do „pliku” sprzed paczki 7: nic go nie wyśle; zgoda wraca z notatką, plik zapisuje krok „Plik na Macu”
     if (isLocalFile(x.draft.target.app)) { await repo.clearApproval(a.ownerId, x.step.id, { note: `Nie wysłałem „${shortTitle(x.step.title, 60)}”: to plik na Macu, nie wysyłka. Plik zapisuje krok „Plik na Macu”.` }); continue; }
     if (isGitDraft(x.draft, x.step.blocks) || isExternalApp(x.draft.target.app)) { s = x; break; }
-    if (await repo.markSendStarted(a.ownerId, x.step.id)) await repo.completeSend(a.ownerId, x.step.id, { summary: "Zatwierdzone; ten szkic nie idzie do żadnej aplikacji zewnętrznej." });
+    if (await repo.markSendStarted(a.ownerId, x.step.id)) await repo.completeSend(a.ownerId, x.step.id, { summary: "Zatwierdzone; ten szkic nie idzie do żadnej aplikacji zewnętrznej." }, "owner");
   }
   if (!s) return new Response(null, { status: 204 });
   const d = s.draft, t = d.target;

@@ -61,6 +61,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("cel wysyłki w rozmowie i w szk
     await repo.upsertBridgeConnections(owner, "MacBook", [{ name: "clickup", ok: true }, { name: "claude.ai Slack", ok: true }]);
     await actions.approveStep(t.id, sid);
     expect((await repo.getTask(owner, t.id))!.steps[0].approvedAt).not.toBeNull();
+    await sql()`delete from tasks where id = ${t.id}`;   // zatwierdzony szkic nie może zostać w bazie: inne pliki testów liczą szkice do wysłania
   });
   it("trzy nowe tickety na jednej liście zapisują się jako trzy szkice", async () => {
     const t = await repo.createTask(owner, { title: "Trzy story", steps: ["Podgląd ról", "Edycja roli", "Usuwanie roli"].map((x) => ({ title: `Utwórz story ${x} w ClickUpie`, tool: "clickup", needsApproval: true })) });
