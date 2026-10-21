@@ -7,6 +7,7 @@ import { Picker } from "@/components/canvas/widgets";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { Icon } from "@/components/canvas/ui";
 import { isGoogleApp, TOOL_LABELS } from "@/lib/schema";
+import { DECISION_TITLE_RE } from "@/lib/stepcard";
 import { Q, fmtMin, roundQ } from "@/lib/time";
 
 type Patch = Parameters<typeof patchStep>[2];
@@ -104,17 +105,21 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
 }
 
 // „Zrobione” kroku Piotra poza aplikacją: po kliknięciu pyta, ile to zajęło (chipy wokół szacunku, ten równy szacunkowi wyróżniony, albo „Pomiń”),
-// a wybór zamyka krok z tym czasem. Zamiast stopera: Piotr i tak robi takie kroki poza aplikacją
-export function DoneAsk({ taskId, stepId, est }: { taskId: string; stepId: string; est: number }) {
+// a wybór zamyka krok z tym czasem. Zamiast stopera: Piotr i tak robi takie kroki poza aplikacją.
+// Krok-wybór bez pytania na kartce („Wybierz…”, „Zdecyduj…”) pyta też, co Piotr wybrał: wpis idzie do wyniku kroku, żeby agent go widział (paczka 9)
+export function DoneAsk({ taskId, stepId, est, title = "" }: { taskId: string; stepId: string; est: number; title?: string }) {
   const [ask, setAsk] = useState(false);
   const [picked, setPicked] = useState<number | null | undefined>(undefined);
+  const [result, setResult] = useState("");
   const [pending, start] = useTransition();
-  const finish = (min: number | null) => { setPicked(min); start(() => doneWithTime(taskId, stepId, min)); };
+  const decision = DECISION_TITLE_RE.test(title.trim());
+  const finish = (min: number | null) => { setPicked(min); start(() => doneWithTime(taskId, stepId, min, decision ? result : undefined)); };
   if (!ask) return <button type="button" className="btn primary" onClick={() => setAsk(true)}>Zrobione</button>;
   const base = roundQ(est), mins = [...new Set([roundQ(est / 2), base, roundQ(est * 2)])];
   const label = (m: number | null, txt: string) => (pending && picked === m ? "Zapisuję…" : txt);
   return (
     <div className="actions ask-time" role="group" aria-label="Ile to zajęło?">
+      {decision ? <GrowTextarea className="in" minRows={1} placeholder="Co wybrałeś? (agent zobaczy to w wyniku kroku)" value={result} onChange={(e) => setResult(e.target.value)} disabled={pending} aria-label="Co wybrałeś?" style={{ width: "100%" }} /> : null}
       <span className="lbl">Ile to zajęło?</span>
       {mins.map((m) => <button key={m} type="button" className={"btn" + (m === base ? " primary" : "")} disabled={pending} onClick={() => finish(m)}>{label(m, fmtMin(m))}</button>)}
       <button type="button" className="btn" disabled={pending} title="Zamknij krok bez zapisu czasu" onClick={() => finish(null)}>{label(null, "Pomiń")}</button>

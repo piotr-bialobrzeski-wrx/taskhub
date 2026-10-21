@@ -130,7 +130,14 @@ ${others.slice(0, 40).map(brief).join("\n") || "(brak)"}${notesText(c.tasks)}`;
 
 // get_task: kartka każdego niezrobionego kroku (bez szkiców, te idą w draftsText), żeby agent mógł ją poprawić po odpowiedzi Piotra.
 // Klocki w kolejności z kartki, numerowane jak w set_blocks; zmiany zapisuje się pełnym zestawem klocków.
-export function cardText(steps: Pick<Step, "id" | "title" | "status" | "blocks">[], max = 6000): string {
+// Za nimi, do wglądu, kartki zrobionych kroków, na których stoi dalsza praca: kroki Piotra (jego decyzja z odpowiedzią na pytanie,
+// tabela, którą wybierał) i kroki, od których zależy jakiś niezrobiony krok (paczka 9: agent nie widział tabeli poziomów z kroku Piotra).
+type CardStep = Pick<Step, "id" | "title" | "status" | "blocks"> & Partial<Pick<Step, "tool" | "dependsOn">>;
+export function doneCardsFor(steps: CardStep[]): CardStep[] {
+  const needed = new Set(steps.filter((s) => s.status !== "done").flatMap((s) => s.dependsOn ?? []));
+  return steps.filter((s) => s.status === "done" && !!s.blocks?.some((b) => b.type !== "draft") && ((s.tool ? isOwnerStep({ tool: s.tool }) : false) || needed.has(s.id)));
+}
+export function cardText(steps: CardStep[], max = 6000, doneMax = 3000): string {
   const one = (b: NonNullable<Step["blocks"]>[number], i: number): string => {
     const h = `[${i}] ${b.type}${"title" in b && b.title ? ` „${b.title}”` : ""}`;
     switch (b.type) {
@@ -150,10 +157,15 @@ export function cardText(steps: Pick<Step, "id" | "title" | "status" | "blocks">
     }
   };
   const out: string[] = [];
+  const body = (s: CardStep) => (s.blocks ?? []).map((b, i) => (b.type === "draft" ? `[${i}] draft (pełna treść w SZKIC KROKU)` : one(b, i))).join("\n");
   for (const s of steps) {
     if (s.status === "done" || !s.blocks?.length) continue;
-    const body = s.blocks.map((b, i) => (b.type === "draft" ? `[${i}] draft (pełna treść w SZKIC KROKU)` : one(b, i))).join("\n");
-    out.push(`KARTKA KROKU ${s.id} „${s.title}”:\n${body.length > max ? body.slice(0, max) + "…" : body}`);
+    const b = body(s);
+    out.push(`KARTKA KROKU ${s.id} „${s.title}”:\n${b.length > max ? b.slice(0, max) + "…" : b}`);
+  }
+  for (const s of doneCardsFor(steps)) {
+    const b = body(s);
+    out.push(`KARTKA ZROBIONEGO KROKU ${s.id} „${s.title}” (do wglądu: ODPOWIEDŹ PIOTRA to jego decyzja; nie poprawiaj przez set_blocks):\n${b.length > doneMax ? b.slice(0, doneMax) + "…" : b}`);
   }
   return out.join("\n");
 }

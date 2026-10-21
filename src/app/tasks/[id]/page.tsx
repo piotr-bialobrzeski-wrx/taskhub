@@ -269,7 +269,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
             {aiOn ? <form action={compose.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Składam…" title="Agent składa panel z faktów, migawek i załączników">Pokaż kontekst</PendingButton></form> : null}
             {!aiOn && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
           </>) : null}
-          {s.status === "todo" && kind === "offline" ? <DoneAsk taskId={t.id} stepId={s.id} est={estOf(s)} /> : null}
+          {s.status === "todo" && kind === "offline" ? <DoneAsk taskId={t.id} stepId={s.id} est={estOf(s)} title={s.title} /> : null}
           {s.status === "todo" && kind === "reading" ? <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Zapisuję…">Przeczytane</PendingButton></form> : null}
           {s.status === "todo" && kind === "decision" && !open.length ? <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Zapisuję…" title="Odpowiedzi już są; krok sprzed paczki 7 zamyka ten przycisk">Zrobione</PendingButton></form> : null}
           {s.status === "handoff" ? <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Krok wraca do zrobienia; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form> : null}

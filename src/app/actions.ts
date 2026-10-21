@@ -326,12 +326,14 @@ export async function addOwnTime(taskId: string, stepId: string, sec: number) {
   if (!(sec > 0 && sec <= 3600) || !isOwnerStep(step) || step.status === "done") return;
   await repo.addOwnSec(stepId, sec);
 }
-// „Zrobione” kroku Piotra poza aplikacją: minuty z pytania „Ile to zajęło?” (null = pominięte), potem krok się zamyka
-export async function doneWithTime(taskId: string, stepId: string, min: number | null) {
+// „Zrobione” kroku Piotra poza aplikacją: minuty z pytania „Ile to zajęło?” (null = pominięte), potem krok się zamyka;
+// result = co wybrał (krok-wybór bez pytania na kartce): idzie do wyniku kroku, a stamtąd do get_task („wynik:”)
+export async function doneWithTime(taskId: string, stepId: string, min: number | null, result?: string) {
   const o = await requireOwner();
   await stepOf(o.id, taskId, stepId);
   if (min != null && Number.isFinite(min) && min > 0 && min < 60 * 24) await repo.updateStep(stepId, { spentSec: Math.round(min * 60), spentManual: true });
-  await finishStep(o.id, taskId, stepId, { by: "owner" });
+  const out = typeof result === "string" ? result.trim().slice(0, 2000) : "";
+  await finishStep(o.id, taskId, stepId, { by: "owner", ...(out ? { output: out } : {}) });
   refresh(taskId);
 }
 

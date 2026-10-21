@@ -102,6 +102,18 @@ enum Policy {
                 h + "/.pgpass", h + "/.zsh_history", h + "/.bash_history"]
     }
 
+    // narzędzia w katalogu domowym, które polecenia muszą móc czytać także bez folderów z kodem (bieg w piaskownicy z denyRead na dom):
+    // Claude Code (ścieżki z listy ClaudeCLI, także po dowiązaniach), node z menedżerów wersji, npm, pnpm, bun, volta
+    static func toolDirs(bin: String = "") -> [String] {
+        let h = home
+        var out = [h + "/.local", h + "/.claude/local", h + "/.npm-global", h + "/.volta", h + "/.nvm", h + "/.npm", h + "/.bun", h + "/Library/pnpm", h + "/.cargo", h + "/go", h + "/.pyenv"]
+        for c in ClaudeCLI.candidates() + (bin.isEmpty ? [] : [bin]) {
+            let real = URL(fileURLWithPath: c).resolvingSymlinksInPath().deletingLastPathComponent().path
+            if real.hasPrefix(h + "/") && !out.contains(where: { real.hasPrefix($0) }) { out.append(real) }
+        }
+        return out
+    }
+
     // reguły Read(//ścieżka): podwójny ukośnik = ścieżka bezwzględna; Read blokuje też Edit i Write
     static func secretReadRules() -> [String] {
         secretDirs().map { "Read(/\($0)/**)" } + secretFiles().map { "Read(/\($0))" }
@@ -267,8 +279,10 @@ enum Policy {
     }
 
     // ---------- bieg „work” ----------
-    // files = foldery na pliki (kroki „Plik na Macu”): Claude tylko zapisuje tam nowe pliki; bez Read, bez Basha, bez --add-dir
-    static func work(runId: String, prompt: String, mcp: String, token: String, probe: Probe, folders: [String], files: [String] = [], model: String) throws -> RunPlan {
+    // files = foldery na pliki (kroki „Plik na Macu”): Claude tylko zapisuje tam nowe pliki; bez Read, bez Basha, bez --add-dir.
+    // Bez folderów z kodem (od 0.1.9) Bash też jest, ale w piaskownicy, która czyta i pisze tylko work/ i /tmp i nie ma sieci: krok, który
+    // tylko uruchamia polecenia albo sprawdza narzędzie, nie potrzebuje repozytorium; krok zmieniający repozytorium nadal czeka na folder
+    static func work(runId: String, prompt: String, mcp: String, token: String, probe: Probe, folders: [String], files: [String] = [], model: String, bin: String = "") throws -> RunPlan {
         let work = Store.workDir.path
         guard ruleSafe(work) else { throw PolicyError("Ścieżka katalogu roboczego ma znaki, których zasady nie obsłużą: \(work)") }
         let dirs = [work] + folders
@@ -282,12 +296,10 @@ enum Policy {
         for d in dirs { allow += ["Edit(/\(d)/**)", "Write(/\(d)/**)"] }
         for d in files { allow += ["Edit(/\(d)/**)", "Write(/\(d)/**)"] }
         allow += conn.read
-        if !folders.isEmpty { allow += bashAllow.map { "Bash(\($0):*)" } }
+        allow += bashAllow.map { "Bash(\($0):*)" }
         var deny = conn.write + bashDeny.map { "Bash(\($0):*)" } + secretReadRules()
-        if folders.isEmpty { deny.append("Bash") }   // bez folderów z kodem nie ma po co uruchamiać poleceń
         let canary = try pickCanary(probe.info, excluded: allow + deny)
-        let hasBash = !folders.isEmpty
-        let builtins: [String] = (hasBash ? ["Bash"] : []) + ["Read", "Edit", "Write", "Glob", "Grep", "TodoWrite", "ToolSearch", "WebSearch", "WebFetch", canary]
+        let builtins: [String] = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "TodoWrite", "ToolSearch", "WebSearch", "WebFetch", canary]
         // tryb zwykły (bez --tools): pozostałe wbudowane narzędzia z próby (Agent, NotebookEdit…) wprost zablokowane, bo reguły „allow”
         // z ~/.claude/settings.json Piotra też obowiązują; zablokowane w argumentach, więc init nie może ich pokazać
         let extra = probe.restricted ? [] : plainExtras(probe.info, keep: builtins, deny: deny)
@@ -296,18 +308,22 @@ enum Policy {
         let perms: [String: Any] = ["defaultMode": "dontAsk", "allow": allow, "deny": deny + [canary]]
         var locked: [String] = []
         for f in folders { locked += protectedInRepo.map { f + "/" + $0 } }
-        let fs: [String: Any] = ["allowWrite": dirs + ["/tmp", "~/.npm"], "denyRead": secretDirs() + secretFiles() + files, "denyWrite": locked]
-        let net: [String: Any] = ["allowedDomains": npmDomains, "allowLocalBinding": true]
-        // piaskownica Basha: zapis tylko w work/, folderach z kodem i tymczasowych; sieć tylko do rejestru npm.
+        // bez folderów z kodem polecenia widzą tylko work/ i /tmp (denyRead na katalog domowy, allowRead węższy wygrywa) i nie mają sieci;
+        // z folderami: czytanie jak dotąd (poza sekretami), sieć tylko do rejestru npm (zależności projektu)
+        let scratch = folders.isEmpty
+        var fs: [String: Any] = ["allowWrite": dirs + ["/tmp", "~/.npm"], "denyRead": (scratch ? [home] : []) + secretDirs() + secretFiles() + files, "denyWrite": locked]
+        if scratch { fs["allowRead"] = [work, "/tmp"] + toolDirs(bin: bin) }
+        let net: [String: Any] = ["allowedDomains": scratch ? [] : npmDomains, "allowLocalBinding": true]
+        // piaskownica Basha: zapis tylko w work/, folderach z kodem i tymczasowych; sieć tylko do rejestru npm (bez folderów: żadna).
         // Gdy piaskownica nie wstanie, Claude Code kończy bieg (zamiast puszczać polecenia bez niej).
-        let sandbox: [String: Any] = ["enabled": hasBash, "autoAllowBashIfSandboxed": hasBash, "allowUnsandboxedCommands": false,
-                                      "failIfUnavailable": hasBash, "filesystem": fs, "network": net]
+        let sandbox: [String: Any] = ["enabled": true, "autoAllowBashIfSandboxed": true, "allowUnsandboxedCommands": false,
+                                      "failIfUnavailable": true, "filesystem": fs, "network": net]
         let settings: [String: Any] = ["permissions": perms, "sandbox": sandbox, "hooks": hk, "disableAllHooks": false]
         let mcpF = try mcpFile(runId: runId, url: mcp, token: token)
         let setF: URL
         do { setF = try writeFile(settings, name: safeId(runId) + "-settings.json") } catch { remove([mcpF]); throw error }
         var p = prompt + (folders.isEmpty
-            ? "\n\nNa tym Macu nie ma folderów z kodem: kroki z kodem oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji."
+            ? "\n\nNa tym Macu nie ma folderów z kodem: polecenia biegną w katalogu roboczym \(work) (Bash widzi tylko jego i /tmp, bez sieci); krok z kodem, który potrzebuje repozytorium, oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery z kodem)."
             : "\n\nFoldery z kodem na tym Macu: " + folders.joined(separator: ", "))
         p += files.isEmpty
             ? "\n\nNa tym Macu nie ma folderów na pliki: kroki „Plik na Macu” (tool file) oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery na pliki)."
@@ -325,7 +341,7 @@ enum Policy {
         env["TASKHUB_ALLOWED_DIRS"] = (dirs + files).joined(separator: ":")
         env["TASKHUB_FILE_DIRS"] = files.joined(separator: ":")
         env["TASKHUB_ALLOWED_TOOLS"] = guardTools(allow, builtins: builtins, canary: canary)
-        return RunPlan(args: args, env: env, files: [mcpF, setF], canary: canary, mustLack: conn.write + (hasBash ? [] : ["Bash"]) + extra,
+        return RunPlan(args: args, env: env, files: [mcpF, setF], canary: canary, mustLack: conn.write + extra,
                        known: Set(probe.info.tools))
     }
 

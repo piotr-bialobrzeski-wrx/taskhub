@@ -34,7 +34,10 @@ Mostek pracuje także przy zamkniętym oknie (aplikacja zostaje w pasku menu). G
   Przed commitem porównuje zmiany każdego pliku z diffem, który zatwierdziłeś (inne = nic nie commituje), a push wysyła tylko
   commity, które sama zrobiła po Twojej zgodzie. „Zatrzymaj” na karcie szkicu w Task Hub przerywa trwającą wysyłkę przy najbliższym sygnale.
 - **Foldery z kodem** (Ustawienia → Foldery z kodem): tylko w nich Claude zmienia pliki i uruchamia testy w krokach z kodem.
-  Bez folderu krok z kodem wraca do Ciebie z prośbą o dodanie. Dodawaj główny folder repozytorium (ten z katalogiem `.git`), nie podfolder.
+  Bez folderu krok z kodem, który zmienia repozytorium, wraca do Ciebie z prośbą o dodanie.
+- **Polecenia bez repozytorium** (od 0.1.9): krok, który tylko uruchamia polecenie albo sprawdza narzędzie (np. `claude --help`), biegnie
+  także bez folderów z kodem: w katalogu `work/`, w piaskownicy, która czyta i zapisuje tylko `work/` i `/tmp` i nie ma sieci
+  (do 0.1.8 bieg bez folderów nie miał terminala w ogóle). Polecenie, które potrzebuje internetu, nadal wraca do Ciebie. Dodawaj główny folder repozytorium (ten z katalogiem `.git`), nie podfolder.
   Aplikacja nie przyjmie całego dysku, katalogu domowego, Biblioteki, ukrytych folderów w katalogu domowym ani folderów systemowych.
   W folderach z kodem piaskownica nie pozwala zapisywać `.git/hooks`, `.git/config`, `.git/info`, `.gitmodules`, `.claude`, `.mcp.json`,
   `.vscode` ani `.idea` (to, co mogłoby uruchomić program poza piaskownicą).

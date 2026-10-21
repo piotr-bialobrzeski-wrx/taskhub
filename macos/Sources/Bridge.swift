@@ -527,7 +527,7 @@ final class Bridge: ObservableObject {
         do {
             if kind == .work {
                 plan = try Policy.work(runId: id, prompt: prompt, mcp: mcp, token: token, probe: use, folders: Policy.codeFolders(store.cfg.codeFolders),
-                                       files: Policy.codeFolders(store.cfg.fileFolders, what: "folder na pliki"), model: model)
+                                       files: Policy.codeFolders(store.cfg.fileFolders, what: "folder na pliki"), model: model, bin: bin)
             } else {
                 plan = try Policy.send(runId: id, prompt: prompt, mcp: mcp, token: token, servers: servers, probe: use, model: model)
             }
