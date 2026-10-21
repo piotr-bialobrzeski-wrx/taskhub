@@ -19,7 +19,7 @@ import { securityReport } from "@/lib/security";
 import { isFilePath, isHttpUrl } from "@/lib/safeurl";
 import { AGENT_MAX_SEC, elapsedSec } from "@/lib/time";
 import { approvalValid, coerceAgentDrafts, draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable, type Draft } from "@/lib/agent/approval";
-import { guessProject } from "@/lib/project-guess";
+import { matchProjectName } from "@/lib/project-guess";
 
 // link kroku to adres elementu w zewnętrznej aplikacji (tylko http/https); adres samego Task Hub nie jest linkiem kroku
 const externalLink = (link: string | undefined | null) => (isHttpUrl(link) ? externalLinkOf(link, appUrl()) : undefined);
@@ -56,12 +56,13 @@ function buildHandler(auth: repo.TokenAuth) {
   const needsDraft = (s: Step) => audience !== "bridge-v1" && audience !== "send" && s.needsApproval && isExternalApp(s.tool) && !sends(s);
   // nazwa albo id połączenia z rejestru → id; pusty napis albo brak = null (agent wybiera sam)
   const connectionIdOf = async (ref: string | undefined): Promise<string | null> => (ref?.trim() ? (await repo.findConnection(ownerId, ref))?.id ?? null : null);
-  // projekt po nazwie z listy (także odmienionej, np. „Shiftwowa”); nieznana nazwa = błąd z listą, bez cichego tworzenia projektu (od tego jest create_project)
+  // projekt po nazwie z listy (także odmienionej, np. „Shiftwowa”, ale w całości: „Shiftwow Mobile” to nie Shiftwow); nieznana nazwa = błąd z listą,
+  // bez cichego tworzenia projektu (od tego jest create_project)
   const projectByName = async (name: string): Promise<string> => {
     const found = await repo.findProjectByName(ownerId, name);
     if (found) return found.id;
     const projects = await repo.listProjects(ownerId);
-    const g = guessProject(name, projects);
+    const g = matchProjectName(name, projects);
     if (g) return g.id;
     throw new Error(`Nie ma projektu „${name}”. Projekty: ${projects.map((p) => p.name).join(", ") || "(brak)"}. Podaj dokładną nazwę z list_projects albo utwórz projekt przez create_project.`);
   };

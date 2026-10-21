@@ -1,7 +1,7 @@
 // Paczka 8, punkt 1: projekt z treści zadania. Nazwa projektu w tytule, celu albo źródle (także odmieniona, także po „projekt …”)
 // daje projekt już przy przyjęciu zadania; agent dostaje zasadę w liście pracy; konektor nie tworzy projektów z nieznanych nazw.
 import { describe, it, expect, beforeAll, vi } from "vitest";
-import { guessProject, nameForms } from "@/lib/project-guess";
+import { guessProject, matchProjectName, nameForms } from "@/lib/project-guess";
 import { PROJECT_RULE } from "@/lib/agent/work";
 import { brief } from "@/lib/agent/context";
 import { project, task } from "./helpers";
@@ -13,8 +13,10 @@ const P = [
   project({ id: "sh", name: "Shiftwow" }), project({ id: "cc", name: "Custom Cookies" }), project({ id: "os", name: "PirxeyOS" }),
   project({ id: "call", name: "Call Companion (hackathon Pirxey)" }), project({ id: "pw", name: "Pirxey & Widelab" }),
   project({ id: "th", name: "Task Hub" }), project({ id: "sl", name: "Shattered Lands" }), project({ id: "vel", name: "Veloza" }), project({ id: "ab", name: "AB" }),
+  project({ id: "px", name: "Pirxey" }), project({ id: "sa", name: "Studio A" }),
 ];
 const g = (t: string) => guessProject(t, P)?.id ?? null;
+const m = (t: string) => matchProjectName(t, P)?.id ?? null;
 
 describe("projekt z treści (guessProject)", () => {
   it("wiadomość Piotra ze zrzutu: „z projektu Shiftwow” daje Shiftwow", () => {
@@ -38,6 +40,30 @@ describe("projekt z treści (guessProject)", () => {
     expect(g("Custom Cookies i Shiftwow: wspólny status")).toBe("cc");
     expect(g("Custom Cookies: ticket w projekcie Shiftwow")).toBe("sh");
     expect(g("Pirxey & Widelab: nowy cennik")).toBe("pw");
+  });
+  it("fraza „projekt …” wygrywa także wtedy, gdy inna nazwa albo ta sama stoi wcześniej bez frazy; cudzysłów po „projekt” nie przeszkadza", () => {
+    expect(g("Custom Cookies: przenieś ticket Shiftwow do projektu Shiftwow")).toBe("sh");
+    expect(g("Shiftwow i Custom Cookies: ticket w projekcie Custom Cookies")).toBe("cc");
+    expect(g("ticket w projekcie „Custom Cookies”")).toBe("cc");
+  });
+  it("temat nazwy: „y” zostaje (Pirxeya, Pirxeyem), samotna litera na końcu nie znika (Studio A to nie „studio ”), NFD pasuje", () => {
+    expect(g("oferta dla Pirxeya")).toBe("px");
+    expect(g("spotkanie z Pirxeyem")).toBe("px");
+    expect(g("Nagranie w studio\n(mail)")).toBeNull();
+    expect(g("Studio A: nagranie")).toBe("sa");
+    expect(g("zadanie w Task Hubie".normalize("NFD"))).toBe("th");
+  });
+  it("nazwa jako argument (matchProjectName) pasuje tylko w całości: odmiana i „projekt …” tak, nadzbiór nie", () => {
+    expect(m("Shiftwowa")).toBe("sh");
+    expect(m("projekt Shiftwow")).toBe("sh");
+    expect(m("Task Hubie")).toBe("th");
+    expect(m("„Shiftwow”")).toBe("sh");
+    expect(m("Call Companion")).toBe("call");
+    expect(m("Shiftwow Mobile")).toBeNull();
+    expect(m("Shiftwow 2")).toBeNull();
+    expect(m("nie Shiftwow")).toBeNull();
+    expect(m("Shift Wow")).toBeNull();
+    expect(m("")).toBeNull();
   });
   it("nazwa z nawiasem pasuje też bez nawiasu; spacje w nazwie to dowolne białe znaki", () => {
     expect(nameForms("Call Companion (hackathon Pirxey)")).toEqual(["Call Companion (hackathon Pirxey)", "Call Companion"]);
@@ -98,5 +124,28 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("projekt z treści w bazie i w k
     const nope = await call(client, "create_task", { title: "Nowy", project: "Nieznany" });
     expect(nope).toContain("Nie ma projektu „Nieznany”");
     expect((await repo.listTasks(owner)).some((t) => t.title === "Nowy")).toBe(false);
+    // nadzbiór znanej nazwy to też nieznany projekt, nie Shiftwow
+    const sup = await call(client, "create_task", { title: "Nowy 2", project: "Shiftwow Mobile" });
+    expect(sup).toContain("Nie ma projektu „Shiftwow Mobile”");
+    expect((await repo.listTasks(owner)).some((t) => t.title === "Nowy 2")).toBe(false);
+    expect(await call(client, "update_task", { taskId: id, project: "Shiftwow 2" })).toContain("Nie ma projektu „Shiftwow 2”");
+    expect((await repo.getTask(owner, id))!.projectId).toBeNull();
+  });
+  it("czat: update_task z nieznaną nazwą projektu nie zmienia projektu i mówi czemu; create_task z nieznaną nazwą idzie bez projektu", async () => {
+    const { applyActions } = await import("@/lib/agent/chat");
+    const t = await repo.createTask(owner, { title: "Retro", projectId: shift });
+    const tasks = await repo.listTasks(owner, { all: true });
+    const done = await applyActions({ reply: "ok", actions: [
+      { type: "update_task", id: t.id, title: "Retro zespołu", project: "Shiftwow Mobile" },
+      { type: "create_task", title: "Nowe z czatu", project: "Shift Wow" },
+    ] }, { ai: undefined as never, ownerId: owner, taskId: null, tasks });
+    const after = (await repo.getTask(owner, t.id))!;
+    expect(after.title).toBe("Retro zespołu");
+    expect(after.projectId).toBe(shift);
+    expect(done.find((d) => d.label.startsWith("Projekt bez zmian"))?.note).toContain("nie ma projektu „Shiftwow Mobile” (są: Shiftwow, Task Hub)");
+    const made = (await repo.listTasks(owner)).find((x) => x.title === "Nowe z czatu")!;
+    expect(made.projectId).toBeNull();
+    expect(done.find((d) => d.label.startsWith("Bez projektu"))?.note).toContain("bez projektu: nie ma projektu „Shift Wow”");
+    expect((await repo.listProjects(owner)).map((p) => p.name).sort()).toEqual(["Shiftwow", "Task Hub"]);
   });
 });

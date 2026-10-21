@@ -5,7 +5,7 @@ import * as repo from "../repo";
 import { contextText } from "./context";
 import { Fact, type Task } from "../schema";
 import { draftOf } from "./approval";
-import { guessProject } from "@/lib/project-guess";
+import { matchProjectName } from "@/lib/project-guess";
 
 const Krok = z.object({
   id: z.string().optional(),
@@ -93,13 +93,16 @@ Klocki panelu:
 ${blocks.join("\n")}` : ""}`;
 }
 
-async function projectIdFor(ownerId: string, name: string | null | undefined): Promise<string | null | undefined> {
-  if (name === undefined) return undefined;
-  if (!name) return null;
+// projekt z akcji agenta: nazwa z listy (także odmieniona, ale w całości); nieznana nazwa nie zmienia projektu i wraca jako „unknown” z listą,
+// żeby rozmowa powiedziała, czemu nie; nowych projektów agent nie tworzy
+async function projectIdFor(ownerId: string, name: string | null | undefined): Promise<{ id: string | null | undefined; unknown?: string }> {
+  if (name === undefined) return { id: undefined };
+  if (!name) return { id: null };
   const found = await repo.findProjectByName(ownerId, name);
-  if (found) return found.id;
-  // nieznana nazwa: dopasuj do listy (także odmienioną), a gdy nic nie pasuje, zostaw bez projektu; nowych projektów agent nie tworzy
-  return guessProject(name, await repo.listProjects(ownerId))?.id ?? null;
+  if (found) return { id: found.id };
+  const projects = await repo.listProjects(ownerId);
+  const g = matchProjectName(name, projects);
+  return g ? { id: g.id } : { id: undefined, unknown: `nie ma projektu „${name}” (są: ${projects.map((p) => p.name).join(", ") || "brak"}); projekt zmienisz w panelu zadania` };
 }
 
 export async function applyActions(r: ChatResult, deps: ChatDeps & { tasks: Task[] }): Promise<Done[]> {
@@ -107,22 +110,24 @@ export async function applyActions(r: ChatResult, deps: ChatDeps & { tasks: Task
   const cur = deps.taskId ? deps.tasks.find((t) => t.id === deps.taskId) ?? null : null;
   for (const a of r.actions) {
     if (a.type === "create_task") {
-      const projectId = await projectIdFor(deps.ownerId, a.project);
+      const proj = await projectIdFor(deps.ownerId, a.project);
       const t = await repo.createTask(deps.ownerId, {
-        title: a.title, summary: a.summary, level: a.level ?? 3, due: a.due ?? null, projectId: projectId ?? cur?.projectId ?? null,
+        title: a.title, summary: a.summary, level: a.level ?? 3, due: a.due ?? null, projectId: proj.id ?? cur?.projectId ?? null,
         steps: (a.steps ?? []).map((s) => ({ title: s.title, tool: s.tool, detail: s.detail, needsApproval: s.needsApproval, estMin: s.est, link: s.link, dependsOn: s.dependsOn })),
         dependsOn: cur && a.link === "after_current" ? [cur.id] : [],
       });
       if (cur && a.link === "before_current") await repo.setTaskDependencies(cur.id, [...cur.dependsOn, t.id]);
       done.push({ label: "Nowe zadanie: " + t.title, taskId: t.id });
+      if (proj.unknown) done.push({ label: "Bez projektu: " + t.title, taskId: deps.taskId ?? undefined, note: `Zadanie „${t.title}” jest ${t.projectId ? "w projekcie bieżącego zadania" : "bez projektu"}: ${proj.unknown}.` });
     } else if (a.type === "add_steps" && cur) {
       const steps = await repo.addSteps(cur.id, a.steps.map((s) => ({ title: s.title, tool: s.tool, detail: s.detail, needsApproval: s.needsApproval, estMin: s.est, link: s.link, dependsOn: s.dependsOn })));
       done.push({ label: `Dodano ${steps.length} krok(i)`, taskId: cur.id });
     } else if (a.type === "update_task") {
       const t = deps.tasks.find((x) => x.id === a.id); if (!t) continue;
-      const projectId = await projectIdFor(deps.ownerId, a.project);
-      await repo.updateTask(deps.ownerId, t.id, { title: a.title, summary: a.summary, level: a.level, due: a.due, projectId });
+      const proj = await projectIdFor(deps.ownerId, a.project);
+      await repo.updateTask(deps.ownerId, t.id, { title: a.title, summary: a.summary, level: a.level, due: a.due, projectId: proj.id });
       done.push({ label: "Zmieniono: " + (a.title ?? t.title), taskId: t.id });
+      if (proj.unknown) done.push({ label: "Projekt bez zmian: " + (a.title ?? t.title), taskId: deps.taskId ?? undefined, note: `Nie zmieniłem projektu zadania „${a.title ?? t.title}”: ${proj.unknown}.` });
     } else if (a.type === "update_step" && cur) {
       const s = cur.steps.find((x) => x.id === a.id); if (!s) continue;
       // poprawiony szkic trafia też do bloku draft, żeby karta publikacji pokazała nową treść
