@@ -29,7 +29,7 @@ export const taskState = (t: Task): string => {
 
 export function brief(s: Scored): string {
   const t = s.task, p = t.steps.filter((x) => x.status === "done").length;
-  return `- [${t.id}] ${t.title} | priorytet ${t.level}/5${s.score.eff !== t.level ? ` (efektywny ${s.score.eff}: ${whyText(s.score)})` : ""} | ${taskState(t)} | kroki ${p}/${t.steps.length} | Piotrowi zostało ~${fmtMin(remainEst(t))}${taskSpent(t) ? ` | czas Piotra ${fmtMin(taskSpent(t))}` : ""}${taskAgent(t) ? ` | czas Claude'a ${fmtMin(taskAgent(t))}` : ""}${t.due ? ` | termin ${t.due}` : ""}${s.project ? ` | projekt: ${s.project.name}` : ""}${t.summary ? " | " + t.summary.slice(0, 140) : ""}`;
+  return `- [${t.id}] ${t.title} | priorytet ${t.level}/5${s.score.eff !== t.level ? ` (efektywny ${s.score.eff}: ${whyText(s.score)})` : ""} | ${taskState(t)} | kroki ${p}/${t.steps.length} | Piotrowi zostało ~${fmtMin(remainEst(t))}${taskSpent(t) ? ` | czas Piotra ${fmtMin(taskSpent(t))}` : ""}${taskAgent(t) ? ` | czas Claude'a ${fmtMin(taskAgent(t))}` : ""}${t.due ? ` | termin ${t.due}` : ""}${s.project ? ` | projekt: ${s.project.name}` : " | bez projektu"}${t.summary ? " | " + t.summary.slice(0, 140) : ""}`;
 }
 
 // Zasady w prompcie w trzech sekcjach: PROFIL (dane o projekcie i narzędziach), ZASADY (zawsze) i PROCEDURY (pełna treść tylko tych, które

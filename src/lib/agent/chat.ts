@@ -5,6 +5,7 @@ import * as repo from "../repo";
 import { contextText } from "./context";
 import { Fact, type Task } from "../schema";
 import { draftOf } from "./approval";
+import { guessProject } from "@/lib/project-guess";
 
 const Krok = z.object({
   id: z.string().optional(),
@@ -96,7 +97,9 @@ async function projectIdFor(ownerId: string, name: string | null | undefined): P
   if (name === undefined) return undefined;
   if (!name) return null;
   const found = await repo.findProjectByName(ownerId, name);
-  return (found ?? (await repo.createProject(ownerId, name))).id;
+  if (found) return found.id;
+  // nieznana nazwa: dopasuj do listy (także odmienioną), a gdy nic nie pasuje, zostaw bez projektu; nowych projektów agent nie tworzy
+  return guessProject(name, await repo.listProjects(ownerId))?.id ?? null;
 }
 
 export async function applyActions(r: ChatResult, deps: ChatDeps & { tasks: Task[] }): Promise<Done[]> {

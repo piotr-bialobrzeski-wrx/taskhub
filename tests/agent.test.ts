@@ -116,6 +116,7 @@ describe.skipIf(!DB)("czat z agentem na bazie", async () => {
   afterAll(async () => { await sql().end({ timeout: 2 }); });
 
   it("wiadomość na kanwie tworzy zadanie z krokami i projektem; w zadaniu dodaje kroki i fakty", async () => {
+    await repo.createProject(owner, "Warsztaty");   // od paczki 8 agent nie zakłada projektów: nazwa musi być z listy (także odmieniona)
     const fake = new FakeProvider("anthropic", [{
       reply: "Założyłem zadanie.",
       actions: [{ type: "create_task", title: "Odpisać Ani o cateringu", level: 4, project: "Warsztaty", due: null, steps: [

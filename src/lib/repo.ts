@@ -8,6 +8,7 @@ import { isHttpUrl, sanitizeBlocks } from "./safeurl";
 import { approvalSig, approvalValid, isGitDraft, isSendable, shownSig, type Draft } from "./agent/approval";
 import { doneChat, stepKind } from "./stepcard";
 import { shortTitle } from "./auto";
+import { guessProject } from "./project-guess";
 export { approvalSig, approvalValid, draftOf, isSendable } from "./agent/approval";
 
 type Row = Record<string, unknown>;
@@ -276,8 +277,10 @@ export type NewStep = { title: string; detail?: string; tool?: string; needsAppr
 export type NewTask = { title: string; summary?: string; source?: string; level?: number; due?: string | null; projectId?: string | null; steps?: NewStep[]; dependsOn?: string[] };
 
 export async function createTask(ownerId: string, input: NewTask): Promise<Task> {
+  // projekt z treści: gdy nikt go nie podał, a tytuł, cel albo źródło wymienia nazwę projektu, zadanie dostaje go od razu (także bez agenta, gdy mostek stoi)
+  const projectId = input.projectId ?? guessProject([input.title, input.summary, input.source].filter(Boolean).join("\n"), await listProjects(ownerId))?.id ?? null;
   const [t] = await sql()`insert into tasks (owner_id, project_id, title, summary, source, level, due)
-    values (${ownerId}, ${input.projectId ?? null}, ${input.title.slice(0, 200)}, ${input.summary ?? ""}, ${input.source ?? ""}, ${input.level ?? 3}, ${input.due ?? null}) returning id`;
+    values (${ownerId}, ${projectId}, ${input.title.slice(0, 200)}, ${input.summary ?? ""}, ${input.source ?? ""}, ${input.level ?? 3}, ${input.due ?? null}) returning id`;
   const id = t.id as string;
   if (input.dependsOn?.length) await sql()`insert into task_dependencies ${sql()(input.dependsOn.map((d) => ({ task_id: id, depends_on_id: d })))} on conflict do nothing`;
   if (input.steps?.length) await addSteps(id, input.steps);

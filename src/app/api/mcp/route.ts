@@ -19,6 +19,7 @@ import { securityReport } from "@/lib/security";
 import { isFilePath, isHttpUrl } from "@/lib/safeurl";
 import { AGENT_MAX_SEC, elapsedSec } from "@/lib/time";
 import { approvalValid, coerceAgentDrafts, draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable, type Draft } from "@/lib/agent/approval";
+import { guessProject } from "@/lib/project-guess";
 
 // link kroku to adres elementu w zewnętrznej aplikacji (tylko http/https); adres samego Task Hub nie jest linkiem kroku
 const externalLink = (link: string | undefined | null) => (isHttpUrl(link) ? externalLinkOf(link, appUrl()) : undefined);
@@ -55,6 +56,15 @@ function buildHandler(auth: repo.TokenAuth) {
   const needsDraft = (s: Step) => audience !== "bridge-v1" && audience !== "send" && s.needsApproval && isExternalApp(s.tool) && !sends(s);
   // nazwa albo id połączenia z rejestru → id; pusty napis albo brak = null (agent wybiera sam)
   const connectionIdOf = async (ref: string | undefined): Promise<string | null> => (ref?.trim() ? (await repo.findConnection(ownerId, ref))?.id ?? null : null);
+  // projekt po nazwie z listy (także odmienionej, np. „Shiftwowa”); nieznana nazwa = błąd z listą, bez cichego tworzenia projektu (od tego jest create_project)
+  const projectByName = async (name: string): Promise<string> => {
+    const found = await repo.findProjectByName(ownerId, name);
+    if (found) return found.id;
+    const projects = await repo.listProjects(ownerId);
+    const g = guessProject(name, projects);
+    if (g) return g.id;
+    throw new Error(`Nie ma projektu „${name}”. Projekty: ${projects.map((p) => p.name).join(", ") || "(brak)"}. Podaj dokładną nazwę z list_projects albo utwórz projekt przez create_project.`);
+  };
   // szkic, którego nic nie wyśle (plik na Macu to nie wysyłka): odmowa z instrukcją dla tego, kto pyta; nil = szkic może się zapisać
   const agentBlocker = async (nd: Draft | null, was: Step, blocks: Block[], taskId: string): Promise<string | null> => {
     if (!nd || nd.status !== "proposed" || nd.stale || was.status === "done") return null;
@@ -175,25 +185,23 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("create_task", {
-      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. title: 2–6 słów, samo sedno (nie cała wiadomość); title kroku od czasownika, 2–6 słów, bez identyfikatorów. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, whatsapp, sheets, docs, file (Plik na Macu: zapis pliku na Macu Piotra, bez zgody, robi go tylko mostek), est: ile minut zajmie Piotrowi (wielokrotność 5), tylko dla kroków manual; czas kroków Claude'a mierzy się sam, needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
+      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. title: 2–6 słów, samo sedno (nie cała wiadomość); title kroku od czasownika, 2–6 słów, bez identyfikatorów. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). project: dokładna nazwa istniejącego projektu z list_projects (nowy tylko przez create_project); bez project projekt bierze się z treści, gdy ją wymienia. Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, whatsapp, sheets, docs, file (Plik na Macu: zapis pliku na Macu Piotra, bez zgody, robi go tylko mostek), est: ile minut zajmie Piotrowi (wielokrotność 5), tylko dla kroków manual; czas kroków Claude'a mierzy się sam, needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
       inputSchema: z.object({
         title: z.string(), summary: z.string().optional(), source: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().optional(), project: z.string().optional(),
         steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })).optional(),
       }),
     }, async (a) => {
-      let projectId: string | null = null;
-      if (a.project) projectId = ((await repo.findProjectByName(ownerId, a.project)) ?? (await repo.createProject(ownerId, a.project))).id;
+      const projectId = a.project ? await projectByName(a.project) : null;   // bez project: projekt z treści, gdy ją wymienia (repo.createTask)
       const t = await repo.createTask(ownerId, { title: a.title, summary: a.summary, source: a.source, level: a.level, due: a.due ?? null, projectId, steps: await Promise.all((a.steps ?? []).map(async (s) => ({ ...s, link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection) }))) });
       return json({ taskId: t.id, steps: t.steps.map((s) => ({ id: s.id, title: s.title })) });
     });
 
     server.registerTool("update_task", {
-      title: "Zmień zadanie", description: "Zmienia tytuł, cel, priorytet, termin albo projekt zadania. Tytuł: 2–6 słów, samo sedno; pierwotny tytuł zostaje zapisany sam.",
+      title: "Zmień zadanie", description: "Zmienia tytuł, cel, priorytet, termin albo projekt zadania. Tytuł: 2–6 słów, samo sedno; pierwotny tytuł zostaje zapisany sam. project: dokładna nazwa istniejącego projektu z list_projects (null = bez projektu); nowy projekt tylko przez create_project.",
       inputSchema: z.object({ taskId: z.string(), title: z.string().optional(), summary: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().nullable().optional(), project: z.string().nullable().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
-      let projectId: string | null | undefined;
-      if (a.project !== undefined) projectId = a.project ? ((await repo.findProjectByName(ownerId, a.project)) ?? (await repo.createProject(ownerId, a.project))).id : null;
+      const projectId = a.project === undefined ? undefined : a.project ? await projectByName(a.project) : null;
       // agent poprawił tytuł: pierwotne brzmienie zostaje w zadaniu („Jak wpadło”), Piotr widzi, że to przeredagowane
       const renamed = !!a.title?.trim() && a.title.trim() !== t.title;
       await repo.updateTask(ownerId, a.taskId, { title: a.title, summary: a.summary, level: a.level, due: a.due, projectId, ...(renamed && !t.titleOriginal ? { titleOriginal: t.title } : {}) });
