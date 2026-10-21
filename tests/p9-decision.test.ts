@@ -59,19 +59,23 @@ describe("kartki zrobionych kroków w get_task", () => {
     expect(t).toContain("KARTKA ZROBIONEGO KROKU h „Analiza” (Twój zrobiony krok");
     expect(t).not.toContain("WYNIK (Co wybrałeś?): gotowe");
   });
-  it("długa kartka zrobionego kroku jest ucięta krócej niż otwarta, z oznaczeniem; łączny limit pomija dalsze kartki", () => {
-    const mk = (id: string, status: "todo" | "done") => step({ id, title: "Wybierz " + id, tool: "manual", status, blocks: [{ type: "free", markdown: "x".repeat(5000) } as Block] });
-    expect(cardText([mk("a", "todo")]).length).toBeGreaterThan(5000);
-    const d = cardText([mk("a", "done")]);
-    expect(d.length).toBeLessThan(3300);
-    expect(d).toContain("[ucięto po 3000 znakach; całość ma 5010]");
-    expect(cardText([mk("a", "done")], 6000, 100).length).toBeLessThan(350);   // doneMax tnie tylko zrobione
-    const many = cardText([mk("a", "done"), mk("b", "done"), mk("c", "done"), mk("d", "done")]);
+  it("zrobiona kartka Claude'a ucięta do 3000 z oznaczeniem, decyzja Piotra do 6000 (odpowiedź jest na końcu); łączny limit pomija dalsze", () => {
+    const big = (n: number): Block => ({ type: "free", markdown: "x".repeat(n) } as Block);
+    const open = step({ id: "o", title: "Zapisz", tool: "claude", status: "todo", dependsOn: ["h"], blocks: [free] });
+    const his = step({ id: "h", title: "Analiza", tool: "claude", status: "done", blocks: [big(5000)] });
+    const mine = step({ id: "m", title: "Wybierz wariant", tool: "manual", status: "done", blocks: [big(5000), q("B")] });
+    const t = cardText([open, his, mine]);
+    expect(t).toContain("[ucięto po 3000 znakach; całość ma 5010]");
+    expect(t).toContain("ODPOWIEDŹ PIOTRA: B");   // 5000 + pytanie mieści się w 6000
+    expect(cardText([open, his], 6000, 100).length).toBeLessThan(400);   // doneMax tnie tylko zrobione kroki Claude'a
+    const huge = step({ id: "g", title: "Wybierz g", tool: "manual", status: "done", blocks: [big(7000)] });
+    expect(cardText([huge])).toContain("[ucięto po 6000 znakach; całość ma 7010]");
+    const mk = (id: string) => step({ id, title: "Wybierz " + id, tool: "manual", status: "done", blocks: [big(5000)] });
+    const many = cardText([mk("a"), mk("b"), mk("c")]);
     expect(many).toContain("KARTKA ZROBIONEGO KROKU a");
     expect(many).toContain("KARTKA ZROBIONEGO KROKU b");
-    expect(many).not.toContain("KARTKA ZROBIONEGO KROKU c");   // 2 × (3000 + oznaczenie) mieści się w 9000, trzecia już nie
-    expect(many).not.toContain("KARTKA ZROBIONEGO KROKU d");
-    expect(many).toContain("(pominięto 2 kartek zrobionych kroków: limit 9000 znaków)");
+    expect(many).not.toContain("KARTKA ZROBIONEGO KROKU c");   // 2 × ~5200 mieści się w 12000, trzecia już nie
+    expect(many).toContain("(pominięto 1 kartek zrobionych kroków: limit 12000 znaków)");
   });
 });
 

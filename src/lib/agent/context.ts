@@ -137,7 +137,8 @@ ${others.slice(0, 40).map(brief).join("\n") || "(brak)"}${notesText(c.tasks)}`;
 // Klocki w kolejności z kartki, numerowane jak w set_blocks; zmiany zapisuje się pełnym zestawem klocków.
 // Za nimi, do wglądu, kartki zrobionych kroków, na których stoi dalsza praca: decyzje Piotra (krok „Wybierz…” albo odpowiedziane pytanie;
 // nie elementy listy ani „Przeczytaj …”) i kroki, od których zależy jakiś niezrobiony krok (paczka 9: agent nie widział tabeli poziomów
-// z kroku Piotra). Najpierw te, na których stoi otwarty krok; łącznie do doneTotal znaków, reszta policzona w jednej linii.
+// z kroku Piotra). Najpierw te, na których stoi otwarty krok; decyzja Piotra do max znaków (jego odpowiedź stoi na końcu kartki, więc
+// krótszy limit ucinał właśnie ją), inne zrobione do doneMax; łącznie do doneTotal znaków, reszta policzona w jednej linii.
 type CardStep = Pick<Step, "id" | "title" | "status" | "blocks"> & Partial<Pick<Step, "tool" | "dependsOn" | "output">>;
 const ownerCard = (s: CardStep): boolean => (s.tool ? isOwnerStep({ tool: s.tool }) : false);
 const decided = (s: CardStep): boolean => DECISION_TITLE_RE.test(s.title.trim()) || !!s.blocks?.some((b) => b.type === "question" && !!b.answer);
@@ -146,7 +147,7 @@ export function doneCardsFor(steps: CardStep[]): CardStep[] {
   const done = steps.filter((s) => s.status === "done" && !!s.blocks?.some((b) => b.type !== "draft") && (needed.has(s.id) || (ownerCard(s) && decided(s))));
   return [...done.filter((s) => needed.has(s.id)), ...done.filter((s) => !needed.has(s.id))];
 }
-export function cardText(steps: CardStep[], max = 6000, doneMax = 3000, doneTotal = 9000): string {
+export function cardText(steps: CardStep[], max = 6000, doneMax = 3000, doneTotal = 12000): string {
   const one = (b: NonNullable<Step["blocks"]>[number], i: number): string => {
     const h = `[${i}] ${b.type}${"title" in b && b.title ? ` „${b.title}”` : ""}`;
     switch (b.type) {
@@ -175,7 +176,8 @@ export function cardText(steps: CardStep[], max = 6000, doneMax = 3000, doneTota
   let used = 0, skipped = 0;
   for (const s of doneCardsFor(steps)) {
     const b = body(s) + (ownerCard(s) && s.output ? `\nWYNIK (Co wybrałeś?): ${s.output}` : "");
-    const cut = b.length > doneMax ? b.slice(0, doneMax) + `… [ucięto po ${doneMax} znakach; całość ma ${b.length}]` : b;
+    const cap = ownerCard(s) ? max : doneMax;
+    const cut = b.length > cap ? b.slice(0, cap) + `… [ucięto po ${cap} znakach; całość ma ${b.length}]` : b;
     if (used + cut.length > doneTotal) { skipped++; continue; }
     used += cut.length;
     const who = ownerCard(s)
