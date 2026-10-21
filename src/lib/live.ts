@@ -8,7 +8,7 @@ export type Activity = { text: string; detail: string | null };
 // narzędzia konektora Task Hub: zdanie po polsku, od czasownika
 const MCP: Record<string, string> = {
   list_work: "sprawdza, co czeka", get_task: "czyta zadanie", get_rules: "czyta zasady pracy", list_rules: "czyta zasady pracy", add_steps: "rozpisuje kroki",
-  start_step: "zaczyna krok", complete_step: "zamyka krok", leave_step: "oddaje krok", skip_step: "zamyka zbędny krok", set_blocks: "układa kartkę kroku", add_facts: "zapisuje fakty",
+  start_step: "zaczyna krok", complete_step: "zamyka krok", leave_step: "oddaje krok", skip_step: "zamyka zbędny krok", reopen_step: "otwiera krok ponownie", set_blocks: "układa kartkę kroku", add_facts: "zapisuje fakty",
   add_snapshot: "zapisuje migawkę", ask_question: "zadaje Ci pytanie", reply_chat: "odpowiada w rozmowie", update_task: "poprawia zadanie", update_step: "poprawia krok",
   create_task: "zakłada zadanie", get_attachment: "ogląda załącznik", describe_attachment: "opisuje załącznik", list_connections: "sprawdza połączenia",
   list_tasks: "przegląda zadania", list_projects: "przegląda projekty", list_companies: "przegląda firmy", create_project: "zakłada projekt", add_rule: "zapisuje zasadę", update_rule: "poprawia zasadę",

@@ -23,7 +23,7 @@ import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estTe
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed, workBubble } from "@/lib/feed";
-import { decisionText, destOf, foldsFor, kindsOf, nowHeading, openQuestions, reportLines, resultLinks, splitBlocks, stepKind, targetLink, whoDid, type CardState } from "@/lib/stepcard";
+import { decisionText, destOf, foldsFor, kindsOf, nowHeading, openQuestions, readingResult, reportLines, resultLinks, splitBlocks, stepKind, targetLink, whoDid, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -223,7 +223,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const { result, material: material0 } = splitBlocks(blocks);
   const material = open.length ? material0.filter((b) => !(open as Block[]).includes(b)) : material0;   // otwarte pytania decyzji stoją w „Teraz”, nie między materiałami
   const form = s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined;
-  const folds = foldsFor(state as CardState, mode);
+  const folds = foldsFor(state as CardState, mode, readingResult(s, material));
   const head = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined);
   const draft = s.blocks?.find((b) => b.type === "draft") as { body?: string } | undefined;
   // raport bez powtórki streszczenia bloku zmian ani treści szkicu; „Do potwierdzenia: …” jako osobna linia

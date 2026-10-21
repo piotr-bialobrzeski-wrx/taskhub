@@ -21,10 +21,19 @@ export function splitBlocks(blocks: Block[]): { result: Changes[]; material: Blo
 }
 export const kindsOf = (blocks: Block[]) => [...new Set(blocks.map((b) => KIND_LABEL[b.type] ?? b.type))].join(", ");
 
-// co jest rozwinięte: brief („Co”) i materiały („Skąd”) zwijają się po zrobieniu; przy szkicu brief ustępuje karcie publikacji
-export function foldsFor(state: CardState, mode: string | null): { brief: boolean; material: boolean } {
+// co jest rozwinięte: brief („Co”) i materiały („Skąd”) zwijają się po zrobieniu; przy szkicu brief ustępuje karcie publikacji;
+// zrobiony odczyt Claude'a (reading) trzyma materiały rozwinięte, bo one są jego wynikiem (treść ticketu, wątku), nie tłem
+export function foldsFor(state: CardState, mode: string | null, reading = false): { brief: boolean; material: boolean } {
   const done = state === "done";
-  return { brief: !done && !mode, material: !done };
+  return { brief: !done && !mode, material: !done || reading };
+}
+// zrobiony odczyt: krok zamknięty przez Claude'a bez szkicu i bez zmian w kodzie, którego kartka niesie treść (paczka 9, punkt 1:
+// do tej pory treść ticketu leżała pod zwiniętą linią „Skąd” i Piotr widział tylko link)
+const CONTENT_KINDS = new Set(["free", "facts", "thread", "table", "list", "mail", "comment", "text", "media"]);
+export function readingResult(s: Pick<Step, "status" | "tool" | "doneBy" | "blocks">, material: Block[]): boolean {
+  if (s.status !== "done" || doneByOf(s) !== "agent") return false;
+  if (s.blocks?.some((b) => b.type === "draft" || b.type === "changes")) return false;
+  return material.some((b) => CONTENT_KINDS.has(b.type));
 }
 
 const norm = (x: string) => x.replace(/\s+/g, " ").trim();

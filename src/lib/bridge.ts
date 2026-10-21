@@ -7,7 +7,7 @@ import * as repo from "./repo";
 import { appUrl } from "./session";
 import { appName, isGoogleApp, normalizeTool, TOOL_KEYS, toolLabel, type Block, type Connection } from "./schema";
 import { appKey, isGitDraft, type Draft } from "./agent/approval";
-import { DECISION_MSG, DEST_RULE, DONE_RULE, EST_RULE, PROJECT_RULE } from "./agent/work";
+import { DECISION_MSG, DEST_RULE, DONE_RULE, EST_RULE, ITEMS_RULE, PROJECT_RULE } from "./agent/work";
 export { appKey, isGitDraft };
 
 export const BRIDGE_ALIVE_MS = 120_000;   // puls starszy niż 2 min = mostek nieaktywny (odpytuje co 15–60 s)
@@ -56,7 +56,7 @@ const FILE_RULE_V2 = "Wynik, który ma zostać plikiem na Macu Piotra, to krok z
 const B_NOSTEPS_V2 = B_NOSTEPS_V1
   .replace("nic nie zostaje „do decyzji”; rozbieżność między treścią a załącznikiem to ask_question z listą, nie krok „Zdecyduj”", "rozbieżność między treścią a załącznikiem, bez której nie da się rozpisać, to ask_question z listą; wybór, który należy do Piotra (co scalić, którą wersję wziąć), to krok „Zdecyduj …” z tool manual: fakty i opcje kładziesz na jego kartce (set_blocks: facts i question z opcjami i zaleceniem), a jego odpowiedź sama zamknie ten krok")
   .replace("est w minutach jako wielokrotność 5", EST_RULE)
-  .replace("dependsOn jako n1, n2).", "dependsOn jako n1, n2). " + PROJECT_RULE + " " + DEST_RULE + " " + FILE_RULE_V2 + " " + DONE_RULE);
+  .replace("dependsOn jako n1, n2).", "dependsOn jako n1, n2). " + PROJECT_RULE + " " + ITEMS_RULE + " " + DEST_RULE + " " + FILE_RULE_V2 + " " + DONE_RULE);
 // v2: odpowiedź Piotra na kartce jego kroku-decyzji nie jest prośbą o poprawkę kartki: krok już się zamknął, decyzję stosuje się w krokach po nim
 const B_MSGS_V2 = B_MSGS.replace("gdy nic nie zmienia, reply_chat jednym zdaniem, czemu.", "gdy nic nie zmienia, reply_chat jednym zdaniem, czemu. " + DECISION_MSG);
 const B_READY_V1 = `   - KROKI DO ZROBIENIA BEZ ZGODY (analiza, research, czytanie maili, wątków, ticketów, kalendarza, przygotowanie materiałów): start_step → zrób pracę swoimi konektorami → add_facts (istotne informacje z pochodzeniem) → complete_step z podsumowaniem i linkiem.`;

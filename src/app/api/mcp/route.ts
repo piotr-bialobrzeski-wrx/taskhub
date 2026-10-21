@@ -210,7 +210,7 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("add_steps", {
-      title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. before: id kroku, przed którym nowe kroki mają wejść (np. krok publikacji, wysyłki, commitu): dziedziczą jego zależności, on zaczyna zależeć od nich, a jego szkic (gdy czekał na zgodę) staje się nieaktualny i krok wraca do zrobienia. Bez before kroki idą na koniec. Termin zadania ustaw osobno przez update_task(due). done: dla pracy, którą już zrobiłeś przy rozpisaniu (przeczytane aplikacje, zebrane dane, raport, analiza): 1–2 zdania wyniku; krok wchodzi od razu jako zrobiony przez Claude (tool = aplikacja, z której czytałeś, albo claude; nie manual, nie file, bez needsApproval), a pełny wynik połóż potem na jego kartce przez set_blocks. Nie twórz Piotrowi kroków „Przeczytaj …”: to, co ma wiedzieć do decyzji, leży na kartce kroku „Zdecyduj …”.",
+      title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. before: id kroku, przed którym nowe kroki mają wejść (np. krok publikacji, wysyłki, commitu): dziedziczą jego zależności, on zaczyna zależeć od nich, a jego szkic (gdy czekał na zgodę) staje się nieaktualny i krok wraca do zrobienia. Bez before kroki idą na koniec. Termin zadania ustaw osobno przez update_task(due). done: dla pracy, którą już zrobiłeś przy rozpisaniu (przeczytane aplikacje, zebrane dane, raport, analiza): 1–2 zdania wyniku; krok wchodzi od razu jako zrobiony przez Claude (tool = aplikacja, z której czytałeś, albo claude; nie manual, nie file, bez needsApproval), a pełny wynik połóż potem na jego kartce przez set_blocks. Elementy listy, o którą prosi Piotr (każdy ticket, wątek albo mail jako osobny krok), to jego otwarte kroki (tool manual, tytuł elementu, treść 1:1 na kartce), nie done. Nie twórz Piotrowi kroków „Przeczytaj …”: to, co ma wiedzieć do decyzji, leży na kartce kroku „Zdecyduj …”.",
       inputSchema: z.object({ taskId: z.string(), steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional(), done: z.string().min(3).max(4000).optional() })), before: z.string().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
@@ -395,6 +395,23 @@ function buildHandler(auth: repo.TokenAuth) {
       await mark(st.id, "zamknął jako zbędny");
       await markRun();
       return text(r.closed ? "Krok zamknięty jako zbędny, zadanie ukończone." : "Krok zamknięty jako zbędny.");
+    });
+
+    server.registerTool("reopen_step", {
+      title: "Otwieram krok ponownie", description: "Przywraca zrobiony albo zamknięty krok do zrobienia (to samo, co „Przywróć do zrobienia” w Task Hub), np. gdy krok wszedł jako zrobiony odczyt, a miał być krokiem Piotra. tool, title, est: od razu nowe narzędzie (manual = krok Piotra), tytuł i szacunek. Nie dla kroku, którego szkic już został wysłany: wtedy add_steps.",
+      inputSchema: z.object({ stepId: z.string(), tool: z.string().optional(), title: z.string().optional(), est: z.number().int().optional() }),
+    }, async (a) => {
+      const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
+      const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
+      if (st.status !== "done") return text("Ten krok nie jest zrobiony.");
+      if (st.sendStartedAt || draftOf(st)?.status === "sent") return text("Nie otworzyłem: szkic tego kroku już poszedł i wysłanego nie da się cofnąć. Dodaj nowy krok przez add_steps.");
+      await repo.reopenStep(ownerId, taskId, st);
+      if (a.tool !== undefined || a.title?.trim() || a.est !== undefined) {
+        await repo.updateStep(st.id, { ...(a.tool !== undefined ? { tool: a.tool } : {}), ...(a.title?.trim() ? { title: a.title.trim() } : {}), ...(a.est !== undefined ? { estMin: a.est } : {}) });
+      }
+      await mark(st.id, "otworzył krok ponownie");
+      await markRun();
+      return text("Krok wrócił do zrobienia.");
     });
 
     server.registerTool("leave_step", {
