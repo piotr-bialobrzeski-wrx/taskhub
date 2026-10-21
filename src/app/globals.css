@@ -767,9 +767,12 @@ details.fold[open] > summary { margin-bottom: var(--s-3); }
 details.fold[open] > summary .t { display: none; }
 details.fold[open] > summary svg { transform: rotate(180deg); }
 
-/* ---------- kartka porównania (paczka 10): karta źródła tylko do odczytu ---------- */
+/* ---------- kartka porównania (paczka 10): karta źródła tylko do odczytu, porównanie obok siebie ---------- */
 .srcdoc .src-meta { font-size: 12.5px; color: var(--sub); }                 /* status, lista, osoba, daty w jednej linii, nad treścią */
 .srcdoc .msg.doc { padding: var(--s-4) var(--s-5); }                        /* treść na białym polu (.msg daje var(--surface) i r-sm), bez paska formatowania */
+/* 2+ kolejne klocki źródłowe obok siebie: kolumny min 340 px, więc w wąskim panelu (treść 560 px) same układają się jedna pod drugą, w szerokim obok siebie; bez container query */
+.cmp { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: var(--s-4); align-items: start; min-width: 0; }
+.cmp > * { min-width: 0; }
 
 /* ---------- menu kafelka na prawy klik (paczka 2, punkt 2) ---------- */
 .ppmenu.tmenu { min-width: 180px; }

@@ -8,6 +8,7 @@ import { Icon, plural } from "@/components/canvas/ui";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { CopyButton } from "@/components/CopyButton";
 import { isHttpUrl, isLocalPath, isMediaUrl, safeHref } from "@/lib/safeurl";
+import { groupBlocks } from "@/lib/stepcard";
 
 // gdzie blok pytania ma zapisać odpowiedź (panel kroku); bez tego pytanie jest tylko do odczytu
 export type BlockForm = { taskId: string; stepId: string };
@@ -221,7 +222,11 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
   }
 }
 
-// indexOf: pozycja klocka na całej kartce (formularz pytania zapisuje odpowiedź pod tym indeksem), gdy blocks to tylko jej część
+// indexOf: pozycja klocka na całej kartce (formularz pytania zapisuje odpowiedź pod tym indeksem), gdy blocks to tylko jej część.
+// 2+ kolejne klocki źródłowe z adresem (dwa tickety, wątki, maile) stoją obok siebie w siatce .cmp (paczka 10, punkt 1); klucz i indeks
+// to pozycja klocka w blocks, ta sama co bez grupowania
 export function BlocksView({ blocks, form, indexOf }: { blocks: Block[]; form?: BlockForm; indexOf?: (b: Block) => number }) {
-  return <div className="stack">{blocks.map((b, i) => <BlockView key={i} b={b} form={form} index={indexOf ? indexOf(b) : i} />)}</div>;
+  let i = 0;
+  const view = (b: Block) => { const k = i++; return <BlockView key={k} b={b} form={form} index={indexOf ? indexOf(b) : k} />; };
+  return <div className="stack">{groupBlocks(blocks).map((g) => { if (!Array.isArray(g)) return view(g); const k = "cmp" + i; return <div key={k} className="cmp">{g.map(view)}</div>; })}</div>;
 }

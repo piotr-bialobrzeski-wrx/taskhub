@@ -23,7 +23,7 @@ import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estTe
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed, workBubble } from "@/lib/feed";
-import { decisionText, destOf, foldsFor, kindsOf, nowHeading, openQuestions, readingResult, reportLines, resultLinks, splitBlocks, stepKind, targetLink, whoDid, type CardState } from "@/lib/stepcard";
+import { decisionText, destOf, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, readingResult, reportLines, resultLinks, splitBlocks, stepKind, targetLink, whoDid, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -224,6 +224,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const material = open.length ? material0.filter((b) => !(open as Block[]).includes(b)) : material0;   // otwarte pytania decyzji stoją w „Teraz”, nie między materiałami
   const form = s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined;
   const folds = foldsFor(state as CardState, mode, readingResult(s, material));
+  const cmp = hasComparison(material);   // kartka porównania (paczka 10, punkt 1): porównywane elementy u góry na całą szerokość, pod nimi karta publikacji
   const head = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined);
   const draft = s.blocks?.find((b) => b.type === "draft") as { body?: string } | undefined;
   // raport bez powtórki streszczenia bloku zmian ani treści szkicu; „Do potwierdzenia: …” jako osobna linia
@@ -307,7 +308,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   return (
     <>
       <div className="pctx" title={`Zadanie: ${t.title}`}><span className="d" style={{ ["--c" as string]: ctx.color }} /><span><b>{t.title}</b> · {ctx.text}</span></div>
-      {mode && skad && folds.material ? <><div className="zones two">{now}{skad}</div>{co}</> : <>{now}{co}{skad}</>}
+      {mode && skad && folds.material ? (cmp ? <>{skad}{now}{co}</> : <><div className="zones two">{now}{skad}</div>{co}</>) : <>{now}{co}{skad}</>}
       <details className="edit tech">
         <summary><span className="k">Szczegóły techniczne</span> · {tech}</summary>
         <div className="stack">

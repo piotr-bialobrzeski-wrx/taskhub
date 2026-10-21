@@ -1,12 +1,14 @@
-// Paczka 10, punkt 2: karta źródła tylko do odczytu. Klocek free z adresem http(s) renderuje się jak karta szkicu (nagłówek z aplikacją,
-// „tylko do odczytu”, przycisk otwarcia, tytuł, linia meta, treść na białym polu bez paska formatowania); każdy klocek źródłowy
-// ma jeden kształt przycisku otwarcia; agent widzi meta i źródło w get_task i w czacie, a bez nich tekst nie zmienia się ani o bajt.
+// Paczka 10, kartka porównania. Punkt 2: karta źródła tylko do odczytu. Klocek free z adresem http(s) renderuje się jak karta szkicu
+// (nagłówek z aplikacją, „tylko do odczytu”, przycisk otwarcia, tytuł, linia meta, treść na białym polu bez paska formatowania); każdy klocek
+// źródłowy ma jeden kształt przycisku otwarcia; agent widzi meta i źródło w get_task i w czacie, a bez nich tekst nie zmienia się ani o bajt.
+// Punkt 1: 2+ kolejne klocki źródłowe z adresem stoją obok siebie w siatce .cmp; pytanie, notatka albo klocek bez adresu przerywa ciąg.
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Blocks, type Block } from "@/lib/schema";
 import { cardText } from "@/lib/agent/context";
 import { stepContextText } from "@/lib/agent/chat";
-import { BlockView } from "@/components/BlockRenderer";
+import { groupBlocks, hasComparison, isSourceBlock } from "@/lib/stepcard";
+import { BlocksView, BlockView } from "@/components/BlockRenderer";
 import { step } from "./helpers";
 
 const URL = "https://app.clickup.com/t/869x";
@@ -99,5 +101,88 @@ describe("render: karta źródła i przycisk otwarcia", () => {
     }
     expect(hs[0]).toContain("<b>Slack</b>");
     expect(hs[1]).toContain("Treść");
+  });
+});
+
+describe("porównanie obok siebie: groupBlocks i hasComparison", () => {
+  const src = (n: string, extra: Partial<Extract<Block, { type: "free" }>> = {}): Block => ({ type: "free", title: n, source: { app: "clickup", ref: n, url: `https://app.clickup.com/t/${n}` }, markdown: "Treść " + n, ...extra });
+  const q: Block = { type: "question", text: "Który?", options: [{ label: "A" }, { label: "B" }] };
+  const note: Block = { type: "text", body: "Różnica: termin." };
+  it("klocek źródłowy = typ z zestawu porównania z adresem http(s); bez adresu, ze złym adresem albo innego typu nie", () => {
+    expect(isSourceBlock(src("a"))).toBe(true);
+    expect(isSourceBlock({ type: "thread", source: { app: "slack", url: "https://x.slack.com/archives/C1/p2" }, messages: [{ author: "A", text: "x" }] })).toBe(true);
+    expect(isSourceBlock({ type: "mail", source: { app: "gmail", url: "https://mail.google.com/mail/u/0/#inbox/1" }, messages: [{ from: "J", text: "x" }] })).toBe(true);
+    expect(isSourceBlock({ type: "comment", source: { app: "figma", url: "https://www.figma.com/file/x" }, author: "O", text: "y" })).toBe(true);
+    expect(isSourceBlock({ type: "table", source: { app: "clickup", url: "https://app.clickup.com/t/1" }, columns: ["a"], rows: [["1"]] })).toBe(true);
+    expect(isSourceBlock({ type: "free", title: "n", source: { app: "clickup", ref: "869x" }, markdown: "x" })).toBe(false);
+    expect(isSourceBlock({ type: "free", source: { app: "clickup", url: "taskhub://connect?url=https://zly.example" }, markdown: "x" })).toBe(false);
+    expect(isSourceBlock({ type: "facts", source: { app: "clickup", url: "https://app.clickup.com/t/1" }, facts: [{ label: "a", value: "b" }] } as Block)).toBe(false);
+    expect(isSourceBlock({ type: "list", items: [{ title: "a", url: "https://x.example/" }] })).toBe(false);
+    expect(isSourceBlock(q)).toBe(false);
+  });
+  it("dwa kolejne klocki źródłowe = jedna grupa, reszta pojedynczo; kolejność kartki zostaje", () => {
+    const a = src("a"), b = src("b");
+    expect(groupBlocks([note, a, b])).toEqual([note, [a, b]]);
+    expect(groupBlocks([a, b, note])).toEqual([[a, b], note]);
+    expect(groupBlocks([q, a, b, note])).toEqual([q, [a, b], note]);
+    expect(hasComparison([q, a, b, note])).toBe(true);
+    expect(groupBlocks([])).toEqual([]);
+    expect(hasComparison([])).toBe(false);
+  });
+  it("trzy kolejne źródła = jedna grupa z trzech; dwa ciągi rozdzielone notatką = dwie grupy", () => {
+    const a = src("a"), b = src("b"), c = src("c"), d = src("d");
+    expect(groupBlocks([a, b, c])).toEqual([[a, b, c]]);
+    expect(groupBlocks([a, b, note, c, d])).toEqual([[a, b], note, [c, d]]);
+  });
+  it("jeden klocek źródłowy, źródło bez adresu albo pytanie między źródłami: bez grupy", () => {
+    const a = src("a"), b = src("b"), noUrl = src("n", { source: { app: "clickup", ref: "n" } });
+    expect(groupBlocks([note, a])).toEqual([note, a]);
+    expect(hasComparison([note, a])).toBe(false);
+    expect(groupBlocks([a, noUrl, b])).toEqual([a, noUrl, b]);
+    expect(hasComparison([a, noUrl, b])).toBe(false);
+    expect(groupBlocks([a, q, b])).toEqual([a, q, b]);
+    expect(hasComparison([a, q, b])).toBe(false);
+    expect(groupBlocks([a, note, b])).toEqual([a, note, b]);
+  });
+  it("fakty i lista nie grupują się, nawet z adresami w środku", () => {
+    const facts: Block = { type: "facts", facts: [{ label: "Status", value: "Open", source: { app: "clickup", url: "https://app.clickup.com/t/1" } }] };
+    const list: Block = { type: "list", items: [{ title: "x", url: "https://app.clickup.com/t/2" }] };
+    expect(groupBlocks([facts, list])).toEqual([facts, list]);
+    expect(hasComparison([facts, list])).toBe(false);
+    expect(groupBlocks([facts, src("a"), src("b"), list])).toEqual([facts, [src("a"), src("b")], list]);
+  });
+  it("mieszane typy źródeł (ticket obok wątku, mail obok komentarza) też stoją obok siebie", () => {
+    const thread: Block = { type: "thread", source: { app: "slack", url: "https://x.slack.com/archives/C1/p2" }, messages: [{ author: "A", text: "x" }] };
+    const mail: Block = { type: "mail", source: { app: "gmail", url: "https://mail.google.com/mail/u/0/#inbox/1" }, messages: [{ from: "J", text: "x" }] };
+    const comment: Block = { type: "comment", source: { app: "figma", url: "https://www.figma.com/file/x" }, author: "O", text: "y" };
+    expect(groupBlocks([src("a"), thread, mail, comment])).toEqual([[src("a"), thread, mail, comment]]);
+  });
+});
+
+describe("porównanie obok siebie: BlocksView", () => {
+  const src = (n: string): Block => ({ type: "free", title: "Ticket " + n, source: { app: "clickup", ref: n, url: `https://app.clickup.com/t/${n}` }, markdown: "Treść " + n });
+  const q: Block = { type: "question", text: "Który?", options: [{ label: "A" }, { label: "B" }] };
+  const form = { taskId: "t1", stepId: "s1" };
+  it("dwa źródła obok siebie: siatka .cmp z obiema kartami, w kolejności kartki", () => {
+    const h = renderToStaticMarkup(<BlocksView blocks={[{ type: "text", body: "Różnica" }, src("a"), src("b")]} />);
+    expect(h).toContain('<div class="cmp">');
+    expect(h.match(/class="cmp"/g)?.length).toBe(1);
+    const cmp = h.slice(h.indexOf('<div class="cmp">'));
+    expect(cmp.match(/class="block kctx srcdoc"/g)?.length).toBe(2);
+    expect(cmp.indexOf("Ticket a")).toBeLessThan(cmp.indexOf("Ticket b"));
+    expect(h.indexOf("Różnica")).toBeLessThan(h.indexOf('<div class="cmp">'));
+  });
+  it("jedno źródło albo źródła rozdzielone pytaniem: bez siatki, karty renderują się jak dotąd", () => {
+    expect(renderToStaticMarkup(<BlocksView blocks={[{ type: "text", body: "Różnica" }, src("a")]} />)).not.toContain("cmp");
+    expect(renderToStaticMarkup(<BlocksView blocks={[src("a")]} />)).not.toContain("cmp");
+    const h = renderToStaticMarkup(<BlocksView blocks={[src("a"), q, src("b")]} form={form} />);
+    expect(h).not.toContain("cmp");
+    expect(h.match(/class="block kctx srcdoc"/g)?.length).toBe(2);
+  });
+  it("indeks klocka to pozycja na całej kartce także po grupie: pytanie za dwoma źródłami zapisuje odpowiedź pod indeksem 2, a indexOf ma pierwszeństwo", () => {
+    const blocks: Block[] = [src("a"), src("b"), q];
+    expect(renderToStaticMarkup(<BlocksView blocks={blocks} form={form} />)).toContain('name="index" value="2"');
+    const part = blocks.slice(1);   // tylko część kartki: indeks z indexOf, nie z pozycji w wycinku
+    expect(renderToStaticMarkup(<BlocksView blocks={part} form={form} indexOf={(b) => blocks.indexOf(b)} />)).toContain('name="index" value="2"');
   });
 });

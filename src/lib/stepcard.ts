@@ -2,7 +2,7 @@
 // Czysta logika bez React, żeby dało się ją testować; składanie w JSX jest w src/app/tasks/[id]/page.tsx.
 import { appName, doneByOf, EXTERNAL_TOOLS, inApp, isOwnerStep, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step } from "./schema";
 import { draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft } from "./agent/approval";
-import { fileName, safeHref } from "./safeurl";
+import { fileName, isHttpUrl, safeHref } from "./safeurl";
 import { fmtTime } from "./clock";
 import { shortTitle } from "./auto";
 
@@ -35,6 +35,19 @@ export function readingResult(s: Pick<Step, "status" | "tool" | "doneBy" | "bloc
   if (s.blocks?.some((b) => b.type === "draft" || b.type === "changes")) return false;
   return material.some((b) => CONTENT_KINDS.has(b.type));
 }
+// kartka porównania (paczka 10, punkt 1): 2+ kolejne klocki źródłowe (ticket, wątek, mail, komentarz, tabela z adresem http(s)) stoją obok siebie
+// w siatce .cmp; pytanie albo notatka między nimi przerywa ciąg (celowo: agent stawia pytanie przed porównywanymi elementami). Czysta logika, bez React
+export const COMPARE_TYPES = new Set(["free", "comment", "thread", "mail", "table"]);
+export const isSourceBlock = (b: Block): boolean => COMPARE_TYPES.has(b.type) && isHttpUrl((b as { source?: { url?: string } }).source?.url);
+export function groupBlocks(blocks: Block[]): (Block | Block[])[] {
+  const out: (Block | Block[])[] = [];
+  let run: Block[] = [];
+  const flush = () => { if (run.length > 1) out.push(run); else out.push(...run); run = []; };
+  for (const b of blocks) { if (isSourceBlock(b)) run.push(b); else { flush(); out.push(b); } }
+  flush();
+  return out;
+}
+export const hasComparison = (blocks: Block[]): boolean => groupBlocks(blocks).some(Array.isArray);
 
 const norm = (x: string) => x.replace(/\s+/g, " ").trim();
 // raport bez powtórki: to, co już stoi w streszczeniu bloku zmian albo w treści szkicu, nie pokazuje się drugi raz; „Do potwierdzenia: …” wychodzi jako osobna linia
