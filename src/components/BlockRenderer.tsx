@@ -1,10 +1,10 @@
 // Jeden renderer dla wszystkich bloków. Nowa aplikacja zewnętrzna nie dodaje tu kodu.
 import type { Block, Fact, Provenance } from "@/lib/schema";
-import { toolLabel } from "@/lib/schema";
+import { appName, normalizeTool, openLabel, toolLabel } from "@/lib/schema";
 import { answerBlockForm } from "@/app/actions";
 import { Markdown } from "@/lib/markdown";
 import { hasMarkdown } from "@/lib/format";
-import { plural } from "@/components/canvas/ui";
+import { Icon, plural } from "@/components/canvas/ui";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { CopyButton } from "@/components/CopyButton";
 import { isHttpUrl, isLocalPath, isMediaUrl, safeHref } from "@/lib/safeurl";
@@ -15,8 +15,9 @@ export type BlockForm = { taskId: string; stepId: string };
 const TOOL_COLORS: Record<string, string> = { slack: "var(--t-slack)", gmail: "var(--t-mail)", clickup: "var(--t-clickup)", calendar: "var(--t-calendar)", claude: "var(--t-claude)", claudeapp: "var(--t-claude)", code: "var(--t-claude)", manual: "var(--t-manual)", github: "var(--t-github)", figma: "var(--t-figma)" };
 export const toolColor = (app: string) => TOOL_COLORS[app] ?? "var(--sub)";
 
-// nagłówek klocka kontekstu: kropka aplikacji, nazwa, miejsce (ref), licznik, „Otwórz” gdy jest adres; ten sam dla wątku, maila, komentarza, tabeli i wolnej treści
-export function SrcHead({ s, title, meta }: { s?: Provenance; title?: string; meta?: string }) {
+// nagłówek klocka kontekstu: kropka aplikacji, nazwa, miejsce (ref), licznik, przycisk „Otwórz w <app>” gdy jest adres (jeden kształt
+// dla wszystkich klocków źródłowych; open = własna etykieta, np. „Otwórz podgląd” dla zmian w kodzie); ten sam dla wątku, maila, komentarza, tabeli i wolnej treści
+export function SrcHead({ s, title, meta, open }: { s?: Provenance; title?: string; meta?: string; open?: string }) {
   if (!s && !title && !meta) return null;
   const href = safeHref(s?.url);   // adresy z danych tylko przez safeHref: javascript:, file:, taskhub: zostają bez linku
   return (
@@ -25,7 +26,21 @@ export function SrcHead({ s, title, meta }: { s?: Provenance; title?: string; me
       {title ? <span>{s ? " · " : ""}{title}</span> : s?.ref ? <span> · {s.ref}</span> : null}
       {meta ? <span> · {meta}</span> : null}
       <span className="sp" />
-      {href ? <a className="chip" href={href} target="_blank" rel="noopener">Otwórz</a> : null}
+      {href && s ? <a className="btn ico sm" href={href} target="_blank" rel="noopener">{open ?? openLabel(normalizeTool(s.app))}<Icon k="ext" size={13} sw={1.6} /></a> : null}
+    </div>
+  );
+}
+// karta źródła tylko do odczytu (paczka 10, punkt 2): klocek free z adresem http(s) wygląda jak karta szkicu (nagłówek z aplikacją,
+// tytuł, linia metadanych, treść na białym polu), ale bez paska formatowania; Piotr czyta ticket albo dokument, poprawia go w aplikacji źródłowej
+function SourceDoc({ b, href }: { b: Extract<Block, { type: "free" }>; href: string }) {
+  const app = b.source?.app ?? "", key = normalizeTool(app);   // openLabel oczekuje klucza: „ClickUp” od agenta -> „Otwórz w ClickUpie”
+  return (
+    <div className="block kctx srcdoc">
+      <div className="src-h"><span className="tool-dot" style={{ ["--c" as string]: toolColor(key) }} /><b>{appName(app)}</b><span>· tylko do odczytu</span><span className="sp" />
+        <a className="btn ico sm" href={href} target="_blank" rel="noopener">{openLabel(key)}<Icon k="ext" size={13} sw={1.6} /></a></div>
+      {b.title ? <h4>{b.title}</h4> : null}
+      {b.meta ? <div className="src-meta">{b.meta}</div> : null}
+      <div className="msg doc"><Markdown text={b.markdown} /></div>
     </div>
   );
 }
@@ -117,8 +132,11 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
           <Table columns={b.columns} rows={b.rows} highlightFrom={b.highlightFrom} />
         </div>
       );
-    case "free":
-      return <div className="block kctx"><SrcHead s={b.source} title={b.title} /><Markdown text={b.markdown} /></div>;
+    case "free": {
+      // z adresem http(s) = karta źródła tylko do odczytu; bez adresu jak dotąd (notatka agenta)
+      const url = b.source?.url;
+      return isHttpUrl(url) ? <SourceDoc b={b} href={url.trim()} /> : <div className="block kctx"><SrcHead s={b.source} title={b.title} /><Markdown text={b.markdown} /></div>;
+    }
     case "draft":
       return (
         <div className="block draft">
@@ -164,7 +182,7 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
       const place = [b.repo, b.branch].filter(Boolean).join(" · ") || undefined;
       return (
         <div className="block kctx" id={form ? "zm-" + form.stepId : undefined}>
-          <SrcHead s={{ app: "github", ref: place, url: http }} title={b.title ?? "Zmiany w kodzie"} meta={`${n} ${plural(n, "plik", "pliki", "plików")}`} />
+          <SrcHead s={{ app: "github", ref: place, url: http }} title={b.title ?? "Zmiany w kodzie"} meta={`${n} ${plural(n, "plik", "pliki", "plików")}`} open="Otwórz podgląd" />
           {b.summary ? <p>{b.summary}</p> : null}
           {b.preview && !http ? <p className="sub">Podgląd: <code>{b.preview}</code>{isLocalPath(b.preview) ? <> <CopyButton text={b.preview.trim()} label="Kopiuj ścieżkę" /></> : null}</p> : null}
           {n ? (

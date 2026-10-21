@@ -81,7 +81,7 @@ export function stepContextText(s: Task["steps"][number]): string {
       case "table": return `- tabela ${b.title ?? ""} (${b.columns.join(", ")}): ${b.rows.length} wierszy`;
       case "list": return `- lista${b.title ? ` „${b.title}”` : ""}: ${b.items.map((i) => i.title).join("; ").slice(0, 400)}`;
       case "draft": return `- SZKIC (${b.status}) do ${b.target.app}${b.target.where ? " " + b.target.where : ""}: ${b.subject ? `temat „${b.subject}”, ` : ""}${b.body.slice(0, 1200)}`;
-      case "free": return `- treść: ${b.markdown.slice(0, 600)}`;
+      case "free": return `- treść${b.meta ? ` [${b.meta}]` : ""}: ${b.markdown.slice(0, 600)}`;
       case "question": return `- pytanie: ${b.text}${b.answer ? ` → ${b.answer}` : ""}`;
       default: return null;
     }

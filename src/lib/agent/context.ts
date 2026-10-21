@@ -1,6 +1,6 @@
 // Kontekst dla agenta: to samo dla agenta w aplikacji, dla klientów MCP i dla promptów hand-off.
 import { publishFormat } from "../format";
-import { type Company, type Connection, type Project, type Rule, type Sphere, type Step, type Task, type TimeSample, CONNECTION_PROVIDER_LABELS, CONNECTION_STATE_LABELS, DECISION_TITLE_RE, doneByOf, isOwnerStep, sphereOf, toolLabel } from "../schema";
+import { type Company, type Connection, type Project, type Provenance, type Rule, type Sphere, type Step, type Task, type TimeSample, CONNECTION_PROVIDER_LABELS, CONNECTION_STATE_LABELS, DECISION_TITLE_RE, doneByOf, isOwnerStep, sphereOf, toolLabel } from "../schema";
 import { LEVELS, scoreOf, whyText, type Score } from "../priority";
 import { agentMinOf, calibrationText, fmtMin, remainEst, taskAgent, taskSpent, todayISO } from "../time";
 import { rulesFor } from "../repo";
@@ -148,6 +148,8 @@ export function doneCardsFor(steps: CardStep[]): CardStep[] {
   return [...done.filter((s) => needed.has(s.id)), ...done.filter((s) => !needed.has(s.id))];
 }
 export function cardText(steps: CardStep[], max = 6000, doneMax = 3000, doneTotal = 12000): string {
+  // skąd jest klocek źródłowy (aplikacja, miejsce, adres): agent odróżnia dwa tickety na kartce porównania; bez źródła nic nie dochodzi
+  const src = (s?: Provenance) => (s ? ` (źródło: ${s.app}${s.ref ? " " + s.ref : ""}${s.url ? " " + s.url : ""})` : "");
   const one = (b: NonNullable<Step["blocks"]>[number], i: number): string => {
     const h = `[${i}] ${b.type}${"title" in b && b.title ? ` „${b.title}”` : ""}`;
     switch (b.type) {
@@ -156,10 +158,10 @@ export function cardText(steps: CardStep[], max = 6000, doneMax = 3000, doneTota
       case "table": return `${h} (${b.columns.join(" | ")}):\n${b.rows.map((r) => `  ${r.join(" | ")}`).join("\n")}`;
       case "list": return `${h}:\n${b.items.map((x) => `  - ${x.title}${x.note ? `: ${x.note}` : ""}${x.done ? " (zrobione)" : ""}`).join("\n")}`;
       case "question": return `${h}: ${b.text} | opcje: ${b.options.map((o) => o.label).join(" / ")}${b.answer ? ` | ODPOWIEDŹ PIOTRA: ${b.answer}` : ` | bez odpowiedzi${b.prev ? ` | WCZEŚNIEJ: ${b.prev}` : ""}`}`;
-      case "free": return `${h}:\n${b.markdown}`;
-      case "thread": return `${h}: ${b.messages.map((m) => `${m.author}: ${m.text}`).join(" / ")}`;
-      case "mail": return `${h}: ${b.messages.map((m) => `${m.from}: ${m.text}`).join(" / ")}`;
-      case "comment": return `${h}: ${b.author}: ${b.text}`;
+      case "free": return `${h}${b.meta ? ` [${b.meta}]` : ""}${src(b.source)}:\n${b.markdown}`;
+      case "thread": return `${h}${src(b.source)}: ${b.messages.map((m) => `${m.author}: ${m.text}`).join(" / ")}`;
+      case "mail": return `${h}${src(b.source)}: ${b.messages.map((m) => `${m.from}: ${m.text}`).join(" / ")}`;
+      case "comment": return `${h}${src(b.source)}: ${b.author}: ${b.text}`;
       case "link": return `${h}: ${b.links.map((l) => l.title ?? l.url).join("; ")}`;
       case "media": return `${h}: ${b.items.map((m) => m.caption ?? m.name ?? m.url).join("; ")}`;
       case "changes": return `${h}: ${b.summary ?? ""} (${b.files.length} plików)`;

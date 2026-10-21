@@ -696,6 +696,7 @@ details.tech > summary .k { font-weight: 600; }
 .src-h b { color: var(--text); font-weight: 650; }
 .src-h .sp { flex: 1; }
 .src-h .chip { text-decoration: none; }
+.btn.sm { padding: 4px 10px; font-size: 11.5px; }   /* przycisk w nagłówku klocka źródłowego: mieści się w min-height 24 px .src-h */
 .files { display: flex; flex-direction: column; gap: 4px; }
 .file > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12.5px; min-width: 0; list-style: none; padding: 4px 0; }
 .file > summary::-webkit-details-marker { display: none; }
@@ -765,6 +766,10 @@ details.fold > summary svg { flex: none; color: var(--sub); transition: transfor
 details.fold[open] > summary { margin-bottom: var(--s-3); }
 details.fold[open] > summary .t { display: none; }
 details.fold[open] > summary svg { transform: rotate(180deg); }
+
+/* ---------- kartka porównania (paczka 10): karta źródła tylko do odczytu ---------- */
+.srcdoc .src-meta { font-size: 12.5px; color: var(--sub); }                 /* status, lista, osoba, daty w jednej linii, nad treścią */
+.srcdoc .msg.doc { padding: var(--s-4) var(--s-5); }                        /* treść na białym polu (.msg daje var(--surface) i r-sm), bez paska formatowania */
 
 /* ---------- menu kafelka na prawy klik (paczka 2, punkt 2) ---------- */
 .ppmenu.tmenu { min-width: 180px; }

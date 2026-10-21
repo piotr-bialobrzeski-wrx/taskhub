@@ -113,6 +113,7 @@ export const FreeBlock = z.object({
   type: z.literal("free"),
   title: z.string().optional(),
   source: Provenance.optional(),
+  meta: z.string().max(300).optional(),    // metadane elementu (status, lista, osoba, daty) w jednej linii; treść idzie w markdown
   markdown: z.string().max(20000),         // gdy żaden inny klocek nie pasuje: nagłówki, akapity, listy, linki, obrazki (http/https)
 });
 export const ListItem = z.object({
