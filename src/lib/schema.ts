@@ -335,6 +335,10 @@ export const toolLabel = (tool: string) => TOOL_LABELS[tool] ?? tool;
 // krok Piotra (narzędzie „Ty”): jego szacunki, jego czas i jego kalibracja; resztę robi Claude i liczy się czas Claude'a
 export const isOwnerStep = (s: Pick<Step, "tool">) => s.tool === "manual";
 export const doneByOf = (s: Pick<Step, "tool" | "doneBy">): "owner" | "agent" => s.doneBy ?? (isOwnerStep(s) ? "owner" : "agent");
+// krok-wybór Piotra (Wybierz…, Zdecyduj…, Ustal…): bez pytania na kartce „Zrobione” pyta „Co wybrałeś?” (wynik kroku), a get_task pokazuje
+// jego kartkę po zrobieniu (paczka 9). Tu, nie w stepcard.ts: ten plik importuje komponent kliencki, a stepcard ciągnie node:crypto.
+// (?=…|$), nie \b: po „ę” granica słowa nie działa; przecinek, dwukropek i średnik po słowie też liczą się jako koniec słowa
+export const DECISION_TITLE_RE = /^(wybierz|zdecyduj|ustal|wybór|decyzja|zatwierdź)(?=[\s,:;]|$)/i;
 // „w ClickUpie”, „na Slacku”: dokąd idzie treść, odmienione; nieznana aplikacja dostaje „· Nazwa”
 export const TOOL_IN: Record<string, string> = {
   clickup: "w ClickUpie", slack: "na Slacku", gmail: "mailem", calendar: "w kalendarzu", github: "na GitHubie", figma: "w Figmie", whatsapp: "na WhatsAppie",

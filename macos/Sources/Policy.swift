@@ -99,14 +99,15 @@ enum Policy {
     static func secretFiles() -> [String] {
         let h = home
         return [Store.file.path, h + "/.npmrc", h + "/.netrc", h + "/.git-credentials", h + "/.claude/.credentials.json", h + "/.claude.json",
-                h + "/.pgpass", h + "/.zsh_history", h + "/.bash_history"]
+                h + "/.pgpass", h + "/.zsh_history", h + "/.bash_history", h + "/.cargo/credentials.toml", h + "/.cargo/credentials", h + "/.pypirc"]
     }
 
     // narzędzia w katalogu domowym, które polecenia muszą móc czytać także bez folderów z kodem (bieg w piaskownicy z denyRead na dom):
-    // Claude Code (ścieżki z listy ClaudeCLI, także po dowiązaniach), node z menedżerów wersji, npm, pnpm, bun, volta
+    // Claude Code (ścieżki z listy ClaudeCLI, także po dowiązaniach) i node z menedżerów wersji (npm-global, volta, nvm, bun, pnpm).
+    // Nic szerzej: całe ~/.local ma historie powłok i tokeny edytorów, ~/.npm pamięć npx (zapis = koń trojański), ~/.cargo i ~/go tokeny
     static func toolDirs(bin: String = "") -> [String] {
         let h = home
-        var out = [h + "/.local", h + "/.claude/local", h + "/.npm-global", h + "/.volta", h + "/.nvm", h + "/.npm", h + "/.bun", h + "/Library/pnpm", h + "/.cargo", h + "/go", h + "/.pyenv"]
+        var out = [h + "/.local/bin", h + "/.local/share/claude", h + "/.claude/local", h + "/.npm-global", h + "/.volta", h + "/.nvm", h + "/.bun", h + "/Library/pnpm"]
         for c in ClaudeCLI.candidates() + (bin.isEmpty ? [] : [bin]) {
             let real = URL(fileURLWithPath: c).resolvingSymlinksInPath().deletingLastPathComponent().path
             if real.hasPrefix(h + "/") && !out.contains(where: { real.hasPrefix($0) }) { out.append(real) }
@@ -280,7 +281,8 @@ enum Policy {
 
     // ---------- bieg „work” ----------
     // files = foldery na pliki (kroki „Plik na Macu”): Claude tylko zapisuje tam nowe pliki; bez Read, bez Basha, bez --add-dir.
-    // Bez folderów z kodem (od 0.1.9) Bash też jest, ale w piaskownicy, która czyta i pisze tylko work/ i /tmp i nie ma sieci: krok, który
+    // Bez folderów z kodem (od 0.1.9) Bash też jest, ale w piaskownicy, która poza systemem i narzędziami czyta i pisze tylko work/ i /tmp
+    // i nie ma sieci: krok, który
     // tylko uruchamia polecenia albo sprawdza narzędzie, nie potrzebuje repozytorium; krok zmieniający repozytorium nadal czeka na folder
     static func work(runId: String, prompt: String, mcp: String, token: String, probe: Probe, folders: [String], files: [String] = [], model: String, bin: String = "") throws -> RunPlan {
         let work = Store.workDir.path
@@ -308,12 +310,14 @@ enum Policy {
         let perms: [String: Any] = ["defaultMode": "dontAsk", "allow": allow, "deny": deny + [canary]]
         var locked: [String] = []
         for f in folders { locked += protectedInRepo.map { f + "/" + $0 } }
-        // bez folderów z kodem polecenia widzą tylko work/ i /tmp (denyRead na katalog domowy, allowRead węższy wygrywa) i nie mają sieci;
-        // z folderami: czytanie jak dotąd (poza sekretami), sieć tylko do rejestru npm (zależności projektu)
+        // bez folderów z kodem polecenia widzą tylko work/, /tmp i narzędzia (denyRead na /Users, /Volumes i katalog domowy; allowRead węższy
+        // wygrywa; zrzut powłoki ~/.claude/shell-snapshots czyta każde polecenie Basha), nie piszą w ~/.npm (pamięć npx, z której npx
+        // uruchamia kod bez piaskownicy) i nie mają sieci ani portów lokalnych; z folderami: czytanie jak dotąd (poza sekretami), sieć
+        // tylko do rejestru npm (zależności projektu)
         let scratch = folders.isEmpty
-        var fs: [String: Any] = ["allowWrite": dirs + ["/tmp", "~/.npm"], "denyRead": (scratch ? [home] : []) + secretDirs() + secretFiles() + files, "denyWrite": locked]
-        if scratch { fs["allowRead"] = [work, "/tmp"] + toolDirs(bin: bin) }
-        let net: [String: Any] = ["allowedDomains": scratch ? [] : npmDomains, "allowLocalBinding": true]
+        var fs: [String: Any] = ["allowWrite": dirs + ["/tmp"] + (scratch ? [] : ["~/.npm"]), "denyRead": (scratch ? [home, "/Users", "/Volumes"] : []) + secretDirs() + secretFiles() + files, "denyWrite": locked]
+        if scratch { fs["allowRead"] = [work, "/tmp", home + "/.claude/shell-snapshots"] + toolDirs(bin: bin) }
+        let net: [String: Any] = ["allowedDomains": scratch ? [] : npmDomains, "allowLocalBinding": !scratch]
         // piaskownica Basha: zapis tylko w work/, folderach z kodem i tymczasowych; sieć tylko do rejestru npm (bez folderów: żadna).
         // Gdy piaskownica nie wstanie, Claude Code kończy bieg (zamiast puszczać polecenia bez niej).
         let sandbox: [String: Any] = ["enabled": true, "autoAllowBashIfSandboxed": true, "allowUnsandboxedCommands": false,
@@ -323,8 +327,8 @@ enum Policy {
         let setF: URL
         do { setF = try writeFile(settings, name: safeId(runId) + "-settings.json") } catch { remove([mcpF]); throw error }
         var p = prompt + (folders.isEmpty
-            ? "\n\nNa tym Macu nie ma folderów z kodem: polecenia biegną w katalogu roboczym \(work) (Bash widzi tylko jego i /tmp, bez sieci); krok z kodem, który potrzebuje repozytorium, oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery z kodem)."
-            : "\n\nFoldery z kodem na tym Macu: " + folders.joined(separator: ", "))
+            ? "\n\nNa tym Macu nie ma folderów z kodem: polecenia biegną w katalogu roboczym \(work) (poza systemem i narzędziami Bash czyta i pisze tylko w nim i w /tmp; bez sieci, bez instalowania pakietów); krok z kodem, który potrzebuje repozytorium, oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery z kodem)."
+            : "\n\nFoldery z kodem na tym Macu (Bash czyta dysk poza sekretami, pisze w katalogu roboczym, w tych folderach i w /tmp; sieć tylko do rejestru npm, więc zależności tylko z npm): " + folders.joined(separator: ", "))
         p += files.isEmpty
             ? "\n\nNa tym Macu nie ma folderów na pliki: kroki „Plik na Macu” (tool file) oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery na pliki)."
             : "\n\nFoldery na pliki na tym Macu (tylko nowe pliki narzędziem Write; bez czytania i bez poleceń): " + files.joined(separator: ", ")
@@ -341,6 +345,11 @@ enum Policy {
         env["TASKHUB_ALLOWED_DIRS"] = (dirs + files).joined(separator: ":")
         env["TASKHUB_FILE_DIRS"] = files.joined(separator: ":")
         env["TASKHUB_ALLOWED_TOOLS"] = guardTools(allow, builtins: builtins, canary: canary)
+        if scratch {
+            // ~/.npm i ~/.gitconfig są poza zasięgiem piaskownicy: npm dostaje pamięć w work/, git nie czyta konfiguracji użytkownika
+            env["npm_config_cache"] = work + "/.npm-cache"
+            env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        }
         return RunPlan(args: args, env: env, files: [mcpF, setF], canary: canary, mustLack: conn.write + extra,
                        known: Set(probe.info.tools))
     }

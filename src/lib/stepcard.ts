@@ -133,8 +133,6 @@ export const whoDid = (s: Pick<Step, "tool" | "doneBy">): "Ty" | "Claude" => (do
 // (odpowiedź zamyka krok); reading = „Przeczytaj …” (jeden przycisk „Przeczytane”); offline = krok Piotra poza aplikacją („Zrobione” z pytaniem o czas)
 export type StepKind = "approval" | "agent" | "decision" | "reading" | "offline";
 export const READ_RE = /^(przeczytaj|przejrzyj|zapoznaj się)(?=\s|$)/i;   // (?=\s|$), nie \b: po „ę” granica słowa nie działa
-// krok-wybór Piotra bez pytania na kartce: „Zrobione” pyta, co wybrał (wynik kroku), żeby decyzja nie przepadła (paczka 9)
-export const DECISION_TITLE_RE = /^(wybierz|zdecyduj|ustal|wybór|decyzja|zatwierdź)(?=\s|$)/i;
 type QuestionB = Extract<Block, { type: "question" }>;
 export function stepKind(s: Pick<Step, "tool" | "title" | "blocks">): StepKind {
   if (draftOf(s)) return "approval";

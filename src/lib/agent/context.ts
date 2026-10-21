@@ -1,6 +1,6 @@
 // Kontekst dla agenta: to samo dla agenta w aplikacji, dla klientów MCP i dla promptów hand-off.
 import { publishFormat } from "../format";
-import { type Company, type Connection, type Project, type Rule, type Sphere, type Step, type Task, type TimeSample, CONNECTION_PROVIDER_LABELS, CONNECTION_STATE_LABELS, doneByOf, isOwnerStep, sphereOf, toolLabel } from "../schema";
+import { type Company, type Connection, type Project, type Rule, type Sphere, type Step, type Task, type TimeSample, CONNECTION_PROVIDER_LABELS, CONNECTION_STATE_LABELS, DECISION_TITLE_RE, doneByOf, isOwnerStep, sphereOf, toolLabel } from "../schema";
 import { LEVELS, scoreOf, whyText, type Score } from "../priority";
 import { agentMinOf, calibrationText, fmtMin, remainEst, taskAgent, taskSpent, todayISO } from "../time";
 import { rulesFor } from "../repo";
@@ -98,6 +98,11 @@ export function capText(text: string | null | undefined, cap = TEXT_CAP): string
   return t.length <= cap ? t : `${t.slice(0, cap)}\n[ucięto po ${cap} znakach; całość ma ${t.length} znaków]`;
 }
 
+// wynik kroku w linii kroków: decyzja Piotra (pole „Co wybrałeś?”, zapis do 2000 znaków) w całości, wynik agenta do 300 znaków; ucięcie widać
+const outputText = (s: Pick<Step, "tool" | "output">): string => {
+  const cap = isOwnerStep(s) ? 2000 : 300, o = s.output ?? "";
+  return o.length > cap ? o.slice(0, cap) + "…" : o;
+};
 export function contextText(c: ContextInput): string {
   const scored = scoreAll(c.tasks, c.projects, c.samples, c.now);
   const open = scored.filter((s) => !s.task.doneAt || (s.task.doneAt && new Date(s.task.doneAt).getTime() > new Date().setHours(0, 0, 0, 0)));
@@ -123,21 +128,25 @@ OBECNE ZADANIE: priorytet ${t.level}/5 (${LEVELS[cur.score.eff]}${cur.score.why.
 Podsumowanie: ${t.summary || "-"}
 Jak wpadło: ${capText(t.source) || "-"}
 Kroki:
-${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status} | po: ${s.dependsOn.join(", ") || "-"}${isOwnerStep(s) ? ` | szacunek ${s.estMin} min` : agentMinOf(s) ? ` | czas Claude'a ${agentMinOf(s)} min` : ""}${s.status === "done" ? ` | zrobił: ${doneByOf(s) === "owner" ? "Piotr" : "Claude"}` : ""}${connLabel(s.connectionId, c.connections)}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + s.output.slice(0, 300) : ""}`).join("\n") || "(brak kroków)"}
+${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status} | po: ${s.dependsOn.join(", ") || "-"}${isOwnerStep(s) ? ` | szacunek ${s.estMin} min` : agentMinOf(s) ? ` | czas Claude'a ${agentMinOf(s)} min` : ""}${s.status === "done" ? ` | zrobił: ${doneByOf(s) === "owner" ? "Piotr" : "Claude"}` : ""}${connLabel(s.connectionId, c.connections)}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + outputText(s) : ""}`).join("\n") || "(brak kroków)"}
 INNE ZADANIA NA GŁÓWNEJ KANWIE (${others.length}):
 ${others.slice(0, 40).map(brief).join("\n") || "(brak)"}${notesText(c.tasks)}`;
 }
 
 // get_task: kartka każdego niezrobionego kroku (bez szkiców, te idą w draftsText), żeby agent mógł ją poprawić po odpowiedzi Piotra.
 // Klocki w kolejności z kartki, numerowane jak w set_blocks; zmiany zapisuje się pełnym zestawem klocków.
-// Za nimi, do wglądu, kartki zrobionych kroków, na których stoi dalsza praca: kroki Piotra (jego decyzja z odpowiedzią na pytanie,
-// tabela, którą wybierał) i kroki, od których zależy jakiś niezrobiony krok (paczka 9: agent nie widział tabeli poziomów z kroku Piotra).
-type CardStep = Pick<Step, "id" | "title" | "status" | "blocks"> & Partial<Pick<Step, "tool" | "dependsOn">>;
+// Za nimi, do wglądu, kartki zrobionych kroków, na których stoi dalsza praca: decyzje Piotra (krok „Wybierz…” albo odpowiedziane pytanie;
+// nie elementy listy ani „Przeczytaj …”) i kroki, od których zależy jakiś niezrobiony krok (paczka 9: agent nie widział tabeli poziomów
+// z kroku Piotra). Najpierw te, na których stoi otwarty krok; łącznie do doneTotal znaków, reszta policzona w jednej linii.
+type CardStep = Pick<Step, "id" | "title" | "status" | "blocks"> & Partial<Pick<Step, "tool" | "dependsOn" | "output">>;
+const ownerCard = (s: CardStep): boolean => (s.tool ? isOwnerStep({ tool: s.tool }) : false);
+const decided = (s: CardStep): boolean => DECISION_TITLE_RE.test(s.title.trim()) || !!s.blocks?.some((b) => b.type === "question" && !!b.answer);
 export function doneCardsFor(steps: CardStep[]): CardStep[] {
   const needed = new Set(steps.filter((s) => s.status !== "done").flatMap((s) => s.dependsOn ?? []));
-  return steps.filter((s) => s.status === "done" && !!s.blocks?.some((b) => b.type !== "draft") && ((s.tool ? isOwnerStep({ tool: s.tool }) : false) || needed.has(s.id)));
+  const done = steps.filter((s) => s.status === "done" && !!s.blocks?.some((b) => b.type !== "draft") && (needed.has(s.id) || (ownerCard(s) && decided(s))));
+  return [...done.filter((s) => needed.has(s.id)), ...done.filter((s) => !needed.has(s.id))];
 }
-export function cardText(steps: CardStep[], max = 6000, doneMax = 3000): string {
+export function cardText(steps: CardStep[], max = 6000, doneMax = 3000, doneTotal = 9000): string {
   const one = (b: NonNullable<Step["blocks"]>[number], i: number): string => {
     const h = `[${i}] ${b.type}${"title" in b && b.title ? ` „${b.title}”` : ""}`;
     switch (b.type) {
@@ -163,10 +172,18 @@ export function cardText(steps: CardStep[], max = 6000, doneMax = 3000): string 
     const b = body(s);
     out.push(`KARTKA KROKU ${s.id} „${s.title}”:\n${b.length > max ? b.slice(0, max) + "…" : b}`);
   }
+  let used = 0, skipped = 0;
   for (const s of doneCardsFor(steps)) {
-    const b = body(s);
-    out.push(`KARTKA ZROBIONEGO KROKU ${s.id} „${s.title}” (do wglądu: ODPOWIEDŹ PIOTRA to jego decyzja; nie poprawiaj przez set_blocks):\n${b.length > doneMax ? b.slice(0, doneMax) + "…" : b}`);
+    const b = body(s) + (ownerCard(s) && s.output ? `\nWYNIK (Co wybrałeś?): ${s.output}` : "");
+    const cut = b.length > doneMax ? b.slice(0, doneMax) + `… [ucięto po ${doneMax} znakach; całość ma ${b.length}]` : b;
+    if (used + cut.length > doneTotal) { skipped++; continue; }
+    used += cut.length;
+    const who = ownerCard(s)
+      ? "(zrobiony krok Piotra: ODPOWIEDŹ PIOTRA i WYNIK to jego decyzja; tej kartki nie zmieniaj przez set_blocks, stosuj ją w krokach po nim)"
+      : "(Twój zrobiony krok, do wglądu; kartkę uzupełnij przez set_blocks tylko na prośbę Piotra)";
+    out.push(`KARTKA ZROBIONEGO KROKU ${s.id} „${s.title}” ${who}:\n${cut}`);
   }
+  if (skipped) out.push(`(pominięto ${skipped} kartek zrobionych kroków: limit ${doneTotal} znaków)`);
   return out.join("\n");
 }
 

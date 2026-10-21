@@ -6,8 +6,7 @@ import { doneWithTime, linkSteps, patchStep } from "@/app/actions";
 import { Picker } from "@/components/canvas/widgets";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { Icon } from "@/components/canvas/ui";
-import { isGoogleApp, TOOL_LABELS } from "@/lib/schema";
-import { DECISION_TITLE_RE } from "@/lib/stepcard";
+import { DECISION_TITLE_RE, isGoogleApp, TOOL_LABELS } from "@/lib/schema";
 import { Q, fmtMin, roundQ } from "@/lib/time";
 
 type Patch = Parameters<typeof patchStep>[2];
