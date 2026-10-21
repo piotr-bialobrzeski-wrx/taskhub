@@ -1,10 +1,10 @@
 // Karta publikacji: trzyma razem dokąd poleci treść (aplikacja, kanał/adresat, konto z rejestru połączeń), jak będzie wyglądać po wysłaniu
 // i przycisk decyzji. Zastępuje blok szkicu w panelu kroku; po wysłaniu zostaje jako zapis. Bez kolorów i logotypów aplikacji: tylko tokeny Task Hub.
 // Opcje (paczka 10, punkt 3b/4): 2+ szkice w kroku to warianty tej samej rzeczy. Przed decyzją każda stoi we własnej karcie w siatce .cmp
-// z własnym formularzem i przyciskiem „Zatwierdź: Opcja X”; po wyborze karta pokazuje wybraną jak jeden szkic, a resztę zwija pod „Odrzucone wersje”.
+// z własnym formularzem, linią miejsca i przyciskiem „Zatwierdź: Opcja X”; po wyborze karta pokazuje wybraną jak jeden szkic, a resztę zwija pod „Odrzucone wersje”.
 import type { Block, Step, Task } from "@/lib/schema";
 import { normalizeTool, openLabel, toolLabel } from "@/lib/schema";
-import { ACTION, approveLabel, destHint, destOf, targetLink } from "@/lib/stepcard";
+import { ACTION, approveLabel, destHint, destOf, targetLink, type Dest } from "@/lib/stepcard";
 import { fileName } from "@/lib/safeurl";
 import { fmtTime } from "@/lib/canvas/vm";
 import { toolColor } from "@/components/canvas/ui";
@@ -48,8 +48,12 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   const { drafts, chosen, rejected, multi } = optionsOf(s);
   // szkic kroku: wybrana opcja, inaczej pierwsza (przy jednym szkicu zawsze on); z niego nagłówek, miejsce i podpowiedź pod przyciskiem, bo te są na krok
   const d = chosen ?? drafts[0] ?? null;
+  // wybrana już poszła, a krok wrócił do zrobienia („Przywróć do zrobienia”): zgody nie będzie (repo.approveDraft odmawia), więc karta pokazuje ją jak po wysyłce
+  const sentAlready = chosen?.status === "sent";
+  const pick = multi && (mode === "proposed" || mode === "parked") && !sentAlready;   // wybór opcji: siatka kart zamiast jednego podglądu
   const changes = (s.blocks?.find((b) => b.type === "changes") ?? null) as Extract<Block, { type: "changes" }> | null;
-  // podgląd zmian: adres http(s) jako przycisk, ścieżka na dysku tylko jako tekst do skopiowania; wynik też tylko http(s)
+  // podgląd zmian: adres http(s) jako przycisk, ścieżka na dysku tylko jako tekst do skopiowania; wynik też tylko http(s);
+  // po zamknięciu kroku przycisk podglądu ma blok zmian pod kartą (jeden przycisk, nie dwa obok siebie)
   const previewUrl = isHttpUrl(changes?.preview) ? changes.preview.trim() : null;
   const previewPath = !previewUrl && isLocalPath(changes?.preview) ? changes.preview.trim() : null;
   const sentHref = safeHref(link);
@@ -64,19 +68,21 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   const body0 = d?.body ?? s.output;
   // dokąd idzie szkic (jedno źródło dla przycisku, linii pod nim i nagłówka po wysyłce); stary szkic bez bloku (sama treść) liczy się jak przy zgodzie
   const dest = destOf(s) ?? (body0?.trim() ? destOf({ ...s, blocks: [...(s.blocks ?? []), { type: "draft", target: { app: s.tool, action: "send" }, body: body0, status: "proposed" }] }) : null);
-  const hint = stays ? null : destHint(dest);
+  const hint = stays || pick || sentAlready ? null : destHint(dest);   // przy siatce każda opcja ma własną linię; po wysyłce nie ma czego obiecywać
   const label = (x: Draft) => optionLabel(x, drafts.indexOf(x));
   const opt = multi && chosen ? ` · ${label(chosen)}` : "";   // nazwa wybranej opcji w nagłówku po decyzji
   // nagłówek: po wysyłce samo miejsce (słowo i godzina stoją w nagłówku „Teraz”); przed decyzją sama aplikacja (miejsce jest pod przyciskiem)
   const head = mode === "unsent" ? <><b>Nie wysłano</b> · zamknięty bez zatwierdzenia</>
     : mode === "sent" ? (dest?.kind === "file" ? <><b>Plik na Macu</b>{s.filePath ? ` · ${fileName(s.filePath)}` : where ? ` · ${where}` : ""}</> : <><b>{dest?.name ?? name}</b>{opt}{where ? ` · ${where}` : ""}</>)
     : mode === "sending" ? <><b>{isPrompt || isCommit0 ? "Claude pracuje" : "Claude wysyła"}</b> · {name}{opt}{where ? ` · ${where}` : ""}</>
+    : sentAlready ? <><b>{dest?.name ?? name}</b>{opt}{where ? ` · ${where}` : ""}</>
     : stays ? <><b>Szkic</b> · zostaje w zadaniu</>
     : mode === "parked" ? <><b>{stale ? "Nieaktualny szkic" : "Odłożony szkic"}</b> · {name}{where ? ` · ${where}` : ""}</>
     : <b>{dest?.name ?? name}</b>;
 
-  // podgląd i formularz zgody jednego szkicu (przy opcjach każdej z osobna); formularz „pub-<krok>” przy jednym szkicu, „pub-<krok>-<i>” przy opcjach
-  const view = (di: Draft | null, i: number) => {
+  // podgląd i formularz zgody jednego szkicu (przy opcjach każdej z osobna); formularz „pub-<krok>” przy jednym szkicu, „pub-<krok>-<i>” przy opcjach;
+  // dd: dokąd idzie ten szkic (przy opcjach miejsce tej opcji, nie kroku), stąd dymek przycisku
+  const view = (di: Draft | null, i: number, dd: Dest | null = dest) => {
     const action = di?.target.action ?? "send", where = di?.target.where ?? null, body = di?.body ?? s.output;
     // komentarz: wprost (action comment) albo odpowiedź/wysyłka w aplikacji, gdzie treść ląduje jako komentarz; commit i push to zapis kodu, nie komentarz
     const isCommit = action === "commit" || action === "push";
@@ -91,7 +97,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       : `${me}${where ? ` · ${where}` : ""}`;
     // pole z formatowaniem dla zwykłej treści przed decyzją; jego ukryte pole „body” należy do formularza „Zatwierdź”
     // szkic z obrazkiem zostaje tylko do odczytu (edytor by go zgubił) i pokazuje się sformatowany
-    const editable = (mode === "proposed" || mode === "parked") && !isRows && !((isPrompt || isCommit) && di) && !/!\[[^\]]*\]\(/.test(body ?? "");
+    const editable = (mode === "proposed" || mode === "parked") && !sentAlready && !isRows && !((isPrompt || isCommit) && di) && !/!\[[^\]]*\]\(/.test(body ?? "");
     const sfx = multi ? "-" + i : "", formId = "pub-" + s.id + sfx;
     // podpis szkicu z tej karty: zgoda obejmie tylko tę wersję (miejsce, pola, wiersze, pliki), nawet gdy agent zmieni szkic przed kliknięciem;
     // drugi podpis, z treścią: gdy Piotr nic nie zmienił, pole nie wysyła treści i zgoda obejmuje dokładnie bajty agenta; przy opcjach numer opcji
@@ -119,20 +125,21 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       </div></div>
     );
     const approve = (text: string) => (
-      <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} disabled={!!issue} title={issue ?? (stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dest?.kind === "send" ? " " + dest.in : ""}`)}>{text}</PendingButton></form>
+      <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} disabled={!!issue} title={issue ?? (stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dd?.kind === "send" ? " " + dd.in : ""}`)}>{text}</PendingButton></form>
     );
     return { preview, approve, isRows };
   };
   const one = view(d, 0);
   const mainLabel = approveLabel(dest, { stays, rows: one.isRows });
-  const pick = multi && (mode === "proposed" || mode === "parked");   // wybór opcji: siatka kart zamiast jednego podglądu
-  const list = multi && !chosen && !pick;                               // zamknięty albo w toku bez wybranej: opcje tylko do odczytu
+  const list = multi && !chosen && !pick;   // zamknięty albo w toku bez wybranej: opcje tylko do odczytu
   // przycisk celu w nagłówku karty przed wysyłką (po wysyłce link do wyniku; krok zamknięty bez wysyłki ma miejsce w rzędzie akcji strony); przy opcjach każda ma własny
   const tl = pick || list || mode === "sent" || mode === "unsent" ? null : targetLink(s, s.blocks, d ?? undefined);
-  // karta jednej opcji: stan i nazwa, przycisk celu tej opcji, podgląd, własny przycisk „Zatwierdź: Opcja X” (bez czasownika aplikacji: miejsce mówi
-  // przycisk celu i linia pod siatką); tylko do odczytu bez przycisków i formularza
+  // karta jednej opcji: stan i nazwa, przycisk celu tej opcji, podgląd, linia z miejscem tej opcji, własny przycisk „Zatwierdź: Opcja X” (bez czasownika
+  // aplikacji: miejsce mówi przycisk celu i linia pod podglądem); tylko do odczytu bez przycisków, linii miejsca i formularza
   const optionCard = (di: Draft, i: number, ro: boolean) => {
-    const v = view(di, i);
+    // miejsce tej opcji: z jej szkicu i klocków kontekstu kroku (blok zmian mówi, czy to commit albo prompt); każda opcja może iść gdzie indziej
+    const od = destOf({ ...s, blocks: [...(s.blocks ?? []).filter((b) => b.type !== "draft"), di] });
+    const v = view(di, i, od), oh = ro || stays ? null : destHint(od);
     return (
       <div key={i} className="block pub opt">
         <div className="pub-h">
@@ -141,12 +148,13 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
           {ro ? null : openBtn(targetLink(s, s.blocks, di))}
         </div>
         {v.preview}
+        {oh ? <p className="pub-dest">{oh}</p> : null}
         {ro ? null : <div className="actions">{v.approve(`Zatwierdź: ${optionLabel(di, i)}`)}</div>}
       </div>
     );
   };
-  // odrzucone wersje po wyborze: zwinięte, do odczytu, bez przycisku otwarcia i bez formularza
-  const rej = multi && chosen && rejected.length ? (
+  // odrzucone wersje po wyborze: zwinięte, do odczytu, bez przycisku otwarcia i bez formularza; nigdy obok siatki opcji (każda stałaby tam dwa razy)
+  const rej = multi && chosen && !pick && rejected.length ? (
     <details className="fold rej">
       <summary><span className="k">Odrzucone wersje ({rejected.length})</span><Icon k="chev" size={10} sw={2.2} /></summary>
       <div className="stack">{rejected.map((r) => <div key={drafts.indexOf(r)} className="msg"><h4>{label(r)}</h4>{r.subject ? <div className="who">{r.subject}</div> : null}{r.body ? <Markdown text={r.body} /> : <p>Brak treści.</p>}</div>)}</div>
@@ -169,7 +177,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       {changes ? (
         <div className="actions">
           <a className="btn" href={"#zm-" + s.id} title="Pliki i diffy na kartce kroku">Zobacz zmiany ({changes.files.length})</a>
-          {previewUrl ? <a className="btn ico" href={previewUrl} target="_blank" rel="noopener" title={previewUrl}>Otwórz podgląd<Icon k="ext" size={13} sw={1.6} /></a> : null}
+          {previewUrl && mode !== "sent" && mode !== "unsent" ? <a className="btn ico" href={previewUrl} target="_blank" rel="noopener" title={previewUrl}>Otwórz podgląd<Icon k="ext" size={13} sw={1.6} /></a> : null}
           {previewPath ? <span className="sub" title="Podgląd leży na Macu: otwórz go w Finderze albo w przeglądarce">Podgląd: <code>{previewPath}</code> <CopyButton text={previewPath} label="Kopiuj ścieżkę" /></span> : null}
         </div>
       ) : null}
@@ -177,14 +185,14 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       {rej}
       {mode === "proposed" ? (
         <div className="actions">
-          {pick ? null : one.approve(mainLabel)}
+          {pick || sentAlready ? null : one.approve(mainLabel)}
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Szkic zostaje, krok wraca do zrobienia">Odłóż</PendingButton></form>
           {issue ? <div className="note warn">{issue}</div> : hint ? <p className="pub-dest">{hint}</p> : null}
         </div>
       ) : mode === "parked" ? (
         <div className="actions">
-          {pick ? null : one.approve(mainLabel)}
+          {pick || sentAlready ? null : one.approve(mainLabel)}
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn" title="Zamknij krok bez wysyłania">Zamknij bez wysyłki</PendingButton></form>
           {issue ? <div className="note warn">{issue}</div> : hint ? <p className="pub-dest">{hint}</p> : null}

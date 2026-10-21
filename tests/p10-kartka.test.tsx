@@ -5,7 +5,10 @@
 // Punkt 3b/4: karta publikacji z opcjami: każda we własnej karcie z własnym formularzem i „Zatwierdź: Opcja X”, po wyborze wybrana w nagłówku,
 // reszta pod „Odrzucone wersje”; nagłówek „Teraz” mówi „Wybierz opcję”; przycisk celu stoi w nagłówku karty, także przy jednym szkicu.
 // Punkt 3c: agent widzi opcje w get_task (sekcja na każdą z nazwą, niewybrana „nie wysyłaj”, ten, kto wysyła, dostaje tylko wybraną) i w czacie.
+// Poprawki po przeglądzie: wysłana opcja po „Przywróć do zrobienia” bez zgody, miejsce każdej opcji pod jej podglądem, „Otwórz podgląd” tylko
+// do zamknięcia kroku, a w CSS rząd opcji bez przyklejenia na telefonie, tło kodu i tytuł w karcie źródła.
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Blocks, type Block, type Step } from "@/lib/schema";
 import { cardText, draftsText } from "@/lib/agent/context";
@@ -327,5 +330,74 @@ describe("opcje na karcie publikacji (punkt 3b/4)", () => {
     expect(h).not.toContain("<form");
     expect(h).not.toContain("Zatwierdź");
     expect(h).not.toContain("Odrzucone wersje");
+  });
+  it("odłożony krok z wysłaną opcją (po „Przywróć do zrobienia”): bez „Zatwierdź”, wybrana w nagłówku jak po wysyłce, odrzucona raz pod „Odrzucone wersje”", () => {
+    const s = step({ status: "todo", tool: "clickup", needsApproval: true, blocks: [A, { ...B, status: "sent" as const }] });
+    expect(cardModeOf(s)).toBe("parked");
+    const h = card(s, "parked");
+    expect(count(h, /Zatwierdź/g)).toBe(0);
+    expect(h).not.toContain('id="pub-');   // bez formularza zgody; „Zamknij bez wysyłki” zostaje
+    expect(count(h, /Odrzucone wersje \(1\)/g)).toBe(1);
+    expect(count(h, /Zmieniamy termin na piątek\./g)).toBe(1);
+    expect(count(h, /Termin zostaje, dokładamy osobę\./g)).toBe(1);
+    expect(h).toContain("<b>ClickUp</b> · Opcja B · Ticket 869bbbbb2");
+    expect(h).not.toContain("Odłożony szkic");
+    expect(h).not.toContain("cmp");
+    expect(h).not.toContain("pub-dest");
+    expect(h).toContain("Zamknij bez wysyłki");
+    // ta sama para jeszcze przed decyzją: siatka z dwoma „Zatwierdź: Opcja X” i bez „Odrzucone wersje”, jak dotąd
+    const hp = card(step({ status: "todo", tool: "clickup", needsApproval: true, blocks: [A, B] }), "parked");
+    expect(count(hp, /Zatwierdź: Opcja/g)).toBe(2);
+    expect(hp).not.toContain("Odrzucone wersje");
+  });
+  it("miejsce każdej opcji pod jej podglądem (dwa różne tickety), bez wspólnej linii pod siatką; dymek przycisku z miejsca tej opcji", () => {
+    const A1 = { ...A, target: { ...A.target, where: "Ticket A1" } }, B2 = { ...B, target: { ...B.target, where: "Ticket B2" } };
+    const h = card(step({ status: "draft", tool: "clickup", needsApproval: true, blocks: [A1, B2] }), "proposed");
+    expect(count(h, /class="pub-dest"/g)).toBe(2);
+    expect(count(h, /Ticket A1 · /g)).toBe(1);
+    expect(count(h, /Ticket B2 · /g)).toBe(1);
+    expect(h).toContain('<p class="pub-dest">Ticket A1 · zmieni ticket</p>');
+    expect(h).toContain('<p class="pub-dest">Ticket B2 · zmieni ticket</p>');
+    // linia miejsca stoi w karcie opcji: po podglądzie, przed jej przyciskiem
+    expect(h.indexOf("Ticket A1 · ")).toBeLessThan(h.indexOf("Zatwierdź: Opcja A"));
+    expect(h.indexOf("Zatwierdź: Opcja A")).toBeLessThan(h.indexOf("Ticket B2 · "));
+    expect(h.indexOf("Ticket B2 · ")).toBeLessThan(h.indexOf("Zatwierdź: Opcja B"));
+    // opcje do różnych aplikacji: dymek każdego przycisku mówi o jej miejscu, nie o pierwszej opcji
+    const slackB = { ...B, target: { app: "slack", action: "send" as const, where: "#dev" } };
+    const hm = card(step({ status: "draft", tool: "clickup", needsApproval: true, blocks: [A1, slackB] }), "proposed");
+    expect(hm).toContain('title="Claude zaktualizuje dokładnie tę treść w ClickUpie"');
+    expect(hm).toContain('title="Claude wyśle dokładnie tę treść na Slacku"');
+    expect(hm).toContain('<p class="pub-dest">#dev · wyśle wiadomość</p>');
+    // jeden szkic jak dotąd: jedna linia miejsca, pod przyciskami
+    const h1 = card(step({ status: "draft", tool: "clickup", needsApproval: true, blocks: [A1] }), "proposed");
+    expect(count(h1, /class="pub-dest"/g)).toBe(1);
+    expect(h1.indexOf("Zatwierdź i zaktualizuj")).toBeLessThan(h1.indexOf("Ticket A1 · zmieni ticket"));
+  });
+  it("„Otwórz podgląd” z bloku zmian tylko do zamknięcia kroku: po wysyłce ma go blok zmian pod kartą, karta zostawia „Zobacz zmiany”", () => {
+    const changes: Block = { type: "changes", repo: "a/b", branch: "feat", preview: "https://podglad.example/x", files: [{ path: "src/a.ts" }] };
+    const git = (status: Draft["status"]): Draft => ({ type: "draft", target: { app: "github", action: "commit", where: "a/b" }, body: "feat: x", status });
+    const sent = step({ status: "done", tool: "github", needsApproval: true, blocks: [changes, git("sent")] });
+    expect(cardModeOf(sent)).toBe("sent");
+    const hs = card(sent, "sent");
+    expect(hs).not.toContain("Otwórz podgląd");
+    expect(hs).toContain("Zobacz zmiany (1)");
+    expect(card(step({ status: "done", tool: "github", needsApproval: true, blocks: [changes, git("proposed")] }), "unsent")).not.toContain("Otwórz podgląd");
+    expect(renderToStaticMarkup(<BlockView b={changes} form={{ taskId: "t1", stepId: sent.id }} />)).toContain("Otwórz podgląd");
+    const hp = card(step({ status: "draft", tool: "github", needsApproval: true, blocks: [changes, git("proposed")] }), "proposed");
+    expect(count(hp, /Otwórz podgląd/g)).toBe(1);
+    expect(hp).toContain('href="https://podglad.example/x"');
+    expect(hp).toContain("Zobacz zmiany (1)");
+  });
+});
+
+describe("css: rząd opcji na telefonie, karta źródła (poprawki po przeglądzie)", () => {
+  it("przyklejony rząd tylko na zewnętrznej karcie bez siatki opcji; kod w karcie źródła ma tło; tytuł karty źródła nad nagłówkami treści", () => {
+    const css = readFileSync("src/app/globals.css", "utf8");
+    expect(css).not.toContain(".pub .actions { position: sticky");
+    expect(css).toMatch(/@media \(max-width: 860px\) \{[^}]*\.block\.pub:not\(\.opt\) > \.actions \{ position: sticky; bottom: 0;/);
+    expect(css).toContain(".block.pub:has(> .cmp) > .actions { position: static; margin: 0; padding: 0; background: transparent; border-radius: 0; }");
+    expect(css).toContain(".srcdoc .msg.doc code { background: var(--surface-2); }");
+    expect(css).toContain(".srcdoc > h4 { font-size: 16px; font-weight: 700; line-height: 1.3; }");
+    expect(css).toContain(".srcdoc .md h4 { font-size: 15px; }");
   });
 });
