@@ -4,8 +4,30 @@ import { createHash } from "node:crypto";
 import { appOfLabel, normalizeTool, type Block, type Step } from "../schema";
 
 export type Draft = Extract<Block, { type: "draft" }>;
-// szkic kroku: pierwszy blok draft (ten pokazuje karta publikacji i ten jedynie może mieć zgodę)
-export const draftOf = (s: Pick<Step, "blocks"> | { blocks: Block[] | null }): Draft | null => (s.blocks?.find((b) => b.type === "draft") as Draft | undefined) ?? null;
+type HasBlocks = Pick<Step, "blocks"> | { blocks: Block[] | null };
+// wszystkie szkice kroku w kolejności kartki: drugi i kolejne to opcje (paczka 10)
+export const draftsOf = (s: HasBlocks): Draft[] => (s.blocks ?? []).filter((b): b is Draft => b.type === "draft");
+// szkic kroku: wysłany, inaczej zatwierdzony, inaczej pierwszy. Przy jednym szkicu zawsze on; przy opcjach ta, którą Piotr wybrał
+// (ten pokazuje karta publikacji, ten bierze wysyłka i ten jedynie może mieć zgodę)
+export const draftOf = (s: HasBlocks): Draft | null => { const ds = draftsOf(s); return ds.find((d) => d.status === "sent") ?? ds.find((d) => d.status === "approved") ?? ds[0] ?? null; };
+// opcje: wybrana = wysłana, inaczej zatwierdzona; odrzucone = propozycje obok wybranej. Odrzucenie wynika ze stanu, nic nie zapisujemy osobno
+export function optionsOf(s: HasBlocks): { drafts: Draft[]; chosen: Draft | null; rejected: Draft[]; multi: boolean } {
+  const drafts = draftsOf(s);
+  const chosen = drafts.find((d) => d.status === "sent") ?? drafts.find((d) => d.status === "approved") ?? null;
+  return { drafts, chosen, rejected: chosen ? drafts.filter((d) => d.status === "proposed") : [], multi: drafts.length > 1 };
+}
+const letter = (i: number) => String.fromCharCode(65 + i);
+// nazwa opcji: title szkicu, inaczej litera z pozycji wśród szkiców („Opcja A”, „Opcja B”)
+export const optionLabel = (d: Draft, i: number): string => d.title?.trim() || `Opcja ${letter(i)}`;
+// numer opcji z numeru (0 = pierwsza) albo nazwy bez wielkości liter (title, „Opcja B”, samo „B”): poprawki z czatu i formularze; null, gdy nie ma takiej
+export function optionIndex(s: HasBlocks, ref: number | string | undefined): number | null {
+  const ds = draftsOf(s);
+  const n = typeof ref === "string" && /^\d+$/.test(ref.trim()) ? Number(ref) : ref;
+  if (typeof n === "number") return Number.isInteger(n) && ds[n] ? n : null;
+  const q = n?.trim().toLowerCase(); if (!q) return null;
+  const i = ds.findIndex((d, k) => [optionLabel(d, k), `Opcja ${letter(k)}`, letter(k)].some((x) => x.toLowerCase() === q));
+  return i >= 0 ? i : null;
+}
 
 // JSON o stałej kolejności kluczy, bez pól undefined: ta sama treść zawsze daje ten sam podpis
 const canon = (v: unknown): unknown => Array.isArray(v) ? v.map(canon)
@@ -63,18 +85,18 @@ export const isLocalFile = (app: string | null | undefined) => normalizeTool(app
 const PROMPT_APPS = new Set(["code", "claudeapp"]);
 export const isPromptDraft = (d: Draft | null | undefined, blocks?: Block[] | null): boolean => !!d && PROMPT_APPS.has(normalizeTool(d.target.app)) && !isGitDraft(d, blocks);
 
-// szkic od agenta (MCP set_blocks, model w aplikacji): sam nie jest ani zatwierdzony, ani wysłany. Ta sama treść co zapisany szkic zachowuje
-// jego stan (agent przepisał kartkę bez zmiany szkicu); inna treść to nowa propozycja, a drugi szkic w kroku zawsze tylko propozycja.
+// szkic od agenta (MCP set_blocks, model w aplikacji): sam nie jest ani zatwierdzony, ani wysłany. Ta sama treść co zapisany szkic (wybrany
+// albo pierwszy) zachowuje jego stan (agent przepisał kartkę bez zmiany szkicu); inna treść to nowa propozycja. Drugi szkic w kroku to opcja;
+// stan trzyma się treści, nie pozycji: dziedziczy go pierwszy przychodzący szkic o tym samym podpisie, każdy inny to propozycja.
 // Zapis agenta to jego aktualna propozycja, więc „nieaktualny” znika.
 export function coerceAgentDrafts(step: Pick<Step, "id" | "blocks">, incoming: Block[]): Block[] {
   const old = draftOf(step);
   const oldSig = old ? approvalSig(step, old) : null;
-  let first = true;
+  let matched = false;
   return incoming.map((b) => {
     if (b.type !== "draft") return b;
-    const isFirst = first; first = false;
     const rest: Draft = { ...b }; delete rest.stale;
-    if (isFirst && old && oldSig === approvalSig({ id: step.id, blocks: incoming }, b)) return { ...rest, status: old.status };
+    if (!matched && old && oldSig === approvalSig({ id: step.id, blocks: incoming }, b)) { matched = true; return { ...rest, status: old.status }; }
     return { ...rest, status: "proposed" as const };
   });
 }

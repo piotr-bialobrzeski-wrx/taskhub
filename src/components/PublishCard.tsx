@@ -95,7 +95,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
     // przed decyzją: samo pole z formatowaniem, bez ramki wiadomości (dokąd poleci mówi nagłówek karty), żeby nie zagnieżdżać trzech tła w sobie
     <div className="pub-edit">
       {d?.subject ? <h4>{d.subject}</h4> : null}
-      <RichField key={s.id} value={body ?? ""} form={formId} onSave={saveDraftBody.bind(null, t.id, s.id)} />
+      <RichField key={s.id} value={body ?? ""} form={formId} onSave={saveDraftBody.bind(null, t.id, s.id, 0)} />
       {d?.fields?.length ? <Facts facts={d.fields} /> : null}
     </div>
   ) : (

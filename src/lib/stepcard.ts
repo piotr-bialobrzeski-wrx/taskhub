@@ -1,7 +1,7 @@
 // Karta kroku „Teraz · Co · Skąd” (paczka 2, punkt 8): stały porządek sekcji, wynik na wierzchu, nic nie pokazuje się dwa razy.
 // Czysta logika bez React, żeby dało się ją testować; składanie w JSX jest w src/app/tasks/[id]/page.tsx.
 import { appName, doneByOf, EXTERNAL_TOOLS, inApp, isOwnerStep, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step } from "./schema";
-import { draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft } from "./agent/approval";
+import { draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, type Draft } from "./agent/approval";
 import { fileName, isHttpUrl, safeHref } from "./safeurl";
 import { fmtTime } from "./clock";
 import { shortTitle } from "./auto";
@@ -197,11 +197,12 @@ export function nowHeading(state: CardState, mode: string | null, deps: number, 
 }
 
 // dokąd prowadzi krok jeszcze przed wysyłką: ticket, wątek albo dokument, w którym coś się zmieni. Kolejność: adres podany przez agenta w szkicu,
-// adres albo id ClickUp w polu „dokąd”, potem źródło z kartki z tej samej aplikacji (ticket, wątek, komentarz, z którego krok wyrósł)
+// adres albo id ClickUp w polu „dokąd”, potem źródło z kartki z tej samej aplikacji (ticket, wątek, komentarz, z którego krok wyrósł).
+// option: konkretna opcja (karta opcji); bez niej szkic kroku (wybrany albo pierwszy)
 const NO_TARGET = new Set(["manual", "claude", "claudeapp", "code", "file"]);
 const HTTP = /https?:\/\/[^\s)>\]]+/;
-export function targetLink(s: Pick<Step, "tool" | "title">, blocks: Block[] | null | undefined): { label: string; url: string } | null {
-  const draft = blocks?.find((b) => b.type === "draft") as Extract<Block, { type: "draft" }> | undefined;
+export function targetLink(s: Pick<Step, "tool" | "title">, blocks: Block[] | null | undefined, option?: Draft): { label: string; url: string } | null {
+  const draft = option ?? draftOf({ blocks: blocks ?? null });
   const app = normalizeTool(draft?.target.app ?? s.tool, s.tool);
   const label = openLabel(app);
   const given = draft?.target.url?.trim();
@@ -214,19 +215,23 @@ export function targetLink(s: Pick<Step, "tool" | "title">, blocks: Block[] | nu
     const id = [where, s.title].map((x) => /\b(?=[0-9a-z]*[a-z])(?=[0-9a-z]*\d)([0-9][0-9a-z]{6,10})\b/.exec(x)?.[1]).find(Boolean);
     if (id) return { label, url: `https://app.clickup.com/t/${id}` };
   }
+  // zapas z kartki: jedno źródło tej aplikacji to miejsce kroku; dwa różne adresy (porównanie dwóch ticketów) to brak przycisku, bez zgadywania
+  let url: string | null = null;
   for (const b of blocks ?? []) {
     const src = (b as { source?: { app?: string; url?: string } }).source;
-    if (src?.url && /^https?:\/\//.test(src.url) && src.app?.toLowerCase() === app.toLowerCase()) return { label, url: src.url };
+    if (!(src?.url && /^https?:\/\//.test(src.url) && src.app?.toLowerCase() === app.toLowerCase())) continue;
+    if (url && url !== src.url) return null;
+    url = src.url;
   }
-  return null;
+  return url ? { label, url } : null;
 }
 
 // to samo miejsce i ta sama czynność (np. komentarz w tickecie 869dxk3h9): po tym rozpoznajemy dwa kroki, które wysłałyby to samo dwa razy
 const COMMENTISH = new Set(["figma", "github", "clickup"]);
 export function draftPlace(s: Pick<Step, "tool" | "title">, blocks: Block[] | null | undefined): string | null {
-  const draft = blocks?.find((b) => b.type === "draft") as Extract<Block, { type: "draft" }> | undefined;
+  const draft = draftOf({ blocks: blocks ?? null });
   if (!draft) return null;
-  const url = targetLink(s, blocks)?.url;
+  const url = targetLink(s, blocks, draft)?.url;
   if (!url) return null;
   const app = draft.target.app.toLowerCase(), act = draft.target.action ?? "send";
   const kind = COMMENTISH.has(app) && (act === "reply" || act === "send") ? "comment" : act;

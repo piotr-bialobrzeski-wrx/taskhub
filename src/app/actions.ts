@@ -14,7 +14,7 @@ import { bridgeHold, busyWith, newTaskText, noStepsWho, shortTitle, type Queue, 
 import { liveActivity } from "@/lib/live";
 import { fmtTime } from "@/lib/clock";
 import { BRIDGE_ALIVE_MS, connectorIssue, isGitDraft } from "@/lib/bridge";
-import { draftOf, isExternalApp, isLocalFile, isPromptDraft, shownSig } from "@/lib/agent/approval";
+import { draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, shownSig, type Draft } from "@/lib/agent/approval";
 import { decisionText, destOf, openQuestions, stepKind } from "@/lib/stepcard";
 import { isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
 
@@ -233,24 +233,29 @@ export async function handoff(taskId: string, stepId: string) {
 // zatwierdzenie szkicu: krok, który coś wysyła, idzie do wysłania (mostek wyśle dokładnie zatwierdzoną treść); inny szkic jest po prostu gotowy
 // fd: formularz zatwierdzenia niesie treść z pola z formatowaniem (body), więc zatwierdza się to, co Piotr widzi, także bez wcześniejszego zapisu.
 // To jedyna droga do zgody: repo.approveDraft zapisuje podpis tej treści; każda późniejsza zmiana treści zgodę kasuje.
+// option: numer opcji z formularza (przy kilku szkicach w kroku każda ma własny przycisk); bez niego szkic kroku = wybrany albo pierwszy
 export async function approveStep(taskId: string, stepId: string, fd?: FormData) {
   const o = await requireOwner();
   const { task, step } = await stepOf(o.id, taskId, stepId);
   const body = fd?.get("body");
   const edited = typeof body === "string" ? body : null;
+  const opt = fd?.get("option");
+  const option = typeof opt === "string" && /^\d+$/.test(opt) ? Number(opt) : undefined;
+  const pick = (s: Step): Draft | null => (option != null ? draftsOf(s)[option] ?? null : draftOf(s));
   // podpis szkicu z karty, którą Piotr widział: bez treści, gdy ją poprawił (idzie w formularzu); z treścią, gdy nietknięta (zgoda na bajty agenta)
   const shown = edited !== null ? fd?.get("seen") : fd?.get("seenFull") ?? fd?.get("seen");
   const seen = typeof shown === "string" && shown ? shown : null;
   if (step.status === "done") { refresh(taskId); return; }
   // szkic do „pliku” sprzed paczki 7: nic go nie wyśle, plik zapisuje krok „Plik na Macu”
-  const d0 = draftOf(step);
+  const d0 = pick(step);
   if (d0 && isLocalFile(d0.target.app)) {
     await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(step.title, 60)}”: to plik na Macu, nie wysyłka, więc ten szkic nigdzie nie pójdzie. Plik zapisuje krok „Plik na Macu”.`, { stepId });
     refresh(taskId); return;
   }
+  // bez zgody: zatwierdzenie kończy krok, a wybrana opcja (przy jednym szkicu on sam) zapisuje się jako wysłana
   if (!step.needsApproval) {
-    if (edited !== null) await writeDraftBody(stepId, step, edited);
-    await finishStep(o.id, taskId, stepId); refresh(taskId); return;
+    if (edited !== null) await writeDraftBody(stepId, step, edited, option);
+    await finishStep(o.id, taskId, stepId, { chosen: option ?? 0 }); refresh(taskId); return;
   }
   // szkic, którego mostek nie wyśle (brak konektora tej aplikacji na Macu, kilka kont, konektor innej firmy): zgoda nic by nie dała, Piotr czyta czemu
   if (d0 && destOf(step)?.kind === "send") {
@@ -261,7 +266,7 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
       refresh(taskId); return;
     }
   }
-  if (await repo.approveDraft(o.id, stepId, { body: edited, seen })) {
+  if (await repo.approveDraft(o.id, stepId, { body: edited, seen, option })) {
     // szkic, który nie wychodzi poza Task Hub (krok Piotra, notatka): zgoda go kończy, nie czeka na bieg wysyłki mostka.
     // Commit wysyła aplikacja na Macu, a zatwierdzony prompt dla agenta wykonuje bieg pracy, więc te czekają
     const s = (await repo.getTask(o.id, taskId))?.steps.find((x) => x.id === stepId);
@@ -271,7 +276,7 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
   } else if (seen) {
     // agent zmienił szkic, zanim Piotr kliknął: zgody nie ma, karta pokaże nową wersję
     const s = (await repo.getTask(o.id, taskId))?.steps.find((x) => x.id === stepId);
-    const d = s ? draftOf(s) : null;
+    const d = s ? pick(s) : null;
     if (s && d && s.status !== "done" && !s.sendStartedAt && shownSig(s, d, edited !== null) !== seen)
       await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(s.title, 60)}”: szkic zmienił się, zanim go zatwierdziłeś. Sprawdź go jeszcze raz.`, { stepId });
   }
@@ -284,19 +289,21 @@ export async function saveReport(fd: FormData) {
   await finishStep(o.id, taskId, stepId, { report, link: url(str(fd, "link")) ?? undefined });
   refresh(taskId);
 }
-// treść szkicu z pola z formatowaniem (Markdown): poprawia blok draft czekający na decyzję albo, gdy szkicu nie ma, wynik kroku.
-// Poprawka zatwierdzonego szkicu kasuje zgodę (repo), szkic wraca do zatwierdzenia
-async function writeDraftBody(stepId: string, step: Step, body: string) {
-  const d = step.blocks?.find((b) => b.type === "draft");
+// treść szkicu z pola z formatowaniem (Markdown): poprawia blok draft czekający na decyzję (option = numer opcji; bez niego wybrany albo pierwszy)
+// albo, gdy szkicu nie ma, wynik kroku. Poprawka zatwierdzonego szkicu kasuje zgodę (repo), szkic wraca do zatwierdzenia
+async function writeDraftBody(stepId: string, step: Step, body: string, option?: number) {
+  const d = option != null ? draftsOf(step)[option] : draftOf(step);
+  if (option != null && !d) return;   // nie ma takiej opcji
   if (d && d.status === "sent") return;
   if (d) { if (d.body !== body) await repo.updateStep(stepId, { blocks: step.blocks!.map((b) => (b === d ? { ...d, body } : b)) }); }
   else if (step.output !== body) await repo.updateStep(stepId, { output: body });
 }
-export async function saveDraftBody(taskId: string, stepId: string, body: string) {
+// option: numer opcji na karcie (0 przy jednym szkicu); pole z formatowaniem woła z samą treścią
+export async function saveDraftBody(taskId: string, stepId: string, option: number, body: string) {
   const o = await requireOwner();
   const { step } = await stepOf(o.id, taskId, stepId);
   if (step.status === "done" || step.status === "handoff") return;   // wysłane albo w wysyłce: treść już nie do zmiany
-  await writeDraftBody(stepId, step, body);
+  await writeDraftBody(stepId, step, body, option);
   refresh(taskId);
 }
 export async function saveOutput(fd: FormData) {

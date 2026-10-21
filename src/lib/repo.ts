@@ -5,11 +5,11 @@ import { sql } from "./db";
 import { type Company, type Connection, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample, appOfLabel, isOwnerStep, normalizeTool, toolLabel } from "./schema";
 import { agentMinOf, elapsedSec, Q, roundQ, spentMin } from "./time";
 import { isHttpUrl, sanitizeBlocks } from "./safeurl";
-import { approvalSig, approvalValid, isGitDraft, isSendable, shownSig, type Draft } from "./agent/approval";
+import { approvalSig, approvalValid, draftOf, draftsOf, isGitDraft, isSendable, shownSig, type Draft } from "./agent/approval";
 import { doneChat, stepKind } from "./stepcard";
 import { shortTitle } from "./auto";
 import { guessProject } from "./project-guess";
-export { approvalSig, approvalValid, draftOf, isSendable } from "./agent/approval";
+export { approvalSig, approvalValid, draftOf, draftsOf, isSendable, optionLabel, optionsOf } from "./agent/approval";
 
 type Row = Record<string, unknown>;
 const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : v == null ? null : String(v));
@@ -369,18 +369,17 @@ export type StepPatch = Partial<{ title: string; detail: string; tool: string; s
 const parseBlocks = (v: unknown): Block[] | null => { if (!v) return null; const p = Blocks.safeParse(v); return p.success ? p.data : null; };
 const isApproved = (b: Block) => b.type === "draft" && b.status === "approved";
 const demote = (blocks: Block[]) => blocks.map((b): Block => (b.type === "draft" && b.status === "approved" ? { ...b, status: "proposed" } : b));
-// klocki przed zapisem: adresy tylko http(s); „zatwierdzony” zostaje tylko pierwszy szkic z ważnym podpisem Piotra (ta sama treść),
-// „wysłany” tylko przy zamknięciu kroku po wysyłce (sent) albo gdy to bez zmian szkic już wysłany; reszta to propozycja
+// klocki przed zapisem: adresy tylko http(s); „zatwierdzony” zostaje tylko pierwszy szkic z ważnym podpisem Piotra (ta sama treść; przy opcjach
+// wybraną poznaje podpis, nie pozycja), „wysłany” tylko przy zamknięciu kroku po wysyłce (sent) albo gdy to bez zmian szkic już wysłany; reszta to propozycja
 function guardBlocks(stepId: string, cur: { blocks: Block[] | null; approvedSig: string | null } | null, next: Block[], sent: boolean): { blocks: Block[]; approved: boolean } {
   const sentSigs = new Set((cur?.blocks ?? []).filter((b): b is Draft => b.type === "draft" && b.status === "sent").map((d) => approvalSig({ id: stepId, blocks: cur?.blocks }, d)));
-  let approved = false, first = true;
+  let approved = false;
   const clean = sanitizeBlocks(next);
   const blocks = clean.map((b): Block => {
     if (b.type !== "draft") return b;
-    const isFirst = first; first = false;
     if (b.status === "proposed") return b;
     const sig = approvalSig({ id: stepId, blocks: clean }, b);
-    if (b.status === "approved" && isFirst && !!cur?.approvedSig && sig === cur.approvedSig) { approved = true; return b; }
+    if (b.status === "approved" && !approved && !!cur?.approvedSig && sig === cur.approvedSig) { approved = true; return b; }
     if (b.status === "sent" && (sent || sentSigs.has(sig))) return b;
     return { ...b, status: "proposed" };
   });
@@ -452,7 +451,7 @@ export async function deleteStep(id: string): Promise<void> { await sql()`delete
 
 // krok gotowy: zapis czasu do historii (uczenie), status, raport i link. by: kto zamknął (Piotr z aplikacji, agent przez MCP albo bieg wysyłki);
 // addSpentSec = czas Piotra, addAgentSec = czas Claude'a; próbka do kalibracji: czas Piotra dla jego kroku, czas Claude'a dla reszty
-export async function completeStep(ownerId: string, task: Task, step: Step, opts: { report?: string; link?: string; output?: string; addSpentSec?: number; addAgentSec?: number; by?: "owner" | "agent" } = {}): Promise<void> {
+export async function completeStep(ownerId: string, task: Task, step: Step, opts: { report?: string; link?: string; output?: string; addSpentSec?: number; addAgentSec?: number; by?: "owner" | "agent"; chosen?: number } = {}): Promise<void> {
   const spentSec = step.spentSec + (opts.addSpentSec ?? 0);
   const agentSec = (step.agentSec ?? 0) + Math.max(0, Math.round(opts.addAgentSec ?? 0));
   const patch: StepPatch = { status: "done", prevStatus: step.status === "done" ? step.prevStatus : step.status, handoffAt: null, doneAt: new Date().toISOString(), doneBy: opts.by ?? "owner", agentStartedAt: null, agentSec };
@@ -461,8 +460,10 @@ export async function completeStep(ownerId: string, task: Task, step: Step, opts
   if (opts.output !== undefined) patch.output = opts.output;
   if (opts.link && isHttpUrl(opts.link)) patch.link = opts.link.trim();
   // zatwierdzony szkic, który krok właśnie wysłał, zostaje w zadaniu jako zapis wysyłki. Wołający pilnują, kto może tak zamknąć krok:
-  // Piotr, mostek v1 przy ważnej zgodzie, bieg wysyłki tego kroku (MCP complete_step i czat w aplikacji odmawiają pozostałym)
-  if (step.blocks?.some(isApproved)) patch.blocks = step.blocks.map((b) => (b.type === "draft" && b.status === "approved" ? { ...b, status: "sent" as const } : b));
+  // Piotr, mostek v1 przy ważnej zgodzie, bieg wysyłki tego kroku (MCP complete_step i czat w aplikacji odmawiają pozostałym).
+  // chosen: krok bez zgody (szkic zostaje w zadaniu) tak samo zapisuje opcję, którą Piotr wybrał przyciskiem (indeks wśród szkiców)
+  const pick = opts.chosen != null ? draftsOf(step)[opts.chosen] : undefined;
+  if (step.blocks?.some(isApproved) || pick?.status === "proposed") patch.blocks = step.blocks!.map((b) => (b.type === "draft" && (b.status === "approved" || b === pick) ? { ...b, status: "sent" as const } : b));
   const own = isOwnerStep(step);
   const sm = own ? spentMin({ spentSec }) : agentMinOf({ agentSec });
   if (sm > 0 && !step.logged) {
@@ -492,13 +493,16 @@ export async function reopenStep(ownerId: string, taskId: string, step: Step): P
 // Jedyne miejsce, które zapisuje zgodę: kliknięcie Piotra „Zatwierdź” (akcja approveStep). Treść poprawiona w tym samym kliknięciu (body) zapisuje się
 // razem ze zgodą; stary szkic bez bloku (sama treść w output) dostaje blok. Szkic już wysyłany (bieg wysyłki go wziął) albo wysłany się nie zmienia.
 // seen: podpis szkicu z karty, którą Piotr miał przed oczami (shownSig); inny podpis w bazie = szkic zmienił się po wyświetleniu, zgody nie ma
-export async function approveDraft(ownerId: string, stepId: string, opts: { body?: string | null; seen?: string | null } = {}): Promise<boolean> {
+// option: numer opcji wśród szkiców kroku (0 = pierwsza); przy jednym szkicu zbędny, przy kilku bez poprawnego numeru zgody nie ma
+export async function approveDraft(ownerId: string, stepId: string, opts: { body?: string | null; seen?: string | null; option?: number } = {}): Promise<boolean> {
   return sql().begin(async (tx) => {
     const [r] = await tx`select s.* from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId} for update of s`;
     if (!r || r.status === "done" || r.sendStartedAt) return false;
     const step = rowToStep(r, []);
     let blocks: Block[] = [...(step.blocks ?? [])];
-    let i = blocks.findIndex((b) => b.type === "draft");
+    const idx = blocks.map((b, k) => (b.type === "draft" ? k : -1)).filter((k) => k >= 0);
+    let i = idx.length > 1 ? idx[opts.option ?? -1] ?? -1 : idx[0] ?? -1;
+    if (idx.length > 1 && i < 0) return false;
     if (i >= 0 && opts.seen && shownSig(step, blocks[i] as Draft, opts.body != null) !== opts.seen) return false;
     if (i < 0) {
       const body = opts.body ?? step.output;
@@ -512,9 +516,12 @@ export async function approveDraft(ownerId: string, stepId: string, opts: { body
     delete d.stale;   // Piotr widział ten szkic i go przyjął
     blocks[i] = d;
     blocks = sanitizeBlocks(blocks);
+    // dwie opcje o tej samej treści: wybór byłby niejednoznaczny (zgoda trzyma się podpisu, nie pozycji), więc bez zgody
+    const sig = approvalSig({ id: step.id, blocks }, blocks[i] as Draft);
+    if (blocks.some((b, k) => k !== i && b.type === "draft" && approvalSig({ id: step.id, blocks }, b) === sig)) return false;
     const p: Row = {
       blocks: tx.json(blocks as never), blocks_at: new Date(), status: "handoff", prev_status: "draft", handoff_at: new Date(),
-      approved_at: new Date(), approved_sig: approvalSig({ id: step.id, blocks }, blocks[i] as Draft), send_started_at: null,
+      approved_at: new Date(), approved_sig: sig, send_started_at: null,
     };
     if (r.blocks && JSON.stringify(r.blocks) !== JSON.stringify(blocks)) p.blocks_prev = tx.json(r.blocks as never);
     await tx`update steps set ${tx(p)} where id = ${stepId}`;
@@ -921,9 +928,9 @@ async function afterRuns(ownerId: string, runs: Row[]): Promise<void> {
     // notatka zawsze, bo treść mogła wyjść; nie, gdy bieg sam powiedział w rozmowie, co się stało (leave_step, wysyłka po wycofaniu zgody)
     const [said] = await sql()`select 1 from chat_messages where owner_id = ${ownerId} and task_id = ${s.taskId as string} and role = 'agent' and created_at >= ${r.startedAt as Date} and actions->>'stepId' = ${stepId} limit 1`;
     if (said) continue;
-    const d = parseBlocks(s.blocks)?.find((b): b is Draft => b.type === "draft");
+    const blocks = parseBlocks(s.blocks), d = draftOf({ blocks });
     // commit z aplikacji na Macu: aplikacja wie, co się nie udało (np. commit jest, push nie), więc piszemy powód
-    const why = d && isGitDraft(d, parseBlocks(s.blocks)) && r.outcome === "error" && typeof r.note === "string" && r.note.trim() ? r.note.trim().slice(0, 500).replace(/([^.!?])$/, "$1.") : "";
+    const why = d && isGitDraft(d, blocks) && r.outcome === "error" && typeof r.note === "string" && r.note.trim() ? r.note.trim().slice(0, 500).replace(/([^.!?])$/, "$1.") : "";
     await addChat(ownerId, s.taskId as string, "agent", why ? `Commit nie wyszedł: ${why} Szkic wrócił do zatwierdzenia; zatwierdź go ponownie, gdy to poprawisz.` : unconfirmedSendNote(d?.target.app ?? "aplikacji docelowej"), { stepId });
   }
 }
