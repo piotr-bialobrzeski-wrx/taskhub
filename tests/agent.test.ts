@@ -191,6 +191,10 @@ describe("get_task: szkice kroków w pełnej treści", () => {
     expect(out).not.toContain("SZKIC KROKU e");
     expect(draftsText([{ id: "z", title: "Z", status: "todo", blocks: null as never }])).toBe("");
   });
+  it("szkic z nazwą (title) ma ją w nagłówku sekcji jako nazwę opcji; bez nazwy nagłówek jak dotąd (paczka 10)", () => {
+    expect(draftsText([{ id: "s1", title: "Odpisz", status: "draft", blocks: [draft("proposed", { title: "Krótko" })] }])).toContain("SZKIC KROKU s1 „Odpisz” · Krótko (czeka na zatwierdzenie Piotra: nie wysyłaj)");
+    expect(draftsText([{ id: "s1", title: "Odpisz", status: "draft", blocks: [draft("proposed", { title: " " })] }])).toContain("SZKIC KROKU s1 „Odpisz” (czeka na zatwierdzenie Piotra: nie wysyłaj)");
+  });
 });
 
 describe("get_task: kartka niezrobionego kroku", () => {
@@ -208,5 +212,12 @@ describe("get_task: kartka niezrobionego kroku", () => {
     expect(out).toContain("[1] question: Kto nadaje poziom? | opcje: Agent / Reguły | ODPOWIEDŹ PIOTRA: Agent, ale z wyjątkiem");
     expect(out).toContain("[2] draft (pełna treść w SZKIC KROKU)");
     expect(out).not.toContain("Zrobiony");
+  });
+  it("szkic z nazwą opcji: odnośnik z nazwą; bez nazwy jak dotąd (paczka 10)", () => {
+    const out = cardText([{ id: "s1", title: "Odpisz", status: "todo", blocks: [
+      { type: "draft", title: "Opcja A", target: { app: "slack", action: "send" }, body: "x", status: "proposed" },
+      { type: "draft", target: { app: "slack", action: "send" }, body: "y", status: "proposed" },
+    ] }]);
+    expect(out).toBe("KARTKA KROKU s1 „Odpisz”:\n[0] draft „Opcja A” (pełna treść w SZKIC KROKU)\n[1] draft (pełna treść w SZKIC KROKU)");
   });
 });

@@ -4,7 +4,7 @@ import { type Company, type Connection, type Project, type Provenance, type Rule
 import { LEVELS, scoreOf, whyText, type Score } from "../priority";
 import { agentMinOf, calibrationText, fmtMin, remainEst, taskAgent, taskSpent, todayISO } from "../time";
 import { rulesFor } from "../repo";
-import { isPromptDraft, isSendable, type Approvable } from "./approval";
+import { isPromptDraft, isSendable, optionLabel, optionsOf, type Approvable } from "./approval";
 
 export type Scored = { task: Task; score: Score; project: Project | null };
 
@@ -169,7 +169,8 @@ export function cardText(steps: CardStep[], max = 6000, doneMax = 3000, doneTota
     }
   };
   const out: string[] = [];
-  const body = (s: CardStep) => (s.blocks ?? []).map((b, i) => (b.type === "draft" ? `[${i}] draft (pełna treść w SZKIC KROKU)` : one(b, i))).join("\n");
+  // szkic tylko jako odnośnik (treść w SZKIC KROKU); nazwa opcji, gdy ma title
+  const body = (s: CardStep) => (s.blocks ?? []).map((b, i) => (b.type === "draft" ? `[${i}] draft${b.title?.trim() ? ` „${b.title.trim()}”` : ""} (pełna treść w SZKIC KROKU)` : one(b, i))).join("\n");
   for (const s of steps) {
     if (s.status === "done" || !s.blocks?.length) continue;
     const b = body(s);
@@ -195,22 +196,28 @@ export function cardText(steps: CardStep[], max = 6000, doneMax = 3000, doneTota
 // więc body, temat, pola i wiersze idą bez skracania; odłożony szkic (krok wrócił do todo) i nieaktualny są oznaczone, żeby ich nie wysłać.
 // send: czy ten, kto pyta, wysyła szkic tego kroku (stary mostek: ważna zgoda; bieg wysyłki: tylko jego krok; konektor i bieg pracy: nikt).
 // Bez danych o zgodzie (same pola kroku) liczy się stan szkicu i kroku.
+// Opcje (2+ szkice w kroku, paczka 10): każda sekcja z nazwą opcji; po wyborze Piotra niewybrane są oznaczone „nie wysyłaj”, a ten, kto wysyła
+// (send prawdziwe), widzi tylko wybraną: bieg wysyłki bierze „sekcję SZKIC KROKU” i ma dostać dokładnie jedną.
 type DraftStep = Pick<Step, "id" | "title" | "status" | "blocks"> & Partial<Pick<Step, "approvedAt" | "approvedSig" | "sendStartedAt">>;
 const legacySend = (s: DraftStep) => !("approvedSig" in s) || isSendable(s as Approvable);
 export function draftsText(steps: DraftStep[], opts: { send?: (s: DraftStep) => boolean } = {}): string {
   const send = opts.send ?? legacySend;
   const out: string[] = [];
   for (const s of steps) {
-    for (const b of s.blocks ?? []) {
-      if (b.type !== "draft") continue;
+    const { drafts, chosen, multi } = optionsOf(s);
+    const chosenLabel = chosen ? optionLabel(chosen, drafts.indexOf(chosen)) : "";
+    drafts.forEach((b, k) => {
+      const rejected = b.status === "proposed" && !!chosen;
+      if (rejected && send(s)) return;
       const state = b.stale ? "NIEAKTUALNY: przygotuj od nowa, nie wysyłaj"
         : b.status === "sent" ? "wysłany"
+        : rejected ? `opcja niewybrana (Piotr wybrał „${chosenLabel}”): nie wysyłaj`
         : b.status === "approved" && s.status === "handoff" ? (send(s) ? (isPromptDraft(b, s.blocks) ? "ZATWIERDZONY PROMPT: wykonaj dokładnie to polecenie, potem complete_step" : "ZATWIERDZONY: wyślij dokładnie tę treść") : "zatwierdzony przez Piotra: wyśle go mostek Task Hub w osobnym biegu wysyłki; nie wysyłaj")
         : b.status === "approved" ? "zatwierdzony, ale krok nie czeka na wysyłkę: nie wysyłaj"
         : s.status === "draft" ? "czeka na zatwierdzenie Piotra: nie wysyłaj"
         : "odłożony: nie wysyłaj";
       const t = b.target;
-      const lines = [`SZKIC KROKU ${s.id} „${s.title}” (${state})`, `- dokąd: ${t.app}${t.where ? ` · ${t.where}` : ""}${t.url ? ` · ${t.url}` : ""} · akcja ${t.action}`];
+      const lines = [`SZKIC KROKU ${s.id} „${s.title}”${multi || b.title?.trim() ? ` · ${optionLabel(b, k)}` : ""} (${state})`, `- dokąd: ${t.app}${t.where ? ` · ${t.where}` : ""}${t.url ? ` · ${t.url}` : ""} · akcja ${t.action}`];
       if (b.subject) lines.push(`- temat: ${b.subject}`);
       if (b.fields?.length) lines.push(`- pola: ${b.fields.map((f) => `${f.label} = ${f.value}`).join("; ")}`);
       if (b.columns?.length) lines.push(`- wiersze (${b.columns.join(" | ")}):\n${(b.rows ?? []).map((r) => `  ${r.join(" | ")}`).join("\n")}`);
@@ -222,7 +229,7 @@ export function draftsText(steps: DraftStep[], opts: { send?: (s: DraftStep) => 
         if (f?.text) lines.push(`- treść jako ${f.label} (wyślij tę wersję):\n---\n${f.text}\n---`);
       }
       out.push(lines.join("\n"));
-    }
+    });
   }
   return out.join("\n");
 }

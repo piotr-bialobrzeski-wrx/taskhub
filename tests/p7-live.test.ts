@@ -70,8 +70,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("ślad biegu: krok „teraz”, 
     expect(r.steps?.[s2]).toMatchObject({ what: "napisał szkic" });
     const d = await step(t.id, s2);
     expect(d.status).toBe("draft"); expect(d.agentAt).not.toBeNull(); expect(d.openedAt).toBeNull();
-    // odmówiony set_blocks (dwa szkice): krok „teraz” tak, ale bez śladu i bez kropki
-    expect(await call(b.token, "set_blocks", { stepId: s3, blocks: [draft("A"), draft("B")] })).toContain("Nie zapisałem");
+    // odmówiony set_blocks (dwa identyczne szkice): krok „teraz” tak, ale bez śladu i bez kropki
+    expect(await call(b.token, "set_blocks", { stepId: s3, blocks: [draft("A"), draft("A")] })).toContain("Nie zapisałem");
     r = await theRun(b.run.id);
     expect(r.stepId).toBe(s3); expect(r.steps?.[s3]).toBeUndefined();
     expect((await step(t.id, s3)).agentAt).toBeNull();

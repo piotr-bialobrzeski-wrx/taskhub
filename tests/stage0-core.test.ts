@@ -123,8 +123,19 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("Etap 0: zgoda Piotra, tokeny bi
     expect((await workSummary(owner, { peek: true })).text).not.toContain("ZATWIERDZONE SZKICE DO WYSŁANIA");
     // complete_step nie zamyka szkicu czekającego na zgodę
     expect((await call(bridge, "complete_step", { stepId: sid, summary: "wysłane" })).text).toContain("Nie zamknąłem");
-    // dwa szkice w jednym kroku: odmowa (karta pokazuje tylko pierwszy)
-    expect((await call(client, "set_blocks", { stepId: sid, blocks: [draft("a"), draft("b")] })).text).toContain("jeden szkic");
+    // dwa szkice o tej samej treści w jednym kroku: odmowa (to jeden szkic, nie opcje)
+    expect((await call(client, "set_blocks", { stepId: sid, blocks: [draft("a"), draft("a")] })).text).toContain("jeden szkic");
+    // dwa różne szkice = opcje (paczka 10): obie propozycje, krok czeka na wybór; opcje do różnych aplikacji: odmowa
+    const t2 = await repo.createTask(owner, { title: "Agent z opcjami", steps: [{ title: "Odpisz na #dev", tool: "slack", needsApproval: true }] });
+    const sid2 = t2.steps[0].id;
+    expect((await call(client, "set_blocks", { stepId: sid2, blocks: [draft("a"), draft("b")] })).text).toContain("czeka na zatwierdzenie");
+    const s2 = await get(t2.id, sid2);
+    expect(repo.draftsOf(s2)).toHaveLength(2);
+    expect(repo.draftsOf(s2).map((d) => d.status)).toEqual(["proposed", "proposed"]);
+    expect(s2.approvedAt).toBeNull();
+    const mixed = await call(client, "set_blocks", { stepId: sid2, blocks: [draft("a"), { ...draft("b"), target: { app: "gmail", where: "zespol@x.pl", action: "send" as const } }] });
+    expect(mixed.text).toContain("Nie zapisałem"); expect(mixed.text).toContain("ten sam target.app");
+    expect(repo.draftsOf(await get(t2.id, sid2)).map((d) => d.body)).toEqual(["a", "b"]);
   });
 
   it("zgoda to podpis treści: zmiana treści, narzędzia, połączenia albo stanu ją kasuje; set_blocks nie zmienia zatwierdzonego szkicu", async () => {

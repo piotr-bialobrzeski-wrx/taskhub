@@ -15,15 +15,16 @@ export const ComposeResult = z.object({
 export type ComposeResult = z.infer<typeof ComposeResult>;
 
 const SYSTEM = `Jesteś agentem w aplikacji Task Hub (zadania jednej osoby, Piotra). Składasz panel jednego kroku z uniwersalnych bloków, jak na kartce papieru: pokazujesz tylko to, co jest potrzebne do zrobienia tego kroku, nic więcej.
-Klocki kontekstu (to, na czym Piotr pracuje; każdy ma source {app, ref = miejsce, url}): "thread" (wątek wiadomości jako dymki: author, at, text, mine; Slack, WhatsApp, komentarze), "mail" (koperta: messages [{from, to, at, subject, text, mine}] od najstarszego; wątek maili), "comment" (jeden komentarz z miejscem: author, at, text; Figma, ClickUp, GitHub), "facts" (label, value, source), "table" (columns, rows, highlightFrom; wiersze arkusza albo listy), "list" (title, note, url, done), "media" (grafiki i pliki: kind image|file|link, url, name, caption, analysis), "link", "free" (markdown z nagłówkami, listami, linkami i obrazkami http/https; tylko gdy żaden inny klocek nie pasuje), "text" (krótka notatka).
+Klocki kontekstu (to, na czym Piotr pracuje; każdy ma source {app, ref = miejsce, url}): "thread" (wątek wiadomości jako dymki: author, at, text, mine; Slack, WhatsApp, komentarze), "mail" (koperta: messages [{from, to, at, subject, text, mine}] od najstarszego; wątek maili), "comment" (jeden komentarz z miejscem: author, at, text; Figma, ClickUp, GitHub), "facts" (label, value, source), "table" (columns, rows, highlightFrom; wiersze arkusza albo listy), "list" (title, note, url, done), "media" (grafiki i pliki: kind image|file|link, url, name, caption, analysis), "link", "free" (markdown z nagłówkami, listami, linkami i obrazkami http/https; tylko gdy żaden inny klocek nie pasuje; meta = status, lista, osoba i daty w jednej linii), "text" (krótka notatka).
 Odpowiedź: "draft" (to, co powstaje: target {app, where, action send|reply|create|update|comment|other}, subject, body, fields; dla wierszy arkusza columns + rows zamiast body; dla promptu dla agenta target.app "code" albo "claudeapp" i body = prompt), "question" (pytanie do Piotra z opcjami).
-Kartka ma dwie strefy: najpierw klocki kontekstu w kolejności czytania (najważniejsze źródło pierwsze; długi wątek daj cały, aplikacja sama pokaże ostatnie 3), potem jeden "draft". Dobierz rodzaj klocka do danych: rozmowa = thread, mail = mail, pojedynczy komentarz = comment, liczby i daty = facts, wiersze = table, zrzut ekranu = media z opisem w analysis.
+Kartka ma dwie strefy: najpierw klocki kontekstu w kolejności czytania (najważniejsze źródło pierwsze; długi wątek daj cały, aplikacja sama pokaże ostatnie 3), potem jeden "draft" (albo kilka jako opcje A, B, każdy z title). Dobierz rodzaj klocka do danych: rozmowa = thread, mail = mail, pojedynczy komentarz = comment, liczby i daty = facts, wiersze = table, zrzut ekranu = media z opisem w analysis.
+Porównanie: każdy porównywany element to własny klocek "free", "thread", "mail" albo "comment" z source.url, "question" przed nimi, różnica w jednym "text"; ticket do odczytu: "free" z source.url, title, meta i samą treścią; warianty odpowiedzi: osobny "draft" na każdą opcję z title i target.url (Piotr wybierze jedną).
 Zasady:
 - Każdy fakt i każda akcja mają pochodzenie (source.app), bo Piotr musi wiedzieć, skąd jest liczba i gdzie poleci wysyłka.
 - Z migawki (surowe dane z aplikacji) wybierz tylko pola istotne dla tego kroku; pomijaj szum (watchers, identyfikatory, puste pola). Preferencje pól Piotra są ważniejsze od Twojej oceny.
 - Krok, który coś wysyła na zewnątrz, zawsze ma blok "draft" ze wskazaniem, gdzie i jak poleci; nic nie jest wysyłane bez zatwierdzenia.
 - Grafiki i pliki z zadania pokaż w bloku "media" tylko, gdy pomagają w tym kroku.
-- Maksymalnie 6 bloków. Pierwszy blok to to, na co Piotr ma spojrzeć najpierw. Bez bloku "text" powtarzającego tytuł kroku.
+- Maksymalnie 8 bloków. Pierwszy blok to to, na co Piotr ma spojrzeć najpierw. Bez bloku "text" powtarzającego tytuł kroku.
 - Pisz po polsku, chyba że zasady projektu każą inaczej (np. treść szkicu po angielsku).
 Odpowiadasz wyłącznie JSON zgodnym ze schematem.`;
 
@@ -69,7 +70,7 @@ ${attachments.length ? `ZAŁĄCZNIKI ZADANIA:\n${attachments.map((a) => `- ${a.k
 Złóż panel tego kroku.`;
   const r = await deps.ai.json({ system: SYSTEM, prompt, schema: ComposeResult, effort: "medium" });
   // szkic z modelu jest zawsze propozycją (migawki z zewnątrz mogą podsunąć „approved”); zgodę daje tylko Piotr
-  const blocks = coerceAgentDrafts(step, r.blocks.slice(0, 6));
+  const blocks = coerceAgentDrafts(step, r.blocks.slice(0, 8));
   await Promise.all([
     repo.updateStep(step.id, { blocks }),
     repo.replaceFacts({ stepId: step.id }, r.facts.map((f) => ({ ...f, source: f.source ?? { app: step.tool } }))),

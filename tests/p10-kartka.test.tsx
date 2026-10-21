@@ -4,10 +4,11 @@
 // Punkt 1: 2+ kolejne klocki źródłowe z adresem stoją obok siebie w siatce .cmp; pytanie, notatka albo klocek bez adresu przerywa ciąg.
 // Punkt 3b/4: karta publikacji z opcjami: każda we własnej karcie z własnym formularzem i „Zatwierdź: Opcja X”, po wyborze wybrana w nagłówku,
 // reszta pod „Odrzucone wersje”; nagłówek „Teraz” mówi „Wybierz opcję”; przycisk celu stoi w nagłówku karty, także przy jednym szkicu.
+// Punkt 3c: agent widzi opcje w get_task (sekcja na każdą z nazwą, niewybrana „nie wysyłaj”, ten, kto wysyła, dostaje tylko wybraną) i w czacie.
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Blocks, type Block, type Step } from "@/lib/schema";
-import { cardText } from "@/lib/agent/context";
+import { cardText, draftsText } from "@/lib/agent/context";
 import { stepContextText } from "@/lib/agent/chat";
 import { shownSig, type Draft } from "@/lib/agent/approval";
 import { groupBlocks, hasComparison, isSourceBlock, nowHeading } from "@/lib/stepcard";
@@ -54,6 +55,42 @@ describe("get_task i czat: meta i źródło klocka", () => {
   it("stepContextText: linia treści z meta w nawiasie kwadratowym, bez meta jak dotąd", () => {
     expect(stepContextText(step({ blocks: [ticket] }))).toContain("- treść [Status: Open · Lista: Backlog · Ola · 12.10.2026]: # Cel");
     expect(stepContextText(step({ blocks: [{ type: "free", markdown: "notatka" }] }))).toContain("- treść: notatka");
+  });
+});
+
+describe("get_task i czat: opcje (punkt 3c)", () => {
+  const opt = (body: string, extra: Partial<Draft> = {}): Draft => ({ type: "draft", target: { app: "slack", where: "#dev", action: "send" }, body, status: "proposed", ...extra });
+  const A = opt("Wersja krótka."), B = opt("Wersja długa, z uzasadnieniem.");
+  it("draftsText: dwie opcje do zatwierdzenia = sekcja na każdą, z nazwą z title albo z pozycji", () => {
+    const out = draftsText([{ id: "s1", title: "Odpisz", status: "draft", blocks: [A, { ...B, title: "Długo" }] }]);
+    expect(out.match(/SZKIC KROKU/g)).toHaveLength(2);
+    expect(out).toContain("SZKIC KROKU s1 „Odpisz” · Opcja A (czeka na zatwierdzenie Piotra: nie wysyłaj)\n- dokąd: slack · #dev · akcja send");
+    expect(out).toContain("SZKIC KROKU s1 „Odpisz” · Długo (czeka na zatwierdzenie Piotra: nie wysyłaj)");
+  });
+  it("draftsText: B zatwierdzona w handoff: A „opcja niewybrana (Piotr wybrał „Opcja B”): nie wysyłaj”; ten, kto wysyła, widzi tylko B", () => {
+    const s = { id: "s1", title: "Odpisz", status: "handoff" as const, blocks: [A, { ...B, status: "approved" as const }] };
+    const out = draftsText([s], { send: () => false });
+    expect(out.match(/SZKIC KROKU/g)).toHaveLength(2);
+    expect(out).toContain("SZKIC KROKU s1 „Odpisz” · Opcja A (opcja niewybrana (Piotr wybrał „Opcja B”): nie wysyłaj)");
+    expect(out).toContain("SZKIC KROKU s1 „Odpisz” · Opcja B (zatwierdzony przez Piotra: wyśle go mostek Task Hub w osobnym biegu wysyłki; nie wysyłaj)");
+    const send = draftsText([s], { send: () => true });
+    expect(send.match(/SZKIC KROKU/g)).toHaveLength(1);
+    expect(send).toContain("SZKIC KROKU s1 „Odpisz” · Opcja B (ZATWIERDZONY: wyślij dokładnie tę treść)");
+    expect(send).toContain(B.body); expect(send).not.toContain(A.body);
+    // nazwa wybranej z title; po wysyłce B „wysłany”, A dalej niewybrana (nikt już nie wysyła, więc obie widoczne)
+    const named = draftsText([{ ...s, blocks: [A, { ...B, title: "Długo", status: "approved" as const }] }], { send: () => false });
+    expect(named).toContain("· Opcja A (opcja niewybrana (Piotr wybrał „Długo”): nie wysyłaj)");
+    const done = draftsText([{ ...s, status: "done" as const, blocks: [A, { ...B, status: "sent" as const }] }], { send: () => false });
+    expect(done).toContain("· Opcja B (wysłany)");
+    expect(done).toContain("· Opcja A (opcja niewybrana (Piotr wybrał „Opcja B”): nie wysyłaj)");
+    // „Zatrzymaj” zdjęło zgodę: obie znów zwykłe propozycje, bez „niewybrana”
+    expect(draftsText([{ ...s, status: "todo" as const, blocks: [A, B] }], { send: () => false })).not.toContain("niewybrana");
+  });
+  it("stepContextText: SZKIC z nazwą opcji, niewybrana oznaczona; jeden szkic bez title jak dotąd", () => {
+    const out = stepContextText(step({ status: "handoff", blocks: [{ ...A, title: "Krótko" }, { ...B, status: "approved" }] }));
+    expect(out).toContain("- SZKIC „Krótko” (proposed, niewybrana) do slack #dev: Wersja krótka.");
+    expect(out).toContain("- SZKIC „Opcja B” (approved) do slack #dev: Wersja długa, z uzasadnieniem.");
+    expect(stepContextText(step({ blocks: [A] }))).toContain("- SZKIC (proposed) do slack #dev: Wersja krótka.");
   });
 });
 

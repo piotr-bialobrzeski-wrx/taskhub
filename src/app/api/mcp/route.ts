@@ -18,7 +18,7 @@ import { appUrl } from "@/lib/session";
 import { securityReport } from "@/lib/security";
 import { isFilePath, isHttpUrl } from "@/lib/safeurl";
 import { AGENT_MAX_SEC, elapsedSec } from "@/lib/time";
-import { approvalValid, coerceAgentDrafts, draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable, type Draft } from "@/lib/agent/approval";
+import { appKey, approvalSig, approvalValid, coerceAgentDrafts, draftOf, draftsOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable } from "@/lib/agent/approval";
 import { matchProjectName } from "@/lib/project-guess";
 
 // link kroku to adres elementu w zewnętrznej aplikacji (tylko http/https); adres samego Task Hub nie jest linkiem kroku
@@ -66,22 +66,27 @@ function buildHandler(auth: repo.TokenAuth) {
     if (g) return g.id;
     throw new Error(`Nie ma projektu „${name}”. Projekty: ${projects.map((p) => p.name).join(", ") || "(brak)"}. Podaj dokładną nazwę z list_projects albo utwórz projekt przez create_project.`);
   };
-  // szkic, którego nic nie wyśle (plik na Macu to nie wysyłka): odmowa z instrukcją dla tego, kto pyta; nil = szkic może się zapisać
-  const agentBlocker = async (nd: Draft | null, was: Step, blocks: Block[], taskId: string): Promise<string | null> => {
-    if (!nd || nd.status !== "proposed" || nd.stale || was.status === "done") return null;
-    if (isLocalFile(nd.target.app)) return audience === "work"
-      ? "Nie zapisałem: „Plik na Macu” to nie szkic do zatwierdzenia. Zmień narzędzie kroku na file (update_step z tool \"file\"), zapisz plik narzędziem Write w folderze z linii „Foldery na pliki”, potem complete_step z polem file."
-      : "Nie zapisałem: „Plik na Macu” to nie szkic do zatwierdzenia. Zmień narzędzie kroku na file (update_step z tool \"file\") i zostaw krok; plik zapisze aplikacja Task Hub 0.1.7 na Macu.";
-    // szkic do aplikacji zewnętrznej, której mostek nie wyśle: nieznane miejsce albo brak konektora na Macu (commit, prompt i notatka nie idą konektorem;
-    // kilka kont albo konto Google do wyboru nie zatrzymuje szkicu: Piotr wskaże konto w nagłówku karty)
-    if (destOf({ tool: was.tool, blocks })?.kind !== "send") return null;
-    const app = nd.target.app, App = appName(app);
-    const conns = await repo.listConnections(ownerId);
-    if (!knownApp(conns, app)) return `Nie zapisałem: nie znam miejsca „${app.trim()}”, więc mostek nie miałby czym tego wysłać. target.app to klucz aplikacji (clickup, slack, gmail, calendar, github, figma, whatsapp, sheets, docs) albo nazwa połączenia z list_connections.`;
-    const [task, projects] = await Promise.all([repo.getTask(ownerId, taskId), repo.listProjects(ownerId)]);
-    const companyId = projects.find((p) => p.id === task?.projectId)?.companyId ?? null;
-    const p = connectorProblem(conns, { app, connectionId: was.connectionId, host: null, companyId });
-    if (p?.kind === "none" && !p.google.length) return `Nie zapisałem: na Macu nie ma działającego konektora ${App} w Claude Code, więc mostek nie wyśle tego szkicu. Nie przygotowuj go: oddaj krok przez leave_step z powodem „Na Macu nie ma konektora ${App}. Dodaj go w Claude Code na Macu.”`;
+  // szkic, którego nic nie wyśle (plik na Macu to nie wysyłka): odmowa z instrukcją dla tego, kto pyta; nil = szkice mogą się zapisać.
+  // Przy opcjach każdy nowy szkic z osobna (pierwsza odmowa wygrywa); zatwierdzony, wysłany i nieaktualny nie podlegają sprawdzeniu
+  const agentBlocker = async (was: Step, blocks: Block[], taskId: string): Promise<string | null> => {
+    if (was.status === "done") return null;
+    let conns: Awaited<ReturnType<typeof repo.listConnections>> | null = null;
+    for (const nd of draftsOf({ blocks })) {
+      if (nd.status !== "proposed" || nd.stale) continue;
+      if (isLocalFile(nd.target.app)) return audience === "work"
+        ? "Nie zapisałem: „Plik na Macu” to nie szkic do zatwierdzenia. Zmień narzędzie kroku na file (update_step z tool \"file\"), zapisz plik narzędziem Write w folderze z linii „Foldery na pliki”, potem complete_step z polem file."
+        : "Nie zapisałem: „Plik na Macu” to nie szkic do zatwierdzenia. Zmień narzędzie kroku na file (update_step z tool \"file\") i zostaw krok; plik zapisze aplikacja Task Hub 0.1.7 na Macu.";
+      // szkic do aplikacji zewnętrznej, której mostek nie wyśle: nieznane miejsce albo brak konektora na Macu (commit, prompt i notatka nie idą konektorem;
+      // kilka kont albo konto Google do wyboru nie zatrzymuje szkicu: Piotr wskaże konto w nagłówku karty)
+      if (destOf({ tool: was.tool, blocks })?.kind !== "send") continue;
+      const app = nd.target.app, App = appName(app);
+      conns ??= await repo.listConnections(ownerId);
+      if (!knownApp(conns, app)) return `Nie zapisałem: nie znam miejsca „${app.trim()}”, więc mostek nie miałby czym tego wysłać. target.app to klucz aplikacji (clickup, slack, gmail, calendar, github, figma, whatsapp, sheets, docs) albo nazwa połączenia z list_connections.`;
+      const [task, projects] = await Promise.all([repo.getTask(ownerId, taskId), repo.listProjects(ownerId)]);
+      const companyId = projects.find((p) => p.id === task?.projectId)?.companyId ?? null;
+      const p = connectorProblem(conns, { app, connectionId: was.connectionId, host: null, companyId });
+      if (p?.kind === "none" && !p.google.length) return `Nie zapisałem: na Macu nie ma działającego konektora ${App} w Claude Code, więc mostek nie wyśle tego szkicu. Nie przygotowuj go: oddaj krok przez leave_step z powodem „Na Macu nie ma konektora ${App}. Dodaj go w Claude Code na Macu.”`;
+    }
     return null;
   };
   // krok właściciela świeżo z bazy (z danymi o zgodzie); null = nie jego albo nie ma
@@ -264,12 +269,15 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("set_blocks", {
-      title: "Ułóż panel kroku", description: "Zapisuje kartkę kroku z klocków: najpierw kontekst (thread = wątek jako dymki, mail = wątek maili z from/to/subject, comment = jeden komentarz z miejscem, facts, table = wiersze, list, media = zrzuty i pliki z opisem, link, free = markdown gdy nic nie pasuje, text = krótka notatka), potem jeden draft (to, co powstaje: target.app, target.where, target.url = adres miejsca, gdzie treść trafi lub co zmieni: ticket, wątek, kanał, dokument; Piotr otwiera go przyciskiem przed wysyłką, action, subject, body w Markdown: nagłówki #, **pogrubienie**, *kursywa*, listy - i 1., linki [tekst](url); Piotr widzi i edytuje je sformatowane, przy wysyłce get_task poda wersję w formacie aplikacji docelowej; dla wierszy arkusza columns + rows; dla promptu dla agenta target.app code). Każdy klocek kontekstu ma source {app, ref = miejsce, url}. Pokaż tylko to, co ważne dla tego kroku; długi wątek daj cały, aplikacja pokaże ostatnie 3. rememberFor: nazwa aplikacji źródłowej, jeśli ten układ ma być wzorem dla podobnych kroków. target.app = klucz aplikacji albo nazwa połączenia z list_connections. Jeden szkic = jedna rzecz w miejscu docelowym (jeden ticket: tytuł w subject, opis w body, typ, priorytet, osoba i status w fields); columns + rows tylko dla wierszy arkusza. Szkicu do miejsca, którego mostek nie wyśle (nieznana aplikacja, brak konektora tej aplikacji na Macu, plik na Macu), set_blocks nie zapisze. Klocek question = pytanie do Piotra na kartce jego kroku-decyzji (text, options 2-6 z label i opcjonalnym note, recommended = indeks zalecanej opcji); jego odpowiedź zamyka krok i wraca w rozmowie. Kartki zrobionego kroku Piotra z jego odpowiedzią set_blocks nie zmienia: zastosuj decyzję w krokach po nim.",
+      title: "Ułóż panel kroku", description: "Zapisuje kartkę kroku z klocków: najpierw kontekst (thread = wątek jako dymki, mail = wątek maili z from/to/subject, comment = jeden komentarz z miejscem, facts, table = wiersze, list, media = zrzuty i pliki z opisem, link, free = markdown gdy nic nie pasuje, text = krótka notatka), potem jeden draft (albo kilka jako opcje, p. niżej; to, co powstaje: target.app, target.where, target.url = adres miejsca, gdzie treść trafi lub co zmieni: ticket, wątek, kanał, dokument; Piotr otwiera go przyciskiem przed wysyłką, action, subject, body w Markdown: nagłówki #, **pogrubienie**, *kursywa*, listy - i 1., linki [tekst](url); Piotr widzi i edytuje je sformatowane, przy wysyłce get_task poda wersję w formacie aplikacji docelowej; dla wierszy arkusza columns + rows; dla promptu dla agenta target.app code). Każdy klocek kontekstu ma source {app, ref = miejsce, url}. Pokaż tylko to, co ważne dla tego kroku; długi wątek daj cały, aplikacja pokaże ostatnie 3. rememberFor: nazwa aplikacji źródłowej, jeśli ten układ ma być wzorem dla podobnych kroków. target.app = klucz aplikacji albo nazwa połączenia z list_connections. Jeden szkic = jedna rzecz w miejscu docelowym (jeden ticket: tytuł w subject, opis w body, typ, priorytet, osoba i status w fields); columns + rows tylko dla wierszy arkusza. Szkicu do miejsca, którego mostek nie wyśle (nieznana aplikacja, brak konektora tej aplikacji na Macu, plik na Macu), set_blocks nie zapisze. Klocek question = pytanie do Piotra na kartce jego kroku-decyzji (text, options 2-6 z label i opcjonalnym note, recommended = indeks zalecanej opcji); jego odpowiedź zamyka krok i wraca w rozmowie. Kartki zrobionego kroku Piotra z jego odpowiedzią set_blocks nie zmienia: zastosuj decyzję w krokach po nim. Porównanie elementów (dwa tickety, wątki albo maile obok siebie): każdy element to osobny klocek free, thread, mail albo comment z source.url, klocek question stoi przed nimi, różnica to jeden klocek text; pełny sposób w procedurze „Kartka porównania” (get_rules z topic kartka porównania). Treść ticketu albo dokumentu do odczytu to klocek free z source.url, title = tytuł elementu, meta = status, lista, osoba i daty w jednej linii, markdown = sama treść 1:1 bez tych metadanych. Warianty tej samej rzeczy do wysłania (opcja A, B) to kilka bloków draft w jednym kroku, każdy z title = nazwa opcji i własnym target.url; Piotr zatwierdza jedną, pozostałe nie lecą (get_task oznaczy je „nie wysyłaj”); wybór, który niczego nie wysyła, to klocek question, nie opcje.",
       inputSchema: z.object({ stepId: z.string(), blocks: Blocks, rememberFor: z.string().optional(), sameTargetOk: z.string().max(300).optional().describe("tylko gdy celowo drugi raz to samo miejsce i czynność (np. kolejny komentarz w tym samym tickecie): jednym zdaniem czemu") }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
       const was = await stepById(a.stepId); if (!was) return text("Nie ma takiego kroku.");
-      if (a.blocks.filter((b) => b.type === "draft").length > 1) return text("Nie zapisałem: krok ma jeden szkic (jeden blok draft). Drugą wysyłkę zapisz jako osobny krok (add_steps) z własnym szkicem.");
+      // kilka bloków draft = opcje tej samej rzeczy: różnią się treścią (inaczej wybór byłby niejednoznaczny) i idą do tej samej aplikacji
+      const drafts = draftsOf({ blocks: a.blocks });
+      if (new Set(drafts.map((d) => approvalSig({ id: a.stepId, blocks: a.blocks }, d))).size < drafts.length) return text("Nie zapisałem: dwa bloki draft o tej samej treści to jeden szkic; opcje różnią się treścią (title = nazwa opcji).");
+      if (new Set(drafts.map((d) => appKey(d.target.app))).size > 1) return text("Nie zapisałem: opcje w jednym kroku to warianty tej samej rzeczy (ten sam target.app). Wysyłkę do innego miejsca zapisz jako osobny krok (add_steps).");
       // zrobiony krok Piotra z jego odpowiedzią na kartce to jego decyzja (KARTKA ZROBIONEGO KROKU w get_task): agent jej nie nadpisze
       if (was.status === "done" && isOwnerStep(was) && was.blocks?.some((b) => b.type === "question" && !!b.answer))
         return text("Nie zapisałem: to zrobiony krok Piotra z jego decyzją na kartce, więc kartki nie zmieniam. Zastosuj decyzję w krokach, które od niego zależą; gdy coś jest niejasne, zapytaj przez reply_chat ze stepId tego kroku.");
@@ -278,15 +286,17 @@ function buildHandler(auth: repo.TokenAuth) {
       // zatwierdzony szkic (czeka na wysyłkę albo właśnie się wysyła) zostaje taki, jaki Piotr zatwierdził
       const nd = draftOf({ blocks }), od = draftOf(was);
       if (was.status !== "done" && (was.approvedAt || was.sendStartedAt) && (!nd || nd.status !== od?.status))
-        return text("Nie zapisałem: Piotr zatwierdził już szkic tego kroku i czeka on na wysyłkę, więc jego treść, adresat i miejsce zostają bez zmian. Zapisz kartkę z tym samym blokiem draft (SZKIC KROKU w get_task) albo, gdy szkic jest nieaktualny, napisz to Piotrowi przez reply_chat ze stepId tego kroku; on zdecyduje.");
-      const blocker = await agentBlocker(nd, was, blocks, taskId);
+        return text("Nie zapisałem: Piotr zatwierdził już szkic tego kroku i czeka on na wysyłkę, więc jego treść, adresat i miejsce zostają bez zmian (przy opcjach: wybrana opcja bez zmian, pozostałe możesz poprawić). Zapisz kartkę z tym samym blokiem draft (SZKIC KROKU w get_task) albo, gdy szkic jest nieaktualny, napisz to Piotrowi przez reply_chat ze stepId tego kroku; on zdecyduje.");
+      const blocker = await agentBlocker(was, blocks, taskId);
       if (blocker) return text(blocker);
-      // dwa kroki z tym samym szkicem (ten sam ticket i czynność) wysłałyby to samo dwa razy: zatrzymaj, zanim powstanie drugi
+      // dwa kroki z tym samym szkicem (ten sam ticket i czynność) wysłałyby to samo dwa razy: zatrzymaj, zanim powstanie drugi;
+      // przy opcjach każda z osobna (ma własny target.url), pierwsza kolizja wygrywa
       if (!a.sameTargetOk) {
         const all = (await repo.getTask(ownerId, taskId))?.steps ?? [];
-        const dup = sameTarget(all, a.stepId, blocks);
+        const rest = blocks.filter((b) => b.type !== "draft");
+        const dup = draftsOf({ blocks }).map((d) => sameTarget(all, a.stepId, [d, ...rest])).find((x) => x.open.length || x.sent.length);
         const name = (x: Step) => `[${x.id}] „${x.title}”`;
-        if (dup.open.length || dup.sent.length) return text(`Nie zapisałem: ${[
+        if (dup) return text(`Nie zapisałem: ${[
           dup.sent.length ? `to samo miejsce i ta sama czynność już wysłane w ${dup.sent.map(name).join(", ")}` : "",
           dup.open.length ? `inny otwarty krok ma szkic do tego samego miejsca: ${dup.open.map(name).join(", ")}` : "",
         ].filter(Boolean).join("; ")}. Popraw szkic w jednym kroku zamiast dublować, a zbędny krok zamknij przez skip_step z powodem. Jeśli to celowo drugi raz (np. kolejny komentarz), podaj sameTargetOk z powodem.`);
@@ -324,7 +334,8 @@ function buildHandler(auth: repo.TokenAuth) {
       // bieg wysyłki zamyka tylko szkic, który wziął, i tylko póki zgoda jest ważna (Piotr mógł zatrzymać wysyłkę)
       if (cur && scope?.kind === "send" && !(approvalValid(cur) && cur.sendStartedAt))
         return text("Nie zamknąłem kroku: wysyłkę tego szkicu zatrzymano albo zgoda Piotra wygasła. Jeśli treść już poszła, oddaj krok przez leave_step z linkiem w powodzie; Piotr sprawdzi.");
-      if (cur && (cur.status === "draft" || cur.blocks?.some((b) => b.type === "draft" && b.status === "proposed")))
+      // (przy opcjach: odrzucona propozycja obok zatwierdzonej albo wysłanej nie blokuje zamknięcia; blokuje brak wyboru)
+      if (cur && (cur.status === "draft" || draftOf(cur)?.status === "proposed"))
         return text("Nie zamknąłem kroku: jego szkic czeka na zatwierdzenie Piotra. Zostaw krok jako szkic; po zatwierdzeniu wyśle go mostek Task Hub. Jeśli krok stał się zbędny (to samo już wysłane, zakres się zmienił), zamknij go przez skip_step z powodem.");
       // zatwierdzony szkic zamyka jako wysłany tylko ten, kto go wysyła: stary mostek przy ważnej zgodzie albo bieg wysyłki tego kroku
       if (cur && draftOf(cur)?.status === "approved" && !sends(cur))

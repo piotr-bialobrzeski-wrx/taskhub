@@ -4,7 +4,7 @@ import { Ai, type ImageInput } from "../ai";
 import * as repo from "../repo";
 import { contextText } from "./context";
 import { Fact, type Task } from "../schema";
-import { draftOf } from "./approval";
+import { draftOf, draftsOf, optionIndex, optionLabel, optionsOf } from "./approval";
 import { matchProjectName } from "@/lib/project-guess";
 
 const Krok = z.object({
@@ -21,7 +21,7 @@ const Action = z.discriminatedUnion("type", [
   z.object({ type: z.literal("create_task"), title: z.string(), level: z.number().int().min(1).max(5).optional(), summary: z.string().optional(), due: z.string().nullable().optional(), project: z.string().nullable().optional(), steps: z.array(Krok).optional(), link: z.enum(["after_current", "before_current", "none"]).optional() }),
   z.object({ type: z.literal("add_steps"), steps: z.array(Krok) }),
   z.object({ type: z.literal("update_task"), id: z.string(), title: z.string().optional(), summary: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().nullable().optional(), project: z.string().nullable().optional() }),
-  z.object({ type: z.literal("update_step"), id: z.string(), title: z.string().optional(), detail: z.string().optional(), output: z.string().optional(), status: z.enum(["done", "todo"]).optional(), link: z.string().optional(), est: z.number().int().optional() }),
+  z.object({ type: z.literal("update_step"), id: z.string(), title: z.string().optional(), detail: z.string().optional(), output: z.string().optional(), option: z.union([z.number().int(), z.string()]).optional(), status: z.enum(["done", "todo"]).optional(), link: z.string().optional(), est: z.number().int().optional() }),
   z.object({ type: z.literal("set_facts"), stepId: z.string(), facts: z.array(Fact).max(12) }),
   z.object({ type: z.literal("create_group"), name: z.string(), taskIds: z.array(z.string()) }),
 ]);
@@ -40,7 +40,7 @@ Akcje (tylko gdy wiadomość o to prosi; na pytanie po prostu odpowiedz):
 - create_task {title (2–6 słów, samo sedno, nie cała wiadomość Piotra), level 1-5, summary, due "YYYY-MM-DD"|null, project nazwa|null, steps [KROK], link "after_current"|"before_current"|"none"} - nowe zadanie; "link" ma sens tylko wewnątrz zadania.
 - add_steps {steps [KROK]} - nowe kroki w obecnym zadaniu; dependsOn może wskazywać id istniejących kroków.
 - update_task {id, title?, summary?, level?, due?, project?}
-- update_step {id, title?, detail?, output?, status? "done"|"todo", link?, est?} - output = poprawiona treść szkicu otwartego kroku (gdy Piotr prosi o zmianę w szkicu); zmienia też treść bloku draft.
+- update_step {id, title?, detail?, output?, option?, status? "done"|"todo", link?, est?} - output = poprawiona treść szkicu otwartego kroku (gdy Piotr prosi o zmianę w szkicu); zmienia też treść bloku draft. Gdy krok ma kilka szkiców (opcje), option = numer opcji (0 = Opcja A) albo jej nazwa; bez option poprawka idzie do wybranej, inaczej do pierwszej.
 - set_facts {stepId, facts [{label, value, source {app, ref, url}}]} - gdy Piotr podaje informacje do kroku (adresat, termin, lista).
 - create_group {name, taskIds} - tylko na głównej kanwie, gdy Piotr mówi, ile ma czasu (np. „mam 1,5 h”): wybierz otwarte zadania mieszczące się w czasie, najpierw bliski termin i wysoki priorytet, nazwij np. „Na 1,5 h” i wypisz je w reply z czasami.
 KROK = {id "n1", title (od czasownika, 2–6 słów, sedno), tool, detail jedno zdanie, dependsOn [], needsApproval true dla wszystkiego, co wysyła coś na zewnątrz, est minuty (wielokrotność 5, min 5, wg kalibracji), link gdy znany}
@@ -71,6 +71,8 @@ ${text}`;
 
 // otwarty krok w panelu: to jego dotyczy wiadomość, chyba że Piotr wskaże inaczej; agent widzi treść klocków i szkic
 export function stepContextText(s: Task["steps"][number]): string {
+  // opcje: nazwa każdej, a po wyborze Piotra niewybrana oznaczona
+  const { drafts, rejected, multi } = optionsOf(s);
   const blocks = (s.blocks ?? []).map((b) => {
     switch (b.type) {
       case "text": return `- notatka${b.title ? ` „${b.title}”` : ""}: ${b.body.slice(0, 600)}`;
@@ -80,7 +82,7 @@ export function stepContextText(s: Task["steps"][number]): string {
       case "comment": return `- komentarz ${b.author}${b.source?.ref ? ` w ${b.source.ref}` : ""}: ${b.text.slice(0, 300)}`;
       case "table": return `- tabela ${b.title ?? ""} (${b.columns.join(", ")}): ${b.rows.length} wierszy`;
       case "list": return `- lista${b.title ? ` „${b.title}”` : ""}: ${b.items.map((i) => i.title).join("; ").slice(0, 400)}`;
-      case "draft": return `- SZKIC (${b.status}) do ${b.target.app}${b.target.where ? " " + b.target.where : ""}: ${b.subject ? `temat „${b.subject}”, ` : ""}${b.body.slice(0, 1200)}`;
+      case "draft": { const k = drafts.indexOf(b); return `- SZKIC${multi || b.title?.trim() ? ` „${optionLabel(b, k)}”` : ""} (${b.status}${rejected.includes(b) ? ", niewybrana" : ""}) do ${b.target.app}${b.target.where ? " " + b.target.where : ""}: ${b.subject ? `temat „${b.subject}”, ` : ""}${b.body.slice(0, 1200)}`; }
       case "free": return `- treść${b.meta ? ` [${b.meta}]` : ""}: ${b.markdown.slice(0, 600)}`;
       case "question": return `- pytanie: ${b.text}${b.answer ? ` → ${b.answer}` : ""}`;
       default: return null;
@@ -130,8 +132,10 @@ export async function applyActions(r: ChatResult, deps: ChatDeps & { tasks: Task
       if (proj.unknown) done.push({ label: "Projekt bez zmian: " + (a.title ?? t.title), taskId: deps.taskId ?? undefined, note: `Nie zmieniłem projektu zadania „${a.title ?? t.title}”: ${proj.unknown}.` });
     } else if (a.type === "update_step" && cur) {
       const s = cur.steps.find((x) => x.id === a.id); if (!s) continue;
-      // poprawiony szkic trafia też do bloku draft, żeby karta publikacji pokazała nową treść
-      const blocks = a.output !== undefined && s.blocks?.some((b) => b.type === "draft") ? s.blocks.map((b) => (b.type === "draft" && b.status !== "sent" ? { ...b, body: a.output!, status: "proposed" as const } : b)) : undefined;
+      // poprawiony szkic trafia też do bloku draft, żeby karta publikacji pokazała nową treść; przy opcjach do wskazanej (option: numer albo nazwa),
+      // bez wskazania do wybranej, inaczej pierwszej; wysłanego nie ruszamy
+      const oi = optionIndex(s, a.option), target = oi != null ? draftsOf(s)[oi] : draftOf(s);
+      const blocks = a.output !== undefined && target ? s.blocks!.map((b) => (b === target && b.status !== "sent" ? { ...b, body: a.output!, status: "proposed" as const } : b)) : undefined;
       await repo.updateStep(s.id, { title: a.title, detail: a.detail, output: a.output, link: a.link && /^https?:\/\//.test(a.link) ? a.link : undefined, estMin: a.est, ...(blocks ? { blocks } : {}) });
       // stan po zmianie (poprawka treści kasuje zgodę na szkic)
       const fresh = blocks ? (await repo.getTask(deps.ownerId, cur.id))?.steps.find((x) => x.id === s.id) ?? s : s;
