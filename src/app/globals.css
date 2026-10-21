@@ -773,6 +773,13 @@ details.fold[open] > summary svg { transform: rotate(180deg); }
 /* 2+ kolejne klocki źródłowe obok siebie: kolumny min 340 px, więc w wąskim panelu (treść 560 px) same układają się jedna pod drugą, w szerokim obok siebie; bez container query */
 .cmp { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: var(--s-4); align-items: start; min-width: 0; }
 .cmp > * { min-width: 0; }
+/* opcje (punkt 3b/4): każda w białej karcie w siatce .cmp pod wspólnym nagłówkiem karty publikacji (nadpisuje przezroczyste .now .block.pub);
+   stan opcji w kolorze decyzji tylko przed wyborem; pole z formatowaniem i podgląd na białej karcie dostają krawędź; odrzucone wersje przygaszone */
+.now .cmp .block.pub.opt { background: var(--surface); padding: var(--s-4) var(--s-5); border-radius: var(--r-sm); }
+.pub.proposed .opt .pub-h b, .pub.parked .opt .pub-h b { color: var(--warn); }
+.pub.opt .pub-edit .rf, .pub.opt .msg { box-shadow: inset 0 0 0 1px var(--line); }
+.pub.opt .pub-edit .rf:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
+.pub .rej .msg { opacity: .72; }
 
 /* ---------- menu kafelka na prawy klik (paczka 2, punkt 2) ---------- */
 .ppmenu.tmenu { min-width: 180px; }

@@ -2,14 +2,18 @@
 // (nagłówek z aplikacją, „tylko do odczytu”, przycisk otwarcia, tytuł, linia meta, treść na białym polu bez paska formatowania); każdy klocek
 // źródłowy ma jeden kształt przycisku otwarcia; agent widzi meta i źródło w get_task i w czacie, a bez nich tekst nie zmienia się ani o bajt.
 // Punkt 1: 2+ kolejne klocki źródłowe z adresem stoją obok siebie w siatce .cmp; pytanie, notatka albo klocek bez adresu przerywa ciąg.
+// Punkt 3b/4: karta publikacji z opcjami: każda we własnej karcie z własnym formularzem i „Zatwierdź: Opcja X”, po wyborze wybrana w nagłówku,
+// reszta pod „Odrzucone wersje”; nagłówek „Teraz” mówi „Wybierz opcję”; przycisk celu stoi w nagłówku karty, także przy jednym szkicu.
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Blocks, type Block } from "@/lib/schema";
+import { Blocks, type Block, type Step } from "@/lib/schema";
 import { cardText } from "@/lib/agent/context";
 import { stepContextText } from "@/lib/agent/chat";
-import { groupBlocks, hasComparison, isSourceBlock } from "@/lib/stepcard";
+import { shownSig, type Draft } from "@/lib/agent/approval";
+import { groupBlocks, hasComparison, isSourceBlock, nowHeading } from "@/lib/stepcard";
 import { BlocksView, BlockView } from "@/components/BlockRenderer";
-import { step } from "./helpers";
+import { cardModeOf, PublishCard, type CardMode } from "@/components/PublishCard";
+import { step, task } from "./helpers";
 
 const URL = "https://app.clickup.com/t/869x";
 const ticket: Block = { type: "free", title: "Logowanie przez Google", source: { app: "ClickUp", ref: "869x", url: URL }, meta: "Status: Open · Lista: Backlog · Ola · 12.10.2026", markdown: "# Cel\n\nUżytkownik loguje się **kontem Google**." };
@@ -184,5 +188,96 @@ describe("porównanie obok siebie: BlocksView", () => {
     expect(renderToStaticMarkup(<BlocksView blocks={blocks} form={form} />)).toContain('name="index" value="2"');
     const part = blocks.slice(1);   // tylko część kartki: indeks z indexOf, nie z pozycji w wycinku
     expect(renderToStaticMarkup(<BlocksView blocks={part} form={form} indexOf={(b) => blocks.indexOf(b)} />)).toContain('name="index" value="2"');
+  });
+});
+
+describe("opcje na karcie publikacji (punkt 3b/4)", () => {
+  const opt = (n: string, body: string, extra: Partial<Draft> = {}): Draft => ({ type: "draft", target: { app: "clickup", action: "update", url: `https://app.clickup.com/t/${n}`, where: `Ticket ${n}` }, body, status: "proposed", ...extra });
+  const A = opt("869aaaaa1", "Zmieniamy termin na piątek."), B = opt("869bbbbb2", "Termin zostaje, dokładamy osobę.");
+  const card = (s: Step, mode: CardMode, link: string | null = null) =>
+    renderToStaticMarkup(<PublishCard t={task({ steps: [s] })} s={s} mode={mode} aiOn={false} ownerName="Piotr" link={link} connections={[]} company={null} />);
+  const count = (h: string, re: RegExp) => h.match(re)?.length ?? 0;
+
+  it("nagłówek „Teraz”: przy 2+ szkicach „Wybierz opcję”, przy jednym i w innych stanach jak dotąd", () => {
+    expect(nowHeading("draft", "proposed", 0, false, undefined, 2)).toEqual({ title: "Wybierz opcję", cls: "draft" });
+    expect(nowHeading("draft", "proposed", 0, false, undefined, 1)).toEqual({ title: "Do zatwierdzenia", cls: "draft" });
+    expect(nowHeading("draft", "proposed", 0, false)).toEqual({ title: "Do zatwierdzenia", cls: "draft" });
+    expect(nowHeading("ready", "parked", 0, false, undefined, 2)).toEqual({ title: "Odłożony szkic", cls: "draft" });
+  });
+  it("do zatwierdzenia z dwiema opcjami: siatka kart, każda z nagłówkiem, przyciskiem celu, własnym formularzem (option, seen) i „Zatwierdź: Opcja X”", () => {
+    const s = step({ status: "draft", tool: "clickup", needsApproval: true, blocks: [A, B] });
+    const h = card(s, "proposed");
+    expect(count(h, /class="cmp"/g)).toBe(1);
+    expect(count(h, /class="block pub opt"/g)).toBe(2);
+    expect(h).toContain("<b>Do zatwierdzenia</b> · Opcja A");
+    expect(h).toContain("<b>Do zatwierdzenia</b> · Opcja B");
+    expect(h).toContain("Zatwierdź: Opcja A");
+    expect(h).toContain("Zatwierdź: Opcja B");
+    expect(h).not.toContain("Zatwierdź i ");
+    expect(h).toContain(`id="pub-${s.id}-0"`);
+    expect(h).toContain(`id="pub-${s.id}-1"`);
+    expect(h).not.toContain(`id="pub-${s.id}"`);
+    expect(h).toContain('name="option" value="0"');
+    expect(h).toContain('name="option" value="1"');
+    const seen = h.match(/name="seen" value="[0-9a-f]+"/g) ?? [];
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).not.toBe(seen[1]);
+    expect(seen).toEqual([`name="seen" value="${shownSig(s, A, true)}"`, `name="seen" value="${shownSig(s, B, true)}"`]);
+    expect(count(h, /name="seenFull"/g)).toBe(2);
+    // przycisk celu każdej opcji w jej nagłówku; wspólny nagłówek nad siatką mówi tylko, dokąd (aplikacja)
+    expect(h).toContain('href="https://app.clickup.com/t/869aaaaa1"');
+    expect(h).toContain('href="https://app.clickup.com/t/869bbbbb2"');
+    expect(count(h, /Otwórz w ClickUpie/g)).toBe(2);
+    expect(h.indexOf("<b>ClickUp</b>")).toBeLessThan(h.indexOf('class="cmp"'));
+    expect(h).toContain("Odłóż");
+  });
+  it("jeden szkic jak dotąd: formularz „pub-<krok>” bez pola option, bez siatki; przycisk celu przeniesiony do nagłówka karty", () => {
+    const s = step({ status: "draft", tool: "clickup", needsApproval: true, blocks: [A] });
+    const h = card(s, "proposed");
+    expect(h).toContain(`id="pub-${s.id}"`);
+    expect(h).not.toContain('name="option"');
+    expect(h).not.toContain("cmp");
+    expect(h).not.toContain("pub opt");
+    expect(h).toContain("Zatwierdź i zaktualizuj");
+    const head = h.slice(h.indexOf('class="pub-h"'), h.indexOf("pub-edit"));
+    expect(head).toContain('<a class="btn ico" href="https://app.clickup.com/t/869aaaaa1" target="_blank" rel="noopener" title="Tu trafi wynik kroku: https://app.clickup.com/t/869aaaaa1">Otwórz w ClickUpie<svg');
+  });
+  it("odłożone opcje: „Odłożony szkic · Opcja X” na każdej karcie i „Zamknij bez wysyłki” pod siatką", () => {
+    const s = step({ status: "todo", tool: "clickup", needsApproval: true, blocks: [A, B] });
+    const h = card(s, "parked");
+    expect(h).toContain("<b>Odłożony szkic</b> · Opcja A");
+    expect(h).toContain("<b>Odłożony szkic</b> · Opcja B");
+    expect(count(h, /Zatwierdź: Opcja/g)).toBe(2);
+    expect(h).toContain("Zamknij bez wysyłki");
+  });
+  it("po wysyłce [sent B, proposed A]: wybrana w nagłówku, jeden przycisk otwarcia, „Odrzucone wersje (1)” bez przycisku i bez formularza", () => {
+    const At = { ...A, title: "Opcja A" }, Bt = { ...B, title: "Opcja B", status: "sent" as const };
+    const s = step({ status: "done", tool: "clickup", needsApproval: true, blocks: [Bt, At] });
+    expect(cardModeOf(s)).toBe("sent");
+    const h = card(s, "sent", "https://app.clickup.com/t/869bbbbb2");
+    expect(h).toContain("<b>ClickUp</b> · Opcja B · Ticket 869bbbbb2");
+    expect(h).toContain("Odrzucone wersje (1)");
+    expect(h).toContain('class="fold rej"');
+    expect(count(h, /href="/g)).toBe(1);
+    expect(h).toContain('href="https://app.clickup.com/t/869bbbbb2"');
+    expect(h).not.toContain("<form");
+    expect(h).not.toContain("cmp");
+    const rej = h.slice(h.indexOf('class="fold rej"'));
+    expect(rej).toContain("<h4>Opcja A</h4>");
+    expect(rej).toContain("Zmieniamy termin na piątek.");
+    expect(rej).not.toContain("Otwórz");
+    expect(h.slice(0, h.indexOf('class="fold rej"'))).toContain("Termin zostaje, dokładamy osobę.");
+  });
+  it("zamknięty bez wyboru: „Nie wysłano”, opcje tylko do odczytu, bez formularzy i bez odrzuconych", () => {
+    const s = step({ status: "done", tool: "clickup", needsApproval: true, blocks: [A, B] });
+    expect(cardModeOf(s)).toBe("unsent");
+    const h = card(s, "unsent");
+    expect(h).toContain("<b>Nie wysłano</b>");
+    expect(count(h, /class="block pub opt"/g)).toBe(2);
+    expect(h).toContain("<b>Opcja A</b>");
+    expect(h).toContain("<b>Opcja B</b>");
+    expect(h).not.toContain("<form");
+    expect(h).not.toContain("Zatwierdź");
+    expect(h).not.toContain("Odrzucone wersje");
   });
 });

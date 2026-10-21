@@ -14,7 +14,7 @@ import { externalLink } from "@/lib/links";
 import { fileName, isHttpUrl, safeHref } from "@/lib/safeurl";
 import { bridgeHold, bridgeLabel, busyWith, noStepsWho, queueWho, type Worker } from "@/lib/auto";
 import { BRIDGE_ALIVE_MS, connectorIssue, protocolOf } from "@/lib/bridge";
-import { draftOf } from "@/lib/agent/approval";
+import { draftOf, draftsOf } from "@/lib/agent/approval";
 import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
 import { Activity } from "@/components/Activity";
@@ -225,16 +225,17 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const form = s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined;
   const folds = foldsFor(state as CardState, mode, readingResult(s, material));
   const cmp = hasComparison(material);   // kartka porównania (paczka 10, punkt 1): porównywane elementy u góry na całą szerokość, pod nimi karta publikacji
-  const head = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined);
-  const draft = s.blocks?.find((b) => b.type === "draft") as { body?: string } | undefined;
+  const head = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined, draftsOf(s).length);
+  const draft = draftOf(s);   // wybrana opcja albo pierwszy szkic: linie raportu bez powtórki jej treści
   // raport bez powtórki streszczenia bloku zmian ani treści szkicu; „Do potwierdzenia: …” jako osobna linia
   const lines = reportLines(s.report, [...result.map((b) => b.summary), draft?.body]);
   const outputExtra = done && s.output && s.output.trim() !== (s.report ?? "").trim() && !s.blocks?.length && mode !== "sent" ? s.output : null;
   const found = mode === "sent" ? [] : resultLinks(s, result[0] ?? null, link ?? null);
   const done0 = done && !found.length && mode !== "sent" ? targetLink(s, s.blocks) : null;   // zrobione bez linku do wyniku: zostaje chociaż miejsce, którego dotyczyło
   const links = done0 ? [done0] : found;
-  // miejsce docelowe (ticket, wątek, dokument) od razu w nagłówku „Teraz”, zanim cokolwiek poleci; po wysyłce jego miejsce zajmuje link do wyniku
-  const target = !done && mode !== "sent" ? targetLink(s, s.blocks) : null;
+  // miejsce docelowe (ticket, wątek, dokument) w nagłówku „Teraz” tylko bez karty publikacji: karta ma własny przycisk celu w nagłówku (przy opcjach
+  // każda swój); po wysyłce jego miejsce zajmuje link do wyniku
+  const target = !done && !mode ? targetLink(s, s.blocks) : null;
   const kinds = kindsOf(material);
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");

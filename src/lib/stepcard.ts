@@ -183,10 +183,11 @@ export function doneChat(s: Pick<Step, "title" | "tool" | "blocks"> & { filePath
 }
 
 const steps = (n: number) => (n === 1 ? "1 krok" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? `${n} kroki` : `${n} kroków`);
-// nagłówek sekcji „Teraz”: stan słowami i kolor bloku; po wysyłce słowo z celu („Utworzono”, „Wysłano”), strona dokłada godzinę
-export function nowHeading(state: CardState, mode: string | null, deps: number, waits: boolean, dest?: Dest | null): { title: string; cls: string } {
+// nagłówek sekcji „Teraz”: stan słowami i kolor bloku; po wysyłce słowo z celu („Utworzono”, „Wysłano”), strona dokłada godzinę;
+// options = liczba szkiców w kroku: przy kilku Piotr wybiera opcję (każda karta pod nagłówkiem ma własne „Do zatwierdzenia”)
+export function nowHeading(state: CardState, mode: string | null, deps: number, waits: boolean, dest?: Dest | null, options = 1): { title: string; cls: string } {
   if (mode === "sent" && dest) return { title: sentWord(dest), cls: "done" };
-  if (mode === "proposed") return { title: "Do zatwierdzenia", cls: "draft" };
+  if (mode === "proposed") return { title: options > 1 ? "Wybierz opcję" : "Do zatwierdzenia", cls: "draft" };
   if (mode === "sending") return { title: "W toku", cls: "handoff" };
   if (mode === "parked") return { title: "Odłożony szkic", cls: "draft" };
   if (mode === "unsent") return { title: "Zamknięty bez wysyłki", cls: "blocked" };

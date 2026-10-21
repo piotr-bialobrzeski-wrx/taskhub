@@ -90,6 +90,9 @@ describe("biała kartka: nowe klocki, markdown, tryb karty, kontekst kroku w cza
     expect(cardModeOf(step({ status: "todo", blocks: [d] }))).toBe("parked");
     expect(cardModeOf(step({ status: "handoff", prevStatus: "draft", blocks: [{ ...d, status: "approved" }] }))).toBe("sending");
     expect(cardModeOf(step({ status: "done", blocks: [{ ...d, status: "sent" }] }))).toBe("sent");
+    // opcje (paczka 10): odrzucona propozycja obok wysłanej nie robi z kroku „Nie wysłano”; żadna wysłana = nic nie poleciało
+    expect(cardModeOf(step({ status: "done", blocks: [{ ...d, status: "sent" }, d] }))).toBe("sent");
+    expect(cardModeOf(step({ status: "done", blocks: [d, d] }))).toBe("unsent");
     expect(cardModeOf(step({ status: "todo" }))).toBeNull();
     expect(cardModeOf(step({ status: "handoff", prevStatus: "todo" }))).toBeNull();
   });
