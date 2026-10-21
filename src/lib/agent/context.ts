@@ -209,9 +209,10 @@ export function draftsText(steps: DraftStep[], opts: { send?: (s: DraftStep) => 
     drafts.forEach((b, k) => {
       const rejected = b.status === "proposed" && !!chosen;
       if (rejected && send(s)) return;
-      const state = b.stale ? "NIEAKTUALNY: przygotuj od nowa, nie wysyłaj"
+      // niewybrana przed „nieaktualny”: odrzuconej opcji nikt nie szykuje od nowa (add_steps przed krokiem oznacza wszystkie, zgoda czyści tylko wybraną)
+      const state = rejected ? `opcja niewybrana (Piotr wybrał „${chosenLabel}”): nie wysyłaj`
+        : b.stale ? "NIEAKTUALNY: przygotuj od nowa, nie wysyłaj"
         : b.status === "sent" ? "wysłany"
-        : rejected ? `opcja niewybrana (Piotr wybrał „${chosenLabel}”): nie wysyłaj`
         : b.status === "approved" && s.status === "handoff" ? (send(s) ? (isPromptDraft(b, s.blocks) ? "ZATWIERDZONY PROMPT: wykonaj dokładnie to polecenie, potem complete_step" : "ZATWIERDZONY: wyślij dokładnie tę treść") : "zatwierdzony przez Piotra: wyśle go mostek Task Hub w osobnym biegu wysyłki; nie wysyłaj")
         : b.status === "approved" ? "zatwierdzony, ale krok nie czeka na wysyłkę: nie wysyłaj"
         : s.status === "draft" ? "czeka na zatwierdzenie Piotra: nie wysyłaj"

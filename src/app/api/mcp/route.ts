@@ -16,7 +16,7 @@ import { originOf, wwwAuthenticate } from "@/lib/oauth";
 import { externalLink as externalLinkOf } from "@/lib/links";
 import { appUrl } from "@/lib/session";
 import { securityReport } from "@/lib/security";
-import { isFilePath, isHttpUrl } from "@/lib/safeurl";
+import { isFilePath, isHttpUrl, sanitizeBlocks } from "@/lib/safeurl";
 import { AGENT_MAX_SEC, elapsedSec } from "@/lib/time";
 import { appKey, approvalSig, approvalValid, coerceAgentDrafts, draftOf, draftsOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable } from "@/lib/agent/approval";
 import { matchProjectName } from "@/lib/project-guess";
@@ -274,9 +274,11 @@ function buildHandler(auth: repo.TokenAuth) {
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
       const was = await stepById(a.stepId); if (!was) return text("Nie ma takiego kroku.");
-      // kilka bloków draft = opcje tej samej rzeczy: różnią się treścią (inaczej wybór byłby niejednoznaczny) i idą do tej samej aplikacji
-      const drafts = draftsOf({ blocks: a.blocks });
-      if (new Set(drafts.map((d) => approvalSig({ id: a.stepId, blocks: a.blocks }, d))).size < drafts.length) return text("Nie zapisałem: dwa bloki draft o tej samej treści to jeden szkic; opcje różnią się treścią (title = nazwa opcji).");
+      // kilka bloków draft = opcje tej samej rzeczy: różnią się treścią (inaczej wybór byłby niejednoznaczny) i idą do tej samej aplikacji;
+      // podpis po sanitizeBlocks, jak przy zapisie i zgodzie: adres spoza http(s) wypada, więc nie może odróżniać dwóch opcji
+      const clean = sanitizeBlocks(a.blocks);
+      const drafts = draftsOf({ blocks: clean });
+      if (new Set(drafts.map((d) => approvalSig({ id: a.stepId, blocks: clean }, d))).size < drafts.length) return text("Nie zapisałem: dwa bloki draft o tej samej treści to jeden szkic; opcje różnią się treścią (title = nazwa opcji).");
       if (new Set(drafts.map((d) => appKey(d.target.app))).size > 1) return text("Nie zapisałem: opcje w jednym kroku to warianty tej samej rzeczy (ten sam target.app). Wysyłkę do innego miejsca zapisz jako osobny krok (add_steps).");
       // zrobiony krok Piotra z jego odpowiedzią na kartce to jego decyzja (KARTKA ZROBIONEGO KROKU w get_task): agent jej nie nadpisze
       if (was.status === "done" && isOwnerStep(was) && was.blocks?.some((b) => b.type === "question" && !!b.answer))

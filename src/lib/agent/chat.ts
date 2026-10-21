@@ -40,7 +40,7 @@ Akcje (tylko gdy wiadomość o to prosi; na pytanie po prostu odpowiedz):
 - create_task {title (2–6 słów, samo sedno, nie cała wiadomość Piotra), level 1-5, summary, due "YYYY-MM-DD"|null, project nazwa|null, steps [KROK], link "after_current"|"before_current"|"none"} - nowe zadanie; "link" ma sens tylko wewnątrz zadania.
 - add_steps {steps [KROK]} - nowe kroki w obecnym zadaniu; dependsOn może wskazywać id istniejących kroków.
 - update_task {id, title?, summary?, level?, due?, project?}
-- update_step {id, title?, detail?, output?, option?, status? "done"|"todo", link?, est?} - output = poprawiona treść szkicu otwartego kroku (gdy Piotr prosi o zmianę w szkicu); zmienia też treść bloku draft. Gdy krok ma kilka szkiców (opcje), option = numer opcji (0 = Opcja A) albo jej nazwa; bez option poprawka idzie do wybranej, inaczej do pierwszej.
+- update_step {id, title?, detail?, output?, option?, status? "done"|"todo", link?, est?} - output = poprawiona treść szkicu otwartego kroku (gdy Piotr prosi o zmianę w szkicu); zmienia też treść bloku draft. Gdy krok ma kilka szkiców (opcje), option = numer opcji (0 = Opcja A) albo jej nazwa; bez option poprawka idzie do wybranej, inaczej do pierwszej; nieznana option = odmowa bez zmian.
 - set_facts {stepId, facts [{label, value, source {app, ref, url}}]} - gdy Piotr podaje informacje do kroku (adresat, termin, lista).
 - create_group {name, taskIds} - tylko na głównej kanwie, gdy Piotr mówi, ile ma czasu (np. „mam 1,5 h”): wybierz otwarte zadania mieszczące się w czasie, najpierw bliski termin i wysoki priorytet, nazwij np. „Na 1,5 h” i wypisz je w reply z czasami.
 KROK = {id "n1", title (od czasownika, 2–6 słów, sedno), tool, detail jedno zdanie, dependsOn [], needsApproval true dla wszystkiego, co wysyła coś na zewnątrz, est minuty (wielokrotność 5, min 5, wg kalibracji), link gdy znany}
@@ -133,8 +133,11 @@ export async function applyActions(r: ChatResult, deps: ChatDeps & { tasks: Task
     } else if (a.type === "update_step" && cur) {
       const s = cur.steps.find((x) => x.id === a.id); if (!s) continue;
       // poprawiony szkic trafia też do bloku draft, żeby karta publikacji pokazała nową treść; przy opcjach do wskazanej (option: numer albo nazwa),
-      // bez wskazania do wybranej, inaczej pierwszej; wysłanego nie ruszamy
-      const oi = optionIndex(s, a.option), target = oi != null ? draftsOf(s)[oi] : draftOf(s);
+      // bez wskazania do wybranej, inaczej pierwszej; wysłanego nie ruszamy. Nieznana opcja = nic nie zmieniamy (poprawka nie może po cichu
+      // trafić do wybranej i skasować zgody), Piotr czyta, jakie opcje są
+      const oi = optionIndex(s, a.option);
+      if (a.option !== undefined && oi == null) { done.push({ label: "Nie zmieniono: " + s.title, taskId: cur.id, note: `Nie ma opcji „${a.option}” w kroku „${s.title}”; opcje: ${draftsOf(s).map(optionLabel).join(", ")}.` }); continue; }
+      const target = oi != null ? draftsOf(s)[oi] : draftOf(s);
       const blocks = a.output !== undefined && target ? s.blocks!.map((b) => (b === target && b.status !== "sent" ? { ...b, body: a.output!, status: "proposed" as const } : b)) : undefined;
       await repo.updateStep(s.id, { title: a.title, detail: a.detail, output: a.output, link: a.link && /^https?:\/\//.test(a.link) ? a.link : undefined, estMin: a.est, ...(blocks ? { blocks } : {}) });
       // stan po zmianie (poprawka treści kasuje zgodę na szkic)

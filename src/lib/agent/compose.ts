@@ -5,7 +5,7 @@ import { Blocks, Fact, type Block, type Rule, type Step, type Task, toolLabel, E
 import { Ai } from "../ai";
 import * as repo from "../repo";
 import { capText, rulesText } from "./context";
-import { coerceAgentDrafts } from "./approval";
+import { coerceAgentDrafts, dedupeOptions } from "./approval";
 
 export const ComposeResult = z.object({
   blocks: Blocks,
@@ -69,8 +69,9 @@ ${step.needsApproval ? "Ten krok wysyła coś na zewnątrz: przygotuj blok draft
 ${attachments.length ? `ZAŁĄCZNIKI ZADANIA:\n${attachments.map((a) => `- ${a.kind} ${a.name ?? ""} ${a.url ?? "(bez adresu)"}${a.analysis ? ": " + a.analysis.slice(0, 300) : ""}`).join("\n")}\n` : ""}${memory ? `OSTATNI UKŁAD DLA ${toolLabel(step.tool)} (zachowaj kolejność i rodzaje bloków, jeśli pasują):\n${JSON.stringify(memory.map((b) => b.type))}\n` : ""}
 Złóż panel tego kroku.`;
   const r = await deps.ai.json({ system: SYSTEM, prompt, schema: ComposeResult, effort: "medium" });
-  // szkic z modelu jest zawsze propozycją (migawki z zewnątrz mogą podsunąć „approved”); zgodę daje tylko Piotr
-  const blocks = coerceAgentDrafts(step, r.blocks.slice(0, 8));
+  // szkic z modelu jest zawsze propozycją (migawki z zewnątrz mogą podsunąć „approved”); zgodę daje tylko Piotr.
+  // Opcje: ta sama treść drugi raz albo inna aplikacja niż pierwsza wypada (set_blocks takie odmawia; tu nie ma komu odmówić)
+  const blocks = dedupeOptions(step.id, coerceAgentDrafts(step, r.blocks.slice(0, 8)));
   await Promise.all([
     repo.updateStep(step.id, { blocks }),
     repo.replaceFacts({ stepId: step.id }, r.facts.map((f) => ({ ...f, source: f.source ?? { app: step.tool } }))),

@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Blocks, type Block, type Step } from "@/lib/schema";
 import { cardText, draftsText } from "@/lib/agent/context";
 import { stepContextText } from "@/lib/agent/chat";
-import { shownSig, type Draft } from "@/lib/agent/approval";
+import { approvalSig, draftsOf, shownSig, type Draft } from "@/lib/agent/approval";
 import { groupBlocks, hasComparison, isSourceBlock, nowHeading } from "@/lib/stepcard";
 import { BlocksView, BlockView } from "@/components/BlockRenderer";
 import { cardModeOf, PublishCard, type CardMode } from "@/components/PublishCard";
@@ -85,6 +85,17 @@ describe("get_task i czat: opcje (punkt 3c)", () => {
     expect(done).toContain("· Opcja A (opcja niewybrana (Piotr wybrał „Opcja B”): nie wysyłaj)");
     // „Zatrzymaj” zdjęło zgodę: obie znów zwykłe propozycje, bez „niewybrana”
     expect(draftsText([{ ...s, status: "todo" as const, blocks: [A, B] }], { send: () => false })).not.toContain("niewybrana");
+  });
+  it("draftsText: niewybrana opcja z „nieaktualny” (add_steps przed krokiem, potem zgoda na B) to „opcja niewybrana”, nie „NIEAKTUALNY”", () => {
+    const s = { id: "s1", title: "Odpisz", status: "handoff" as const, blocks: [{ ...A, stale: true }, { ...B, status: "approved" as const }] };
+    const full = { ...s, approvedAt: "2026-10-21T10:00:00.000Z", approvedSig: approvalSig(s, draftsOf(s)[1]) };
+    const out = draftsText([full], { send: () => false });
+    expect(out).toContain("SZKIC KROKU s1 „Odpisz” · Opcja A (opcja niewybrana (Piotr wybrał „Opcja B”): nie wysyłaj)");
+    expect(out).toContain("· Opcja B (zatwierdzony przez Piotra: wyśle go mostek Task Hub w osobnym biegu wysyłki; nie wysyłaj)");
+    expect(out).not.toContain("NIEAKTUALNY");
+    // ten, kto wysyła, dalej widzi tylko B; bez wyboru Piotra „nieaktualny” zostaje
+    expect(draftsText([full]).match(/SZKIC KROKU/g)).toHaveLength(1);
+    expect(draftsText([{ ...s, status: "todo" as const, blocks: [{ ...A, stale: true }, B] }])).toContain("· Opcja A (NIEAKTUALNY: przygotuj od nowa, nie wysyłaj)");
   });
   it("stepContextText: SZKIC z nazwą opcji, niewybrana oznaczona; jeden szkic bez title jak dotąd", () => {
     const out = stepContextText(step({ status: "handoff", blocks: [{ ...A, title: "Krótko" }, { ...B, status: "approved" }] }));

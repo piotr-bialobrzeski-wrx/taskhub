@@ -512,6 +512,8 @@ export async function approveDraft(ownerId: string, stepId: string, opts: { body
     }
     const cur = blocks[i] as Draft;
     if (cur.status === "sent") return false;
+    // inna opcja tej kartki już poszła: krok już opublikował, a ta zgoda nigdy nie byłaby ważna (draftOf woli wysłaną)
+    if (blocks.some((b, k) => k !== i && b.type === "draft" && b.status === "sent")) return false;
     const d: Draft = { ...cur, ...(opts.body != null ? { body: opts.body } : {}), status: "approved" };
     delete d.stale;   // Piotr widział ten szkic i go przyjął
     blocks[i] = d;

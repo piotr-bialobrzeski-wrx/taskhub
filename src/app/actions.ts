@@ -14,7 +14,7 @@ import { bridgeHold, busyWith, newTaskText, noStepsWho, shortTitle, type Queue, 
 import { liveActivity } from "@/lib/live";
 import { fmtTime } from "@/lib/clock";
 import { BRIDGE_ALIVE_MS, connectorIssue, isGitDraft } from "@/lib/bridge";
-import { draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, shownSig, type Draft } from "@/lib/agent/approval";
+import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, shownSig, type Draft } from "@/lib/agent/approval";
 import { decisionText, destOf, openQuestions, stepKind } from "@/lib/stepcard";
 import { isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
 
@@ -246,6 +246,11 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
   const shown = edited !== null ? fd?.get("seen") : fd?.get("seenFull") ?? fd?.get("seen");
   const seen = typeof shown === "string" && shown ? shown : null;
   if (step.status === "done") { refresh(taskId); return; }
+  // opcja z karty, której już nie ma (agent przepisał kartkę z mniejszą liczbą opcji, zanim Piotr kliknął): bez zgody i bez zamykania kroku
+  if (option != null && draftsOf(step).length && !pick(step)) {
+    await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(step.title, 60)}”: szkic zmienił się, zanim go zatwierdziłeś. Sprawdź go jeszcze raz.`, { stepId });
+    refresh(taskId); return;
+  }
   // szkic do „pliku” sprzed paczki 7: nic go nie wyśle, plik zapisuje krok „Plik na Macu”
   const d0 = pick(step);
   if (d0 && isLocalFile(d0.target.app)) {
@@ -273,12 +278,14 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
     const d = s ? draftOf(s) : null;
     if (s && d && !isExternalApp(d.target.app) && !isGitDraft(d, s.blocks) && !isPromptDraft(d, s.blocks) && (await repo.markSendStarted(o.id, stepId)))
       await repo.completeSend(o.id, stepId, { summary: "Zatwierdzone; ten szkic nie idzie do żadnej aplikacji zewnętrznej." }, "owner");
-  } else if (seen) {
-    // agent zmienił szkic, zanim Piotr kliknął: zgody nie ma, karta pokaże nową wersję
+  } else {
+    // zgody nie ma: agent zmienił szkic, zanim Piotr kliknął (karta pokaże nową wersję), albo inny powód (approveRefusal); jedna notatka, nigdy dwie
     const s = (await repo.getTask(o.id, taskId))?.steps.find((x) => x.id === stepId);
     const d = s ? pick(s) : null;
-    if (s && d && s.status !== "done" && !s.sendStartedAt && shownSig(s, d, edited !== null) !== seen)
-      await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(s.title, 60)}”: szkic zmienił się, zanim go zatwierdziłeś. Sprawdź go jeszcze raz.`, { stepId });
+    if (s && s.status !== "done" && !s.sendStartedAt) {
+      const why = seen && d && shownSig(s, d, edited !== null) !== seen ? "szkic zmienił się, zanim go zatwierdziłeś. Sprawdź go jeszcze raz" : approveRefusal(s, { option, body: edited });
+      if (why) await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(s.title, 60)}”: ${why}.`, { stepId });
+    }
   }
   refresh(taskId);
 }
@@ -292,8 +299,9 @@ export async function saveReport(fd: FormData) {
 // treść szkicu z pola z formatowaniem (Markdown): poprawia blok draft czekający na decyzję (option = numer opcji; bez niego wybrany albo pierwszy)
 // albo, gdy szkicu nie ma, wynik kroku. Poprawka zatwierdzonego szkicu kasuje zgodę (repo), szkic wraca do zatwierdzenia
 async function writeDraftBody(stepId: string, step: Step, body: string, option?: number) {
-  const d = option != null ? draftsOf(step)[option] : draftOf(step);
-  if (option != null && !d) return;   // nie ma takiej opcji
+  const ds = draftsOf(step);
+  const d = option != null ? ds[option] : draftOf(step);
+  if (option != null && ds.length && !d) return;   // nie ma takiej opcji (stary szkic bez bloku ma treść w output: numer z karty go nie blokuje)
   if (d && d.status === "sent") return;
   if (d) { if (d.body !== body) await repo.updateStep(stepId, { blocks: step.blocks!.map((b) => (b === d ? { ...d, body } : b)) }); }
   else if (step.output !== body) await repo.updateStep(stepId, { output: body });

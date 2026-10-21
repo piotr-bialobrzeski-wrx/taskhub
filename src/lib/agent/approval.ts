@@ -76,6 +76,23 @@ export function approvalValid(s: Approvable): boolean {
 // do wysłania: ważna zgoda i żaden bieg wysyłki jeszcze go nie wziął
 export const isSendable = (s: Approvable): boolean => approvalValid(s) && !s.sendStartedAt;
 
+// zgoda niemożliwa z innego powodu niż „szkic zmienił się, zanim kliknąłeś” (ten powód sprawdza shownSig): powód po polsku dla Piotra, null = nic
+// nie stoi na przeszkodzie. Lustro odmów repo.approveDraft: brak takiej opcji przy kilku szkicach; inna opcja tej kartki już wysłana (krok już
+// opublikował, a druga zgoda nigdy nie byłaby ważna, bo draftOf woli wysłaną); dwie opcje o tej samej treści (podpis liczony z poprawką z formularza)
+export function approveRefusal(step: { id: string; blocks: Block[] | null }, opts: { option?: number; body?: string | null } = {}): string | null {
+  const ds = draftsOf(step);
+  const d = ds.length > 1 ? (opts.option != null ? ds[opts.option] : undefined) : ds[0];
+  if (ds.length > 1 && !d) return "nie ma takiej opcji na kartce; szkic zmienił się, zanim go zatwierdziłeś";
+  if (ds.some((x) => x !== d && x.status === "sent")) return "jedna opcja z tej kartki już poszła, więc drugiej nie wyślę; nową wysyłkę zapisz jako osobny krok";
+  if (d) {
+    const picked: Draft = { ...d, ...(opts.body != null ? { body: opts.body } : {}) };
+    const blocks = (step.blocks ?? []).map((b) => (b === d ? picked : b));
+    const sig = approvalSig({ id: step.id, blocks }, picked);
+    if (blocks.some((b) => b !== picked && b.type === "draft" && approvalSig({ id: step.id, blocks }, b) === sig)) return "dwie opcje mają tę samą treść; popraw jedną albo usuń";
+  }
+  return null;
+}
+
 // aplikacje, w których szkic nie wychodzi do innych ludzi: krok Piotra, tekst w Task Hub, prompt dla agenta
 const INTERNAL = new Set(["manual", "claude", "claudeapp", "code", "taskhub", "file"]);
 export const isExternalApp = (app: string | null | undefined) => !!app?.trim() && !INTERNAL.has(normalizeTool(app));
@@ -98,5 +115,19 @@ export function coerceAgentDrafts(step: Pick<Step, "id" | "blocks">, incoming: B
     const rest: Draft = { ...b }; delete rest.stale;
     if (!matched && old && oldSig === approvalSig({ id: step.id, blocks: incoming }, b)) { matched = true; return { ...rest, status: old.status }; }
     return { ...rest, status: "proposed" as const };
+  });
+}
+// opcje złożone przez model w aplikacji (composeStep): szkic o tej samej treści co wcześniejszy albo do innej aplikacji niż pierwszy wypada,
+// bo nie ma komu odmówić (set_blocks odmawia agentowi zamiast wyrzucać); klocki kontekstu zostają
+export function dedupeOptions(stepId: string, blocks: Block[]): Block[] {
+  const sigs = new Set<string>();
+  let app: string | null = null;
+  return blocks.filter((b) => {
+    if (b.type !== "draft") return true;
+    const sig = approvalSig({ id: stepId, blocks }, b), key = appKey(b.target.app);
+    app ??= key;
+    if (sigs.has(sig) || key !== app) return false;
+    sigs.add(sig);
+    return true;
   });
 }

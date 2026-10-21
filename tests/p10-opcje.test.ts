@@ -2,9 +2,11 @@
 // (approvalSig), nie pozycji w tablicy. Kartki z opcjami zapisuje tu wprost repo.updateStep (to samo, co robi set_blocks po coerceAgentDrafts).
 // Punkt 3c: bieg wysyłki dostaje w get_task tylko wybraną opcję i zamyka krok mimo odrzuconej propozycji obok; poprawka z czatu trafia
 // do wskazanej opcji; set_blocks sprawdza każdą opcję osobno pod kątem miejsca, do którego inny krok już wysłał.
+// Poprawki po przeglądzie: odmowa zgody z powodem w rozmowie (opcja spoza karty, opcja obok już wysłanej, dwie opcje o tej samej treści),
+// poprawka z czatu z nieznaną opcją nic nie zmienia, stary szkic bez bloku dalej zapisuje treść z pola, set_blocks liczy podpis po sanitizeBlocks.
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import type { Block, Step } from "@/lib/schema";
-import { approvalSig, coerceAgentDrafts, draftOf, draftsOf, optionIndex, optionLabel, optionsOf, shownSig, type Draft } from "@/lib/agent/approval";
+import { approvalSig, approveRefusal, coerceAgentDrafts, dedupeOptions, draftOf, draftsOf, optionIndex, optionLabel, optionsOf, shownSig, type Draft } from "@/lib/agent/approval";
 import { targetLink } from "@/lib/stepcard";
 
 vi.mock("next/cache", () => ({ revalidatePath: () => undefined }));
@@ -66,6 +68,31 @@ describe("opcje: szkic kroku po stanie, nie po pozycji", () => {
     const step = st([{ ...A, status: "approved" }]);
     expect(statuses(coerceAgentDrafts(step, [A, A, B]))).toEqual(["approved", "proposed", "proposed"]);
     expect(statuses(coerceAgentDrafts(step, [B, A, A]))).toEqual(["proposed", "approved", "proposed"]);
+  });
+});
+
+describe("odmowa zgody z powodem i opcje z modelu w aplikacji (poprawki po przeglądzie)", () => {
+  it("approveRefusal: brak takiej opcji, opcja obok już wysłanej, ta sama treść (także po poprawce z formularza); inaczej null", () => {
+    const s = st([A, B]);
+    expect(approveRefusal(s, { option: 1 })).toBeNull();
+    expect(approveRefusal(s, {})).toContain("nie ma takiej opcji");
+    expect(approveRefusal(s, { option: 5 })).toContain("nie ma takiej opcji");
+    expect(approveRefusal(st([{ ...A, status: "sent" }, B]), { option: 1 })).toContain("już poszła");
+    expect(approveRefusal(st([A, { ...A, title: "Kopia" }]), { option: 0 })).toContain("tę samą treść");
+    expect(approveRefusal(s, { option: 0, body: B.body })).toContain("tę samą treść");
+    expect(approveRefusal(s, { option: 0, body: "zupełnie inna" })).toBeNull();
+    // jeden szkic: numer zbędny; stary szkic bez bloku: nic do sprawdzenia
+    expect(approveRefusal(st([A]), {})).toBeNull();
+    expect(approveRefusal(st([A]), { option: 0, body: "inna" })).toBeNull();
+    expect(approveRefusal(st(null), { option: 0 })).toBeNull();
+  });
+  it("dedupeOptions: powtórzona treść i inna aplikacja niż pierwsza wypadają, klocki kontekstu zostają", () => {
+    const text: Block = { type: "text", body: "Kontekst" };
+    const Bc = D(B.body, { target: { app: "clickup", action: "update" } });
+    expect(dedupeOptions("s1", [text, A, { ...A, title: "Kopia" }, Bc])).toEqual([text, A]);
+    expect(dedupeOptions("s1", [text, A, B])).toEqual([text, A, B]);
+    expect(dedupeOptions("s1", [text])).toEqual([text]);
+    expect(dedupeOptions("s1", [])).toEqual([]);
   });
 });
 
@@ -144,11 +171,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("opcje w bazie: zgoda, wysyłka 
     expect(optionsOf(after).chosen?.body).toBe(B.body);
     expect(optionsOf(after).rejected.map((d) => d.body)).toEqual([A.body]);
   });
-  it("(2) agent przepisuje kartkę z opcjami w odwróconej kolejności: zgoda zostaje na B", async () => {
+  it("(2) agent przepisuje kartkę z opcjami w odwróconej kolejności (set_blocks): zgoda zostaje na B", async () => {
     const { taskId, s } = await twoOptions();
-    const was = await approveB(taskId, s);
-    const blocks = coerceAgentDrafts(was, [{ type: "text", body: "Kontekst" }, { ...B }, { ...A }]);
-    await repo.updateStep(s.id, { blocks });
+    await approveB(taskId, s);
+    expect(await call(client, "set_blocks", { stepId: s.id, blocks: [{ type: "text", body: "Kontekst" }, { ...B }, { ...A }] })).toContain("Panel zapisany");
     const after = await get(taskId, s.id);
     expect(after.status).toBe("handoff"); expect(after.approvedAt).not.toBeNull();
     expect(draftsOf(after).map((d) => [d.body, d.status])).toEqual([[B.body, "approved"], [A.body, "proposed"]]);
@@ -156,14 +182,21 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("opcje w bazie: zgoda, wysyłka 
     expect(after.approvedSig).toBe(approvalSig(after, draftOf(after)!));
     expect(repo.isSendable(after)).toBe(true);
   });
-  it("(3) zmieniona B: set_blocks odmówi (szkic kroku nie ma już stanu wybranej), a zapis wprost kasuje zgodę jak każda zmiana treści", async () => {
+  it("(3) set_blocks w handoff: poprawka odrzuconej A przechodzi, B dalej zatwierdzona; poprawka wybranej B = odmowa, zgoda zostaje", async () => {
     const { taskId, s } = await twoOptions();
-    const was = await approveB(taskId, s);
-    const changed = coerceAgentDrafts(was, [A, { ...B, body: B.body + " Dopisek." }]);
-    // warunek odmowy z set_blocks (route.ts): po zapisie szkic kroku nie miałby stanu zatwierdzonego
-    expect(statuses(changed)).toEqual(["proposed", "proposed"]);
-    expect(draftOf({ blocks: changed })?.status).not.toBe(draftOf(was)?.status);
-    expect(repo.isSendable(await get(taskId, s.id))).toBe(true);   // nic nie zapisano: zgoda stoi
+    await approveB(taskId, s);
+    expect(await call(client, "set_blocks", { stepId: s.id, blocks: [{ ...A, body: A.body + " (poprawka)" }, { ...B }] })).toContain("Panel zapisany");
+    const a1 = await get(taskId, s.id);
+    expect(a1.status).toBe("handoff"); expect(a1.approvedAt).not.toBeNull();
+    expect(repo.isSendable(a1)).toBe(true);
+    expect(draftsOf(a1).map((d) => [d.body, d.status])).toEqual([[A.body + " (poprawka)", "proposed"], [B.body, "approved"]]);
+    // zmieniona B: po zapisie szkic kroku nie miałby stanu wybranej, więc odmowa i nic się nie zapisuje
+    const r2 = await call(client, "set_blocks", { stepId: s.id, blocks: [{ ...A, body: A.body + " (poprawka)" }, { ...B, body: B.body + "!" }] });
+    expect(r2).toContain("Nie zapisałem"); expect(r2).toContain("przy opcjach");
+    const a2 = await get(taskId, s.id);
+    expect(repo.isSendable(a2)).toBe(true);
+    expect(draftsOf(a2).map((d) => d.status)).toEqual(["proposed", "approved"]);
+    expect(draftsOf(a2)[1].body).toBe(B.body);
     // zapis z pominięciem bramki: zgoda trzyma się podpisu, więc znika, a krok wraca do zatwierdzenia
     await repo.updateStep(s.id, { blocks: [A, { ...B, body: B.body + " Dopisek.", status: "approved" }] });
     const after = await get(taskId, s.id);
@@ -284,5 +317,92 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("opcje w bazie: zgoda, wysyłka 
     // obie do innych miejsc: zapis, krok czeka na wybór
     expect(await call(client, "set_blocks", { stepId: s2, blocks: [to("Wariant A", V, "Opcja A"), to("Wariant B", V.replace(/200$/, "300"), "Opcja B")] })).toContain("czeka na zatwierdzenie");
     expect(draftsOf(await get(t.id, s2)).map((d) => d.title)).toEqual(["Opcja A", "Opcja B"]);
+  });
+  // ---------- poprawki po przeglądzie ----------
+  const chat = async (taskId: string) => (await repo.listChat(owner, taskId, 20)).map((m) => m.text);
+  it("(10) stary szkic bez bloku: saveDraftBody z option 0 (tak binduje karta) zapisuje output", async () => {
+    const t = await repo.createTask(owner, { title: "Opcje stary szkic", steps: [{ title: "Mail do Ani", tool: "gmail", needsApproval: true }] });
+    const sid = t.steps[0].id;
+    await repo.updateStep(sid, { status: "draft", output: "Treść maila" });
+    await actions.saveDraftBody(t.id, sid, 0, "Treść po poprawce");
+    expect((await get(t.id, sid)).output).toBe("Treść po poprawce");
+    expect(draftsOf(await get(t.id, sid))).toHaveLength(0);
+  });
+  it("(11) krok bez zgody, opcja spoza karty: krok się nie zamyka, obie propozycje, jedna notatka „zanim go zatwierdziłeś”", async () => {
+    const { taskId, s } = await twoOptions(false);
+    const fd = new FormData(); fd.set("option", "5");
+    await actions.approveStep(taskId, s.id, fd);
+    const after = await get(taskId, s.id);
+    expect(after.status).toBe("draft");
+    expect(draftsOf(after).map((d) => d.status)).toEqual(["proposed", "proposed"]);
+    expect(optionsOf(after).chosen).toBeNull();
+    const notes = (await chat(taskId)).filter((x) => x.includes("zanim go zatwierdziłeś"));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("Nie zatwierdziłem „Odpisz na #dev”");
+  });
+  it("(12) opcja obok już wysłanej (krok przywrócony do zrobienia, agent dopisał B): zgody nie ma, krok nie czeka na wysyłkę, notatka „już poszła”", async () => {
+    const { taskId, sid, s } = await twoOptions(true, [A]);
+    const fd = new FormData(); fd.set("seen", shownSig(s, A, true)); fd.set("seenFull", shownSig(s, A, false));
+    await actions.approveStep(taskId, sid, fd);
+    expect(await repo.markSendStarted(owner, sid)).toBe(true);
+    expect(await repo.completeSend(owner, sid, { summary: "Poszło na #dev." })).toBe(true);
+    expect(draftsOf(await get(taskId, sid)).map((d) => d.status)).toEqual(["sent"]);
+    await actions.reopen(taskId, sid);
+    expect(await call(client, "set_blocks", { stepId: sid, blocks: [A, B] })).toContain("Panel zapisany");
+    const was = await get(taskId, sid);
+    expect(was.status).toBe("todo");
+    expect(draftsOf(was).map((d) => d.status)).toEqual(["sent", "proposed"]);
+    expect(await repo.approveDraft(owner, sid, { option: 1 })).toBe(false);
+    const after = await approveB(taskId, was);
+    expect(after.status).toBe("todo"); expect(after.approvedAt).toBeNull(); expect(after.approvedSig).toBeNull();
+    expect(draftsOf(after).map((d) => d.status)).toEqual(["sent", "proposed"]);
+    expect(repo.isSendable(after)).toBe(false);
+    const notes = (await chat(taskId)).filter((x) => x.includes("Nie zatwierdziłem"));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("już poszła");
+  });
+  it("(13) dwie opcje o tej samej treści pod różnymi nazwami: „Zatwierdź” nie przechodzi po cichu, jedna notatka „tę samą treść”", async () => {
+    const { taskId, s } = await twoOptions(true, [A, { ...A, title: "Kopia" }]);
+    const a = draftsOf(s)[0];
+    const fd = new FormData(); fd.set("option", "0"); fd.set("seen", shownSig(s, a, true)); fd.set("seenFull", shownSig(s, a, false));
+    await actions.approveStep(taskId, s.id, fd);
+    const after = await get(taskId, s.id);
+    expect(after.status).toBe("draft"); expect(after.approvedAt).toBeNull();
+    expect(draftsOf(after).map((d) => d.status)).toEqual(["proposed", "proposed"]);
+    const notes = (await chat(taskId)).filter((x) => x.includes("Nie zatwierdziłem"));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("tę samą treść");
+    expect(notes[0]).not.toContain("zmienił się");
+    // bez podpisu z karty (sam numer opcji) ten sam powód; bez numeru przy opcjach: „nie ma takiej opcji”
+    const fd2 = new FormData(); fd2.set("option", "0");
+    await actions.approveStep(taskId, s.id, fd2);
+    expect((await chat(taskId)).filter((x) => x.includes("tę samą treść"))).toHaveLength(2);
+    await actions.approveStep(taskId, s.id);
+    expect((await chat(taskId)).filter((x) => x.includes("nie ma takiej opcji"))).toHaveLength(1);
+    expect((await get(taskId, s.id)).approvedAt).toBeNull();
+  });
+  it("(14) set_blocks: adres spoza http(s) nie odróżnia dwóch opcji o tej samej treści (podpis po sanitizeBlocks, jak przy zapisie i zgodzie)", async () => {
+    const { taskId, s } = await twoOptions(true, []);
+    const r = await call(client, "set_blocks", { stepId: s.id, blocks: [{ ...A, target: { ...A.target, url: "taskhub:abc" } }, { ...A }] });
+    expect(r).toContain("Nie zapisałem"); expect(r).toContain("tej samej treści");
+    expect(draftsOf(await get(taskId, s.id))).toHaveLength(0);
+    // adres http(s) odróżnia opcje jak dotąd
+    expect(await call(client, "set_blocks", { stepId: s.id, blocks: [{ ...A, target: { ...A.target, url: "https://x.slack.com/archives/C1/p1700000000000900" } }, { ...A, title: "Bez adresu" }] })).toContain("Panel zapisany");
+    expect(draftsOf(await get(taskId, s.id))).toHaveLength(2);
+  });
+  it("(15) poprawka z czatu z nieznaną opcją: nic się nie zmienia, zgoda na B zostaje, notatka „Nie ma opcji” z listą opcji", async () => {
+    const { taskId, s } = await twoOptions();
+    expect(repo.isSendable(await approveB(taskId, s))).toBe(true);
+    const done = await applyActions({ reply: "", actions: [{ type: "update_step", id: s.id, output: "Poprawka do wariantu C", option: "Opcja C" }] }, await chatDeps(taskId));
+    expect(done.map((d) => d.label)).toEqual(["Nie zmieniono: Odpisz na #dev"]);
+    expect(done[0].note).toContain("Nie ma opcji „Opcja C” w kroku „Odpisz na #dev”");
+    expect(done[0].note).toContain("opcje: Krótko, Opcja B");
+    const after = await get(taskId, s.id);
+    expect(after.status).toBe("handoff"); expect(after.approvedAt).not.toBeNull();
+    expect(draftsOf(after).map((d) => [d.body, d.status])).toEqual([[A.body, "proposed"], [B.body, "approved"]]);
+    expect(repo.isSendable(after)).toBe(true);
+    // numer spoza zakresu też jest odmową; bez option poprawka idzie jak dotąd
+    expect((await applyActions({ reply: "", actions: [{ type: "update_step", id: s.id, output: "x", option: 7 }] }, await chatDeps(taskId)))[0].note).toContain("Nie ma opcji „7”");
+    expect(draftsOf(await get(taskId, s.id)).map((d) => d.body)).toEqual([A.body, B.body]);
   });
 });
