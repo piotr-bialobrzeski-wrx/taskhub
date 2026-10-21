@@ -45,6 +45,10 @@ Mostek pracuje także przy zamkniętym oknie (aplikacja zostaje w pasku menu). G
   `curl`/`ssh`/`scp`, `sudo`, `osascript`, `open`, `security`, czytanie kluczy i haseł
   (`~/.ssh`, `~/.aws`, `~/.docker`, `~/.kube`, `~/.gnupg`, `~/.pgpass`, historia powłoki, pęk kluczy, dane tej aplikacji, ciasteczka). Pilnują tego lista narzędzi, piaskownica Claude Code i strażnik
   (`Task Hub --hook-guard`, hak PreToolUse).
+- **Konektor, który doszedł po próbie** (od 0.1.8): mostek co 6 h robi próbę Claude Code (jakie narzędzia i konektory ma). Konektor,
+  który przy próbie jeszcze się łączył (np. Figma), a w biegu już jest, nie ma reguły w ustawieniach biegu, więc jego narzędzia blokuje
+  strażnik z listy narzędzi biegu (`TASKHUB_ALLOWED_TOOLS`); bieg idzie dalej bez niego, a przed następnym biegiem mostek robi nową próbę.
+  Do 0.1.7 taki bieg był przerywany i mostek stawał na 10 minut.
 - **Zatrzymaj**: przycisk w powiadomieniu albo „Zatrzymaj bieg” w pasku menu przerywa bieg (z procesami potomnymi), Task Hub dostaje
   wynik „zatrzymany”, a mostek odczekuje 10 minut. „Sprawdź teraz” wznawia od razu.
 - Okno Task Hub otwiera na zewnątrz tylko `http(s)`, `mailto` i `tel`; inne schematy (np. `file:`) są blokowane.

@@ -51,7 +51,7 @@ struct RunPlan {
     var files: [URL]
     var canary: String          // narzędzie zablokowane tylko w pliku ustawień: jego brak w init = plik przyjęty
     var mustLack: [String]      // narzędzia zablokowane w argumentach: init nie może ich pokazać
-    var known: Set<String> = [] // narzędzia z próby: konektor, którego próba nie widziała, nie ma reguły (bieg nie rusza, nowa próba)
+    var known: Set<String> = [] // narzędzia z próby: konektor, którego próba nie widziała, nie ma reguły (blokuje go strażnik, po biegu nowa próba)
 }
 
 struct McpName {
@@ -324,8 +324,22 @@ enum Policy {
         var env = ClaudeCLI.env()
         env["TASKHUB_ALLOWED_DIRS"] = (dirs + files).joined(separator: ":")
         env["TASKHUB_FILE_DIRS"] = files.joined(separator: ":")
+        env["TASKHUB_ALLOWED_TOOLS"] = guardTools(allow, builtins: builtins, canary: canary)
         return RunPlan(args: args, env: env, files: [mcpF, setF], canary: canary, mustLack: conn.write + (hasBash ? [] : ["Bash"]) + extra,
                        known: Set(probe.info.tools))
+    }
+
+    // lista dla strażnika (TASKHUB_ALLOWED_TOOLS): nazwy z reguł „allow” bez wzorców w nawiasach („Read(//x/**)” → „Read”,
+    // „Bash(git status:*)” → „Bash”) i wbudowane narzędzia biegu bez narzędzia-próbki; „mcp__serwer” obejmuje wszystkie narzędzia serwera.
+    // Czego tu nie ma, strażnik odmawia: także narzędzi konektora, który doszedł po próbie (bieg idzie dalej bez niego)
+    static func guardTools(_ allow: [String], builtins: [String], canary: String) -> String {
+        var out: [String] = []
+        for raw in allow + builtins {
+            let name = raw.split(separator: "(", maxSplits: 1).first.map(String.init) ?? raw
+            guard !name.isEmpty, name != canary, !name.contains(":"), !out.contains(name) else { continue }
+            out.append(name)
+        }
+        return out.joined(separator: ":")
     }
 
     // wbudowane narzędzia z próby, których bieg nie używa (bez narzędzia-próbki i już zablokowanych)
@@ -373,6 +387,7 @@ enum Policy {
         args += common(probe, tools: builtins, model: model)
         var env = ClaudeCLI.env()
         env["TASKHUB_ALLOWED_DIRS"] = ""   // wysyłka niczego nie zmienia na dysku
+        env["TASKHUB_ALLOWED_TOOLS"] = guardTools(allow, builtins: builtins, canary: canary)
         let lack = base.filter { probe.info.tools.contains($0) } + probe.info.tools.filter { t in split(t).map { others.contains($0.server) } ?? false } + extra
         return RunPlan(args: args, env: env, files: [mcpF, setF], canary: canary, mustLack: lack, known: Set(probe.info.tools))
     }
@@ -383,10 +398,13 @@ enum Policy {
         guard i.permissionMode == "dontAsk" else { return "Claude Code nie przyjął zasad mostka (tryb uprawnień: \(i.permissionMode ?? "brak"))" }
         if i.tools.contains(plan.canary) { return "Claude Code nie przyjął zasad mostka (pominął plik ustawień biegu)" }
         if let t = plan.mustLack.first(where: { i.tools.contains($0) }) { return "Claude Code nie przyjął zasad mostka (nie zablokował \(t))" }
-        // konektor, którego próba nie znała (doszedł po próbie): nie ma dla niego reguły, więc bieg nie rusza, a mostek robi nową próbę
-        if let t = i.tools.first(where: { t in split(t).map { $0.server != hub && !plan.known.contains(t) } ?? false }) {
-            return "Claude Code nie przyjął zasad mostka (nowe narzędzie \(t), ponowna próba)"
-        }
         return nil
+    }
+
+    // narzędzia konektorów, których próba nie widziała (konektor doszedł po próbie, np. Figma w próbie jeszcze „pending”): nie mają reguły
+    // w ustawieniach biegu, więc w tym biegu blokuje je strażnik (lista TASKHUB_ALLOWED_TOOLS), a mostek przed następnym robi nową próbę.
+    // Do 0.1.7 taki bieg był przerywany i mostek stawał na 10 minut, więc jeden kapryśny konektor zatrzymywał całą pracę.
+    static func unknownTools(_ i: InitInfo, _ plan: RunPlan) -> [String] {
+        i.tools.filter { t in split(t).map { $0.server != hub && !plan.known.contains(t) } ?? false }
     }
 }

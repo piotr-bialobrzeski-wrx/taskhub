@@ -1,7 +1,8 @@
 // Strażnik biegów mostka: Claude Code woła go przed każdym narzędziem (hook PreToolUse z pliku ustawień biegu)
 // jako „Task Hub --hook-guard”. Czyta JSON ze stdin; odmowa = kod 2 i powód na stderr, zgoda = kod 0 bez wyjścia
 // (nigdy „allow”: o reszcie decydują zasady biegu). Bez AppKit i bez okien, żeby był szybki; nieczytelne wejście = odmowa.
-// To druga linia obrony: pierwsza to lista dozwolonych narzędzi i piaskownica Basha.
+// To druga linia obrony: pierwsza to lista dozwolonych narzędzi i piaskownica Basha. Lista narzędzi biegu (TASKHUB_ALLOWED_TOOLS)
+// łapie też konektory, które Claude Code podłączył dopiero po próbie (nie mają reguły w ustawieniach biegu).
 import Darwin
 import Foundation
 
@@ -32,8 +33,20 @@ enum Guard {
             .split(separator: ":").map { String($0) }.filter { $0.hasPrefix("/") }
         let fileDirs = (ProcessInfo.processInfo.environment["TASKHUB_FILE_DIRS"] ?? "")
             .split(separator: ":").map { String($0) }.filter { $0.hasPrefix("/") }
+        let tools = (ProcessInfo.processInfo.environment["TASKHUB_ALLOWED_TOOLS"] ?? "")
+            .split(separator: ":").map { String($0) }.filter { !$0.isEmpty }
+        if let why = toolProblem(tool, allowed: tools) { return deny(why) }
         if let why = check(tool: tool, input: input, cwd: cwd, allowed: allowed, fileDirs: fileDirs) { return deny(why) }
         return 0
+    }
+
+    // lista narzędzi biegu (TASKHUB_ALLOWED_TOOLS, dwukropek dzieli): pusta = bez tej kontroli; wpis „mcp__serwer” = każde narzędzie
+    // tego serwera. Konektor, którego próba nie widziała (doszedł po próbie, np. Figma najpierw „pending”), nie ma reguły w ustawieniach
+    // biegu, więc blokuje go tu strażnik zamiast przerywać cały bieg; to samo z narzędziem, którego lista biegu nie zna.
+    static func toolProblem(_ tool: String, allowed: [String]) -> String? {
+        guard !allowed.isEmpty, !allowed.contains(tool) else { return nil }
+        if let n = Policy.split(tool), allowed.contains("mcp__" + n.server) { return nil }
+        return "Strażnik Task Hub: narzędzie \(tool) nie jest na liście tego biegu (konektor doszedł po próbie albo to narzędzie zapisu), zablokowane."
     }
 
     static func deny(_ why: String) -> Int32 {

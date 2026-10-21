@@ -308,7 +308,18 @@ final class Bridge: ObservableObject {
             throw PolicyError("Zaktualizuj Claude Code: w Terminalu claude update (jest \(v), mostek potrzebuje co najmniej \(Policy.minVersion)).")
         }
         if let p = probe, p.bin == bin, p.version == v, Date().timeIntervalSince(p.at) < probeEvery { return p }
-        let plain = await ClaudeCLI.probe(bin, restricted: false)
+        var plain = await ClaudeCLI.probe(bin, restricted: false)
+        if let first = plain.initInfo, first.servers.contains(where: { $0.status == "pending" }) {
+            // konektor jeszcze się łączył (np. Figma): chwila i druga próba; zostaje ta z większą liczbą połączonych serwerów i narzędzi,
+            // bo konektor widziany dopiero w biegu nie ma reguły i strażnik go blokuje
+            let names = first.servers.filter { $0.status == "pending" }.map { $0.name }.joined(separator: ", ")
+            Log.write("próba Claude Code: konektory jeszcze się łączą (\(names)), za chwilę druga próba")
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            let again = await ClaudeCLI.probe(bin, restricted: false)
+            if again.ok, let second = again.initInfo, (Bridge.connected(second), second.tools.count) > (Bridge.connected(first), first.tools.count) {
+                plain = again
+            }
+        }
         guard plain.ok, let info = plain.initInfo else {
             if ClaudeCLI.isAuth(plain.text) { throw PolicyError("Claude Code wylogowany: \(plain.text)") }
             throw PolicyError("Próba Claude Code się nie udała: \(String(plain.text.prefix(300)))")
@@ -335,6 +346,7 @@ final class Bridge: ObservableObject {
     }
 
     static let rejected = "Claude Code nie przyjął zasad mostka"
+    private static func connected(_ i: InitInfo) -> Int { i.servers.filter { $0.status == "connected" }.count }
 
     // błąd przed biegiem: stan, opis i termin kolejnej próby
     private func hold(_ s: State, _ msg: String, _ seconds: Double) -> Outcome {
@@ -526,10 +538,21 @@ final class Bridge: ObservableObject {
         defer { Policy.remove(plan.files) }
         if userStopped || serverStopped || Task.isCancelled { return ProcessResult(ok: false, text: "zatrzymany przez Ciebie") }
         let p = plan
-        let runner = ProcessRunner(bin: bin, args: p.args, cwd: Store.workDir.path, env: p.env, maxSeconds: Double(maxMin * 60),
-                                   onInit: { info in Policy.check(info, p) })
-        current = runner
         let bridge = self
+        let runner = ProcessRunner(bin: bin, args: p.args, cwd: Store.workDir.path, env: p.env, maxSeconds: Double(maxMin * 60),
+                                   onInit: { info in
+            // konektor, którego próba nie widziała: bieg idzie dalej (strażnik blokuje jego narzędzia), a przed następnym biegiem nowa próba
+            let fresh = Policy.unknownTools(info, p)
+            if !fresh.isEmpty {
+                let servers = Set(fresh.compactMap { Policy.split($0)?.server }).sorted().joined(separator: ", ")
+                Task { @MainActor in
+                    Log.write("  konektor doszedł po próbie (\(servers), narzędzi: \(fresh.count)): w tym biegu blokuje je strażnik, przed następnym nowa próba")
+                    bridge.probe = nil
+                }
+            }
+            return Policy.check(info, p)
+        })
+        current = runner
         let result = await runner.run { step in
             Task { @MainActor in
                 bridge.detail = step
