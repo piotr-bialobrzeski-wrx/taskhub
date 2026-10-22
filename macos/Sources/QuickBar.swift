@@ -567,6 +567,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     private var centerX: CGFloat = 0
     private var bottom: CGFloat = 0           // dół paska stoi w miejscu: tekst i historia rosną w górę, jak dok w Task Hub
     private var clickMonitor: Any? = nil
+    private var localMonitor: Any? = nil
+    private var shownAt = Date.distantPast
     private var picking = false
     private var hiding = false
     private var activated = false
@@ -591,7 +593,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         panel.hasShadow = true
         panel.becomesKeyOnlyIfNeeded = false
         panel.worksWhenModal = true
-        if #available(macOS 13.0, *) { host.sizingOptions = [] }
+        // fittingSize liczy się z wewnętrznego rozmiaru widoku; bez .intrinsicContentSize wychodziło 0×0 i pasek był niewidoczny (0.1.10)
+        if #available(macOS 13.0, *) { host.sizingOptions = [.intrinsicContentSize] }
         panel.contentView = host
         panel.delegate = self
 
@@ -604,7 +607,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         // inne biurko albo zmiana monitorów: pasek się chowa, skrót otworzy go na nowo tam, gdzie jesteś
         bag.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             guard let me = self else { return }
-            Task { @MainActor in if !me.picking { me.hide() } }
+            Task { @MainActor in if !me.picking && me.isVisible { Log.write("szybki pasek: schowany (inne biurko)"); me.hide() } }
         })
         bag.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             guard let me = self else { return }
@@ -628,10 +631,12 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         let front = NSWorkspace.shared.frontmostApplication
         previousApp = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
         layout(force: true)
+        shownAt = Date()
         panel.orderFrontRegardless()
-        panel.makeKey()
+        panel.makeKeyAndOrderFront(nil)
         model.focus()
         startClickMonitor()
+        Log.write("szybki pasek: otwarty \(Int(panel.frame.width))×\(Int(panel.frame.height)) na \(screen?.localizedName ?? "?")\(panel.isKeyWindow ? "" : " (bez klawiatury)")")
     }
 
     func hide() {
@@ -651,29 +656,50 @@ final class QuickBarController: NSObject, NSWindowDelegate {
 
     private func layout(force: Bool = false) {
         guard force || panel.isVisible else { return }
-        let s = host.fittingSize
+        var s = host.fittingSize
+        if s.width < 100 { s.width = QuickBarModel.width }
+        if s.height < 40 { s.height = estimatedHeight() }   // zapas, gdyby SwiftUI nie podał rozmiaru
         let frame = NSRect(x: round(centerX - s.width / 2), y: round(bottom), width: ceil(s.width), height: ceil(s.height))
         guard frame != panel.frame else { return }
         panel.setFrame(frame, display: true)
         panel.invalidateShadow()
     }
 
-    // klik w innej aplikacji albo na biurku; klik w innym oknie Task Hub zabiera panelowi klawiaturę (windowDidResignKey)
+    private func estimatedHeight() -> CGFloat {
+        var h = model.textHeight + 12
+        if !model.files.isEmpty { h += 34 }
+        if !model.error.isEmpty { h += 22 }
+        if model.showHistory { h += 8 + min(max(model.histContent, 40), model.maxHist) }
+        return h
+    }
+
+    // klik obok paska (w innej aplikacji, na biurku albo w innym oknie Task Hub) go chowa; nie samo oddanie klawiatury,
+    // bo panel traci ją też chwilę po otwarciu z menu w pasku menu i wtedy chował się od razu
     private func startClickMonitor() {
         stopClickMonitor()
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+        let kinds: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: kinds) { [weak self] _ in
             guard let me = self else { return }
-            Task { @MainActor in if !me.picking { me.hide() } }
+            Task { @MainActor in me.clickedOutside(reason: "klik poza Task Hub") }
         }
+        let own = panel
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: kinds) { [weak self] e in
+            if let me = self, e.window !== own { Task { @MainActor in me.clickedOutside(reason: "klik w innym oknie Task Hub") } }
+            return e
+        }
+    }
+
+    private func clickedOutside(reason: String) {
+        guard !picking, Date().timeIntervalSince(shownAt) > 0.3 else { return }
+        Log.write("szybki pasek: schowany (\(reason))")
+        hide()
     }
 
     private func stopClickMonitor() {
         if let m = clickMonitor { NSEvent.removeMonitor(m) }
+        if let m = localMonitor { NSEvent.removeMonitor(m) }
         clickMonitor = nil
-    }
-
-    func windowDidResignKey(_ notification: Notification) {
-        if !picking { hide() }
+        localMonitor = nil
     }
 
     // spinacz: systemowe okno wyboru plików, nad paskiem
