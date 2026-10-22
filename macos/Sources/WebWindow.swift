@@ -56,6 +56,15 @@ final class WebWindowController: NSWindowController, WKNavigationDelegate, WKUID
         }
     }
 
+    // konkretna strona Task Hub (np. /tasks/<id> z historii szybkiego paska), zawsze pod adresem z Ustawień
+    func open(path: String) {
+        guard !store.baseURL.isEmpty, path.hasPrefix("/"), let u = URL(string: store.baseURL + path) else { show(); return }
+        loadedBase = store.baseURL
+        webView.load(URLRequest(url: u))
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func reload() {
         if webView.url == nil || webView.url?.scheme == "about" { load(force: true) } else { webView.reload() }
     }

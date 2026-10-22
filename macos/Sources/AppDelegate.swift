@@ -1,4 +1,4 @@
-// Spina wszystko: menu aplikacji, ikonę w pasku menu, okno z Task Hub, okienko szybkiego zadania, Ustawienia,
+// Spina wszystko: menu aplikacji, ikonę w pasku menu, okno z Task Hub, szybki pasek (skrót z Ustawień), Ustawienia,
 // link taskhub://connect z Ustawień Task Hub (tylko po pytaniu) i mostek, który pracuje także przy zamkniętym oknie.
 import AppKit
 import Combine
@@ -10,11 +10,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private(set) lazy var bridge = Bridge(store: store)
     private(set) lazy var updater = Updater(store: store)
     private var web: WebWindowController! = nil
-    private var quick: QuickEntryController! = nil
+    private var bar: QuickBarController! = nil
     private var settings: NSWindowController? = nil
     private var statusItem: NSStatusItem! = nil
     private let statusMenu = NSMenu()
-    private var hotKey: HotKey? = nil
+    private var barKey: HotKey? = nil
+    private var barKeyApplied: Shortcut? = nil
     private var bag = Set<AnyCancellable>()
     private var applied = ""
     private var connecting = false   // okno „Połączyć…?” już wisi
@@ -26,14 +27,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         buildMainMenu()
         web = WebWindowController(store: store)
         web.onConnectURL = { [weak self] u in self?.handle(url: u) }
-        quick = QuickEntryController(bridge: bridge, store: store)
-        quick.model.openSettings = { [weak self] in self?.showSettings() }
+        bar = QuickBarController(bridge: bridge, store: store)
+        bar.model.openTask = { [weak self] id in self?.openTask(id) }
         setupStatusItem()
         // powiadomienie „Claude pracuje” z przyciskiem Zatrzymaj (mostek woła runStarted/runEnded)
         Notifier.shared.onStop = { [weak self] in self?.stopRun() }
         Notifier.shared.onOpen = { [weak self] in self?.showMain() }
         Notifier.shared.setup()
-        hotKey = HotKey(keyCode: HotKey.keyT, modifiers: HotKey.ctrlAlt) { [weak self] in self?.showQuickEntry() }
+        registerBarKey()
+        // nagrywanie nowego skrótu w Ustawieniach: stary na ten czas nie działa, żeby naciśnięcie trafiło do nagrywania
+        ShortcutState.shared.$recording.dropFirst().removeDuplicates().sink { [weak self] rec in
+            Task { @MainActor in if rec { self?.barKey = nil; self?.barKeyApplied = nil } else { self?.registerBarKey() } }
+        }.store(in: &bag)
         bridge.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in Task { @MainActor in self?.refreshStatusIcon() } }.store(in: &bag)
         store.$cfg.dropFirst().removeDuplicates().debounce(for: .seconds(0.8), scheduler: DispatchQueue.main).sink { [weak self] _ in self?.applyConfig() }.store(in: &bag)
         if store.configured {
@@ -46,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // samoaktualizacja: cicho, gdy okna zamknięte i mostek nie pracuje; inaczej pytamy
         updater.canRelaunchQuietly = { [weak self] in
             guard let self = self else { return false }
-            let visible = [self.web.window, self.settings?.window, self.quick.window].contains { $0?.isVisible == true }
+            let visible = [self.web.window, self.settings?.window, self.bar.panel].contains { $0?.isVisible == true }
             return !visible && self.bridge.state != .running
         }
         updater.askRelaunch = { [weak self] v in self?.askRelaunch(v) }
@@ -156,17 +161,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         web.load(force: false)
         showMain()
         Log.write("połączono przez link: \(store.baseURL)")
-        alert("Połączono z Task Hub", "Mostek pracuje na tym Macu: \(store.cfg.name). Claude Code zajmie się zadaniami, gdy tylko się pojawią. Okienko nowego zadania: ⌃⌥T.")
+        alert("Połączono z Task Hub", "Mostek pracuje na tym Macu: \(store.cfg.name). Claude Code zajmie się zadaniami, gdy tylko się pojawią. Szybki pasek: \(store.cfg.quickBar.label).")
     }
 
     // ---------- konfiguracja → mostek ----------
     private func applyConfig() {
         web.load(force: false)
+        if store.cfg.quickBar != barKeyApplied { registerBarKey() }
         let key = store.baseURL + "|" + store.cfg.token + "|" + String(store.cfg.bridge)
         guard key != applied else { return }
         applied = key
         if store.configured && store.cfg.bridge { bridge.restart() } else { bridge.stop() }
         refreshStatusIcon()
+    }
+
+    // skrót szybkiego paska z Ustawień; wynik (czy macOS go przyjął) widać w Ustawieniach
+    private func registerBarKey() {
+        guard !ShortcutState.shared.recording else { return }
+        let s = store.cfg.quickBar
+        barKey = nil
+        let k = HotKey(keyCode: s.key, modifiers: s.mods) { [weak self] in self?.bar.toggle() }
+        barKey = k
+        barKeyApplied = s
+        ShortcutState.shared.ok = k.ok
     }
 
     // ---------- pasek menu ----------
@@ -196,7 +213,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(.separator())
         menu.addItem(item("Otwórz Task Hub", #selector(showMain), "1"))
-        menu.addItem(item("Nowe zadanie…", #selector(showQuickEntry), "n"))
+        let quick = item("Szybki pasek", #selector(showQuickBar), "")
+        quick.toolTip = "Skrót: \(store.cfg.quickBar.label) (zmienisz w Ustawieniach)"
+        menu.addItem(quick)
         menu.addItem(.separator())
         let toggle = item(store.cfg.bridge ? "Wyłącz mostek" : "Włącz mostek", #selector(toggleBridge), "")
         toggle.isEnabled = store.configured
@@ -272,7 +291,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let fileItem = NSMenuItem()
         main.addItem(fileItem)
         let fileMenu = NSMenu(title: "Plik")
-        fileMenu.addItem(withTitle: "Nowe zadanie…", action: #selector(showQuickEntry), keyEquivalent: "n")
+        fileMenu.addItem(withTitle: "Szybki pasek", action: #selector(showQuickBar), keyEquivalent: "n")
         fileMenu.addItem(withTitle: "Zamknij okno", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         fileItem.submenu = fileMenu
 
@@ -315,8 +334,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         web.show()
     }
 
-    @objc func showQuickEntry() {
-        quick.show()
+    @objc func showQuickBar() {
+        bar.show()
+    }
+
+    // klik zielonej wiadomości w historii paska: jej zadanie w oknie Task Hub
+    private func openTask(_ id: String?) {
+        bar.hide()
+        guard let id = id, id.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { web.show(); return }
+        web.open(path: "/tasks/\(id)")
     }
 
     @objc func reloadWeb() { web.reload() }

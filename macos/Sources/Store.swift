@@ -13,6 +13,7 @@ struct Config: Codable, Equatable {
     var autoUpdate = true   // czy aplikacja ma się sama aktualizować (wydania przez Task Hub)
     var codeFolders: [String] = []   // foldery z kodem (ścieżki bezwzględne): tylko tu Claude zmienia pliki w krokach z kodem
     var fileFolders: [String] = []   // foldery na pliki: tylko tu Claude zapisuje nowe pliki kroków „Plik na Macu”
+    var quickBar = Shortcut.quickBar // skrót szybkiego paska
 
     init() {}
 
@@ -28,6 +29,7 @@ struct Config: Codable, Equatable {
         autoUpdate = try c.decodeIfPresent(Bool.self, forKey: .autoUpdate) ?? true
         codeFolders = (try? c.decodeIfPresent([String].self, forKey: .codeFolders)) ?? []
         fileFolders = (try? c.decodeIfPresent([String].self, forKey: .fileFolders)) ?? []
+        quickBar = (try? c.decodeIfPresent(Shortcut.self, forKey: .quickBar)) ?? Shortcut.quickBar
     }
 }
 

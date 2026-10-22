@@ -1,8 +1,8 @@
-// Szybkie zadanie z aplikacji na Macu (okienko „Nowe zadanie”): tworzy zadanie tak jak dok na kanwie i mówi, kto się nim zajmie.
-import * as repo from "@/lib/repo";
-import { bridgeHold, busyWith, newTaskText, noStepsWho } from "@/lib/auto";
-import { BRIDGE_ALIVE_MS, authBridge } from "@/lib/bridge";
-import { liveActivity } from "@/lib/live";
+// Szybki pasek z aplikacji na Macu (i starsze okienko „Nowe zadanie”): ta sama droga co główne pole na kanwie (src/lib/intake.ts).
+// Pasek wysyła multipart (tekst + pliki, jak dok), starsze wersje aplikacji JSON { text }. Odpowiedź: nowe zadanie i jego adres.
+import { revalidatePath } from "next/cache";
+import { authBridge } from "@/lib/bridge";
+import { intake, uploads } from "@/lib/intake";
 import { appUrl } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -10,14 +10,18 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const a = await authBridge(req);
   if (a instanceof Response) return a;
-  const body = (await req.json().catch(() => ({}))) as { text?: string };
-  const text = String(body.text ?? "").trim();
-  if (!text) return Response.json({ error: "Pusta treść." }, { status: 400 });
-  await repo.addChat(a.ownerId, null, "user", text);
-  const t = await repo.createTask(a.ownerId, { title: text.slice(0, 120), source: text });
-  const st = await repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS);
-  const w = { alive: st.alive, name: st.name, run: liveActivity(st.run), hold: bridgeHold(st.meta, st.pause) };
-  const message = newTaskText(t.title, noStepsWho(w, t.id, busyWith(w.run, await repo.listTasks(a.ownerId))));
-  await repo.addChat(a.ownerId, null, "agent", message);
-  return Response.json({ id: t.id, url: `${appUrl()}/tasks/${t.id}`, message });
+  let typed = "", files: File[] = [];
+  if ((req.headers.get("content-type") ?? "").toLowerCase().includes("multipart/form-data")) {
+    const fd = await req.formData().catch(() => null);
+    if (!fd) return Response.json({ error: "Nie umiem odczytać wiadomości." }, { status: 400 });
+    typed = String(fd.get("text") ?? "").trim();
+    files = uploads(fd);
+  } else {
+    const body = (await req.json().catch(() => ({}))) as { text?: string };
+    typed = String(body.text ?? "").trim();
+  }
+  if (!typed && !files.length) return Response.json({ error: "Pusta treść." }, { status: 400 });
+  const { goTo, note } = await intake(a.ownerId, { typed, files, taskId: null, stepId: null });
+  try { revalidatePath("/"); } catch { /* poza żądaniem Next (testy) */ }
+  return Response.json({ id: goTo, url: goTo ? `${appUrl()}/tasks/${goTo}` : `${appUrl()}/`, message: note ?? "Mam to." });
 }

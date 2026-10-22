@@ -223,13 +223,13 @@ final class Bridge: ObservableObject {
         return try await requestRaw(method, path, data: data)
     }
 
-    private func requestRaw(_ method: String, _ path: String, data: Data?) async throws -> (Int, [String: Any]) {
+    private func requestRaw(_ method: String, _ path: String, data: Data?, type: String = "application/json", timeout: TimeInterval = 30) async throws -> (Int, [String: Any]) {
         guard let url = URL(string: store.baseURL + path) else { throw BridgeError.bad("zły adres Task Hub") }
         var r = URLRequest(url: url)
         r.httpMethod = method
-        r.timeoutInterval = 30
+        r.timeoutInterval = timeout
         r.setValue("Bearer \(store.cfg.token.trimmingCharacters(in: .whitespaces))", forHTTPHeaderField: "Authorization")
-        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.setValue(type, forHTTPHeaderField: "Content-Type")
         r.setValue(ClaudeCLI.userAgent, forHTTPHeaderField: "User-Agent")
         if let d = data { r.httpBody = d }
         let pair: (Data, URLResponse)
@@ -284,10 +284,24 @@ final class Bridge: ObservableObject {
     }
 
     // szybkie zadanie z okienka „Nowe zadanie”
-    func quickTask(_ text: String) async throws -> String {
-        let (code, j) = try await request("POST", "/api/bridge/task", body: ["text": text])
+    // szybki pasek: tekst i pliki jak z głównego pola na kanwie (multipart „text” + „files”); wynik: nowe zadanie i jego adres
+    func quickSend(_ text: String, files: [QuickFile]) async throws -> (id: String?, url: String?) {
+        let boundary = "TaskHub-\(UUID().uuidString)"
+        var d = Data()
+        func part(_ head: String, _ body: Data) {
+            d.append("--\(boundary)\r\n\(head)\r\n\r\n".data(using: .utf8)!)
+            d.append(body)
+            d.append("\r\n".data(using: .utf8)!)
+        }
+        part("Content-Disposition: form-data; name=\"text\"", text.data(using: .utf8) ?? Data())
+        for f in files {
+            let name = f.name.replacingOccurrences(of: "\"", with: "'").replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
+            part("Content-Disposition: form-data; name=\"files\"; filename=\"\(name)\"\r\nContent-Type: \(f.mime)", f.data)
+        }
+        d.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        let (code, j) = try await requestRaw("POST", "/api/bridge/task", data: d, type: "multipart/form-data; boundary=\(boundary)", timeout: 90)
         guard code == 200 else { throw BridgeError.http(code, (j["error"] as? String) ?? "") }
-        return (j["message"] as? String) ?? "Mam to."
+        return (j["id"] as? String, j["url"] as? String)
     }
 
     // sprawdzenie połączenia z Ustawień: ile rzeczy czeka

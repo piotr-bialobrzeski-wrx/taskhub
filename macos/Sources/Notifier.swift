@@ -55,6 +55,17 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         Log.write("powiadomienie o biegu: \(msg)")
     }
 
+    // zwykła informacja (np. wiadomość z szybkiego paska nie poszła)
+    func notice(_ title: String, _ body: String) {
+        setup()
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "taskhub-notice-\(UUID().uuidString)", content: content, trigger: nil)) { error in
+            if let e = error { let msg = e.localizedDescription; Task { @MainActor in Log.write("powiadomienie: \(msg)") } }
+        }
+    }
+
     func runEnded() {
         let c = UNUserNotificationCenter.current()
         c.removePendingNotificationRequests(withIdentifiers: [RunNote.id])

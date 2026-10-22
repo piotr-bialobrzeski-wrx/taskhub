@@ -70,7 +70,7 @@ jobs:
         run: |
           cat > macos/out/notes.md <<'EOF'
           Aplikacja Task Hub na Maca (macOS 13 lub nowszy, Apple Silicon i Intel): okno z Task Hub, ikona w pasku menu,
-          okienko „Nowe zadanie” (⌃⌥T) i mostek, który uruchamia Claude Code na tym Macu, gdy tylko pojawi się praca.
+          szybki pasek (domyślnie ⌥Spacja) i mostek, który uruchamia Claude Code na tym Macu, gdy tylko pojawi się praca.
 
           **Instalacja**
           1. Pobierz `Task-Hub-<wersja>.pkg` i otwórz go. Jeśli macOS powie, że nie może sprawdzić dewelopera: Ustawienia systemowe → Prywatność i ochrona → „Otwórz mimo to”.

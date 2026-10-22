@@ -3,9 +3,10 @@
 Natywna aplikacja (Swift, AppKit + WebKit + SwiftUI), odpowiednik Claude Code Quick z Project Hub, ale z mostkiem w środku:
 
 - **okno z Task Hub** (aplikacja webowa w WKWebView, logowanie zapamiętane, linki na zewnątrz idą do przeglądarki),
-- **ikona w pasku menu** ze stanem mostka (czuwa / Claude pracuje / limit / wylogowany), „Sprawdź teraz”, „Nowe zadanie…”,
+- **ikona w pasku menu** ze stanem mostka (czuwa / Claude pracuje / limit / wylogowany), „Sprawdź teraz”, „Szybki pasek”,
   a w trakcie biegu „Zatrzymaj bieg”,
-- **okienko „Nowe zadanie”** pod ⌃⌥T z każdego miejsca (⌘N w aplikacji): wklej maila albo opis, ⌘↩ wysyła, Claude zaczyna od razu,
+- **szybki pasek** pod skrótem z Ustawień (domyślnie ⌥Spacja, ⌘N w aplikacji) z każdego miejsca i biurka: pole jak dok w Task Hub ze spinaczem,
+  ⌘V z grafikami i plikami, Enter wysyła tą samą drogą co główne pole (`POST /api/bridge/task`), historia 10 ostatnich wysłanych,
 - **mostek**: co kilkanaście sekund pyta Task Hub tanim HTTP (`GET /api/bridge/work`, zero tokenów), a gdy czeka praca,
   bierze bieg (`POST /api/bridge/run`) i uruchamia Claude Code na subskrypcji (ANTHROPIC_API_KEY celowo nieustawione),
   przekazuje użycia narzędzi jako postęp i zgłasza wynik (`PATCH /api/bridge/run/:id`). Zasady biegu niżej,
@@ -60,10 +61,10 @@ Mostek pracuje także przy zamkniętym oknie (aplikacja zostaje w pasku menu). G
 ## Pliki
 
 - `Sources/` – kod: `App.swift` (start, @main, wejście strażnika), `AppDelegate.swift` (menu, pasek menu, okna, link taskhub://), `WebWindow.swift` (okno z aplikacją),
-  `QuickEntry.swift` (szybkie zadanie), `SettingsView.swift` (ustawienia), `Bridge.swift` (pętla mostka), `ProcessRunner.swift` (bieg Claude Code,
+  `QuickBar.swift` (szybki pasek i jego historia), `SettingsView.swift` (ustawienia), `Bridge.swift` (pętla mostka), `ProcessRunner.swift` (bieg Claude Code,
   stream-json, strażnik czasu), `ClaudeCLI.swift` (szukanie Claude Code, środowisko, limit/wylogowanie), `Policy.swift` (zasady biegu: narzędzia, ustawienia),
   `Guard.swift` (strażnik `--hook-guard`), `GitSend.swift` (commit i push bez modelu), `Notifier.swift` (powiadomienie z „Zatrzymaj”),
-  `Store.swift` (config.json, foldery z kodem), `HotKey.swift` (⌃⌥T), `Theme.swift` (kolory i pigułki z aplikacji webowej), `Log.swift` (dziennik),
+  `Store.swift` (config.json, foldery z kodem), `HotKey.swift` (skrót paska), `Theme.swift` (kolory i pigułki z aplikacji webowej), `Log.swift` (dziennik),
   `Updater.swift` (samoaktualizacja przez Task Hub, SHA-256).
 - `VERSION` – numer wersji aplikacji (podbicie = nowe wydanie).
 - `Info.plist` – tożsamość (`com.taskhub.app`), schemat `taskhub`, macOS 13+, powiadomienia jako alerty (przycisk „Zatrzymaj” widać od razu).

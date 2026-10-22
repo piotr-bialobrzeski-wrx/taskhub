@@ -21,6 +21,9 @@ enum Theme {
     static let accent2NS = NSColor.dynamic(light: NSColor(hex: 0x6A6CF0), dark: NSColor(hex: 0x8B8DF7))
     static let accentSoftNS = NSColor.dynamic(light: NSColor(hex: 0x5A5CE6, alpha: 0.10), dark: NSColor(hex: 0x7C7EF5, alpha: 0.16))
     static let dangerNS = NSColor.dynamic(light: NSColor(hex: 0xD64B5A), dark: NSColor(hex: 0xF07A86))
+    static let okNS = NSColor.dynamic(light: NSColor(hex: 0x2E8A5C), dark: NSColor(hex: 0x5CC28F))      // --ok: wysłane, zrobione
+    static let warnNS = NSColor.dynamic(light: NSColor(hex: 0xA86A12), dark: NSColor(hex: 0xE6B055))    // --warn: w trakcie (obwódka kafelka w toku)
+    static let glassNS = NSColor.dynamic(light: NSColor(hex: 0xFFFFFF, alpha: 0.78), dark: NSColor(hex: 0x1E1E2C, alpha: 0.80))   // --glass
 
     static let bg = Color(nsColor: bgNS)
     static let surface = Color(nsColor: surfaceNS)
@@ -31,6 +34,9 @@ enum Theme {
     static let accent2 = Color(nsColor: accent2NS)
     static let accentSoft = Color(nsColor: accentSoftNS)
     static let danger = Color(nsColor: dangerNS)
+    static let ok = Color(nsColor: okNS)
+    static let warn = Color(nsColor: warnNS)
+    static let glass = Color(nsColor: glassNS)
 }
 
 // przycisk-pigułka jak .pill / .pill.primary w aplikacji webowej

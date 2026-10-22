@@ -1,4 +1,4 @@
-// Ustawienia aplikacji (⌘,): połączenie z Task Hub, mostek, Claude Code, foldery z kodem, start po zalogowaniu, dziennik.
+// Ustawienia aplikacji (⌘,): połączenie z Task Hub, szybki pasek (skrót), mostek, Claude Code, foldery z kodem, start po zalogowaniu, dziennik.
 import AppKit
 import ServiceManagement
 import SwiftUI
@@ -7,6 +7,9 @@ struct SettingsView: View {
     @ObservedObject var store: Store
     @ObservedObject var bridge: Bridge
     @ObservedObject var updater: Updater
+    @ObservedObject var keys = ShortcutState.shared
+    @State private var keyMonitor: Any? = nil
+    @State private var keyInfo = ""
     @State private var connectInfo = ""
     @State private var checking = false
     @State private var claudeInfo = ""
@@ -36,6 +39,25 @@ struct SettingsView: View {
                     Text(connectInfo).font(.system(size: 12)).foregroundColor(Theme.sub).lineLimit(2)
                 }
                 Text("Najprościej: w Task Hub (przeglądarka) → Ustawienia → Mostek na komputerze → „Połącz aplikację Task Hub na tym Macu”. Adres i token wpiszą się same.")
+                    .font(.system(size: 11.5)).foregroundColor(Theme.sub)
+            }
+            Section("Szybki pasek") {
+                LabeledContent("Skrót") {
+                    HStack(spacing: 8) {
+                        Button(keys.recording ? "Naciśnij nowy skrót…" : store.cfg.quickBar.label) { keys.recording ? stopRecording() : startRecording() }
+                            .help(keys.recording ? "Esc anuluje" : "Kliknij i naciśnij nowy skrót")
+                        if store.cfg.quickBar != Shortcut.quickBar && !keys.recording { Button("Domyślny (⌥Spacja)") { store.cfg.quickBar = Shortcut.quickBar; keyInfo = "" } }
+                        Button("Otwórz pasek") { (NSApp.delegate as? AppDelegate)?.showQuickBar() }
+                    }
+                }
+                if !keyInfo.isEmpty { Text(keyInfo).font(.system(size: 12)).foregroundColor(Theme.danger) }
+                if !keys.ok && !keys.recording {
+                    Text("macOS nie przyjął skrótu \(store.cfg.quickBar.label): pewnie ma go już inna aplikacja. Wybierz inny.").font(.system(size: 12)).foregroundColor(Theme.danger)
+                }
+                if let cq = Shortcut.claudeQuick(), store.cfg.quickBar.same(asText: cq) {
+                    Text("Ten sam skrót otwiera Claude Code Quick (\(cq)). Zmień skrót tam albo wybierz tu inny, inaczej oba okienka będą się kłócić.").font(.system(size: 12)).foregroundColor(Theme.danger)
+                }
+                Text("Pasek otworzysz tym skrótem z każdego miejsca i biurka. Lewy i prawy Option działają tak samo: macOS nie rozróżnia ich w skrótach.")
                     .font(.system(size: 11.5)).foregroundColor(Theme.sub)
             }
             Section("Mostek: Claude pracuje w tle na tym Macu") {
@@ -126,7 +148,32 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onDisappear { stopRecording() }
         .frame(minWidth: 560, idealWidth: 620, maxWidth: .infinity, minHeight: 420, idealHeight: 640, maxHeight: .infinity)
+    }
+
+    // nagrywanie skrótu: następne naciśnięcie z ⌘, ⌃ albo ⌥ zostaje skrótem paska; Esc anuluje
+    @MainActor private func startRecording() {
+        keyInfo = ""
+        keys.recording = true
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+            let plain = e.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
+            if e.keyCode == 53 && plain { stopRecording(); return nil }   // Esc
+            guard let s = Shortcut.from(e) else {
+                keyInfo = "Skrót musi mieć ⌘, ⌃ albo ⌥ (np. ⌥Spacja, ⌃⌥T)."
+                NSSound.beep()
+                return nil
+            }
+            store.cfg.quickBar = s
+            stopRecording()
+            return nil
+        }
+    }
+
+    @MainActor private func stopRecording() {
+        if let m = keyMonitor { NSEvent.removeMonitor(m) }
+        keyMonitor = nil
+        if keys.recording { keys.recording = false }
     }
 
     @MainActor private func check() {

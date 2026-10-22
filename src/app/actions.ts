@@ -7,13 +7,12 @@ import { SESSION_COOKIE, checkPassword, sessionValue } from "@/lib/auth";
 import { requireOwner } from "@/lib/session";
 import { client, hhmm, mayTry, record } from "@/lib/guard";
 import * as repo from "@/lib/repo";
-import { aiFor, composeFlow, finishStep, prepareStep, taskQueue } from "@/lib/services";
+import { composeFlow, finishStep, prepareStep, taskQueue } from "@/lib/services";
 import { Q, roundQ } from "@/lib/time";
-import { runChat } from "@/lib/agent/chat";
-import { bridgeHold, busyWith, newTaskText, noStepsWho, shortTitle, type Queue, type Worker } from "@/lib/auto";
-import { liveActivity } from "@/lib/live";
+import { intake, uploads } from "@/lib/intake";
+import { shortTitle, type Queue } from "@/lib/auto";
 import { fmtTime } from "@/lib/clock";
-import { BRIDGE_ALIVE_MS, connectorIssue, isGitDraft } from "@/lib/bridge";
+import { connectorIssue, isGitDraft } from "@/lib/bridge";
 import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, shownSig, type Draft } from "@/lib/agent/approval";
 import { decisionText, destOf, openQuestions, stepKind } from "@/lib/stepcard";
 import { isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
@@ -45,57 +44,12 @@ export async function logout() {
 }
 
 // ---------- czat z agentem ----------
-const MAX_UPLOAD = 4 * 1024 * 1024;   // limit treści żądania na Vercelu
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-// pliki z doku (z dysku, Ctrl+V, przeciągnięte): do 8 sztuk, każdy do 4 MB
-function uploads(fd: FormData): File[] {
-  return fd.getAll("files").filter((f): f is File => typeof f === "object" && f !== null && "arrayBuffer" in f && (f as File).size > 0 && (f as File).size <= MAX_UPLOAD).slice(0, 8);
-}
-async function attachFiles(taskId: string, files: File[], notes: { caption: string; analysis: string }[] = []) {
-  for (const [i, f] of files.entries()) {
-    const data = Buffer.from(await f.arrayBuffer());
-    // obrazkiem jest tylko to, co /api/files pokazuje w przeglądarce (SVG i reszta idą jako plik do pobrania)
-    await repo.addAttachment({ taskId }, { kind: IMAGE_TYPES.has(f.type) && !/\.svg$/i.test(f.name) ? "image" : "file", name: f.name, mime: f.type || undefined, bytes: f.size, keep: true, data, caption: notes[i]?.caption, analysis: notes[i]?.analysis });
-  }
-}
-
+// rdzeń w src/lib/intake.ts: tę samą drogę ma szybki pasek w aplikacji na Macu
 export async function chat(fd: FormData) {
   const o = await requireOwner();
-  const files = uploads(fd);
-  const typed = str(fd, "text");
-  if (!typed && !files.length) return;
-  const text = typed || (files.length === 1 ? `Załącznik: ${files[0].name}` : `Załączniki: ${files.map((f) => f.name).join(", ")}`);
   const taskId = str(fd, "taskId") || null;
   const stepId = (taskId && str(fd, "stepId")) || null;   // otwarty krok w panelu: domyślny kontekst wiadomości
-  const ai = await aiFor(o.id);
-  let goTo: string | null = null;
-  if (!ai.enabled) {
-    // bez klucza modelu: na kanwie tekst staje się zadaniem, w zadaniu zostaje jako notatka rozmowy; pliki trafiają do zadania
-    await repo.addChat(o.id, taskId, "user", text + (typed && files.length ? ` (załączniki: ${files.map((f) => f.name).join(", ")})` : ""), stepId ? { stepId } : undefined);
-    // komunikaty mówią, co z tego ma Piotr, nie jak działa mechanizm
-    // w zadaniu wiadomość czeka w kolejce: jej stan (kto ją weźmie i kiedy, w pracy, odpowiedziano) liczy się na bieżąco pod dymkiem i na karcie nad dokiem,
-    // bez dopisywania do rozmowy zapowiedzi „przeczyta za chwilę” przy każdej wiadomości
-    if (taskId) { await attachFiles(taskId, files); }
-    else {
-      // nowe zadanie z kanwy: kto je rozpisze i kiedy (mostek teraz / po bieżącej pracy / w ciągu minuty, albo automat o pełnej godzinie)
-      const t = await repo.createTask(o.id, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files);
-      const [st, tasks] = await Promise.all([repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.listTasks(o.id)]);
-      const w: Worker = { alive: st.alive, name: st.name, run: liveActivity(st.run), hold: bridgeHold(st.meta, st.pause) };
-      await repo.addChat(o.id, null, "agent", newTaskText(t.title, noStepsWho(w, t.id, busyWith(w.run, tasks)))); goTo = t.id;
-    }
-  } else {
-    try {
-      const images = await Promise.all(files.filter((f) => IMAGE_TYPES.has(f.type)).map(async (f) => ({ mediaType: f.type as "image/png", base64: Buffer.from(await f.arrayBuffer()).toString("base64") })));
-      const { done, result } = await runChat(text, { ai, ownerId: o.id, taskId, stepId, images });
-      const created = done.find((d) => d.taskId && d.label.startsWith("Nowe zadanie"));
-      if (!taskId && created?.taskId) goTo = created.taskId;
-      const target = taskId ?? created?.taskId ?? null;
-      if (target) await attachFiles(target, files, result.attachments ?? []);
-    } catch (e) {
-      await repo.addChat(o.id, taskId, "user", text);
-      await repo.addChat(o.id, taskId, "agent", "Agent nie odpowiedział: " + fail(e));
-    }
-  }
+  const { goTo } = await intake(o.id, { typed: str(fd, "text"), files: uploads(fd), taskId, stepId });
   refresh(taskId);
   if (goTo) redirect(`/tasks/${goTo}`);
 }

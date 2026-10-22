@@ -1,4 +1,4 @@
-// Task Hub na Maca: okno z aplikacją, ikona w pasku menu, szybkie zadanie (⌃⌥T) i mostek do Claude Code w środku.
+// Task Hub na Maca: okno z aplikacją, ikona w pasku menu, szybki pasek (domyślnie ⌥Spacja) i mostek do Claude Code w środku.
 // Punkt wejścia na głównym wątku (@main zamiast main.swift, żeby cały start był izolowany do MainActor).
 // „Task Hub --hook-guard” to strażnik biegów mostka (hook Claude Code): odpowiada i kończy, bez NSApplication i okien.
 import AppKit
