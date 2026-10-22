@@ -492,6 +492,15 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("opcje w bazie: zgoda, wysyłka 
     expect(after.status).toBe("todo");
     expect(statuses(after.blocks!)).toEqual(["text", "sent"]);
   });
+  it("(19b) wysłana opcja z odrzuconą obok: kartka z tą samą odrzuconą i nowym kontekstem się zapisuje, nowa propozycja nie", async () => {
+    const { taskId, s } = await twoOptions();
+    await approveB(taskId, s);
+    expect(await repo.markSendStarted(owner, s.id)).toBe(true);
+    expect(await repo.completeSend(owner, s.id, { summary: "Poszło na #dev." })).toBe(true);
+    expect(await call(client, "set_blocks", { stepId: s.id, blocks: [{ type: "text", body: "Kontekst" }, A, B] })).toContain("Panel zapisany");
+    expect(statuses((await get(taskId, s.id)).blocks!)).toEqual(["text", "proposed", "sent"]);
+    expect(await call(client, "set_blocks", { stepId: s.id, blocks: [{ ...A, body: A.body + " Nowa." }, B] })).toContain("już poszedł");
+  });
   it("(20) composeStep z modelem w aplikacji: powtórzona opcja i opcja do innej aplikacji wypadają przed zapisem, klocek kontekstu zostaje", async () => {
     const text: Block = { type: "text", body: "Kontekst" };
     const Bc = D(B.body, { target: { app: "clickup", action: "update" } });

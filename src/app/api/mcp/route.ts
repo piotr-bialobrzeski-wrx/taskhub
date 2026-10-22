@@ -287,7 +287,9 @@ function buildHandler(auth: repo.TokenAuth) {
       const blocks = keepOwnerAnswers(was.blocks, coerceAgentDrafts(was, a.blocks));
       // szkic tego kroku już poszedł (krok zrobiony albo przywrócony do zrobienia): wysłanego nie da się cofnąć, a propozycja obok niego nigdy nie
       // dostanie zgody (approveDraft odmawia, karta nie ma przycisku), więc odmowa jak w reopen_step; sam kontekst przy tym samym wysłanym szkicu się zapisuje
-      if (was.blocks?.some((b) => b.type === "draft" && b.status === "sent") && blocks.some((b) => b.type === "draft" && b.status === "proposed"))
+      // propozycja, która już leżała obok wysłanej (odrzucona opcja), nie jest nowa: jej podpis był na kartce, więc kartka z nią się zapisuje
+      const known = new Set(draftsOf(was).filter((d) => d.status === "proposed").map((d) => approvalSig(was, d)));
+      if (was.blocks?.some((b) => b.type === "draft" && b.status === "sent") && blocks.some((b) => b.type === "draft" && b.status === "proposed" && !known.has(approvalSig({ id: a.stepId, blocks }, b))))
         return text("Nie zapisałem: szkic tego kroku już poszedł i wysłanego nie da się cofnąć, więc drugi szkic obok niego nigdy nie dostanie zgody. Nową wysyłkę zapisz jako osobny krok (add_steps); kartkę tego kroku możesz uzupełnić tylko o klocki kontekstu.");
       // zatwierdzony szkic (czeka na wysyłkę albo właśnie się wysyła) zostaje taki, jaki Piotr zatwierdził
       const nd = draftOf({ blocks }), od = draftOf(was);
