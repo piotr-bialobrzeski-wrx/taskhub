@@ -3,6 +3,7 @@
 // (POST /api/bridge/task → src/lib/intake.ts). Pasek pokazuje się na ekranie z kursorem i na bieżącym biurku, nad wszystkim;
 // klik obok, Esc albo zmiana biurka go chowa, a wpisany tekst i załączniki czekają do następnego otwarcia.
 import AppKit
+import Combine
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
@@ -596,13 +597,18 @@ final class QuickBarController: NSObject, NSWindowDelegate {
 
         model.close = { [weak self] in self?.hide() }
         model.pickFiles = { [weak self] in self?.pick() }
-        sink = model.objectWillChange.sink { [weak self] _ in DispatchQueue.main.async { self?.layout() } }
+        sink = model.objectWillChange.sink { [weak self] _ in
+            guard let me = self else { return }
+            DispatchQueue.main.async { me.layout() }
+        }
         // inne biurko albo zmiana monitorów: pasek się chowa, skrót otworzy go na nowo tam, gdzie jesteś
         bag.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in if self?.picking == false { self?.hide() } }
+            guard let me = self else { return }
+            Task { @MainActor in if !me.picking { me.hide() } }
         })
         bag.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.hide() }
+            guard let me = self else { return }
+            Task { @MainActor in me.hide() }
         })
     }
 
@@ -656,7 +662,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     private func startClickMonitor() {
         stopClickMonitor()
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
-            Task { @MainActor in if self?.picking == false { self?.hide() } }
+            guard let me = self else { return }
+            Task { @MainActor in if !me.picking { me.hide() } }
         }
     }
 
