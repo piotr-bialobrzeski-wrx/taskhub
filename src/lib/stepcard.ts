@@ -1,7 +1,7 @@
 // Karta kroku „Teraz · Co · Skąd” (paczka 2, punkt 8): stały porządek sekcji, wynik na wierzchu, nic nie pokazuje się dwa razy.
 // Czysta logika bez React, żeby dało się ją testować; składanie w JSX jest w src/app/tasks/[id]/page.tsx.
 import { appName, doneByOf, EXTERNAL_TOOLS, inApp, isOwnerStep, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step } from "./schema";
-import { draftOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, type Draft } from "./agent/approval";
+import { draftOf, draftsOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, type Draft } from "./agent/approval";
 import { fileName, isHttpUrl, safeHref } from "./safeurl";
 import { fmtTime } from "./clock";
 import { shortTitle } from "./auto";
@@ -73,6 +73,12 @@ export function resultLinks(s: Pick<Step, "tool">, changes: Pick<Changes, "previ
   }
   return out;
 }
+// rząd akcji strony kroku: po wysyłce bez linków (karta publikacji ma link do wyniku); zrobiony krok z blokiem zmian pod kartą nie powtarza
+// „Otwórz podgląd”, bo ten przycisk niesie już blok zmian (jeden przycisk, nie dwa w tej samej strefie); „Repozytorium” i inne linki zostają
+export function pageLinks(s: Pick<Step, "tool">, changes: Pick<Changes, "preview"> | null, link: string | null, mode: string | null, done: boolean): { label: string; url: string }[] {
+  if (mode === "sent") return [];
+  return resultLinks(s, changes, link).filter((l) => !(done && changes && l.label === "Otwórz podgląd"));
+}
 
 // ---------- dokąd idzie szkic: jedno źródło dla przycisku, linii pod nim, nagłówka po wysyłce, kafelka, listy i rozmowy ----------
 export type DestKind = "send" | "file" | "commit" | "push" | "prompt" | "internal";
@@ -134,7 +140,10 @@ export function tileDest(d: Dest | null, s: Pick<Step, "status" | "doneAt" | "bl
     return null;
   }
   if (draft?.status !== "proposed") return null;
-  return `${d.kind === "commit" ? "Commit" : d.name}${d.where ? " · " + d.where : ""}`;
+  // 2+ opcje bez wyboru: ile ich jest, nie dokąd idzie pierwsza (każda może iść gdzie indziej); wybór pokazuje karta
+  const n = draftsOf(s).length, what = d.kind === "commit" ? "Commit" : d.name;
+  if (n > 1) return `${what} · ${n} ${n <= 4 ? "opcje" : "opcji"}`;
+  return `${what}${d.where ? " · " + d.where : ""}`;
 }
 // adres do kliknięcia z dolnej linii: tylko po wysyłce do aplikacji, tylko http(s)
 export const tileDestHref = (d: Dest | null, s: Pick<Step, "status" | "link">): string | null => (d?.kind === "send" && s.status === "done" ? safeHref(s.link) ?? null : null);
@@ -184,9 +193,11 @@ export function doneChat(s: Pick<Step, "title" | "tool" | "blocks"> & { filePath
 
 const steps = (n: number) => (n === 1 ? "1 krok" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? `${n} kroki` : `${n} kroków`);
 // nagłówek sekcji „Teraz”: stan słowami i kolor bloku; po wysyłce słowo z celu („Utworzono”, „Wysłano”), strona dokłada godzinę;
-// options = liczba szkiców w kroku: przy kilku Piotr wybiera opcję (każda karta pod nagłówkiem ma własne „Do zatwierdzenia”)
-export function nowHeading(state: CardState, mode: string | null, deps: number, waits: boolean, dest?: Dest | null, options = 1): { title: string; cls: string } {
+// options = liczba szkiców w kroku: przy kilku Piotr wybiera opcję (każda karta pod nagłówkiem ma własne „Do zatwierdzenia”);
+// sentAlready = wybrana opcja już poszła, a krok wrócił do zrobienia: nic nie czeka na zgodę, więc „Już wysłano” zamiast „Odłożony szkic” albo „Wybierz opcję”
+export function nowHeading(state: CardState, mode: string | null, deps: number, waits: boolean, dest?: Dest | null, options = 1, sentAlready = false): { title: string; cls: string } {
   if (mode === "sent" && dest) return { title: sentWord(dest), cls: "done" };
+  if (sentAlready && (mode === "proposed" || mode === "parked")) return { title: "Już wysłano", cls: "done" };
   if (mode === "proposed") return { title: options > 1 ? "Wybierz opcję" : "Do zatwierdzenia", cls: "draft" };
   if (mode === "sending") return { title: "W toku", cls: "handoff" };
   if (mode === "parked") return { title: "Odłożony szkic", cls: "draft" };

@@ -786,6 +786,7 @@ details.fold[open] > summary svg { transform: rotate(180deg); }
 .pub.opt .pub-edit .rf, .pub.opt .msg { box-shadow: inset 0 0 0 1px var(--line); }
 .pub.opt .pub-edit .rf:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
 .pub .rej .msg { opacity: .72; }
+.pub .rej .msg code { background: var(--surface-2); }                   /* kod w odrzuconej wersji: .msg i .md code mają to samo tło (surface), więc bez tego znikał */
 
 /* ---------- menu kafelka na prawy klik (paczka 2, punkt 2) ---------- */
 .ppmenu.tmenu { min-width: 180px; }

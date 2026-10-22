@@ -7,6 +7,8 @@
 // Punkt 3c: agent widzi opcje w get_task (sekcja na każdą z nazwą, niewybrana „nie wysyłaj”, ten, kto wysyła, dostaje tylko wybraną) i w czacie.
 // Poprawki po przeglądzie: wysłana opcja po „Przywróć do zrobienia” bez zgody, miejsce każdej opcji pod jej podglądem, „Otwórz podgląd” tylko
 // do zamknięcia kroku, a w CSS rząd opcji bez przyklejenia na telefonie, tło kodu i tytuł w karcie źródła.
+// Poprawki po przeglądzie 2: karta wysłanej opcji po przywróceniu (tylko „Zamknij bez wysyłki” z notą, „Już wysłano”, wysłana do odczytu z „wysłano”),
+// ścieżka podglądu i „Otwórz podgląd” raz w strefie „Teraz”, kod w odrzuconych wersjach z tłem, kafelek z liczbą opcji.
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -14,7 +16,7 @@ import { Blocks, type Block, type Step } from "@/lib/schema";
 import { cardText, draftsText } from "@/lib/agent/context";
 import { stepContextText } from "@/lib/agent/chat";
 import { approvalSig, draftsOf, shownSig, type Draft } from "@/lib/agent/approval";
-import { groupBlocks, hasComparison, isSourceBlock, nowHeading } from "@/lib/stepcard";
+import { destOf, groupBlocks, hasComparison, isSourceBlock, nowHeading, pageLinks, resultLinks, tileDest } from "@/lib/stepcard";
 import { BlocksView, BlockView } from "@/components/BlockRenderer";
 import { cardModeOf, PublishCard, type CardMode } from "@/components/PublishCard";
 import { step, task } from "./helpers";
@@ -245,8 +247,8 @@ describe("porównanie obok siebie: BlocksView", () => {
 describe("opcje na karcie publikacji (punkt 3b/4)", () => {
   const opt = (n: string, body: string, extra: Partial<Draft> = {}): Draft => ({ type: "draft", target: { app: "clickup", action: "update", url: `https://app.clickup.com/t/${n}`, where: `Ticket ${n}` }, body, status: "proposed", ...extra });
   const A = opt("869aaaaa1", "Zmieniamy termin na piątek."), B = opt("869bbbbb2", "Termin zostaje, dokładamy osobę.");
-  const card = (s: Step, mode: CardMode, link: string | null = null) =>
-    renderToStaticMarkup(<PublishCard t={task({ steps: [s] })} s={s} mode={mode} aiOn={false} ownerName="Piotr" link={link} connections={[]} company={null} />);
+  const card = (s: Step, mode: CardMode, link: string | null = null, aiOn = false) =>
+    renderToStaticMarkup(<PublishCard t={task({ steps: [s] })} s={s} mode={mode} aiOn={aiOn} ownerName="Piotr" link={link} connections={[]} company={null} />);
   const count = (h: string, re: RegExp) => h.match(re)?.length ?? 0;
 
   it("nagłówek „Teraz”: przy 2+ szkicach „Wybierz opcję”, przy jednym i w innych stanach jak dotąd", () => {
@@ -254,6 +256,14 @@ describe("opcje na karcie publikacji (punkt 3b/4)", () => {
     expect(nowHeading("draft", "proposed", 0, false, undefined, 1)).toEqual({ title: "Do zatwierdzenia", cls: "draft" });
     expect(nowHeading("draft", "proposed", 0, false)).toEqual({ title: "Do zatwierdzenia", cls: "draft" });
     expect(nowHeading("ready", "parked", 0, false, undefined, 2)).toEqual({ title: "Odłożony szkic", cls: "draft" });
+    // wybrana opcja już poszła, a krok wrócił do zrobienia: „Już wysłano”; bez flagi jak dotąd; po wysyłce i w toku flaga nic nie zmienia
+    expect(nowHeading("ready", "parked", 0, false, undefined, 2, true)).toEqual({ title: "Już wysłano", cls: "done" });
+    expect(nowHeading("draft", "proposed", 0, false, undefined, 2, true)).toEqual({ title: "Już wysłano", cls: "done" });
+    expect(nowHeading("draft", "proposed", 0, false, undefined, 1, true)).toEqual({ title: "Już wysłano", cls: "done" });
+    expect(nowHeading("ready", "parked", 0, false, undefined, 2, false)).toEqual({ title: "Odłożony szkic", cls: "draft" });
+    expect(nowHeading("draft", "proposed", 0, false, undefined, 2, false)).toEqual({ title: "Wybierz opcję", cls: "draft" });
+    expect(nowHeading("handoff", "sending", 0, false, undefined, 2, true)).toEqual({ title: "W toku", cls: "handoff" });
+    expect(nowHeading("done", "unsent", 0, false, undefined, 2, true)).toEqual({ title: "Zamknięty bez wysyłki", cls: "blocked" });
   });
   it("do zatwierdzenia z dwiema opcjami: siatka kart, każda z nagłówkiem, przyciskiem celu, własnym formularzem (option, seen) i „Zatwierdź: Opcja X”", () => {
     const s = step({ status: "draft", tool: "clickup", needsApproval: true, blocks: [A, B] });
@@ -345,10 +355,81 @@ describe("opcje na karcie publikacji (punkt 3b/4)", () => {
     expect(h).not.toContain("cmp");
     expect(h).not.toContain("pub-dest");
     expect(h).toContain("Zamknij bez wysyłki");
+    // wysłana opcja tylko do odczytu: podgląd „moja wiadomość”, bez pola z formatowaniem (jego autozapis trafiłby do opcji A pod indeksem 0)
+    expect(h).not.toContain("pub-edit");
+    expect(h).not.toContain("rf-");
+    expect(h).toContain('class="msg mine"');
+    // to samo po przywróceniu kroku bez zgody (status draft, tryb „do zatwierdzenia”, [A proposed, B sent])
+    const hn = card(step({ status: "draft", tool: "clickup", needsApproval: false, blocks: [A, { ...B, status: "sent" as const }] }), "proposed");
+    expect(cardModeOf(step({ status: "draft", tool: "clickup", needsApproval: false, blocks: [A, { ...B, status: "sent" as const }] }))).toBe("proposed");
+    expect(count(hn, /Zatwierdź/g)).toBe(0);
+    expect(hn).not.toContain('id="pub-');
+    expect(hn).not.toContain("pub-edit");
+    expect(hn).not.toContain("rf-");
+    expect(hn).toContain('class="msg mine"');
+    expect(hn).toContain("<b>ClickUp</b> · Opcja B · Ticket 869bbbbb2");
+    expect(count(hn, /Odrzucone wersje \(1\)/g)).toBe(1);
     // ta sama para jeszcze przed decyzją: siatka z dwoma „Zatwierdź: Opcja X” i bez „Odrzucone wersje”, jak dotąd
     const hp = card(step({ status: "todo", tool: "clickup", needsApproval: true, blocks: [A, B] }), "parked");
     expect(count(hp, /Zatwierdź: Opcja/g)).toBe(2);
     expect(hp).not.toContain("Odrzucone wersje");
+  });
+  it("wysłana opcja po „Przywróć do zrobienia” (Slack): w rzędzie akcji tylko „Zamknij bez wysyłki” i nota, bez „Przygotuj od nowa”, „Odłóż”, zgody i linii miejsca; wysłana z „wysłano”", () => {
+    const sl = (body: string, status: Draft["status"] = "proposed"): Draft => ({ type: "draft", target: { app: "slack", where: "#dev", action: "send" }, body, status });
+    const s = step({ status: "todo", tool: "slack", needsApproval: true, blocks: [sl("Wersja krótka."), sl("Wersja długa.", "sent")] });
+    expect(cardModeOf(s)).toBe("parked");
+    const h = card(s, "parked", null, true);
+    expect(count(h, /<form/g)).toBe(1);
+    expect(h).toContain("Zamknij bez wysyłki");
+    expect(h).toContain('<div class="note">Ten szkic już poszedł; nową wysyłkę zapisz jako osobny krok.</div>');
+    expect(h).toContain("Piotr · wysłano");
+    expect(h).not.toContain("Piotr · teraz");
+    expect(h).not.toContain("Przygotuj od nowa");
+    expect(h).not.toContain("Odłóż");
+    expect(h).not.toContain("Zatwierdź");
+    expect(h).not.toContain("pub-dest");
+    expect(h).not.toContain("pub-edit");
+    expect(h).not.toContain("rf-");
+    expect(h).toContain('class="msg mine"');
+    expect(h).toContain("<b>Slack</b> · Opcja B · #dev");
+    expect(count(h, /Odrzucone wersje \(1\)/g)).toBe(1);
+    // ta sama para po przywróceniu kroku bez zgody (tryb „do zatwierdzenia”): też bez „Odłóż” i bez „Przygotuj od nowa”
+    const hp = card(step({ status: "draft", tool: "slack", needsApproval: false, blocks: [sl("Wersja krótka."), sl("Wersja długa.", "sent")] }), "proposed", null, true);
+    expect(count(hp, /<form/g)).toBe(1);
+    expect(hp).toContain("Zamknij bez wysyłki");
+    expect(hp).toContain("Ten szkic już poszedł");
+    expect(hp).not.toContain("Odłóż");
+    expect(hp).not.toContain("Przygotuj od nowa");
+    expect(hp).toContain("Piotr · wysłano");
+    // jeden wysłany szkic po przywróceniu: to samo
+    const h1 = card(step({ status: "todo", tool: "slack", needsApproval: true, blocks: [sl("Wersja krótka.", "sent")] }), "parked", null, true);
+    expect(count(h1, /<form/g)).toBe(1);
+    expect(h1).toContain("Ten szkic już poszedł");
+    expect(h1).toContain("Piotr · wysłano");
+    // bez wysłanej opcji rząd odłożonego jak dotąd: zgoda na każdą opcję, „Przygotuj od nowa”, „Zamknij bez wysyłki”, bez noty
+    const h0 = card(step({ status: "todo", tool: "slack", needsApproval: true, blocks: [sl("Wersja krótka."), sl("Wersja długa.")] }), "parked", null, true);
+    expect(count(h0, /Zatwierdź: Opcja/g)).toBe(2);
+    expect(h0).toContain("Przygotuj od nowa");
+    expect(h0).toContain("Zamknij bez wysyłki");
+    expect(h0).not.toContain("już poszedł");
+    expect(h0).not.toContain("wysłano");
+    // po wysyłce jak dotąd: „wysłano” w podglądzie
+    expect(card(step({ status: "done", tool: "slack", needsApproval: true, blocks: [sl("Wersja krótka.", "sent")] }), "sent")).toContain("Piotr · wysłano");
+  });
+  it("kafelek: przy 2+ opcjach bez wyboru dolna linia mówi, ile ich jest, nie dokąd idzie pierwsza; jeden szkic i wybrana jak dotąd", () => {
+    const two = step({ status: "draft", tool: "clickup", needsApproval: true, blocks: [A, B] });
+    expect(tileDest(destOf(two), two)).toBe("ClickUp · 2 opcje");
+    const four = step({ status: "draft", tool: "clickup", needsApproval: true, blocks: [A, B, A, B] });
+    expect(tileDest(destOf(four), four)).toBe("ClickUp · 4 opcje");
+    const five = step({ status: "draft", tool: "clickup", needsApproval: true, blocks: [A, B, A, B, A] });
+    expect(tileDest(destOf(five), five)).toBe("ClickUp · 5 opcji");
+    const one = step({ status: "draft", tool: "clickup", needsApproval: true, blocks: [A] });
+    expect(tileDest(destOf(one), one)).toBe("ClickUp · Ticket 869aaaaa1");
+    // po wyborze jak dotąd: zatwierdzona bez dolnej linii (kafelek mówi „Pracuje od”), wysłana z miejscem i godziną
+    const chosen = step({ status: "handoff", tool: "clickup", needsApproval: true, blocks: [A, { ...B, status: "approved" as const }] });
+    expect(tileDest(destOf(chosen), chosen)).toBeNull();
+    const sent = step({ status: "done", tool: "clickup", needsApproval: true, doneAt: "2026-10-20T16:52:00Z", blocks: [A, { ...B, status: "sent" as const }] });
+    expect(tileDest(destOf(sent), sent)).toBe("W ClickUpie · Ticket 869bbbbb2 · 18:52");
   });
   it("miejsce każdej opcji pod jej podglądem (dwa różne tickety), bez wspólnej linii pod siatką; dymek przycisku z miejsca tej opcji", () => {
     const A1 = { ...A, target: { ...A.target, where: "Ticket A1" } }, B2 = { ...B, target: { ...B.target, where: "Ticket B2" } };
@@ -387,6 +468,34 @@ describe("opcje na karcie publikacji (punkt 3b/4)", () => {
     expect(count(hp, /Otwórz podgląd/g)).toBe(1);
     expect(hp).toContain('href="https://podglad.example/x"');
     expect(hp).toContain("Zobacz zmiany (1)");
+    // ścieżka na dysku tak samo: po zamknięciu kroku linię „Podgląd: …” z „Kopiuj ścieżkę” ma tylko blok zmian pod kartą
+    const local: Block = { ...changes, preview: "/Users/piotr/proj/dist/index.html" };
+    const hl = card(step({ status: "done", tool: "github", needsApproval: true, blocks: [local, git("sent")] }), "sent");
+    expect(hl).not.toContain("Kopiuj ścieżkę");
+    expect(hl).not.toContain("Podgląd:");
+    expect(hl).toContain("Zobacz zmiany (1)");
+    const hu = card(step({ status: "done", tool: "github", needsApproval: true, blocks: [local, git("proposed")] }), "unsent");
+    expect(hu).not.toContain("Kopiuj ścieżkę");
+    expect(hu).not.toContain("Podgląd:");
+    expect(renderToStaticMarkup(<BlockView b={local} form={{ taskId: "t1", stepId: "s1" }} />)).toContain("Kopiuj ścieżkę");
+    const hlp = card(step({ status: "draft", tool: "github", needsApproval: true, blocks: [local, git("proposed")] }), "proposed");
+    expect(count(hlp, /Kopiuj ścieżkę/g)).toBe(1);
+    expect(count(hlp, /Podgląd: /g)).toBe(1);
+    expect(hlp).toContain("<code>/Users/piotr/proj/dist/index.html</code>");
+  });
+});
+
+describe("rząd akcji strony kroku: jeden „Otwórz podgląd” (poprawki po przeglądzie 2)", () => {
+  it("pageLinks: zrobiony krok z blokiem zmian pod kartą nie powtarza podglądu, „Repozytorium” zostaje; przed zamknięciem i resultLinks jak dotąd", () => {
+    const s = { tool: "github" }, ch = { preview: "https://podglad.example/x" }, repo = "https://github.com/a/b";
+    expect(resultLinks(s, ch, repo)).toEqual([{ label: "Otwórz podgląd", url: "https://podglad.example/x" }, { label: "Repozytorium", url: repo }]);
+    expect(pageLinks(s, ch, repo, "unsent", true)).toEqual([{ label: "Repozytorium", url: repo }]);
+    expect(pageLinks(s, ch, repo, null, true)).toEqual([{ label: "Repozytorium", url: repo }]);
+    expect(pageLinks(s, ch, null, "unsent", true)).toEqual([]);
+    expect(pageLinks(s, ch, repo, "sent", true)).toEqual([]);
+    expect(pageLinks(s, ch, repo, "proposed", false)).toEqual(resultLinks(s, ch, repo));
+    expect(pageLinks(s, ch, repo, null, false)).toEqual(resultLinks(s, ch, repo));
+    expect(pageLinks(s, null, repo, null, true)).toEqual(resultLinks(s, null, repo));
   });
 });
 
@@ -397,6 +506,8 @@ describe("css: rząd opcji na telefonie, karta źródła (poprawki po przeglądz
     expect(css).toMatch(/@media \(max-width: 860px\) \{[^}]*\.block\.pub:not\(\.opt\) > \.actions \{ position: sticky; bottom: 0;/);
     expect(css).toContain(".block.pub:has(> .cmp) > .actions { position: static; margin: 0; padding: 0; background: transparent; border-radius: 0; }");
     expect(css).toContain(".srcdoc .msg.doc code { background: var(--surface-2); }");
+    expect(css).toContain(".pub .rej .msg code { background: var(--surface-2); }");
+    expect(css).toContain(".pub .rej .msg { opacity: .72; }");
     expect(css).toContain(".srcdoc > h4 { font-size: 16px; font-weight: 700; line-height: 1.3; }");
     expect(css).toContain(".srcdoc .md h4 { font-size: 15px; }");
   });

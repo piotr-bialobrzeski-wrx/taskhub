@@ -97,7 +97,11 @@ describe("render: adresy z danych nie trafiają do href", () => {
     const t = task({ steps: [s] });
     const h = renderToStaticMarkup(<PublishCard t={t} s={s} mode="sent" aiOn={false} ownerName="Piotr" link="javascript:alert(1)" connections={[]} company={null} />);
     noBad(h);
-    expect(h).toContain("Kopiuj ścieżkę");
+    // po zamknięciu kroku ścieżkę z „Kopiuj ścieżkę” ma blok zmian pod kartą (sprawdzony wyżej), karta jej nie powtarza; przed zamknięciem stoi na karcie, nadal nie jako href
+    expect(h).not.toContain("Kopiuj ścieżkę");
+    const open = renderToStaticMarkup(<PublishCard t={t} s={step({ status: "draft", tool: "github", needsApproval: true, blocks: [{ ...d, status: "proposed" }, ch] as Block[] })} mode="proposed" aiOn={false} ownerName="Piotr" link={null} connections={[]} company={null} />);
+    noBad(open);
+    expect(open).toContain("Kopiuj ścieżkę");
     const ok = renderToStaticMarkup(<PublishCard t={t} s={s} mode="sent" aiOn={false} ownerName="Piotr" link="https://github.com/a/b/commit/1" connections={[]} company={null} />);
     expect(ok).toContain('href="https://github.com/a/b/commit/1"');
   });
