@@ -257,8 +257,11 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
     await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(step.title, 60)}”: to plik na Macu, nie wysyłka, więc ten szkic nigdzie nie pójdzie. Plik zapisuje krok „Plik na Macu”.`, { stepId });
     refresh(taskId); return;
   }
-  // bez zgody: zatwierdzenie kończy krok, a wybrana opcja (przy jednym szkicu on sam) zapisuje się jako wysłana
+  // bez zgody: zatwierdzenie kończy krok, a wybrana opcja (przy jednym szkicu on sam) zapisuje się jako wysłana.
+  // Te same odmowy co przy zgodzie (opcja obok już wysłanej po przywróceniu kroku, dwie opcje o tej samej treści): krok się nie zamyka, Piotr czyta czemu
   if (!step.needsApproval) {
+    const why = approveRefusal(step, { option, body: edited });
+    if (why) { await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(step.title, 60)}”: ${why}.`, { stepId }); refresh(taskId); return; }
     if (edited !== null) await writeDraftBody(stepId, step, edited, option);
     await finishStep(o.id, taskId, stepId, { chosen: option ?? 0 }); refresh(taskId); return;
   }

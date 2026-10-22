@@ -2,6 +2,7 @@
 // Każda zmiana treści szkicu unieważnia zgodę; agent nie ma jak jej podrobić, bo podpis liczy serwer z zapisanej treści.
 import { createHash } from "node:crypto";
 import { appOfLabel, normalizeTool, type Block, type Step } from "../schema";
+import { sanitizeBlocks } from "../safeurl";
 
 export type Draft = Extract<Block, { type: "draft" }>;
 type HasBlocks = Pick<Step, "blocks"> | { blocks: Block[] | null };
@@ -119,12 +120,14 @@ export function coerceAgentDrafts(step: Pick<Step, "id" | "blocks">, incoming: B
 }
 // opcje złożone przez model w aplikacji (composeStep): szkic o tej samej treści co wcześniejszy albo do innej aplikacji niż pierwszy wypada,
 // bo nie ma komu odmówić (set_blocks odmawia agentowi zamiast wyrzucać); klocki kontekstu zostają
+// podpis po sanitizeBlocks, jak przy zapisie i w set_blocks: adres spoza http(s) wypada przy zapisie, więc nie może odróżniać dwóch opcji
 export function dedupeOptions(stepId: string, blocks: Block[]): Block[] {
+  const clean = sanitizeBlocks(blocks);
   const sigs = new Set<string>();
   let app: string | null = null;
-  return blocks.filter((b) => {
+  return blocks.filter((b, k) => {
     if (b.type !== "draft") return true;
-    const sig = approvalSig({ id: stepId, blocks }, b), key = appKey(b.target.app);
+    const sig = approvalSig({ id: stepId, blocks: clean }, clean[k] as Draft), key = appKey(b.target.app);
     app ??= key;
     if (sigs.has(sig) || key !== app) return false;
     sigs.add(sig);

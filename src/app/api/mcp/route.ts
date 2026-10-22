@@ -285,6 +285,10 @@ function buildHandler(auth: repo.TokenAuth) {
         return text("Nie zapisałem: to zrobiony krok Piotra z jego decyzją na kartce, więc kartki nie zmieniam. Zastosuj decyzję w krokach, które od niego zależą; gdy coś jest niejasne, zapytaj przez reply_chat ze stepId tego kroku.");
       // szkic od agenta sam nie jest zatwierdzony ani wysłany; ta sama treść co zapisany szkic zachowuje jego stan; odpowiedzi na pytania tylko od Piotra
       const blocks = keepOwnerAnswers(was.blocks, coerceAgentDrafts(was, a.blocks));
+      // szkic tego kroku już poszedł (krok zrobiony albo przywrócony do zrobienia): wysłanego nie da się cofnąć, a propozycja obok niego nigdy nie
+      // dostanie zgody (approveDraft odmawia, karta nie ma przycisku), więc odmowa jak w reopen_step; sam kontekst przy tym samym wysłanym szkicu się zapisuje
+      if (was.blocks?.some((b) => b.type === "draft" && b.status === "sent") && blocks.some((b) => b.type === "draft" && b.status === "proposed"))
+        return text("Nie zapisałem: szkic tego kroku już poszedł i wysłanego nie da się cofnąć, więc drugi szkic obok niego nigdy nie dostanie zgody. Nową wysyłkę zapisz jako osobny krok (add_steps); kartkę tego kroku możesz uzupełnić tylko o klocki kontekstu.");
       // zatwierdzony szkic (czeka na wysyłkę albo właśnie się wysyła) zostaje taki, jaki Piotr zatwierdził
       const nd = draftOf({ blocks }), od = draftOf(was);
       if (was.status !== "done" && (was.approvedAt || was.sendStartedAt) && (!nd || nd.status !== od?.status))

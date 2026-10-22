@@ -514,10 +514,15 @@ export async function approveDraft(ownerId: string, stepId: string, opts: { body
     if (cur.status === "sent") return false;
     // inna opcja tej kartki już poszła: krok już opublikował, a ta zgoda nigdy nie byłaby ważna (draftOf woli wysłaną)
     if (blocks.some((b, k) => k !== i && b.type === "draft" && b.status === "sent")) return false;
-    const d: Draft = { ...cur, ...(opts.body != null ? { body: opts.body } : {}), status: "approved" };
-    delete d.stale;   // Piotr widział ten szkic i go przyjął
-    blocks[i] = d;
-    blocks = sanitizeBlocks(blocks);
+    blocks[i] = { ...cur, ...(opts.body != null ? { body: opts.body } : {}), status: "approved" };
+    // ostatnie kliknięcie wygrywa: opcja zatwierdzona chwilę wcześniej (drugi przycisk, zanim karta się odświeżyła, albo druga karta) wraca do
+    // propozycji, żeby approved_sig zawsze był podpisem szkicu kroku (draftOf) i bieg wysyłki dostał dokładnie jeden szkic.
+    // „Nieaktualny” znika z każdej opcji: Piotr widział kartkę i wybrał, a odrzuconej nikt nie szykuje od nowa
+    blocks = sanitizeBlocks(blocks.map((b, k): Block => {
+      if (b.type !== "draft") return b;
+      const d: Draft = { ...b }; delete d.stale;
+      return k !== i && d.status === "approved" ? { ...d, status: "proposed" } : d;
+    }));
     // dwie opcje o tej samej treści: wybór byłby niejednoznaczny (zgoda trzyma się podpisu, nie pozycji), więc bez zgody
     const sig = approvalSig({ id: step.id, blocks }, blocks[i] as Draft);
     if (blocks.some((b, k) => k !== i && b.type === "draft" && approvalSig({ id: step.id, blocks }, b) === sig)) return false;
