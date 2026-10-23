@@ -4,7 +4,7 @@
 // Mostek v2 (0.1.7): najpierw wysyłki zatwierdzonych szkiców (osobny bieg z jednym konektorem albo commit robiony przez
 // aplikację), potem praca. Każdy bieg ma własny token biegu i zasady z Policy (nigdy bypassPermissions); „Zatrzymaj”
 // przerywa bieg i wstrzymuje nowe na 10 minut.
-// 0.1.12: model, wysiłek i model zapasowy biegu dobiera Task Hub (poziom kroku); przy limicie modelu następny bieg idzie na zapasowym,
+// Paczka 12: model, wysiłek i model zapasowy biegu dobiera Task Hub (poziom kroku); przy limicie modelu następny bieg idzie na zapasowym,
 // a gdy w limicie są wszystkie potrzebne modele, Task Hub odpowiada 429 z godziną powrotu.
 import Foundation
 
