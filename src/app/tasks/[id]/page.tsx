@@ -23,7 +23,7 @@ import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estTe
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed, workBubble } from "@/lib/feed";
-import { decisionText, destOf, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, readingResult, reportLines, splitBlocks, stepKind, targetLink, whoDid, type CardState } from "@/lib/stepcard";
+import { decisionText, destOf, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, readingResult, reportLines, splitBlocks, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -226,7 +226,10 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const folds = foldsFor(state as CardState, mode, readingResult(s, material));
   const cmp = hasComparison(material);   // kartka porównania (paczka 10, punkt 1): porównywane elementy u góry na całą szerokość, pod nimi karta publikacji
   // wybrana opcja już poszła, a krok wrócił do zrobienia: „Już wysłano” zamiast „Odłożony szkic” albo „Wybierz opcję” (karta nie daje zgody)
-  const head = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined, draftsOf(s).length, optionsOf(s).chosen?.status === "sent");
+  // krok „Zleć w projekcie: …” robi wątek projektu Claude w chmurze: nagłówek mówi gdzie, a zamiast „Uruchom” jest polecenie do skopiowania
+  const inProject = kind === "offline" && isProjectStep(s);
+  const head0 = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined, draftsOf(s).length, optionsOf(s).chosen?.status === "sent");
+  const head = inProject && state === "ready" && !mode ? { ...head0, title: "Do zrobienia w projekcie w chmurze" } : head0;
   const draft = draftOf(s);   // wybrana opcja albo pierwszy szkic: linie raportu bez powtórki jej treści
   // raport bez powtórki streszczenia bloku zmian ani treści szkicu; „Do potwierdzenia: …” jako osobna linia
   const lines = reportLines(s.report, [...result.map((b) => b.summary), draft?.body]);
@@ -274,7 +277,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
             {aiOn ? <form action={compose.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Składam…" title="Agent składa panel z faktów, migawek i załączników">Pokaż kontekst</PendingButton></form> : null}
             {!aiOn && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
           </>) : null}
-          {s.status === "todo" && kind === "offline" ? <DoneAsk taskId={t.id} stepId={s.id} est={estOf(s)} title={s.title} /> : null}
+          {s.status === "todo" && inProject ? <CopyButton className="btn primary" text={projectPrompt(t, s, origin)} label="Kopiuj polecenie" title="Polecenie dla wątku w projekcie Claude w chmurze: wklej je tam; wątek przeczyta zadanie i zamknie ten krok" /> : null}
+          {s.status === "todo" && kind === "offline" ? <DoneAsk taskId={t.id} stepId={s.id} est={estOf(s)} title={s.title} primary={!inProject} /> : null}
           {s.status === "todo" && kind === "reading" ? <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Zapisuję…">Przeczytane</PendingButton></form> : null}
           {s.status === "todo" && kind === "decision" && !open.length ? <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Zapisuję…" title="Odpowiedzi już są; krok sprzed paczki 7 zamyka ten przycisk">Zrobione</PendingButton></form> : null}
           {s.status === "handoff" ? <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Krok wraca do zrobienia; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form> : null}

@@ -1,6 +1,6 @@
 // Karta kroku „Teraz · Co · Skąd” (paczka 2, punkt 8): stały porządek sekcji, wynik na wierzchu, nic nie pokazuje się dwa razy.
 // Czysta logika bez React, żeby dało się ją testować; składanie w JSX jest w src/app/tasks/[id]/page.tsx.
-import { appName, doneByOf, EXTERNAL_TOOLS, inApp, isOwnerStep, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step } from "./schema";
+import { appName, doneByOf, EXTERNAL_TOOLS, inApp, isOwnerStep, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step, type Task } from "./schema";
 import { draftOf, draftsOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, type Draft } from "./agent/approval";
 import { fileName, isHttpUrl, safeHref } from "./safeurl";
 import { fmtTime } from "./clock";
@@ -161,6 +161,20 @@ export function stepKind(s: Pick<Step, "tool" | "title" | "blocks">): StepKind {
   if (!isOwnerStep(s)) return "agent";
   if (s.blocks?.some((b) => b.type === "question")) return "decision";
   return READ_RE.test(s.title.trim()) ? "reading" : "offline";
+}
+// krok Piotra „Zleć w projekcie: …” (paczka 12, punkt 3): pracę robi wątek projektu Claude w chmurze, który uruchamia Piotr (zmiany w kodzie
+// Task Hub; zasada w bazie). Mostek i automat go nie biorą, bo to krok Piotra; karta daje polecenie do skopiowania zamiast „Uruchom”
+export const PROJECT_RE = /^zleć w projekcie(?=[\s,:;]|$)/i;
+export const isProjectStep = (s: Pick<Step, "tool" | "title">) => isOwnerStep(s) && PROJECT_RE.test(s.title.trim());
+// polecenie dla wątku projektu: co zrobić, brief kroku i skąd wziąć resztę (wątek ma konektor Task Hub, więc czyta zadanie sam i zamyka krok)
+export function projectPrompt(t: Pick<Task, "id" | "title" | "steps">, s: Pick<Step, "id" | "title" | "detail">, appUrl: string): string {
+  const what = s.title.trim().replace(PROJECT_RE, "").replace(/^[\s,:;]+/, "") || s.title.trim();
+  const n = String(t.steps.findIndex((x) => x.id === s.id) + 1).padStart(2, "0");
+  return [
+    `Zrób krok z Task Hub: ${what}.`,
+    s.detail.trim(),
+    `Zadanie „${t.title}” (${appUrl}/tasks/${t.id}), krok ${n}. Pełną treść, wcześniejsze kroki i decyzje przeczytaj przez get_task. Po skończeniu zamknij ten krok (complete_step) z wynikiem: co zmieniłeś i gdzie to jest.`,
+  ].filter(Boolean).join("\n\n");
 }
 export const openQuestions = (s: Pick<Step, "blocks">): QuestionB[] => (s.blocks ?? []).filter((b): b is QuestionB => b.type === "question" && !b.answer);
 // wynik kroku-decyzji zapisany w output: jedna odpowiedź wprost, kilka z treścią pytań

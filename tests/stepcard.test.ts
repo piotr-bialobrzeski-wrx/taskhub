@@ -192,3 +192,24 @@ describe("rodzaj kroku", () => {
     expect(keepOwnerAnswers(stored, [{ type: "text", body: "x" }])).toEqual([{ type: "text", body: "x" }]);
   });
 });
+
+describe("krok „Zleć w projekcie” (paczka 12, punkt 3)", async () => {
+  const { isProjectStep, projectPrompt } = await import("@/lib/stepcard");
+  it("krok Piotra z tytułem „Zleć w projekcie” robi projekt w chmurze; inne kroki nie", () => {
+    expect(isProjectStep({ tool: "manual", title: "Zleć w projekcie: dobór modelu w biegu" })).toBe(true);
+    expect(isProjectStep({ tool: "manual", title: "zleć w projekcie dobór modelu" })).toBe(true);
+    expect(isProjectStep({ tool: "code", title: "Zleć w projekcie: dobór modelu" })).toBe(false);   // krok agenta: nie
+    expect(isProjectStep({ tool: "manual", title: "Zleć w projekcie" })).toBe(true);
+    expect(isProjectStep({ tool: "manual", title: "Zleć w projektach: x" })).toBe(false);
+    expect(stepKind(step({ tool: "manual", title: "Zleć w projekcie: dobór modelu" }))).toBe("offline");   // „Zrobione” jak przy kroku poza aplikacją
+  });
+  it("polecenie: czynność bez przedrostka, brief, adres zadania, numer kroku i co zrobić na końcu", () => {
+    const a = step({ id: "a", title: "Przeczytaj notatkę" }), b = step({ id: "b", tool: "manual", title: "Zleć w projekcie: dobór modelu w biegu", detail: "Poziom kroku w bazie i --model w mostku." });
+    const p = projectPrompt({ id: "t1", title: "Dobór modelu", steps: [a, b] }, b, "https://th.example");
+    expect(p.split("\n\n")).toEqual([
+      "Zrób krok z Task Hub: dobór modelu w biegu.",
+      "Poziom kroku w bazie i --model w mostku.",
+      "Zadanie „Dobór modelu” (https://th.example/tasks/t1), krok 02. Pełną treść, wcześniejsze kroki i decyzje przeczytaj przez get_task. Po skończeniu zamknij ten krok (complete_step) z wynikiem: co zmieniłeś i gdzie to jest.",
+    ]);
+  });
+});
