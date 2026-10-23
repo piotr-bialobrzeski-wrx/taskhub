@@ -4,6 +4,8 @@
 // Mostek v2 (0.1.7): najpierw wysyłki zatwierdzonych szkiców (osobny bieg z jednym konektorem albo commit robiony przez
 // aplikację), potem praca. Każdy bieg ma własny token biegu i zasady z Policy (nigdy bypassPermissions); „Zatrzymaj”
 // przerywa bieg i wstrzymuje nowe na 10 minut.
+// 0.1.12: model, wysiłek i model zapasowy biegu dobiera Task Hub (poziom kroku); przy limicie modelu następny bieg idzie na zapasowym,
+// a gdy w limicie są wszystkie potrzebne modele, Task Hub odpowiada 429 z godziną powrotu.
 import Foundation
 
 struct BridgeWork {
@@ -62,7 +64,7 @@ final class Bridge: ObservableObject {
             if pending > 0 { return "czuwa, czeka \(pending)" + (busyBy.map { " (pracuje \($0))" } ?? "") }
             return "czuwa, nic nie czeka"
         case .running: return (runLabel.isEmpty ? "Claude pracuje" : runLabel) + (detail.isEmpty ? "" : " · \(detail)")
-        case .limit: return "limit Claude" + (until.map { ", wracam \(ClaudeCLI.hhmm($0))" } ?? "")
+        case .limit: return (detail.hasPrefix("limit modeli") ? detail : "limit Claude") + (until.map { ", wracam \(ClaudeCLI.hhmm($0))" } ?? "")
         case .auth: return "Claude Code wylogowany: w Terminalu wpisz claude, potem /login"
         case .error: return "błąd: \(detail)"
         case .offline: return "brak połączenia z Task Hub: \(detail)"
@@ -261,9 +263,10 @@ final class Bridge: ObservableObject {
         return BridgeWork(pending: pending, sends: sends, work: work, pollMs: (j["pollMs"] as? Int) ?? 0, runBridge: who, key: (j["key"] as? String) ?? "")
     }
 
-    private func touch(_ id: String, note: String?) async {
+    private func touch(_ id: String, note: String?, model: String? = nil) async {
         var body: [String: Any] = [:]
         if let n = note { body["note"] = String(n.prefix(200)) }
+        if let m = model { body["model"] = String(m.prefix(64)) }
         guard let r = try? await request("PATCH", "/api/bridge/run/\(id)", body: body) else { return }
         // cancel: Piotr zatrzymał ten bieg w Task Hub („Zatrzymaj” w dymku pracy) albo wycofał zgodę na szkic tej wysyłki („Zatrzymaj” na karcie), więc bieg kończy się od razu
         if (r.1["cancel"] as? Bool) == true, isRunningNow, runId == id, !serverStopped, !userStopped {
@@ -351,11 +354,12 @@ final class Bridge: ObservableObject {
                 restricted = want.isSubset(of: got)
             }
         }
-        let p = Probe(bin: bin, version: v, info: info, restricted: restricted, at: Date())
+        let flags = await ClaudeCLI.helpFlags(bin)
+        let p = Probe(bin: bin, version: v, info: info, restricted: restricted, at: Date(), flags: flags)
         probe = p
         let names = info.servers.map { "\($0.name) (\($0.status))" }.joined(separator: ", ")
         let conn = Policy.connectorTools(info)
-        Log.write("próba Claude Code \(v): \(info.tools.count) narzędzi; konektory: \(names.isEmpty ? "brak" : names); do odczytu \(conn.read.count), zablokowane \(conn.write.count); tryb ograniczony: \(restricted ? "tak" : "nie")")
+        Log.write("próba Claude Code \(v): \(info.tools.count) narzędzi; konektory: \(names.isEmpty ? "brak" : names); do odczytu \(conn.read.count), zablokowane \(conn.write.count); tryb ograniczony: \(restricted ? "tak" : "nie"); wysiłek: \(flags.contains("--effort") ? "tak" : "nie"), model zapasowy: \(flags.contains("--fallback-model") ? "tak" : "nie")")
         return p
     }
 
@@ -397,6 +401,16 @@ final class Bridge: ObservableObject {
             return .busy
         }
         if code == 204 { return .nothing }   // nic gotowego do wysłania
+        if code == 429 {
+            // wszystkie modele potrzebne do czekającej pracy są w limicie (razem z zapasowymi): czekamy do najbliższego końca limitu
+            let u = (j["until"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date().addingTimeInterval(30 * 60)
+            let msg = (j["error"] as? String) ?? "limit modeli"
+            if state != .limit || detail != msg { Log.write("mostek czeka: \(msg)") }
+            state = .limit
+            detail = msg
+            until = max(u, Date().addingTimeInterval(60))
+            return .limit
+        }
         if code == 422 {
             // serwer nie znalazł konektora: cofnął zatwierdzenie i napisał o tym w zadaniu
             Log.write("wysyłka odłożona: \((j["error"] as? String) ?? "brak konektora na tym Macu")")
@@ -414,7 +428,8 @@ final class Bridge: ObservableObject {
         let app = ((j["target"] as? [String: Any])?["app"] as? String) ?? ""
         let git = kind == .send ? (j["git"] as? [String: Any]) : nil
         let label: String
-        if kind == .work { label = "Claude pracuje nad zadaniami" }
+        let modelText = (j["modelLabel"] as? String) ?? ""   // „Opus · wysoki” albo „limit Fable do 01:00, pracuję na Opusie”
+        if kind == .work { label = "Claude pracuje nad zadaniami" + (modelText.isEmpty ? "" : " (\(modelText))") }
         else if git != nil { label = "Commit: " + (title.isEmpty ? "zatwierdzony szkic" : title) }
         else { label = "Wysyłka" + (app.isEmpty ? "" : " do \(app)") + (title.isEmpty ? "" : ": \(title)") }
 
@@ -437,6 +452,8 @@ final class Bridge: ObservableObject {
         }
         let result: ProcessResult
         var sent: [String: Any]? = nil
+        var limitUntil: Date? = nil
+        let served = !((j["model"] as? String) ?? "").isEmpty   // model dobrał Task Hub (poziom kroku)
         planFailed = false
         if let g = git {
             if let job = GitJob(g) {
@@ -491,9 +508,17 @@ final class Bridge: ObservableObject {
             probe = nil
         } else if ClaudeCLI.isLimit(result.text) {
             outcome = .limit
-            state = .limit
-            until = ClaudeCLI.resetDate(result.text) ?? Date().addingTimeInterval(30 * 60)
-            detail = "limit Claude"
+            limitUntil = ClaudeCLI.resetDate(result.text)
+            if served {
+                // model od Task Hub: serwer zapisze limit tego modelu i następny bieg dostanie zapasowy (albo 429, gdy nie ma czym pracować)
+                state = .idle
+                until = Date().addingTimeInterval(20)
+                detail = "limit modelu, przechodzę na zapasowy"
+            } else {
+                state = .limit
+                until = limitUntil ?? Date().addingTimeInterval(30 * 60)
+                detail = "limit Claude"
+            }
         } else if ClaudeCLI.isAuth(result.text) {
             outcome = .auth
             state = .auth
@@ -508,6 +533,7 @@ final class Bridge: ObservableObject {
         if note.isEmpty { note = result.ok ? "zrobione" : "błąd bez komunikatu" }
         var body: [String: Any] = ["outcome": outcome.rawValue, "note": note]
         if outcome == .done, let s = sent { body["sent"] = s }
+        if outcome == .limit, let u = limitUntil { body["until"] = ISO8601DateFormatter().string(from: u) }
         await finishRun(id, body)
         isRunningNow = false
         runLabel = ""
@@ -526,7 +552,11 @@ final class Bridge: ObservableObject {
             return ProcessResult(ok: false, text: "Task Hub nie podał promptu albo adresu konektora.")
         }
         let token = (j["token"] as? String) ?? ""   // token biegu; tokenu mostka nigdy nie dajemy Claude
-        let model = store.cfg.model
+        // model, wysiłek i zapasowy od Task Hub (dobór do poziomu kroku); bez nich model z Ustawień aplikacji (puste = domyślny Claude Code)
+        let served = ((j["model"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
+        let model = Policy.ModelChoice(model: served.isEmpty ? store.cfg.model : served,
+                                       effort: served.isEmpty ? "" : ((j["effort"] as? String) ?? ""),
+                                       fallback: served.isEmpty ? "" : ((j["fallbackModel"] as? String) ?? ""))
         var use = pr
         let servers = ((j["servers"] as? [Any]) ?? []).compactMap { $0 as? String }
         if kind == .send {
@@ -555,6 +585,8 @@ final class Bridge: ObservableObject {
         let bridge = self
         let runner = ProcessRunner(bin: bin, args: p.args, cwd: Store.workDir.path, env: p.env, maxSeconds: Double(maxMin * 60),
                                    onInit: { info in
+            // jakim modelem naprawdę idzie bieg (po przełączeniu na zapasowy inny niż zamówiony): Task Hub pokaże „ostatnio: model · wysiłek”
+            if !info.model.isEmpty { Task { @MainActor in await bridge.touch(id, note: nil, model: info.model) } }
             // konektor, którego próba nie widziała: bieg idzie dalej (strażnik blokuje jego narzędzia), a przed następnym biegiem nowa próba
             let fresh = Policy.unknownTools(info, p)
             if !fresh.isEmpty {

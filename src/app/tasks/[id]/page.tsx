@@ -28,7 +28,8 @@ import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
 import { GrowTextarea } from "@/components/GrowTextarea";
-import { ConfirmButton, DoneAsk, InlineText, PromptBox, StepMeta, type StepConnection } from "@/components/StepFields";
+import { ConfirmButton, DoneAsk, InlineText, PromptBox, StepMeta, type StepConnection, type StepModelInfo } from "@/components/StepFields";
+import { choiceOf, LEVEL_LABELS, modelConfig, modelLabel, runLabel, stepLevel } from "@/lib/agent/models";
 import { agentLabel, indexFrom } from "@/lib/search";
 import { Icon, plural } from "@/components/canvas/ui";
 import { InlineDate, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
@@ -57,6 +58,17 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     repo.listPendingChat(o.id, t.id),
   ]);
   const providers = availableProviders(), aiOn = providers.length > 0;
+  // dobór modelu kroku agenta (Ustawienia → Agent): co da „auto”, wybór Piotra i czym zrobił go ostatni bieg
+  const mcfg = modelConfig(o.settings);
+  const modelOf = (s: Step): (StepModelInfo & { now: string }) | null => {
+    if (!mcfg || isOwnerStep(s)) return null;
+    const lvl = stepLevel(s, { weight: cur.project?.weight }), auto = choiceOf(mcfg, lvl), cur2 = choiceOf(mcfg, lvl, s.modelPick);
+    return {
+      auto: `${LEVEL_LABELS[lvl]}: ${runLabel(auto.model, auto.effort)}`, pick: s.modelPick ?? null,
+      choices: mcfg.choices.map((m) => ({ key: m, label: modelLabel(m) })), last: s.lastRun?.model ? runLabel(s.lastRun.model, s.lastRun.effort) : null,
+      now: runLabel(cur2.model, cur2.effort),
+    };
+  };
   const feed = agentFeed(chatLog);
   const origin = appUrl();
   // kto pracuje teraz (mostek na komputerze z bieżącym biegiem albo automat o pełnej godzinie) i nad czym
@@ -178,7 +190,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     if (!raw || !s.needsApproval || (m !== "proposed" && m !== "parked") || destOf(s)?.kind !== "send") return null;
     return connectorIssue(b.connections, b.companies, { app: raw, connectionId: s.connectionId, companyId: cur.project?.companyId ?? null });
   };
-  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} oldMac={protocolOf(bridge.meta.v) < 2} issue={issueOf(s)} />; });
+  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} oldMac={protocolOf(bridge.meta.v) < 2} issue={issueOf(s)} model={modelOf(s)} />; });
 
   return (
     <>
@@ -195,10 +207,11 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
-function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, oldMac, issue }: {
+function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, oldMac, issue, model }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null; company: string | null;
   connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null; oldMac: boolean; issue: string | null;
+  model: (StepModelInfo & { now: string }) | null;
 }) {
   // szczegóły są już w sekcji „Co”, więc blok tekstu z tą samą treścią odpada
   const blocks = (s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
@@ -241,7 +254,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const target = !done && !mode ? targetLink(s, s.blocks) : null;
   const kinds = kindsOf(material);
   const deps = s.dependsOn.length;
-  const tech = [toolLabel(s.tool), own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
+  const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
   const took = whoDid(s) === "Ty" ? spentMin(s) : agentMin;
   const meta = done && s.filePath ? `Zapisano na Macu · ${fileName(s.filePath)}` : done ? `${whoDid(s)}${took ? ` · ${fmtMin(took)}` : ""}` : state === "ready" && !mode ? (own ? `Ty · ~${fmtMin(estOf(s))}` : `${toolLabel(s.tool)} · Claude`) : null;
 
@@ -319,7 +332,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           <StepMeta taskId={t.id}
             step={{ id: s.id, tool: s.tool, own, agentMin, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null, connectionId: s.connectionId }}
             steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title, done: x.status === "done" }))}
-            connections={connections} showConnection={!mode}
+            connections={connections} showConnection={!mode} model={done ? null : model}
             calText={calOn && cal ? `Z Twoich czasów (${cal.n} ${plural(cal.n, "krok", "kroki", "kroków")}): takie kroki trwają zwykle ×${String(cal.k).replace(".", ",")}.` : null} />
           <InlineText taskId={t.id} stepId={s.id} field="link" value={s.link ?? ""} as="small" placeholder="Dodaj link do wyniku (ticket, wydarzenie, mail)…" shown={s.link ? "Link: " + s.link.replace(/^https?:\/\//, "").slice(0, 70) : undefined} />
         </div>

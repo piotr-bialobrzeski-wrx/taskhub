@@ -5,6 +5,7 @@ import * as repo from "@/lib/repo";
 import { authBridge } from "@/lib/bridge";
 import { toolLabel, normalizeTool } from "@/lib/schema";
 import { isHttpUrl } from "@/lib/safeurl";
+import { resetFromText } from "@/lib/agent/models";
 
 export const dynamic = "force-dynamic";
 const OUTCOMES = new Set(["done", "error", "limit", "auth", "stopped"]);
@@ -16,10 +17,11 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (a instanceof Response) return a;
   const { id } = await ctx.params;
   if (!UUID.test(id)) return Response.json({ ok: false }, { status: 404 });
-  const body = (await req.json().catch(() => ({}))) as { note?: string; outcome?: string; sent?: { link?: unknown; summary?: unknown } | null };
+  const body = (await req.json().catch(() => ({}))) as { note?: string; outcome?: string; sent?: { link?: unknown; summary?: unknown } | null; model?: unknown; until?: unknown };
   const note = typeof body.note === "string" ? body.note : undefined;
   if (!body.outcome) {
-    const ok = await repo.touchBridgeRun(a.ownerId, id, note);   // z którym krokiem i zadaniem bieg jest związany, zapisuje serwer MCP przy wywołaniach
+    // model: pełna nazwa z init Claude Code (aplikacja 0.1.12), do „ostatnio: model · wysiłek” na krokach
+    const ok = await repo.touchBridgeRun(a.ownerId, id, note, typeof body.model === "string" ? body.model : undefined);   // z którym krokiem i zadaniem bieg jest związany, zapisuje serwer MCP przy wywołaniach
     // cancel: Piotr zatrzymał ten bieg w Task Hub („Zatrzymaj” w dymku pracy) albo wycofał zgodę na szkic tego biegu wysyłki („Zatrzymaj” na karcie), więc aplikacja przerywa bieg
     const cancel = ok && (await repo.runCancelled(a.ownerId, id));
     return Response.json(cancel ? { ok, cancel } : { ok }, { status: ok ? 200 : 404 });
@@ -37,6 +39,15 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
         const app = repo.draftOf(st)?.target.app;
         await repo.addChat(a.ownerId, run.taskId, "agent", `Mostek zgłosił wysyłkę${report.summary ? ` (${report.summary})` : ""}, ale zgoda na ten szkic była już wycofana. Sprawdź w ${app ? toolLabel(normalizeTool(app)) : "aplikacji docelowej"}, co poszło.`, { stepId: run.stepId, link: isHttpUrl(report.link) ? report.link : undefined });
       }
+    }
+  }
+  // limit modelu biegu: do godziny z aplikacji (until) albo z komunikatu Claude Code; do tej chwili biegi idą na zapasowym, potem same wracają na główny
+  if (body.outcome === "limit") {
+    const run = await repo.getBridgeRun(a.ownerId, id);
+    if (run && !run.endedAt && run.model) {
+      const given = typeof body.until === "string" && !Number.isNaN(Date.parse(body.until)) ? new Date(body.until).toISOString() : null;
+      const until = given ?? resetFromText(note) ?? new Date(Date.now() + 30 * 60_000).toISOString();
+      if (Date.parse(until) > Date.now()) await repo.recordModelLimit(a.ownerId, run.model, until);
     }
   }
   const ok = await repo.endBridgeRun(a.ownerId, id, body.outcome, note);

@@ -16,8 +16,10 @@ struct InitInfo {
     var version: String
     var tools: [String]
     var servers: [McpStatus]
+    var model: String         // pełna nazwa modelu biegu, np. claude-sonnet-5-5 (wysiłku init nie podaje)
 
     init(_ ev: [String: Any]) {
+        model = (ev["model"] as? String) ?? ""
         permissionMode = ev["permissionMode"] as? String
         version = (ev["claude_code_version"] as? String) ?? (ev["version"] as? String) ?? ""
         tools = ((ev["tools"] as? [Any]) ?? []).compactMap { $0 as? String }

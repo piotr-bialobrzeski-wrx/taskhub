@@ -57,11 +57,15 @@ function NumChip({ value, stepBy, min, label, onSave }: { value: number; stepBy:
   return <button type="button" className="pp boxed num" title={label + ": kliknij, aby zmienić"} onClick={() => setEdit(true)}><span className="pp-t">{fmtMin(value)}</span><Icon k="pen" size={11} sw={1.8} /></button>;
 }
 
-export function StepMeta({ taskId, step, steps, calText, connections = [], showConnection = true }: {
+// model kroku agenta: „auto” (poziom kroku → model i wysiłek z Ustawień) albo wybór Piotra; obok, czym zrobił go ostatni bieg
+export type StepModelInfo = { auto: string; pick: string | null; choices: { key: string; label: string }[]; last: string | null };
+
+export function StepMeta({ taskId, step, steps, calText, connections = [], showConnection = true, model = null }: {
   taskId: string;
   step: { id: string; tool: string; own: boolean; agentMin: number; estMin: number; spentMin: number; needsApproval: boolean; dependsOn: string[]; estHint?: string | null; connectionId?: string | null };
   steps: { id: string; title: string; done: boolean }[]; calText?: string | null;
   connections?: StepConnection[]; showConnection?: boolean;   // wybór połączenia: w technikaliach tylko, gdy nie ma go w karcie publikacji
+  model?: StepModelInfo | null;
 }) {
   const [, start] = useTransition();
   const patch = (p: Patch) => start(() => patchStep(taskId, step.id, p));
@@ -81,6 +85,9 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
           <div><div className="lbl">Szacunek{step.estHint ? <span className="hint"> {step.estHint}</span> : null}</div><NumChip value={step.estMin} stepBy={Q} min={Q} label="Szacunek w minutach" onSave={(v) => patch({ estMin: v })} /></div>
           <div><div className="lbl">Twój czas</div><NumChip value={step.spentMin} stepBy={5} min={0} label="Twój czas w minutach" onSave={(v) => patch({ spentMin: v })} /></div>
         </> : <div><div className="lbl">Czas Claude'a</div><span className="pp boxed" title="Liczy się sam: od chwili, gdy Claude zaczął krok, do jego zamknięcia"><span className="pp-t">{step.agentMin ? fmtMin(step.agentMin) : "jeszcze nic"}</span></span></div>}
+        {model ? <div><div className="lbl">Model{model.last ? <span className="hint"> ostatnio: {model.last}</span> : null}</div>
+          <Picker cls="boxed" title="Którym modelem Claude ma zrobić ten krok: auto dobiera model i wysiłek do poziomu kroku (Ustawienia → Agent)" trigger={<span className="pp-t">{model.pick ? model.choices.find((c) => c.key === model.pick)?.label ?? model.pick : `auto · ${model.auto}`}</span>} onPick={(k) => patch({ modelPick: k || null })}
+            options={[{ key: "", on: !model.pick, node: <span>auto · {model.auto}</span> }, ...model.choices.map((c) => ({ key: c.key, on: c.key === model.pick, node: <span>{c.label}</span> }))]} /></div> : null}
         <div><div className="lbl">Zgoda</div>
           <Picker cls="boxed" title="Czy krok wysyła coś na zewnątrz i czeka na Twoją zgodę" trigger={<span className="pp-t">{step.needsApproval ? "wymaga zgody" : "bez zgody"}</span>} onPick={(k) => patch({ needsApproval: k === "1" })}
             options={[{ key: "1", on: step.needsApproval, node: <span>wymaga zgody: wysyła coś na zewnątrz</span> }, { key: "0", on: !step.needsApproval, node: <span>bez zgody: Claude robi od razu</span> }]} /></div>

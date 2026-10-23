@@ -3,6 +3,7 @@ import * as repo from "@/lib/repo";
 import type { Step } from "@/lib/schema";
 import { brief, scoreAll } from "./context";
 import { approvalValid, draftOf, isPromptDraft, isSendable, type Draft } from "./approval";
+import { choiceOf, modelConfig, runLabel, stepChoice, type Choice } from "./models";
 // list_work pokazuje początek wiadomości; całość (do 50 tys. znaków) jest w get_task
 const preview = (x: string, n = 600) => (x.length > n ? x.slice(0, n) + "… (całość w get_task)" : x);
 
@@ -23,7 +24,9 @@ export const PROJECT_RULE = "Projekt: zadanie „bez projektu”, którego treś
 export const DECISION_RULE = "Decyzja Piotra: krok Piotra, w którym ma coś wybrać, zdecydować albo zatwierdzić wariant (Wybierz…, Zdecyduj…, Ustal…), ma na kartce przez set_blocks to, z czego wybiera (table, free), i klocek question z opcjami (options z label i note, recommended = indeks zalecanej); jego odpowiedź zamyka krok, wraca do Ciebie w rozmowie, a kartka zrobionego kroku zostaje w get_task (KARTKA ZROBIONEGO KROKU). Bez pytania na kartce Piotr musi wpisać wybór ręcznie przy „Zrobione” (pole „Co wybrałeś?”): trafia tylko do pola wynik, bez opcji i tabeli, więc zawsze daj pytanie na kartce.";
 export const ITEMS_RULE = "Lista elementów: gdy Piotr prosi o elementy jako kroki (tickety, wątki, maile, dokumenty: „każdy X jako osobny krok”, „pokaż ich treść w krokach”), każdy element to jego otwarty krok (tool manual, est 5), title = tytuł elementu w jego języku (bez przerabiania na czasownik), a na kartce przez set_blocks klocek free z treścią elementu 1:1 (Markdown) i klocek link do źródła; takich kroków nie oznaczaj jako zrobione. Jako zrobiony odczyt (add_steps.done) wchodzi tylko praca przygotowawcza (wybór, filtr, analiza), jednym krokiem.";
 export const isLongTitle = (t: string) => t.trim().split(/\s+/).length > 6 || /[.!?]\s+\S/.test(t.trim());
-export type WorkSummary = { text: string; counts: WorkCounts; total: number };
+// choices: grupy pracy (model i wysiłek) w kolejności listy, bez powtórzeń; puste, gdy w ustawieniach nie ma doboru modeli
+// sig: grupy wszystkich pozycji po kolei (krok oddany i podniesiony poziom zmienia sig, choć tekst listy jest ten sam)
+export type WorkSummary = { text: string; counts: WorkCounts; total: number; choices?: Choice[]; sig?: string };
 // kto pyta: bridge-v1 = stara aplikacja mostka (0.1.6, skrypt Node) wysyła zatwierdzone szkice jak dotąd; client = konektor OAuth i automat co godzinę,
 // work = bieg pracy mostka v2: oba bez zatwierdzonych szkiców (wysyła je osobny bieg wysyłki); send = bieg wysyłki: tylko jego jeden krok (stepId)
 export type WorkAudience = "bridge-v1" | "client" | "work" | "send";
@@ -64,44 +67,69 @@ async function sendSummary(ownerId: string, stepId: string | undefined): Promise
 }
 
 // peek: tylko policz, nie oznaczaj odpowiedzi Piotra jako odczytanych (mostek zagląda tu co kilkanaście sekund)
-export async function workSummary(ownerId: string, opts: { peek?: boolean; audience?: WorkAudience; stepId?: string } = {}): Promise<WorkSummary> {
+// focus: bieg pracy mostka z doborem modelu widzi tylko swoją grupę („model|wysiłek”); resztę zrobi osobny bieg na modelu dobranym do niej
+export async function workSummary(ownerId: string, opts: { peek?: boolean; audience?: WorkAudience; stepId?: string; focus?: string | null } = {}): Promise<WorkSummary> {
   const audience = opts.audience ?? "bridge-v1";
   if (audience === "send") return sendSummary(ownerId, opts.stepId);
   const sends = audience === "bridge-v1";   // tylko stary mostek wysyła z listy pracy; reszta nie widzi zatwierdzonych szkiców
-  const [tasks, projects, samples, answered, chat] = await Promise.all([repo.listTasks(ownerId), repo.listProjects(ownerId), repo.listSamples(ownerId), repo.listQuestions(ownerId, { answeredUnseen: true }), repo.listUnseenChat(ownerId)]);
+  const [tasks, projects, samples, allAnswered, allChat, settings] = await Promise.all([repo.listTasks(ownerId), repo.listProjects(ownerId), repo.listSamples(ownerId), repo.listQuestions(ownerId, { answeredUnseen: true }), repo.listUnseenChat(ownerId), repo.userSettings(ownerId)]);
+  // dobór modelu: każda pozycja listy dostaje grupę (model i wysiłek z poziomu kroku); bez konfiguracji wszystko w jednej, pustej grupie
+  const cfg = modelConfig(settings);
+  const weightOf = new Map(tasks.map((t) => [t.id, projects.find((p) => p.id === t.projectId)?.weight ?? null]));
+  const stepOf = new Map(tasks.flatMap((t) => t.steps.map((st) => [st.id, st] as const)));
+  // grupy z miejscem sekcji na liście (wiadomości, w toku, rozpisanie, odpowiedzi, gotowe, pliki, szkice, tytuły): bieg bierze grupę pierwszej pozycji
+  const seen: { rank: number; c: Choice }[] = [];
+  let skipped = 0;
+  // pozycja w grupie biegu (albo bez focus: zawsze)
+  const take = (c: Choice | null, rank: number): boolean => {
+    if (c) seen.push({ rank, c });
+    const ok = !opts.focus || (c?.key ?? "") === opts.focus;
+    if (!ok) skipped++;
+    return ok;
+  };
+  const forStep = (st: Step, taskId: string) => (cfg ? stepChoice(cfg, st, { weight: weightOf.get(taskId) }) : null);
+  // wiadomość albo odpowiedź przy kroku idzie na poziomie tego kroku (kartka Piotra co najmniej Analiza), bez kroku na Analizie
+  const forTaskMsg = (taskId: string, stepId?: string | null) => { const st = stepId ? stepOf.get(stepId) : undefined; return cfg ? (st ? forStep(st, taskId) : choiceOf(cfg, "analysis")) : null; };
+  const chat = allChat.filter((m) => take(forTaskMsg(m.taskId, (m.actions as { stepId?: string } | null)?.stepId), 0));
   const open = scoreAll(tasks, projects, samples).filter((s) => !s.task.doneAt && !s.task.deletedAt);
   const unfinished = new Set(tasks.filter((t) => !t.doneAt && !t.deletedAt).map((t) => t.id));
   const free = open.filter((s) => !s.task.dependsOn.some((d) => unfinished.has(d)));   // zadania, które nie czekają na inne zadania
   const openQ = await repo.listQuestions(ownerId, { open: true });
   const waitingTask = new Set(openQ.map((q) => q.taskId));
-  const noSteps = free.filter((s) => !s.task.steps.length && !waitingTask.has(s.task.id));
+  // rozpisanie zadania zawsze na Strategii
+  const noSteps = free.filter((s) => !s.task.steps.length && !waitingTask.has(s.task.id) && take(cfg ? choiceOf(cfg, "strategy") : null, 3));
   const attN = await repo.countAttachments(noSteps.map((s) => s.task.id));
   // tytuły zadań wpisane jako cała wiadomość Piotra (dłuższe niż 6 słów albo zdanie z kropką), których agent jeszcze nie skrócił
-  const longTitles = open.filter((s) => !s.task.titleOriginal && isLongTitle(s.task.title));
+  // samo skrócenie tytułu to Mechanika
+  const longTitles = open.filter((s) => !s.task.titleOriginal && isLongTitle(s.task.title) && take(cfg ? choiceOf(cfg, "mechanics") : null, 8));
+  const answered = allAnswered.filter((q) => take(forTaskMsg(q.taskId, q.stepId), 4));
   const going: string[] = [], approved: string[] = [], ready: string[] = [], approval: string[] = [], held: string[] = [], files: string[] = [];
+  const RANK = new Map<string[], number>([[going, 1], [approved, 2], [held, 2], [ready, 5], [files, 6], [approval, 7]]);
   for (const s of free) {
     if (waitingTask.has(s.task.id)) continue;
     for (const st of s.task.steps) {
+      const c = forStep(st, s.task.id);
       const line = `- krok [${st.id}] „${st.title}” (${st.tool}) w zadaniu [${s.task.id}] „${s.task.title}”${st.detail ? ": " + st.detail.slice(0, 200) : ""}`;
+      const add = (list: string[], l: string) => { if (take(c, RANK.get(list) ?? 5)) list.push(l); };
       const depsDone = st.dependsOn.every((d) => s.task.steps.find((x) => x.id === d)?.status === "done");
       // szkic ze zgodą Piotra (podpis treści): wysyła go stary mostek z tej listy albo osobny bieg wysyłki; zgoda nieważna albo wysyłka w toku = nic dla agenta
       if (st.status === "handoff" && (st.approvedAt || st.sendStartedAt || draftOf(st)?.status === "approved")) {
         // zatwierdzony prompt dla agenta: bieg pracy (i klient) wykonuje go jak krok w toku; stary mostek ma go w szkicach do wysłania
-        if (!sends && depsDone && isSendable(st) && isPromptDraft(draftOf(st), st.blocks)) { going.push(line + " (zatwierdzony prompt: wykonaj polecenie z sekcji „SZKIC KROKU” w get_task, potem complete_step)"); continue; }
+        if (!sends && depsDone && isSendable(st) && isPromptDraft(draftOf(st), st.blocks)) { add(going, line + " (zatwierdzony prompt: wykonaj polecenie z sekcji „SZKIC KROKU” w get_task, potem complete_step)"); continue; }
         if (!sends || !isSendable(st)) continue;
         // zatwierdzony szkic czeka z wysyłką, aż skończą się kroki przed nim (Piotr może zatwierdzić wcześniej, ale kolejność wysyłki zostaje)
-        (depsDone ? approved : held).push(line + (depsDone && st.handoffAt ? ` (od ${st.handoffAt})` : ""));
+        add(depsDone ? approved : held, line + (depsDone && st.handoffAt ? ` (od ${st.handoffAt})` : ""));
         continue;
       }
       // plik na Macu zapisuje tylko bieg pracy mostka (aplikacja 0.1.7): inni go nie widzą
       if (st.tool === "file" && audience !== "work") continue;
-      if (st.status === "handoff") { going.push(line + (st.handoffAt ? ` (od ${st.handoffAt})` : "") + (st.tool === "file" ? " (plik na Macu: dokończ jak w sekcji PLIKI NA MACU)" : "")); continue; }
+      if (st.status === "handoff") { add(going, line + (st.handoffAt ? ` (od ${st.handoffAt})` : "") + (st.tool === "file" ? " (plik na Macu: dokończ jak w sekcji PLIKI NA MACU)" : "")); continue; }
       if (st.status !== "todo") continue;
       if (!depsDone) continue;
       if (st.tool === "manual") continue;
-      if (st.tool === "file") { files.push(line); continue; }
+      if (st.tool === "file") { add(files, line); continue; }
       // szkic nieaktualny (nowe kroki weszły przed nim) agent przygotowuje od nowa, gdy kroki przed nim są zrobione
-      if (st.needsApproval) { if (!st.blocks?.some((b) => b.type === "draft" && !b.stale)) approval.push(line); } else ready.push(line);
+      if (st.needsApproval) { if (!st.blocks?.some((b) => b.type === "draft" && !b.stale)) add(approval, line); } else add(ready, line);
     }
   }
   if (!opts.peek) await Promise.all([repo.markQuestionsSeen(ownerId, answered.map((q) => q.id)), repo.markChatSeen(ownerId, { ids: chat.map((m) => m.id) })]);
@@ -122,5 +150,10 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
     longTitles.length ? `TYTUŁY DO SKRÓCENIA (update_task z nowym title, nic więcej; ${TITLE_RULE}; pierwotny tytuł zostaje zapisany sam):\n` + longTitles.map((s) => `- zadanie [${s.task.id}] „${s.task.title}”`).join("\n") : "",
     openQ.length ? `ZADANIA CZEKAJĄCE NA ODPOWIEDŹ PIOTRA (pomiń): ${[...waitingTask].map((id) => `[${id}]`).join(", ")}` : "",
   ].filter(Boolean).join("\n\n");
-  return { text: out || "Nic nie czeka na agenta.", counts, total };
+  const choices: Choice[] = [];
+  for (const { c } of [...seen].sort((a, b) => a.rank - b.rank)) if (!choices.some((x) => x.key === c.key)) choices.push(c);
+  // bieg z doborem modelu: na początku listy, na czym pracuje i że reszta idzie osobnym biegiem
+  const focus = opts.focus ? choices.find((c) => c.key === opts.focus) ?? null : null;
+  const head = opts.focus && total ? `TEN BIEG: ${focus ? runLabel(focus.model, focus.effort) : opts.focus.replace("|", " · ")}. Rób tylko pozycje z tej listy.${skipped ? ` Pozostałe (${skipped}) zrobi osobny bieg na modelu dobranym do ich poziomu, więc ich nie szukaj i nie bierz się za nie (także za kroki, które dodasz przy rozpisaniu).` : ""}\n\n` : "";
+  return { text: out ? head + out : "Nic nie czeka na agenta.", counts, total, choices, sig: seen.map((x) => x.c.key).join(",") };
 }

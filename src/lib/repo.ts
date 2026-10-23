@@ -9,6 +9,7 @@ import { approvalSig, approvalValid, draftOf, draftsOf, isGitDraft, isSendable, 
 import { doneChat, stepKind } from "./stepcard";
 import { shortTitle } from "./auto";
 import { guessProject } from "./project-guess";
+import { isModelName, MAX_ESCALATION, normalizeLevel } from "./agent/models";
 export { approvalSig, approvalValid, draftOf, draftsOf, isSendable, optionLabel, optionsOf } from "./agent/approval";
 
 type Row = Record<string, unknown>;
@@ -237,6 +238,8 @@ function rowToStep(r: Row, deps: string[]): Step {
     approvedAt: iso(r.approvedAt), approvedSig: (r.approvedSig as string) ?? null, sendStartedAt: iso(r.sendStartedAt),
     agentSec: Number(r.agentSec ?? 0), agentStartedAt: iso(r.agentStartedAt), doneBy: (r.doneBy as "owner" | "agent") ?? null,
     agentAt: iso(r.agentAt), openedAt: iso(r.openedAt),
+    workLevel: (r.workLevel as string) ?? null, modelPick: (r.modelPick as string) ?? null, escalation: Number(r.escalation ?? 0),
+    lastRun: (r.lastRun as Step["lastRun"]) ?? null,
   };
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
@@ -273,7 +276,7 @@ export async function getTask(ownerId: string, id: string): Promise<Task | null>
   const rows = await sql()`select * from tasks where owner_id = ${ownerId} and id = ${id}`;
   return (await hydrate(rows))[0] ?? null;
 }
-export type NewStep = { title: string; detail?: string; tool?: string; needsApproval?: boolean; estMin?: number; link?: string; dependsOn?: string[] /* indeksy lub id */; connectionId?: string | null };
+export type NewStep = { title: string; detail?: string; tool?: string; needsApproval?: boolean; estMin?: number; link?: string; dependsOn?: string[] /* indeksy lub id */; connectionId?: string | null; workLevel?: string | null };
 export type NewTask = { title: string; summary?: string; source?: string; level?: number; due?: string | null; projectId?: string | null; steps?: NewStep[]; dependsOn?: string[] };
 
 export async function createTask(ownerId: string, input: NewTask): Promise<Task> {
@@ -295,8 +298,8 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
   let pos = bef ? Number(bef.position) : Number(n);
   const created: { id: string }[] = [];
   for (const s of steps) {
-    const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id)
-      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval && normalizeTool(s.tool) !== "file"}, ${roundQ(s.estMin ?? Q)}, ${isHttpUrl(s.link) ? s.link.trim() : null}, ${s.connectionId ?? null}) returning id`;
+    const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id, work_level)
+      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval && normalizeTool(s.tool) !== "file"}, ${roundQ(s.estMin ?? Q)}, ${isHttpUrl(s.link) ? s.link.trim() : null}, ${s.connectionId ?? null}, ${normalizeLevel(s.workLevel)}) returning id`;
     created.push({ id: r.id as string });
   }
   // zależności: "n2" / indeks w tej paczce albo id istniejącego kroku
@@ -365,7 +368,7 @@ export async function purgeTask(ownerId: string, id: string): Promise<void> {
   await sql()`delete from tasks where id = ${id} and owner_id = ${ownerId}`;
 }
 
-export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null; filePath: string | null; agentSec: number; agentStartedAt: string | null; doneBy: "owner" | "agent" | null }>;
+export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null; filePath: string | null; agentSec: number; agentStartedAt: string | null; doneBy: "owner" | "agent" | null; workLevel: string | null; modelPick: string | null }>;
 const parseBlocks = (v: unknown): Block[] | null => { if (!v) return null; const p = Blocks.safeParse(v); return p.success ? p.data : null; };
 const isApproved = (b: Block) => b.type === "draft" && b.status === "approved";
 const demote = (blocks: Block[]) => blocks.map((b): Block => (b.type === "draft" && b.status === "approved" ? { ...b, status: "proposed" } : b));
@@ -438,6 +441,8 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
   if (patch.logged !== undefined) p.logged = patch.logged;
   if (patch.connectionId !== undefined) p.connection_id = patch.connectionId;
   if (patch.filePath !== undefined) p.file_path = patch.filePath?.trim().slice(0, 500) || null;
+  if (patch.workLevel !== undefined) p.work_level = normalizeLevel(patch.workLevel);
+  if (patch.modelPick !== undefined) p.model_pick = isModelName(patch.modelPick) ? patch.modelPick.trim() : null;
   if (!Object.keys(p).length) return;
   await sql()`update steps set ${sql()(p)} where id = ${id}`;
 }
@@ -884,6 +889,18 @@ export async function deleteApiToken(ownerId: string, id: string): Promise<void>
 export async function setUserSettings(ownerId: string, patch: Record<string, unknown>): Promise<void> {
   await sql()`update users set settings = settings || ${sql().json(patch as never)} where id = ${ownerId}`;
 }
+export async function userSettings(ownerId: string): Promise<Record<string, unknown>> {
+  const [r] = await sql()`select settings from users where id = ${ownerId}`;
+  return (r?.settings as Record<string, unknown>) ?? {};
+}
+// limit modelu do podanej chwili (z komunikatu Claude Code); jednym zapisem, żeby dwa biegi nie nadpisały sobie limitów
+export async function recordModelLimit(ownerId: string, model: string, until: string): Promise<void> {
+  await sql()`update users set settings = jsonb_set(settings, '{modelLimits}', coalesce(settings->'modelLimits', '{}'::jsonb) || jsonb_build_object(${model}::text, ${until}::text)) where id = ${ownerId}`;
+}
+// krok oddany przez bieg: następna próba idzie poziom wyżej (najwyżej MAX_ESCALATION)
+export async function bumpEscalation(stepId: string): Promise<void> {
+  await sql()`update steps set escalation = least(escalation + 1, ${MAX_ESCALATION}) where id = ${stepId}`;
+}
 
 // ---------- mostek na komputerze ----------
 // Puls: token rodzaju "bridge" ma seen_at i meta (komputer, silnik, stan). Bieg: jeden otwarty na właściciela (unikalny indeks częściowy),
@@ -893,8 +910,11 @@ export type RunKind = "work" | "send";
 // steps: kroki, których bieg dotknął (serwer MCP zapisuje przy każdym udanym wywołaniu): first = pierwsze dotknięcie, at = ostatnie, what = co zrobił;
 // stepId = krok „teraz”. stopAt: Piotr zatrzymał bieg w Task Hub; stoppable: bieg pracy v2 (ma token biegu, więc da się go zatrzymać stąd)
 export type RunStep = { first: string; at: string; what: string };
-export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null; kind?: RunKind; markAt?: string | null; steps?: Record<string, RunStep>; stopAt?: string | null; stoppable?: boolean };
-const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null, kind: r.kind === "send" ? "send" : "work", markAt: iso(r.markAt), steps: (r.steps as Record<string, RunStep>) ?? {}, stopAt: iso(r.stopAt), stoppable: r.stoppable === true });
+// model, effort: co bieg dostał; focus: grupa pracy „model|wysiłek” (list_work biegu pokazuje tylko ją); modelUsed: pełna nazwa z Claude Code
+export type RunModel = { model: string; effort: string; focus: string; fallback: string };
+export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null; kind?: RunKind; markAt?: string | null; steps?: Record<string, RunStep>; stopAt?: string | null; stoppable?: boolean; model?: string | null; effort?: string | null; focus?: string | null; fallback?: string | null; modelUsed?: string | null };
+const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null, kind: r.kind === "send" ? "send" : "work", markAt: iso(r.markAt), steps: (r.steps as Record<string, RunStep>) ?? {}, stopAt: iso(r.stopAt), stoppable: r.stoppable === true,
+  model: (r.model as string) ?? null, effort: (r.effort as string) ?? null, focus: (r.focus as string) ?? null, fallback: (r.fallback as string) ?? null, modelUsed: (r.modelUsed as string) ?? null });
 // pause: Piotr zatrzymał bieg w Task Hub („Zatrzymaj” w dymku pracy): mostek nie bierze nowej pracy do tej chwili, chyba że Piotr napisze wcześniej
 export type BridgeStatus = { alive: boolean; seenAt: string | null; name: string | null; meta: Record<string, unknown>; run: BridgeRun | null; pause: string | null };
 
@@ -914,9 +934,10 @@ export async function expireBridgeRuns(ownerId: string, staleMin: number): Promi
   return rows.length;
 }
 // stepId: krok biegu wysyłki (ustala też zadanie); bieg pracy wiąże się z krokiem sam, z notatek mostka
-export async function startBridgeRun(ownerId: string, tokenId: string | null, bridge: string, kind: RunKind = "work", stepId: string | null = null): Promise<BridgeRun | null> {
+export async function startBridgeRun(ownerId: string, tokenId: string | null, bridge: string, kind: RunKind = "work", stepId: string | null = null, m: RunModel | null = null): Promise<BridgeRun | null> {
   const [s] = stepId ? await sql()`select s.id, s.task_id from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId}` : [];
-  const [r] = await sql()`insert into bridge_runs (owner_id, token_id, bridge, kind, step_id, task_id) values (${ownerId}, ${tokenId}, ${bridge.slice(0, 80)}, ${kind}, ${s?.id ?? null}, ${s?.taskId ?? null})
+  const [r] = await sql()`insert into bridge_runs (owner_id, token_id, bridge, kind, step_id, task_id, model, effort, focus, fallback)
+    values (${ownerId}, ${tokenId}, ${bridge.slice(0, 80)}, ${kind}, ${s?.id ?? null}, ${s?.taskId ?? null}, ${m?.model || null}, ${m?.effort || null}, ${m?.focus ?? null}, ${m?.fallback || null})
     on conflict (owner_id) where ended_at is null do nothing returning *`;
   return r ? rowToRun(r) : null;
 }
@@ -967,9 +988,10 @@ export async function stopPause(ownerId: string): Promise<string | null> {
   return r ? pauseEnd(r.stopAt as Date) : null;
 }
 // note: co mostek robi teraz („start_step: id”, „Bash: npm test”); z którym zadaniem i krokiem bieg jest związany, zapisuje serwer MCP (runTouch)
-export async function touchBridgeRun(ownerId: string, id: string, note?: string): Promise<boolean> {
+export async function touchBridgeRun(ownerId: string, id: string, note?: string, modelUsed?: string): Promise<boolean> {
   const p: Row = { touched_at: new Date() };
   if (note !== undefined) p.note = note.slice(0, 200);
+  if (modelUsed !== undefined && isModelName(modelUsed)) p.model_used = modelUsed.trim();
   const rows = await sql()`update bridge_runs set ${sql()(p)} where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id`;
   return rows.length > 0;
 }
@@ -1007,6 +1029,9 @@ export async function stepOpened(ownerId: string, taskId: string, stepId: string
 }
 export async function endBridgeRun(ownerId: string, id: string, outcome: string, note?: string): Promise<boolean> {
   const rows = await sql()`update bridge_runs set ended_at = now(), touched_at = now(), outcome = ${outcome.slice(0, 20)}, note = coalesce(${note?.slice(0, 600) ?? null}, note) where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id, started_at, kind, step_id, outcome, note`;
+  // „ostatnio: model · wysiłek” na krokach, których bieg dotknął (bieg z modelem od Task Hub)
+  if (rows.length) await sql()`update steps s set last_run = jsonb_build_object('model', coalesce(b.model_used, b.model), 'effort', b.effort, 'at', now())
+    from bridge_runs b where b.id = ${id} and b.model is not null and (s.id::text in (select jsonb_object_keys(b.steps)) or s.id = b.step_id)`;
   if (rows.length) await requeueChat(ownerId, rows[0].startedAt as Date);   // wiadomości wzięte w tym biegu bez odpowiedzi wracają do kolejki
   await afterRuns(ownerId, rows);
   return rows.length > 0;

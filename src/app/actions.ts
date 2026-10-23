@@ -1,5 +1,6 @@
 "use server";
 // Akcje serwera dla widoków. Każda sprawdza zalogowanego właściciela; agent nigdy nie usuwa, człowiek może.
+import { modelConfig, normalizeLevel } from "@/lib/agent/models";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -127,7 +128,7 @@ export async function addStepForm(fd: FormData) {
   refresh(taskId);
 }
 // edycja w miejscu: jedno pole naraz, tam gdzie je widać w panelu kroku
-export async function patchStep(taskId: string, stepId: string, patch: { title?: string; detail?: string; tool?: string; estMin?: number; spentMin?: number; link?: string; needsApproval?: boolean; connectionId?: string | null }) {
+export async function patchStep(taskId: string, stepId: string, patch: { title?: string; detail?: string; tool?: string; estMin?: number; spentMin?: number; link?: string; needsApproval?: boolean; connectionId?: string | null; modelPick?: string | null }) {
   const o = await requireOwner();
   const { step } = await stepOf(o.id, taskId, stepId);
   const p: repo.StepPatch = {};
@@ -139,6 +140,7 @@ export async function patchStep(taskId: string, stepId: string, patch: { title?:
   if (patch.link !== undefined) p.link = patch.link.trim() ? url(patch.link.trim()) : null;
   if (patch.needsApproval !== undefined) p.needsApproval = patch.needsApproval;
   if (patch.connectionId !== undefined) p.connectionId = patch.connectionId || null;
+  if (patch.modelPick !== undefined) p.modelPick = patch.modelPick || null;
   if (Object.keys(p).length) await repo.updateStep(step.id, p);
   refresh(taskId);
 }
@@ -410,6 +412,20 @@ export async function saveSettings(fd: FormData) {
   const o = await requireOwner();
   const p = str(fd, "aiProvider");
   await repo.setUserSettings(o.id, { aiProvider: p === "anthropic" || p === "openai" ? p : null });
+  revalidatePath("/settings");
+}
+// dobór modelu: jeden poziom (model, wysiłek, zapasowy); całość przechodzi przez modelConfig, więc zły wpis niczego nie psuje
+export async function saveModelLevel(level: string, patch: { model?: string; effort?: string; fallback?: string }) {
+  const o = await requireOwner();
+  const lvl = normalizeLevel(level);
+  const cfg = modelConfig(o.settings);
+  if (!lvl || !cfg) return;
+  const cur = cfg.levels[lvl];
+  const next = { ...cur, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) } as typeof cur;
+  if (next.fallback === next.model) next.fallback = "";
+  const models = { choices: cfg.choices, levels: { ...cfg.levels, [lvl]: next } };
+  if (!modelConfig({ models })) return;
+  await repo.setUserSettings(o.id, { models });
   revalidatePath("/settings");
 }
 export type TokenState = { token?: string; error?: string };

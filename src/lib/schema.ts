@@ -201,6 +201,10 @@ export const Step = z.object({
   doneBy: z.enum(["owner", "agent"]).nullable().optional(),   // kto zamknął krok; null (sprzed paczki 7) = wg narzędzia
   agentAt: z.string().nullable().optional(),        // ostatnia zmiana kroku przez agenta (kartka, szkic, zamknięcie); kropka na kafelku do pierwszego otwarcia
   openedAt: z.string().nullable().optional(),       // Piotr otworzył krok po tej zmianie
+  workLevel: z.string().nullable().optional(),      // poziom pracy (strategy, analysis, execution, mechanics); null = z narzędzia
+  modelPick: z.string().nullable().optional(),      // wybór Piotra na karcie: null = auto
+  escalation: z.number().int().optional(),          // o ile poziomów wyżej po oddanych krokach
+  lastRun: z.object({ model: z.string().nullable(), effort: z.string().nullable(), at: z.string() }).nullable().optional(),   // „ostatnio: model · wysiłek”
 });
 export type Step = z.infer<typeof Step>;
 
