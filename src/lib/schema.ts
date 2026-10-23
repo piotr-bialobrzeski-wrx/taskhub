@@ -204,6 +204,7 @@ export const Step = z.object({
   workLevel: z.string().nullable().optional(),      // poziom pracy (strategy, analysis, execution, mechanics); null = z narzędzia
   modelPick: z.string().nullable().optional(),      // wybór Piotra na karcie: null = auto
   escalation: z.number().int().optional(),          // o ile poziomów wyżej po oddanych krokach
+  waitFor: z.string().nullable().optional(),        // oddany, bo czeka na ten krok (dowolne zadanie); do jego zrobienia nie wraca do list_work
   lastRun: z.object({ model: z.string().nullable(), effort: z.string().nullable(), at: z.string() }).nullable().optional(),   // „ostatnio: model · wysiłek”
   cloud: z.object({ state: z.enum(["queued", "rung", "working"]), at: z.string(), rungAt: z.string().optional(), takenAt: z.string().optional(), failAt: z.string().optional() }).nullable().optional(),   // „Uruchom w chmurze”: kliknięte, odpalone z Maca, wzięte przez chmurę
 });
@@ -340,6 +341,10 @@ export const TOOL_LABELS: Record<string, string> = {
 export const toolLabel = (tool: string) => TOOL_LABELS[tool] ?? tool;
 // krok Piotra (narzędzie „Ty”): jego szacunki, jego czas i jego kalibracja; resztę robi Claude i liczy się czas Claude'a
 export const isOwnerStep = (s: Pick<Step, "tool">) => s.tool === "manual";
+// krok z kodem (Claude Code) w projekcie Task Hub (paczka 14, punkt 1): zmiany w repozytorium samej aplikacji robi wątek projektu Claude w chmurze
+// (zasada „Task Hub: zmiany w kodzie robi projekt w chmurze”), więc mostek i automat go nie biorą; Piotr zleca go przyciskiem „Uruchom w chmurze”
+export const APP_PROJECT_RE = /^task[\s-]?hub$/i;
+export const isAppCodeStep = (s: Pick<Step, "tool">, project: string | null | undefined) => s.tool === "code" && !!project && APP_PROJECT_RE.test(project.trim());
 export const doneByOf = (s: Pick<Step, "tool" | "doneBy">): "owner" | "agent" => s.doneBy ?? (isOwnerStep(s) ? "owner" : "agent");
 // krok-wybór Piotra (Wybierz…, Zdecyduj…, Ustal…): bez pytania na kartce „Zrobione” pyta „Co wybrałeś?” (wynik kroku), a get_task pokazuje
 // jego kartkę po zrobieniu (paczka 9). Tu, nie w stepcard.ts: ten plik importuje komponent kliencki, a stepcard ciągnie node:crypto.

@@ -16,7 +16,7 @@ import { fmtTime } from "@/lib/clock";
 import { connectorIssue, isGitDraft } from "@/lib/bridge";
 import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, shownSig, type Draft } from "@/lib/agent/approval";
 import { decisionText, destOf, isProjectStep, openQuestions, stepKind } from "@/lib/stepcard";
-import { isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
+import { isAppCodeStep, isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const num = (fd: FormData, k: string, def: number) => { const v = Number(str(fd, k)); return Number.isFinite(v) && str(fd, k) !== "" ? v : def; };
@@ -180,18 +180,25 @@ export async function compose(taskId: string, stepId: string) {
 }
 // „Uruchom”: krok przechodzi w toku (kafelek pokazuje pracę); Claude z konektora bierze go z list_work i zgłasza wynik przez complete_step
 // tylko krok do zrobienia: szkic idzie dalej wyłącznie przez „Zatwierdź”, a stan „w toku” po szkicu nie może wyglądać jak zgoda
+// nazwa projektu zadania: krok z kodem w projekcie Task Hub idzie do chmury, nie do mostka (paczka 14, punkt 1)
+async function projectNameOf(ownerId: string, task: { projectId: string | null }): Promise<string | null> {
+  return task.projectId ? (await repo.listProjects(ownerId)).find((p) => p.id === task.projectId)?.name ?? null : null;
+}
+const cloudChat = (title: string) => `Zlecone do chmury: „${shortTitle(title, 70)}”. Claude w chmurze weźmie ten krok i zamknie go z wynikiem.`;
 export async function handoff(taskId: string, stepId: string) {
   const o = await requireOwner();
-  const { step } = await stepOf(o.id, taskId, stepId);
-  if (step.status === "todo") await repo.updateStep(stepId, { status: "handoff", prevStatus: "todo", handoffAt: new Date().toISOString() });
+  const { task, step } = await stepOf(o.id, taskId, stepId);
+  // „Uruchom” na kroku z kodem Task Hub (np. z menu kafelka) zleca go chmurze, bo mostek go nie zrobi
+  if (isAppCodeStep(step, await projectNameOf(o.id, task))) { if (await repo.queueCloud(o.id, stepId)) await repo.addChat(o.id, taskId, "agent", cloudChat(step.title), { stepId }); }
+  else if (step.status === "todo") await repo.updateStep(stepId, { status: "handoff", prevStatus: "todo", handoffAt: new Date().toISOString() });
   refresh(taskId);
 }
 // „Uruchom w chmurze” (paczka 13, punkt 3): krok „Zleć w projekcie: …” / „Wdróż na produkcję” idzie do wątku projektu Claude w chmurze.
 // Zlecenie zapisuje tylko to kliknięcie (sesja Piotra); mostek na Macu odpala chmurę przy najbliższym pytaniu, chmura bierze krok przez take_cloud_step
 export async function runInCloud(taskId: string, stepId: string) {
   const o = await requireOwner();
-  const { step } = await stepOf(o.id, taskId, stepId);
-  if (isProjectStep(step) && (await repo.queueCloud(o.id, stepId))) await repo.addChat(o.id, taskId, "agent", `Zlecone do chmury: „${shortTitle(step.title, 70)}”. Claude w chmurze weźmie ten krok i zamknie go z wynikiem.`, { stepId });
+  const { task, step } = await stepOf(o.id, taskId, stepId);
+  if (isProjectStep(step, await projectNameOf(o.id, task)) && (await repo.queueCloud(o.id, stepId))) await repo.addChat(o.id, taskId, "agent", cloudChat(step.title), { stepId });
   refresh(taskId);
 }
 export async function cancelCloudRun(taskId: string, stepId: string) {

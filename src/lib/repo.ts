@@ -239,7 +239,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     agentSec: Number(r.agentSec ?? 0), agentStartedAt: iso(r.agentStartedAt), doneBy: (r.doneBy as "owner" | "agent") ?? null,
     agentAt: iso(r.agentAt), openedAt: iso(r.openedAt),
     workLevel: (r.workLevel as string) ?? null, modelPick: (r.modelPick as string) ?? null, escalation: Number(r.escalation ?? 0),
-    lastRun: (r.lastRun as Step["lastRun"]) ?? null, cloud: (r.cloud as Step["cloud"]) ?? null,
+    lastRun: (r.lastRun as Step["lastRun"]) ?? null, cloud: (r.cloud as Step["cloud"]) ?? null, waitFor: (r.waitFor as string) ?? null,
   };
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
@@ -256,7 +256,7 @@ function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
 const TASK_COLS = ["id", "owner_id", "project_id", "title", "title_original", "summary", "source", "level", "due", "done_at", "deleted_at", "note_text", "note_summary", "note_at", "pos", "created_at"];
 const STEP_COLS = ["id", "task_id", "position", "title", "detail", "tool", "status", "prev_status", "needs_approval", "est_min", "spent_sec", "spent_manual", "spent_at", "link", "handoff_at", "done_at",
   "report", "output", "review", "blocks", "blocks_at", "logged", "pos", "connection_id", "file_path", "approved_at", "approved_sig", "send_started_at", "agent_sec", "agent_started_at", "done_by",
-  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud"];
+  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for"];
 const taskCols = () => sql()(TASK_COLS);
 
 async function hydrate(rows: Row[]): Promise<Task[]> {
@@ -977,6 +977,11 @@ export async function recordModelLimit(ownerId: string, model: string, until: st
 // krok oddany przez bieg: następna próba idzie poziom wyżej (najwyżej MAX_ESCALATION)
 export async function bumpEscalation(stepId: string): Promise<void> {
   await sql()`update steps set escalation = least(escalation + 1, ${MAX_ESCALATION}) where id = ${stepId}`;
+}
+
+// krok oddany, bo czeka na inny krok (paczka 14, punkt 1): każde oddanie zapisuje cel od nowa (null = nie czeka)
+export async function setWaitFor(stepId: string, target: string | null): Promise<void> {
+  await sql()`update steps set wait_for = ${target} where id = ${stepId}`;
 }
 
 // ---------- mostek na komputerze ----------

@@ -5,7 +5,7 @@ import { z } from "zod";
 import * as repo from "@/lib/repo";
 import { companyOf, contextText, brief, scoreAll, capText, draftsText, cardText } from "@/lib/agent/context";
 import { rulesText } from "@/lib/agent/context";
-import { audienceOf, workSummary } from "@/lib/agent/work";
+import { audienceOf, WAIT_RE, waitTarget, workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago, connectorProblem, knownApp } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
 import { appName, Blocks, ChangedFile, Fact, isOwnerStep, normalizeTool, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
@@ -442,8 +442,8 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("leave_step", {
-      title: "Oddaję krok", description: "Gdy kroku nie da się zrobić (brak narzędzia, dostępu albo danych): krok wraca do zrobienia, a Piotr widzi powód w zadaniu. Nie używaj do pytań, od tego jest ask_question, ani do kroków zbędnych, od tego jest skip_step.",
-      inputSchema: z.object({ stepId: z.string(), reason: z.string().max(600) }),
+      title: "Oddaję krok", description: "Gdy kroku nie da się zrobić (brak narzędzia, dostępu albo danych): krok wraca do zrobienia, a Piotr widzi powód w zadaniu. Gdy krok tylko czeka (na inny krok, bieg albo projekt w chmurze), zacznij powód od „czeka na …” i podaj waitFor = id kroku, na który czeka: wtedy poziom kroku nie rośnie, a krok wraca na listę dopiero, gdy tamten jest zrobiony. Nie używaj do pytań, od tego jest ask_question, ani do kroków zbędnych, od tego jest skip_step.",
+      inputSchema: z.object({ stepId: z.string(), reason: z.string().max(600), waitFor: z.string().optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
       const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
@@ -457,8 +457,14 @@ function buildHandler(auth: repo.TokenAuth) {
       // czas od start_step liczy się mimo oddania (Claude próbował); bez start_step nic, bo oddany krok mógł nie być nawet zaczęty
       await repo.addAgentTime(st.id, await agentSecFor(st, { runClock: false }));
       await repo.addChat(ownerId, taskId, "agent", `Nie zrobiłem kroku „${shortTitle(st.title, 70)}”: ${a.reason}`, { stepId: st.id });
-      // oddany w biegu mostka: następna próba idzie poziom wyżej (zasada „Dobór modelu i wysiłku”); wysyłka nie ma poziomu
-      if (scope?.kind === "work" || kind === "bridge") await repo.bumpEscalation(st.id);
+      // na jaki krok czeka (paczka 14, punkt 1): waitFor albo krok wskazany w powodzie czekania; każde oddanie zapisuje to od nowa
+      const all = (await repo.listTasks(ownerId)).flatMap((t) => t.steps.map((x) => ({ id: x.id, taskId: t.id, title: x.title })));
+      const waitFor = a.waitFor && a.waitFor !== st.id && all.some((x) => x.id === a.waitFor) ? a.waitFor : waitTarget(a.reason, { id: st.id, taskId, title: st.title }, all);
+      await repo.setWaitFor(st.id, waitFor);
+      // oddany w biegu mostka: następna próba idzie poziom wyżej (zasada „Dobór modelu i wysiłku”); wysyłka nie ma poziomu.
+      // Oddanie z czekania („czeka na …”, „do zrobienia w projekcie w chmurze”, wskazany krok) to nie nieudana próba: poziom zostaje
+      const waits = !!waitFor || WAIT_RE.test(a.reason);
+      if ((scope?.kind === "work" || kind === "bridge") && !waits) await repo.bumpEscalation(st.id);
       await mark(st.id, "oddał krok");
       await markRun();
       return text("Krok oddany.");

@@ -1,6 +1,6 @@
 // Co czeka na agenta: jedna funkcja dla list_work (tekst dla Claude) i dla mostka na komputerze (same liczby, bez skutków ubocznych).
 import * as repo from "@/lib/repo";
-import type { Step } from "@/lib/schema";
+import { isAppCodeStep, type Step } from "@/lib/schema";
 import { brief, scoreAll } from "./context";
 import { approvalValid, draftOf, isPromptDraft, isSendable, type Draft } from "./approval";
 import { choiceOf, modelConfig, runLabel, stepChoice, type Choice } from "./models";
@@ -26,6 +26,25 @@ export const ITEMS_RULE = "Lista elementów: gdy Piotr prosi o elementy jako kro
 export const isLongTitle = (t: string) => t.trim().split(/\s+/).length > 6 || /[.!?]\s+\S/.test(t.trim());
 // choices: grupy pracy (model i wysiłek) w kolejności listy, bez powtórzeń; puste, gdy w ustawieniach nie ma doboru modeli
 // sig: grupy wszystkich pozycji po kolei (krok oddany i podniesiony poziom zmienia sig, choć tekst listy jest ten sam)
+// oddanie kroku, który tylko czeka (na inny krok, bieg albo wątek w chmurze), to nie nieudana próba: nie podnosi poziomu (paczka 14, punkt 1)
+export const WAIT_RE = /^[\s„"'(]*(czeka(m|my|ją)?(?=[\s,:;.]|$)|do zrobienia w projekcie w chmurze)/i;
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+type StepRef = { id: string; taskId: string; title: string };
+// na jaki krok czeka oddany krok: id kroku w powodzie, a bez niego tytuł w cudzysłowie („…” albo "…"), który pasuje do jednego kroku
+// (najpierw w tym samym zadaniu); siebie samego nie liczy. Szuka tylko w powodzie czekania (WAIT_RE)
+export function waitTarget(reason: string, self: StepRef, steps: StepRef[]): string | null {
+  if (!WAIT_RE.test(reason)) return null;
+  const others = steps.filter((x) => x.id !== self.id);
+  for (const m of reason.match(UUID_RE) ?? []) { const hit = others.find((x) => x.id === m.toLowerCase()); if (hit) return hit.id; }
+  const norm = (x: string) => x.trim().replace(/\s+/g, " ").toLowerCase();
+  for (const m of reason.matchAll(/[„"]([^”"]{3,200})[”"]/g)) {
+    const hits = others.filter((x) => norm(x.title) === norm(m[1]));
+    const same = hits.filter((x) => x.taskId === self.taskId);
+    if (same.length === 1) return same[0].id;
+    if (hits.length === 1) return hits[0].id;
+  }
+  return null;
+}
 export type WorkSummary = { text: string; counts: WorkCounts; total: number; choices?: Choice[]; sig?: string };
 // kto pyta: bridge-v1 = stara aplikacja mostka (0.1.6, skrypt Node) wysyła zatwierdzone szkice jak dotąd; client = konektor OAuth i automat co godzinę,
 // work = bieg pracy mostka v2: oba bez zatwierdzonych szkiców (wysyła je osobny bieg wysyłki); send = bieg wysyłki: tylko jego jeden krok (stepId)
@@ -77,6 +96,7 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
   const cfg = modelConfig(settings);
   const weightOf = new Map(tasks.map((t) => [t.id, projects.find((p) => p.id === t.projectId)?.weight ?? null]));
   const stepOf = new Map(tasks.flatMap((t) => t.steps.map((st) => [st.id, st] as const)));
+  const projectOf = new Map(tasks.map((t) => [t.id, projects.find((p) => p.id === t.projectId)?.name ?? null]));
   // grupy z miejscem sekcji na liście (wiadomości, w toku, rozpisanie, odpowiedzi, gotowe, pliki, szkice, tytuły): bieg bierze grupę pierwszej pozycji
   const seen: { rank: number; c: Choice }[] = [];
   let skipped = 0;
@@ -128,6 +148,10 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
       if (st.status === "handoff") { add(going, line + (st.handoffAt ? ` (od ${st.handoffAt})` : "") + (st.tool === "file" ? " (plik na Macu: dokończ jak w sekcji PLIKI NA MACU)" : "")); continue; }
       if (st.status !== "todo") continue;
       if (!depsDone) continue;
+      // oddany, bo czeka na inny krok (także z innego zadania): wraca na listę dopiero, gdy tamten jest zrobiony (paczka 14, punkt 1)
+      if (st.waitFor && stepOf.has(st.waitFor) && stepOf.get(st.waitFor)!.status !== "done") continue;
+      // krok z kodem w projekcie Task Hub robi wątek w chmurze na zlecenie Piotra, nie bieg mostka ani automat (paczka 14, punkt 1)
+      if (isAppCodeStep(st, projectOf.get(s.task.id))) continue;
       if (st.tool === "manual") continue;
       if (st.tool === "file") { add(files, line); continue; }
       // szkic nieaktualny (nowe kroki weszły przed nim) agent przygotowuje od nowa, gdy kroki przed nim są zrobione

@@ -1,6 +1,6 @@
 // Karta kroku „Teraz · Co · Skąd” (paczka 2, punkt 8): stały porządek sekcji, wynik na wierzchu, nic nie pokazuje się dwa razy.
 // Czysta logika bez React, żeby dało się ją testować; składanie w JSX jest w src/app/tasks/[id]/page.tsx.
-import { appName, doneByOf, EXTERNAL_TOOLS, inApp, isOwnerStep, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step, type Task } from "./schema";
+import { appName, doneByOf, EXTERNAL_TOOLS, inApp, isAppCodeStep, isOwnerStep, normalizeTool, openLabel, TOOL_LABELS, toolLabel, type Block, type Step, type Task } from "./schema";
 import { draftOf, draftsOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, type Draft } from "./agent/approval";
 import { fileName, isHttpUrl, safeHref } from "./safeurl";
 import { fmtTime } from "./clock";
@@ -167,7 +167,9 @@ export function stepKind(s: Pick<Step, "tool" | "title" | "blocks">): StepKind {
 // zaplanowane zadanie w chmurze) i awaryjnie polecenie do skopiowania
 export const PROJECT_RE = /^zleć w projekcie(?=[\s,:;]|$)/i;
 export const DEPLOY_RE = /^wdróż na produkcj[ęe](?=[\s,:;.]|$)/i;
-export const isProjectStep = (s: Pick<Step, "tool" | "title">) => isOwnerStep(s) && (PROJECT_RE.test(s.title.trim()) || DEPLOY_RE.test(s.title.trim()));
+// project: nazwa projektu zadania; krok z kodem w projekcie Task Hub też idzie do chmury (paczka 14, punkt 1)
+export const isProjectStep = (s: Pick<Step, "tool" | "title">, project?: string | null) =>
+  (isOwnerStep(s) && (PROJECT_RE.test(s.title.trim()) || DEPLOY_RE.test(s.title.trim()))) || isAppCodeStep(s, project);
 export const isDeployStep = (s: Pick<Step, "tool" | "title">) => isOwnerStep(s) && DEPLOY_RE.test(s.title.trim());
 // polecenie dla wątku projektu: co zrobić, brief kroku i skąd wziąć resztę (wątek ma konektor Task Hub, więc czyta zadanie sam i zamyka krok)
 export function projectPrompt(t: Pick<Task, "id" | "title" | "steps">, s: Pick<Step, "id" | "title" | "detail">, appUrl: string): string {

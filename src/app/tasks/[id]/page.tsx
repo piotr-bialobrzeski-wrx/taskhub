@@ -190,7 +190,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     if (!raw || !s.needsApproval || (m !== "proposed" && m !== "parked") || destOf(s)?.kind !== "send") return null;
     return connectorIssue(b.connections, b.companies, { app: raw, connectionId: s.connectionId, companyId: cur.project?.companyId ?? null });
   };
-  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} />; });
+  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} project={cur.project?.name ?? null} />; });
 
   return (
     <>
@@ -207,11 +207,11 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
-function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, oldMac, macAlive, issue, model }: {
+function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, oldMac, macAlive, issue, model, project }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null; company: string | null;
   connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null; oldMac: boolean; macAlive: boolean; issue: string | null;
-  model: (StepModelInfo & { now: string }) | null;
+  model: (StepModelInfo & { now: string }) | null; project: string | null;
 }) {
   // szczegóły są już w sekcji „Co”, więc blok tekstu z tą samą treścią odpada
   const blocks = (s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
@@ -240,7 +240,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const cmp = hasComparison(material);   // kartka porównania (paczka 10, punkt 1): porównywane elementy u góry na całą szerokość, pod nimi karta publikacji
   // wybrana opcja już poszła, a krok wrócił do zrobienia: „Już wysłano” zamiast „Odłożony szkic” albo „Wybierz opcję” (karta nie daje zgody)
   // krok „Zleć w projekcie: …” robi wątek projektu Claude w chmurze: nagłówek mówi gdzie, a zamiast „Uruchom” jest polecenie do skopiowania
-  const inProject = kind === "offline" && isProjectStep(s);
+  // krok z kodem w projekcie Task Hub (paczka 14, punkt 1) też: mostek go nie zrobi, więc zamiast „Przygotuj” / „Uruchom” jest „Uruchom w chmurze”
+  const inProject = (kind === "offline" || kind === "agent") && isProjectStep(s, project);
   const head0 = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined, draftsOf(s).length, optionsOf(s).chosen?.status === "sent");
   // „Uruchom w chmurze” (paczka 13, punkt 3): kliknięte czeka, aż mostek na Macu odpali chmurę (queued), potem aż chmura weźmie krok (rung)
   const cloud = s.status === "todo" && inProject ? s.cloud ?? null : null;
@@ -291,7 +292,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {review?.summary ? <div className={"review" + (review.fits === false || review.warning ? " warn" : "")}>{review.warning ? <div><b>Uwaga:</b> {review.warning}</div> : null}<div>{review.summary}</div>{review.links?.filter(isHttpUrl).length ? <div className="deps">{review.links.filter(isHttpUrl).map((u) => <a key={u} className="chip" href={u} target="_blank" rel="noopener"><span>{u.replace(/^https?:\/\//, "").slice(0, 40)}</span></a>)}</div> : null}</div> : null}
       {!mode || mode === "sent" || mode === "unsent" ? (
         <div className="actions">
-          {s.status === "todo" && kind === "agent" ? (<>
+          {s.status === "todo" && kind === "agent" && !inProject ? (<>
             {aiOn && !ext ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Agent przygotowuje…">Przygotuj</PendingButton></form> : null}
             {aiOn ? <form action={compose.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Składam…" title="Agent składa panel z faktów, migawek i załączników">Pokaż kontekst</PendingButton></form> : null}
             {!aiOn && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
