@@ -223,4 +223,29 @@ describe.skipIf(!DB)("mostek: serwer", async () => {
     expect(w2.run).toBeNull();
     await sql()`delete from tasks where id = ${task.id}`;
   });
+  it("odcisk bazy: zmienia się przy każdej zmianie, z której liczy się lista pracy; puls mostka widzi nową pracę od razu", async () => {
+    const t = await repo.createApiToken(owner, "Mac odcisk", "bridge");
+    const H = { Authorization: `Bearer ${t}` };
+    const poll = async () => (await work.GET(new Request("http://x/api/bridge/work?v=2", { headers: H }))).json();
+    const s0 = await repo.workStamp(owner);
+    expect(await repo.workStamp(owner)).toBe(s0);   // bez zmian ten sam
+    const before = (await poll()).counts.noSteps as number;
+    const task = await repo.createTask(owner, { title: "Odcisk test" });
+    const s1 = await repo.workStamp(owner);
+    expect(s1).not.toBe(s0);
+    expect((await poll()).counts.noSteps).toBe(before + 1);   // nowe zadanie bez kroków od razu w pracy, mimo pamięci wyniku
+    const [st] = await repo.addSteps(task.id, [{ title: "Krok odcisku" }]);
+    const s2 = await repo.workStamp(owner);
+    expect(s2).not.toBe(s1);
+    await sql()`update steps set status = 'done' where id = ${st.id}`;
+    expect(await repo.workStamp(owner)).not.toBe(s2);
+    const s3 = await repo.workStamp(owner);
+    await repo.askQuestion(owner, { taskId: task.id, text: "Pytanie?" });
+    expect(await repo.workStamp(owner)).not.toBe(s3);
+    // lista zadań nie niesie już tsvectora ani poprzedniej kartki, a „Cofnij” dalej wie, że jest co cofać
+    await sql()`update steps set blocks = '[]'::jsonb, blocks_prev = '[]'::jsonb where id = ${st.id}`;
+    const got = await repo.getTask(owner, task.id);
+    expect(got?.steps[0].hasPrevBlocks).toBe(true);
+    await sql()`delete from tasks where id = ${task.id}`;
+  });
 });

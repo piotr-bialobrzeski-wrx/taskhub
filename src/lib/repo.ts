@@ -233,7 +233,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     tool: r.tool as string, status: r.status as Step["status"], prevStatus: (r.prevStatus as string) ?? null, needsApproval: !!r.needsApproval,
     estMin: Number(r.estMin), spentSec: Number(r.spentSec), spentManual: !!r.spentManual, link: (r.link as string) ?? null,
     handoffAt: iso(r.handoffAt), doneAt: iso(r.doneAt), report: (r.report as string) ?? null, output: (r.output as string) ?? "",
-    review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), hasPrevBlocks: r.blocksPrev != null, logged: !!r.logged,
+    review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), hasPrevBlocks: r.hasPrevBlocks != null ? !!r.hasPrevBlocks : r.blocksPrev != null, logged: !!r.logged,
     pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, connectionId: (r.connectionId as string) ?? null, filePath: (r.filePath as string) ?? null,
     approvedAt: iso(r.approvedAt), approvedSig: (r.approvedSig as string) ?? null, sendStartedAt: iso(r.sendStartedAt),
     agentSec: Number(r.agentSec ?? 0), agentStartedAt: iso(r.agentStartedAt), doneBy: (r.doneBy as "owner" | "agent") ?? null,
@@ -250,11 +250,20 @@ function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
     pos: (r.pos as { x: number; y: number }) ?? null, createdAt: iso(r.createdAt) as string, dependsOn: deps, steps,
   };
 }
+// kolumny do odczytu zadań i kroków: bez `search` (tsvector, sam tekst drugi raz) i bez `blocks_prev` (cała poprzednia kartka, tylko do „Cofnij”),
+// bo listy zadań czyta się bardzo często (mostek, puls strony, konektor), a każdy bajt z bazy liczy się do transferu Supabase.
+// Nowa kolumna potrzebna w rowToTask / rowToStep musi trafić też tutaj.
+const TASK_COLS = ["id", "owner_id", "project_id", "title", "title_original", "summary", "source", "level", "due", "done_at", "deleted_at", "note_text", "note_summary", "note_at", "pos", "created_at"];
+const STEP_COLS = ["id", "task_id", "position", "title", "detail", "tool", "status", "prev_status", "needs_approval", "est_min", "spent_sec", "spent_manual", "spent_at", "link", "handoff_at", "done_at",
+  "report", "output", "review", "blocks", "blocks_at", "logged", "pos", "connection_id", "file_path", "approved_at", "approved_sig", "send_started_at", "agent_sec", "agent_started_at", "done_by",
+  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run"];
+const taskCols = () => sql()(TASK_COLS);
+
 async function hydrate(rows: Row[]): Promise<Task[]> {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id as string);
   const [stepRows, sdeps, tdeps] = await Promise.all([
-    sql()`select * from steps where task_id in ${sql()(ids)} order by task_id, position, created_at`,
+    sql()`select ${sql()(STEP_COLS)}, (blocks_prev is not null) as has_prev_blocks from steps where task_id in ${sql()(ids)} order by task_id, position, created_at`,
     sql()`select sd.* from step_dependencies sd join steps s on s.id = sd.step_id where s.task_id in ${sql()(ids)}`,
     sql()`select * from task_dependencies where task_id in ${sql()(ids)}`,
   ]);
@@ -266,14 +275,14 @@ async function hydrate(rows: Row[]): Promise<Task[]> {
 }
 export async function listTasks(ownerId: string, opts: { trash?: boolean; all?: boolean } = {}): Promise<Task[]> {
   const rows = opts.all
-    ? await sql()`select * from tasks where owner_id = ${ownerId} order by created_at`
+    ? await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} order by created_at`
     : opts.trash
-      ? await sql()`select * from tasks where owner_id = ${ownerId} and deleted_at is not null order by deleted_at desc`
-      : await sql()`select * from tasks where owner_id = ${ownerId} and deleted_at is null order by created_at`;
+      ? await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} and deleted_at is not null order by deleted_at desc`
+      : await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} and deleted_at is null order by created_at`;
   return hydrate(rows);
 }
 export async function getTask(ownerId: string, id: string): Promise<Task | null> {
-  const rows = await sql()`select * from tasks where owner_id = ${ownerId} and id = ${id}`;
+  const rows = await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} and id = ${id}`;
   return (await hydrate(rows))[0] ?? null;
 }
 export type NewStep = { title: string; detail?: string; tool?: string; needsApproval?: boolean; estMin?: number; link?: string; dependsOn?: string[] /* indeksy lub id */; connectionId?: string | null; workLevel?: string | null };
@@ -798,6 +807,22 @@ export async function closeIfDone(ownerId: string, taskId: string): Promise<bool
   return rows.length > 0;
 }
 // stempel zmian dla pulsu przeglądarki: ostatnia zmiana zadania, kroków, rozmowy i pytań (jednego zadania albo wszystkich)
+// odcisk wszystkiego, z czego liczy się lista pracy (zadania, kroki, zależności, wiadomości, pytania, próbki czasu, ważność projektów, ustawienia):
+// jeden mały wiersz zamiast całej bazy zadań; mostek pyta co kilkanaście sekund, a pełną listę liczymy tylko, gdy odcisk się zmieni
+export async function workStamp(ownerId: string): Promise<string> {
+  const [r] = await sql()`select concat_ws('|',
+      (select max(updated_at)::text || '#' || count(*) from tasks where owner_id = ${ownerId}),
+      (select max(s.updated_at)::text || '#' || count(*) from steps s join tasks t on t.id = s.task_id where t.owner_id = ${ownerId}),
+      (select count(*) from task_dependencies d join tasks t on t.id = d.task_id where t.owner_id = ${ownerId}),
+      (select count(*) from step_dependencies d join steps s on s.id = d.step_id join tasks t on t.id = s.task_id where t.owner_id = ${ownerId}),
+      (select max(greatest(created_at, seen_at, answered_at))::text || '#' || count(*) from chat_messages where owner_id = ${ownerId}),
+      (select max(greatest(asked_at, answered_at, seen_at))::text || '#' || count(*) from questions where owner_id = ${ownerId}),
+      (select max(at)::text || '#' || count(*) from time_samples where owner_id = ${ownerId}),
+      (select md5(coalesce(string_agg(id::text || ':' || weight, ',' order by id), '')) from projects where owner_id = ${ownerId}),
+      (select md5(settings::text) from users where id = ${ownerId})
+    ) as k`;
+  return (r?.k as string) ?? "";
+}
 export async function changeStamp(ownerId: string, taskId: string | null): Promise<string> {
   const [r] = taskId
     ? await sql()`select greatest(
@@ -862,7 +887,7 @@ export async function deleteGroup(ownerId: string, id: string): Promise<void> { 
 
 // ---------- wyszukiwanie pełnotekstowe (bez AI) ----------
 export async function searchTasks(ownerId: string, q: string, limit = 20): Promise<Task[]> {
-  const rows = await sql()`select * from tasks where owner_id = ${ownerId} and deleted_at is null and (search @@ plainto_tsquery('simple', ${q}) or title ilike ${"%" + q + "%"}) order by created_at desc limit ${limit}`;
+  const rows = await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} and deleted_at is null and (search @@ plainto_tsquery('simple', ${q}) or title ilike ${"%" + q + "%"}) order by created_at desc limit ${limit}`;
   return hydrate(rows);
 }
 

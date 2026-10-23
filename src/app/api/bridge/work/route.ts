@@ -7,6 +7,23 @@ import { BRIDGE_ALIVE_MS, BRIDGE_VERSION, RUN_STALE_MIN, authBridge, pollMs, pro
 
 export const dynamic = "force-dynamic";
 
+// Pełna lista pracy czyta całą bazę zadań z krokami (setki KB), a mostek pyta co 15 s z każdego Maca. Wynik trzymamy w pamięci
+// instancji i liczymy od nowa tylko, gdy zmieni się odcisk bazy (repo.workStamp, jeden mały wiersz) albo minie CACHE_MS
+// (to, co zależy od samego czasu, np. wiadomość wzięta, ale bez odpowiedzi). Zimna instancja = jedno pełne liczenie, jak dotąd.
+const CACHE_MS = 5 * 60_000;
+type Cached = { stamp: string; at: number; work: number; counts: Record<string, number>; key: string; sends: number };
+const cache = new Map<string, Cached>();
+
+async function cached(ownerId: string, proto: number, compute: () => Promise<Omit<Cached, "stamp" | "at">>): Promise<Cached> {
+  const id = `${ownerId}|${proto}`;
+  const stamp = await repo.workStamp(ownerId);
+  const hit = cache.get(id);
+  if (hit && hit.stamp === stamp && Date.now() - hit.at < CACHE_MS) return hit;
+  const c = { ...(await compute()), stamp, at: Date.now() };
+  cache.set(id, c);
+  return c;
+}
+
 export async function GET(req: Request) {
   const a = await authBridge(req);
   if (a instanceof Response) return a;
@@ -18,16 +35,25 @@ export async function GET(req: Request) {
   await repo.expireBridgeRuns(a.ownerId, RUN_STALE_MIN);
   if (protocolOf(q.get("v")) < 2) {
     // v1 bez zmian: zatwierdzone szkice liczą się do pracy, wysyła je ten sam bieg
-    const [w, st] = await Promise.all([workSummary(a.ownerId, { peek: true }), repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS)]);
-    return Response.json({ ok: true, pending: w.total, counts: w.counts, run: st.run, pollMs: pollMs(), version: 1, time: new Date().toISOString() });
+    const [c, st] = await Promise.all([
+      cached(a.ownerId, 1, async () => { const w = await workSummary(a.ownerId, { peek: true }); return { work: w.total, counts: w.counts, key: "", sends: 0 }; }),
+      repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS),
+    ]);
+    return Response.json({ ok: true, pending: c.work, counts: c.counts, run: st.run, pollMs: pollMs(), version: 1, time: new Date().toISOString() });
   }
-  const [w, sends, st] = await Promise.all([workSummary(a.ownerId, { peek: true, audience: "work" }), listSendable(a.ownerId), repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS)]);
+  const [c, st] = await Promise.all([
+    cached(a.ownerId, 2, async () => {
+      const [w, sends] = await Promise.all([workSummary(a.ownerId, { peek: true, audience: "work" }), listSendable(a.ownerId)]);
+      // key: odcisk listy pracy; ten sam po udanym biegu = bieg niczego nie ruszył (np. krok oddany przez leave_step), aplikacja nie powtarza go od razu
+      const key = w.total ? createHash("sha256").update(w.text + (w.sig ?? "")).digest("hex").slice(0, 16) : "";
+      return { work: w.total, counts: w.counts, key, sends: sends.length };
+    }),
+    repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS),
+  ]);
   // po „Zatrzymaj” w Task Hub mostek nie bierze pracy do końca przerwy (albo do wiadomości Piotra); zatwierdzone szkice wysyła dalej
-  const work = st.pause ? 0 : w.total;
-  // key: odcisk listy pracy; ten sam po udanym biegu = bieg niczego nie ruszył (np. krok oddany przez leave_step), aplikacja nie powtarza go od razu
-  const key = work ? createHash("sha256").update(w.text + (w.sig ?? "")).digest("hex").slice(0, 16) : "";
+  const work = st.pause ? 0 : c.work;
   return Response.json({
-    ok: true, pending: work + sends.length, work, sends: sends.length, key, counts: { ...w.counts, approved: sends.length }, ...(st.pause ? { pause: st.pause } : {}),
+    ok: true, pending: work + c.sends, work, sends: c.sends, key: work ? c.key : "", counts: { ...c.counts, approved: c.sends }, ...(st.pause ? { pause: st.pause } : {}),
     run: st.run, pollMs: pollMs(), version: BRIDGE_VERSION, time: new Date().toISOString(),
   });
 }
