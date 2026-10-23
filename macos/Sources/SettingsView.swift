@@ -73,7 +73,7 @@ struct SettingsView: View {
                 }
                 if !claudeInfo.isEmpty { Text(claudeInfo).font(.system(size: 12)).foregroundColor(Theme.sub) }
                 TextField("Nazwa tego komputera", text: $store.cfg.name)
-                TextField("Model (puste = domyślny Claude Code)", text: $store.cfg.model, prompt: Text("np. sonnet"))
+                TextField("Model, gdy Task Hub go nie dobierze (puste = domyślny Claude Code)", text: $store.cfg.model, prompt: Text("np. sonnet"))
                 Toggle("Uruchamiaj Task Hub po zalogowaniu do Maca", isOn: $loginItem)
                     .onChange(of: loginItem) { v in setLogin(v) }
                 if !loginError.isEmpty { Text(loginError).font(.system(size: 12)).foregroundColor(Theme.danger) }

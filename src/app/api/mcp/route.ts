@@ -20,6 +20,10 @@ import { isFilePath, isHttpUrl, sanitizeBlocks } from "@/lib/safeurl";
 import { AGENT_MAX_SEC, elapsedSec } from "@/lib/time";
 import { appKey, approvalSig, approvalValid, coerceAgentDrafts, draftOf, draftsOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable } from "@/lib/agent/approval";
 import { matchProjectName } from "@/lib/project-guess";
+import { normalizeLevel } from "@/lib/agent/models";
+
+// poziom pracy kroku według zasady „Dobór modelu i wysiłku”: od niego mostek dobiera model i wysiłek biegu
+const WORK_LEVEL_DOC = "workLevel: poziom pracy kroku dla agenta według zasady „Dobór modelu i wysiłku”: strategy (Strategia: wymyślić, zaplanować, rozstrzygnąć), analysis (Analiza: zebrać i zrozumieć materiał, szkic do klienta), execution (Wykonanie: krok dokładnie opisany, kod według planu), mechanics (Mechanika: tylko przenieść albo wysłać); nadaj go przy rozpisaniu każdemu krokowi agenta, bez niego poziom bierze się z narzędzia.";
 
 // link kroku to adres elementu w zewnętrznej aplikacji (tylko http/https); adres samego Task Hub nie jest linkiem kroku
 const externalLink = (link: string | undefined | null) => (isHttpUrl(link) ? externalLinkOf(link, appUrl()) : undefined);
@@ -191,10 +195,10 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("create_task", {
-      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. title: 2–6 słów, samo sedno (nie cała wiadomość); title kroku od czasownika, 2–6 słów, bez identyfikatorów. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). project: dokładna nazwa istniejącego projektu z list_projects (nowy tylko przez create_project); bez project projekt bierze się z treści, gdy ją wymienia. Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, whatsapp, sheets, docs, file (Plik na Macu: zapis pliku na Macu Piotra, bez zgody, robi go tylko mostek), est: ile minut zajmie Piotrowi (wielokrotność 5), tylko dla kroków manual; czas kroków Claude'a mierzy się sam, needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony.",
+      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. title: 2–6 słów, samo sedno (nie cała wiadomość); title kroku od czasownika, 2–6 słów, bez identyfikatorów. due: termin YYYY-MM-DD (ustaw, gdy w treści jest termin). project: dokładna nazwa istniejącego projektu z list_projects (nowy tylko przez create_project); bez project projekt bierze się z treści, gdy ją wymienia. Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, whatsapp, sheets, docs, file (Plik na Macu: zapis pliku na Macu Piotra, bez zgody, robi go tylko mostek), est: ile minut zajmie Piotrowi (wielokrotność 5), tylko dla kroków manual; czas kroków Claude'a mierzy się sam, needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony. " + WORK_LEVEL_DOC,
       inputSchema: z.object({
         title: z.string(), summary: z.string().optional(), source: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().optional(), project: z.string().optional(),
-        steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional() })).optional(),
+        steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional(), workLevel: z.string().optional() })).optional(),
       }),
     }, async (a) => {
       const projectId = a.project ? await projectByName(a.project) : null;   // bez project: projekt z treści, gdy ją wymienia (repo.createTask)
@@ -215,8 +219,8 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("add_steps", {
-      title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. before: id kroku, przed którym nowe kroki mają wejść (np. krok publikacji, wysyłki, commitu): dziedziczą jego zależności, on zaczyna zależeć od nich, a jego szkic (gdy czekał na zgodę) staje się nieaktualny i krok wraca do zrobienia. Bez before kroki idą na koniec. Termin zadania ustaw osobno przez update_task(due). done: dla pracy, którą już zrobiłeś przy rozpisaniu (przeczytane aplikacje, zebrane dane, raport, analiza): 1–2 zdania wyniku; krok wchodzi od razu jako zrobiony przez Claude (tool = aplikacja, z której czytałeś, albo claude; nie manual, nie file, bez needsApproval), a pełny wynik połóż potem na jego kartce przez set_blocks. Elementy listy, o którą prosi Piotr (każdy ticket, wątek albo mail jako osobny krok), to jego otwarte kroki (tool manual, tytuł elementu, treść 1:1 na kartce), nie done. Nie twórz Piotrowi kroków „Przeczytaj …”: to, co ma wiedzieć do decyzji, leży na kartce kroku „Zdecyduj …”.",
-      inputSchema: z.object({ taskId: z.string(), steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional(), done: z.string().min(3).max(4000).optional() })), before: z.string().optional() }),
+      title: "Dodaj kroki", description: "Dodaje kroki do zadania. Pola jak w create_task; link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub. before: id kroku, przed którym nowe kroki mają wejść (np. krok publikacji, wysyłki, commitu): dziedziczą jego zależności, on zaczyna zależeć od nich, a jego szkic (gdy czekał na zgodę) staje się nieaktualny i krok wraca do zrobienia. Bez before kroki idą na koniec. Termin zadania ustaw osobno przez update_task(due). done: dla pracy, którą już zrobiłeś przy rozpisaniu (przeczytane aplikacje, zebrane dane, raport, analiza): 1–2 zdania wyniku; krok wchodzi od razu jako zrobiony przez Claude (tool = aplikacja, z której czytałeś, albo claude; nie manual, nie file, bez needsApproval), a pełny wynik połóż potem na jego kartce przez set_blocks. Elementy listy, o którą prosi Piotr (każdy ticket, wątek albo mail jako osobny krok), to jego otwarte kroki (tool manual, tytuł elementu, treść 1:1 na kartce), nie done. Nie twórz Piotrowi kroków „Przeczytaj …”: to, co ma wiedzieć do decyzji, leży na kartce kroku „Zdecyduj …”. " + WORK_LEVEL_DOC,
+      inputSchema: z.object({ taskId: z.string(), steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional(), done: z.string().min(3).max(4000).optional(), workLevel: z.string().optional() })), before: z.string().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
       const bef = a.before ? t.steps.find((s) => s.id === a.before) ?? null : null;
@@ -254,14 +258,15 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("update_step", {
-      title: "Zmień krok", description: "Zmienia tytuł, opis, narzędzie, szacunek, link albo połączenie kroku (tool = klucz jak w create_task; link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket; connection = nazwa z list_connections, pusty napis zdejmuje).",
-      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), tool: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional() }),
+      title: "Zmień krok", description: "Zmienia tytuł, opis, narzędzie, szacunek, link, połączenie albo poziom pracy kroku (tool = klucz jak w create_task; link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket; connection = nazwa z list_connections, pusty napis zdejmuje; workLevel jak w add_steps, pusty napis = z narzędzia).",
+      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), tool: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional(), workLevel: z.string().optional() }),
     }, async (a) => {
       if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
       const connectionId = a.connection === undefined ? undefined : await connectionIdOf(a.connection);
       if (a.connection?.trim() && !connectionId) return text("Nie ma takiego połączenia (list_connections).");
       const was = await stepById(a.stepId);
-      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, tool: a.tool, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null, connectionId });
+      if (a.workLevel?.trim() && !normalizeLevel(a.workLevel)) return text("Nieznany poziom pracy: strategy, analysis, execution albo mechanics (Strategia, Analiza, Wykonanie, Mechanika).");
+      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, tool: a.tool, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null, connectionId, workLevel: a.workLevel === undefined ? undefined : a.workLevel.trim() || null });
       await mark(a.stepId, "zmienił krok");
       // zmiana narzędzia albo połączenia kroku z zatwierdzonym szkicem kasuje zgodę (inne konto, inna aplikacja niż te, które Piotr widział)
       if (was?.approvedAt && !(await stepById(a.stepId))?.approvedAt) return text("Zmieniono. Zgoda Piotra na szkic tego kroku wygasła (zmienione narzędzie albo połączenie): szkic wrócił do zatwierdzenia.");
@@ -452,6 +457,8 @@ function buildHandler(auth: repo.TokenAuth) {
       // czas od start_step liczy się mimo oddania (Claude próbował); bez start_step nic, bo oddany krok mógł nie być nawet zaczęty
       await repo.addAgentTime(st.id, await agentSecFor(st, { runClock: false }));
       await repo.addChat(ownerId, taskId, "agent", `Nie zrobiłem kroku „${shortTitle(st.title, 70)}”: ${a.reason}`, { stepId: st.id });
+      // oddany w biegu mostka: następna próba idzie poziom wyżej (zasada „Dobór modelu i wysiłku”); wysyłka nie ma poziomu
+      if (scope?.kind === "work" || kind === "bridge") await repo.bumpEscalation(st.id);
       await mark(st.id, "oddał krok");
       await markRun();
       return text("Krok oddany.");
@@ -487,7 +494,9 @@ function buildHandler(auth: repo.TokenAuth) {
         const st = await repo.bridgeStatus(ownerId, BRIDGE_ALIVE_MS);
         if (st.alive) return text(`MOSTEK AKTYWNY: Claude Code na komputerze Piotra (${st.name ?? "mostek"}) wykonuje pracę na bieżąco (ostatni sygnał ${ago(st.seenAt)}). Nic nie rób i zakończ. list_work z force: true pokaże pracę mimo to.`);
       }
-      return text((await workSummary(ownerId, { audience, stepId: scope?.stepId ?? undefined, peek: audience === "send" })).text);
+      // bieg pracy z doborem modelu widzi tylko swoją grupę pracy (model i wysiłek)
+      const focus = scope?.kind === "work" && scope.runId ? (await repo.getBridgeRun(ownerId, scope.runId))?.focus ?? null : null;
+      return text((await workSummary(ownerId, { audience, stepId: scope?.stepId ?? undefined, peek: audience === "send", focus })).text);
     });
 
     server.registerTool("ask_question", {

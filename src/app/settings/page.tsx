@@ -11,11 +11,12 @@ import { fmtTime } from "@/lib/canvas/vm";
 import { PendingButton } from "@/components/Pending";
 import { TokenForm } from "@/components/TokenForm";
 import { CopyButton } from "@/components/CopyButton";
-import { ClientGuide, ProviderPicker } from "@/components/SettingsBits";
+import { ClientGuide, ModelLevels, ProviderPicker } from "@/components/SettingsBits";
+import { activeLimits, EFFORT_LABELS, EFFORTS, LEVEL_HINTS, LEVEL_LABELS, LEVELS, modelConfig, modelLabel, runLabel } from "@/lib/agent/models";
 import { ConnectionsPanel, EngineConfig } from "@/components/ConnectionsPanel";
 import { HashOpener, PageBar } from "@/components/PageBar";
 import { Icon } from "@/components/canvas/ui";
-import { createBridgeToken, createToken, revokeToken, saveSettings } from "../actions";
+import { createBridgeToken, createToken, revokeToken, saveModelLevel, saveSettings } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,7 @@ function More({ id, title, children }: { id: string; title: string; children: Re
 function bridgeLine(b: repo.BridgeStatus): string {
   const st = b.meta.state as string | undefined, until = b.meta.until as string | undefined;
   if (!b.alive) return b.seenAt ? `nieaktywny, ostatni sygnał ${ago(b.seenAt)}` : "nie uruchomiony";
-  if (b.run) return `pracuje${b.run.note ? `: ${b.run.note}` : ""} (od ${fmtTime(b.run.startedAt)})`;
+  if (b.run) return `pracuje${b.run.model ? ` na ${runLabel(b.run.modelUsed ?? b.run.model, b.run.effort)}` : ""}${b.run.note ? `: ${b.run.note}` : ""} (od ${fmtTime(b.run.startedAt)})`;
   if (st === "limit") return `czeka, limit Claude${until ? ` do ${fmtTime(until)}` : ""}`;
   if (st === "auth") return "Claude Code wylogowany: w Terminalu wpisz claude, potem /login";
   if (st === "error") return `ostatni bieg nie wyszedł, spróbuje znowu za chwilę`;
@@ -51,6 +52,13 @@ export default async function Settings() {
   const origin = appUrl();
   const mcp = origin + "/api/mcp";
   const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace("T", " ") : "nigdy");
+  // dobór modelu: poziomy z ustawień i limity, które jeszcze trwają („limit Fable do 01:00, poziomy z nim pracują na Opusie”)
+  const mcfg = modelConfig(o.settings);
+  const limits = Object.entries(activeLimits((o.settings as { modelLimits?: unknown }).modelLimits));
+  const limitLine = mcfg && limits.length ? limits.map(([m, u]) => {
+    const subs = [...new Set(LEVELS.filter((l) => mcfg.levels[l].model === m).map((l) => mcfg.levels[l].fallback).filter((f) => f && !limits.some(([x]) => x === f)))];
+    return `limit ${modelLabel(m)} do ${fmtTime(u)}${subs.length ? `, pracuję na ${subs.map(modelLabel).join(" i ")}` : ""}`;
+  }).join(" · ") : null;
   return (
     <main className="page withbar">
       <PageBar title="Ustawienia" index={index} screen="settings" agent={agentLabel(avail)} aiOn={avail.length > 0} />
@@ -68,10 +76,20 @@ export default async function Settings() {
             <>
               <p className="sub" style={{ margin: 0 }}>Agent wbudowany jest wyłączony (brak klucza modelu). Pracuje Twój Claude z subskrypcji: mostek na komputerze, a gdy komputer śpi, zadanie zaplanowane co godzinę. Pytania zadaje w Task Hub. Zatwierdzone szkice wysyła tylko mostek.</p>
               <div className="kv"><span className="k">Mostek</span><span className={"st" + (bridge.alive ? " active" : "")}>{bridge.alive ? "działa" : "nieaktywny"}</span><span className="sub" style={{ flex: 1 }}>{bridgeLine(bridge)}{bridge.name ? ` · ${bridge.name}` : ""}</span></div>
+              {limitLine ? <div className="kv"><span className="k">Limit modelu</span><span className="sub" style={{ flex: 1 }}>{limitLine}. Po tej godzinie biegi same wracają na model główny.</span></div> : null}
               <div className="kv"><span className="k">Zapas</span><span className="sub" style={{ flex: 1 }}>{AUTO_TEXT}</span></div>
             </>
           )}
           <div className="kv"><span className="k">Zasady pracy</span><span className="sub" style={{ flex: 1 }}>Jak agent ma działać: ogólne, projektu, narzędzia.</span><Link className="pill" href="/rules">Otwórz zasady</Link></div>
+          {mcfg ? <More id="models" title="Dobór modelu i wysiłku do kroku">
+            <div className="stack">
+              <p className="sub" style={{ margin: 0 }}>Agent przy rozpisaniu nadaje każdemu krokowi poziom pracy, a mostek uruchamia Claude Code modelem i wysiłkiem tego poziomu. Krok oddany przez Claude&apos;a idzie przy następnej próbie poziom wyżej, projekt o ważności 5 też o jeden wyżej. Gdy model główny trafi na limit, biegi do końca limitu idą na zapasowym, potem same wracają. Na karcie kroku możesz zamiast „auto” wybrać konkretny model.</p>
+              <ModelLevels action={saveModelLevel}
+                rows={[...LEVELS].reverse().map((l) => ({ level: l, label: LEVEL_LABELS[l], hint: LEVEL_HINTS[l], ...mcfg.levels[l] }))}
+                choices={mcfg.choices.map((m) => ({ key: m, label: modelLabel(m) }))} labels={Object.fromEntries(mcfg.choices.map((m) => [m, modelLabel(m)]))}
+                efforts={EFFORTS.map((e) => ({ key: e, label: EFFORT_LABELS[e] }))} />
+            </div>
+          </More> : null}
           <More id="bridge" title="Jak uruchomić mostek na komputerze (praca od razu, jak w Project Hub)">
             <div className="stack">
               <p className="sub" style={{ margin: 0 }}>{BRIDGE_TEXT} Mostek siedzi w aplikacji Task Hub na Maca: co kilkanaście sekund pyta Task Hub o pracę za darmo i tylko wtedy uruchamia w tle Claude Code na Twojej subskrypcji, z konektorami, które masz w Claude Code na tym komputerze. Działa, gdy komputer nie śpi; w pozostałym czasie pracuje zapas co godzinę.</p>

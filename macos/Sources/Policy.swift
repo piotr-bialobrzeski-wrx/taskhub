@@ -39,6 +39,7 @@ struct Probe {
     var info: InitInfo
     var restricted: Bool        // --restricted nie ukrył konektorów, więc go używamy
     var at: Date
+    var flags: Set<String> = [] // flagi z claude --help (--effort, --fallback-model)
 
     var prompts: Bool { version >= Policy.promptsFrom }       // --permission-prompts none
     var onFailure: Bool { version >= Policy.onFailureFrom }   // hook z onFailure: "block"
@@ -268,14 +269,22 @@ enum Policy {
 
     static func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
-    // wspólne flagi: tryb ograniczony (tylko --settings i zarządzane), pytania o zgodę = odmowa, model
-    static func common(_ probe: Probe, tools: [String], model: String) -> [String] {
+    // model biegu od Task Hub (dobór do poziomu kroku): skrót modelu, wysiłek i zapasowy na przeciążenie w trakcie biegu
+    struct ModelChoice { var model = ""; var effort = ""; var fallback = "" }
+
+    // wspólne flagi: tryb ograniczony (tylko --settings i zarządzane), pytania o zgodę = odmowa, model, wysiłek i model zapasowy
+    // (dwa ostatnie tylko, gdy ta wersja Claude Code je zna)
+    static func common(_ probe: Probe, tools: [String], model m: ModelChoice) -> [String] {
         var a: [String] = []
         if probe.restricted { a += ["--restricted", "--tools", tools.joined(separator: ",")] }
         else { a += ["--setting-sources", "user"] }   // bez ustawień projektu z work/ (agent mógłby je tam podłożyć)
         if probe.prompts { a += ["--permission-prompts", "none"] }
-        let m = model.trimmingCharacters(in: .whitespaces)
-        if !m.isEmpty { a += ["--model", m] }
+        let model = m.model.trimmingCharacters(in: .whitespaces)
+        if !model.isEmpty { a += ["--model", model] }
+        let effort = m.effort.trimmingCharacters(in: .whitespaces)
+        if !effort.isEmpty && probe.flags.contains("--effort") { a += ["--effort", effort] }
+        let fb = m.fallback.trimmingCharacters(in: .whitespaces)
+        if !fb.isEmpty && fb != model && probe.flags.contains("--fallback-model") { a += ["--fallback-model", fb] }
         return a
     }
 
@@ -284,7 +293,7 @@ enum Policy {
     // Bez folderów z kodem (od 0.1.9) Bash też jest, ale w piaskownicy, która poza systemem i narzędziami czyta i pisze tylko work/ i /tmp
     // i nie ma sieci: krok, który
     // tylko uruchamia polecenia albo sprawdza narzędzie, nie potrzebuje repozytorium; krok zmieniający repozytorium nadal czeka na folder
-    static func work(runId: String, prompt: String, mcp: String, token: String, probe: Probe, folders: [String], files: [String] = [], model: String, bin: String = "") throws -> RunPlan {
+    static func work(runId: String, prompt: String, mcp: String, token: String, probe: Probe, folders: [String], files: [String] = [], model: ModelChoice, bin: String = "") throws -> RunPlan {
         let work = Store.workDir.path
         guard ruleSafe(work) else { throw PolicyError("Ścieżka katalogu roboczego ma znaki, których zasady nie obsłużą: \(work)") }
         let dirs = [work] + folders
@@ -378,7 +387,7 @@ enum Policy {
         Set(info.tools.compactMap { split($0)?.server }).union(info.servers.map { norm($0.name) })
     }
 
-    static func send(runId: String, prompt: String, mcp: String, token: String, servers: [String], probe: Probe, model: String) throws -> RunPlan {
+    static func send(runId: String, prompt: String, mcp: String, token: String, servers: [String], probe: Probe, model: ModelChoice) throws -> RunPlan {
         var names: [String] = []
         for s in servers {
             let n = norm(s)

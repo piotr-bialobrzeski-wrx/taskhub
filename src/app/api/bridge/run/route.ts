@@ -4,10 +4,14 @@
 // na Macu (git), a wiadomość wysyła Claude Code tylko konektorem docelowej aplikacji (servers) z tokenem, który zna ten jeden krok.
 import * as repo from "@/lib/repo";
 import { listSendable, type Sendable } from "@/lib/agent/work";
+import type { RunModel } from "@/lib/repo";
 import { isExternalApp, isLocalFile } from "@/lib/agent/approval";
 import { RUN_MAX_MIN, RUN_STALE_MIN, SEND_MAX_MIN, authBridge, bridgePrompt, bridgeWorkPrompt, connectorProblem, gitSend, isGitDraft, mcpUrl, protocolOf, sendPrompt, sendServers, type BridgeAuth } from "@/lib/bridge";
 import { normalizeTool, toolLabel } from "@/lib/schema";
 import { shortTitle } from "@/lib/auto";
+import { workSummary } from "@/lib/agent/work";
+import { activeLimits, choiceOf, modelConfig, modelLabel, pickRun, runLabel, type RunPick } from "@/lib/agent/models";
+import { fmtTime } from "@/lib/clock";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "cache-control": "no-store" };
@@ -30,11 +34,35 @@ export async function POST(req: Request) {
   const kind = body.kind ?? "work";
   if (kind === "send") return sendRun(a, bridge);
   if (kind !== "work") return Response.json({ error: "kind: work albo send" }, { status: 400 });
-  const run = await repo.startBridgeRun(a.ownerId, a.tokenId, bridge, "work");
+  // dobór modelu: grupa pierwszej pozycji listy pracy, której model (albo zapasowy) nie jest w limicie; wszystkie w limicie = 429 z godziną powrotu
+  const settings = await repo.userSettings(a.ownerId);
+  const w = await workSummary(a.ownerId, { peek: true, audience: "work" });
+  const pick = pickRun(w.choices ?? [], activeLimits(settings.modelLimits));
+  if (pick && "blockedUntil" in pick) {
+    const names = [...new Set((w.choices ?? []).map((c) => modelLabel(c.model)))].join(", ");
+    return Response.json({ error: `limit modeli (${names}) do ${fmtTime(pick.blockedUntil)}`, until: pick.blockedUntil, limit: true }, { status: 429, headers: NO_STORE });
+  }
+  const m = pick ? runModel(pick) : null;
+  const run = await repo.startBridgeRun(a.ownerId, a.tokenId, bridge, "work", null, m);
   if (!run) return busy(a.ownerId);
   // Claude Code dostaje token tego biegu (bez wysyłek, gaśnie z końcem biegu), nigdy token mostka
   const token = await repo.createRunToken(a.ownerId, { kind: "work", runId: run.id }, RUN_MAX_MIN + 10);
-  return Response.json({ run, kind: "work", prompt: bridgeWorkPrompt(), mcp: mcpUrl(), token, maxMinutes: RUN_MAX_MIN, staleMinutes: RUN_STALE_MIN }, { headers: NO_STORE });
+  return Response.json({ run, kind: "work", prompt: bridgeWorkPrompt(), mcp: mcpUrl(), token, maxMinutes: RUN_MAX_MIN, staleMinutes: RUN_STALE_MIN, ...modelFields(pick) }, { headers: NO_STORE });
+}
+
+// model biegu: zapisany w biegu (list_work, „ostatnio: model · wysiłek” na krokach) i podany aplikacji na Macu (--model, --effort, --fallback-model)
+function runModel(p: RunPick): RunModel {
+  // na zapasowym z powodu limitu: w trakcie biegu nie ma już na co przełączać (główny i tak jest w limicie)
+  return { model: p.model, effort: p.choice.effort, focus: p.choice.key, fallback: p.limited ? "" : p.choice.fallback };
+}
+function modelFields(p: RunPick | null): Record<string, string> {
+  if (!p) return {};
+  const m = runModel(p);
+  const label = runLabel(m.model, m.effort);
+  return {
+    model: m.model, effort: m.effort, fallbackModel: m.fallback, level: p.choice.level,
+    modelLabel: p.limited ? `limit ${modelLabel(p.limited.model)} do ${fmtTime(p.limited.until)}, pracuję na ${modelLabel(p.model)}` : label,
+  };
 }
 
 // szkic, którego nie da się wysłać z tego Maca: zgoda wraca do Piotra z notatką w rozmowie zadania, bieg nie rusza
@@ -79,7 +107,11 @@ async function sendRun(a: BridgeAuth, bridge: string): Promise<Response> {
     // kilka kont tej samej aplikacji, a krok nie wskazuje żadnego: model nie może zgadywać, z którego wysłać
     if (p?.kind === "many") return refuse(a.ownerId, s, `na komputerze ${bridge} jest kilka kont ${toolLabel(normalizeTool(t.app))} (${p.servers.map((x) => `„${x}”`).join(", ")}), a krok nie wskazuje, którym wysłać (wybierz połączenie na karcie szkicu)`);
   }
-  const run = await repo.startBridgeRun(a.ownerId, a.tokenId, bridge, "send", s.step.id);
+  // zatwierdzony szkic do wysłania to Mechanika (zasada „Dobór modelu i wysiłku”); commit robi aplikacja bez modelu
+  const settings = git ? {} : await repo.userSettings(a.ownerId), cfg = modelConfig(settings);
+  const sp = cfg ? pickRun([choiceOf(cfg, "mechanics")], activeLimits(settings.modelLimits)) : null;
+  const pick = sp && !("blockedUntil" in sp) ? sp : null;
+  const run = await repo.startBridgeRun(a.ownerId, a.tokenId, bridge, "send", s.step.id, pick ? runModel(pick) : null);
   if (!run) return busy(a.ownerId);
   // najwyżej raz: znacznik wysyłki ustawia się atomowo; gdy szkic zdążył się zmienić, bieg znika i nic nie leci
   if (!(await repo.markSendStarted(a.ownerId, s.step.id))) {
@@ -93,5 +125,5 @@ async function sendRun(a: BridgeAuth, bridge: string): Promise<Response> {
   if (git) return Response.json({ ...base, git }, { headers: NO_STORE });
   const token = await repo.createRunToken(a.ownerId, { kind: "send", runId: run.id, stepId: s.step.id, taskId: s.taskId }, SEND_MAX_MIN + 5);
   const prompt = sendPrompt({ stepId: s.step.id, taskId: s.taskId, app: t.app, action: t.action, servers });
-  return Response.json({ ...base, prompt, mcp: mcpUrl(), token, servers }, { headers: NO_STORE });
+  return Response.json({ ...base, prompt, mcp: mcpUrl(), token, servers, ...modelFields(pick) }, { headers: NO_STORE });
 }

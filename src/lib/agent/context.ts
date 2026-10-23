@@ -1,4 +1,5 @@
 // Kontekst dla agenta: to samo dla agenta w aplikacji, dla klientów MCP i dla promptów hand-off.
+import { LEVEL_LABELS, normalizeLevel } from "./models";
 import { publishFormat } from "../format";
 import { type Company, type Connection, type Project, type Provenance, type Rule, type Sphere, type Step, type Task, type TimeSample, CONNECTION_PROVIDER_LABELS, CONNECTION_STATE_LABELS, DECISION_TITLE_RE, doneByOf, isOwnerStep, sphereOf, toolLabel } from "../schema";
 import { LEVELS, scoreOf, whyText, type Score } from "../priority";
@@ -128,7 +129,7 @@ OBECNE ZADANIE: priorytet ${t.level}/5 (${LEVELS[cur.score.eff]}${cur.score.why.
 Podsumowanie: ${t.summary || "-"}
 Jak wpadło: ${capText(t.source) || "-"}
 Kroki:
-${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status} | po: ${s.dependsOn.join(", ") || "-"}${isOwnerStep(s) ? ` | szacunek ${s.estMin} min` : agentMinOf(s) ? ` | czas Claude'a ${agentMinOf(s)} min` : ""}${s.status === "done" ? ` | zrobił: ${doneByOf(s) === "owner" ? "Piotr" : "Claude"}` : ""}${connLabel(s.connectionId, c.connections)}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + outputText(s) : ""}`).join("\n") || "(brak kroków)"}
+${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status} | po: ${s.dependsOn.join(", ") || "-"}${isOwnerStep(s) ? ` | szacunek ${s.estMin} min` : agentMinOf(s) ? ` | czas Claude'a ${agentMinOf(s)} min` : ""}${s.status === "done" ? ` | zrobił: ${doneByOf(s) === "owner" ? "Piotr" : "Claude"}` : ""}${connLabel(s.connectionId, c.connections)}${s.workLevel && s.tool !== "manual" ? ` | poziom: ${LEVEL_LABELS[normalizeLevel(s.workLevel) ?? "analysis"]}` : ""}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + outputText(s) : ""}`).join("\n") || "(brak kroków)"}
 INNE ZADANIA NA GŁÓWNEJ KANWIE (${others.length}):
 ${others.slice(0, 40).map(brief).join("\n") || "(brak)"}${notesText(c.tasks)}`;
 }

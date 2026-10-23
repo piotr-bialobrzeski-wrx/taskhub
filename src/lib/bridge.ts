@@ -56,7 +56,9 @@ const FILE_RULE_V2 = "Wynik, który ma zostać plikiem na Macu Piotra, to krok z
 const B_NOSTEPS_V2 = B_NOSTEPS_V1
   .replace("nic nie zostaje „do decyzji”; rozbieżność między treścią a załącznikiem to ask_question z listą, nie krok „Zdecyduj”", "rozbieżność między treścią a załącznikiem, bez której nie da się rozpisać, to ask_question z listą; wybór, który należy do Piotra (co scalić, którą wersję wziąć), to krok „Zdecyduj …” z tool manual: fakty i opcje kładziesz na jego kartce (set_blocks: facts i question z opcjami i zaleceniem), a jego odpowiedź sama zamknie ten krok")
   .replace("est w minutach jako wielokrotność 5", EST_RULE)
-  .replace("dependsOn jako n1, n2).", "dependsOn jako n1, n2). " + PROJECT_RULE + " " + ITEMS_RULE + " " + DECISION_RULE + " " + DEST_RULE + " " + FILE_RULE_V2 + " " + DONE_RULE);
+  .replace("dependsOn jako n1, n2).", "dependsOn jako n1, n2, workLevel = poziom pracy kroku agenta według zasady „Dobór modelu i wysiłku”: strategy, analysis, execution albo mechanics). " + PROJECT_RULE + " " + ITEMS_RULE + " " + DECISION_RULE + " " + DEST_RULE + " " + FILE_RULE_V2 + " " + DONE_RULE)
+  // z doborem modelu kroki po rozpisaniu robi następny bieg na modelu dobranym do ich poziomu (list_work biegu to mówi)
+  .replace("Potem w tym samym przebiegu bierz się za kroki tego zadania, które są gotowe.", "Potem w tym samym przebiegu bierz się za kroki tego zadania, które są gotowe, chyba że list_work mówi, że pozostałe pozycje zrobi osobny bieg.");
 // v2: odpowiedź Piotra na kartce jego kroku-decyzji nie jest prośbą o poprawkę kartki: krok już się zamknął, decyzję stosuje się w krokach po nim
 const B_MSGS_V2 = B_MSGS.replace("gdy nic nie zmienia, reply_chat jednym zdaniem, czemu.", "gdy nic nie zmienia, reply_chat jednym zdaniem, czemu. " + DECISION_MSG);
 const B_READY_V1 = `   - KROKI DO ZROBIENIA BEZ ZGODY (analiza, research, czytanie maili, wątków, ticketów, kalendarza, przygotowanie materiałów): start_step → zrób pracę swoimi konektorami → add_facts (istotne informacje z pochodzeniem) → complete_step z podsumowaniem i linkiem.`;

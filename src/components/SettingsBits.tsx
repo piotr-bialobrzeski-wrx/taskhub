@@ -1,6 +1,7 @@
 "use client";
-// Kawałki ekranu ustawień, które potrzebują stanu: wybór dostawcy modelu (własna lista, nie systemowa) i instrukcja podłączenia klienta w zakładkach.
-import { useState } from "react";
+// Kawałki ekranu ustawień, które potrzebują stanu: wybór dostawcy modelu (własna lista, nie systemowa), instrukcja podłączenia klienta w zakładkach
+// i dobór modelu do poziomu pracy.
+import { useState, useTransition } from "react";
 import { Picker } from "@/components/canvas/widgets";
 import { CopyButton } from "./CopyButton";
 
@@ -53,5 +54,36 @@ export function ClientGuide({ mcp }: { mcp: string }) {
         </ol>
       )}
     </div>
+  );
+}
+
+// Dobór modelu i wysiłku: dla każdego poziomu pracy model, wysiłek i model zapasowy (na czas limitu głównego); każda zmiana zapisuje się od razu
+export type LevelRow = { level: string; label: string; hint: string; model: string; effort: string; fallback: string };
+export function ModelLevels({ rows, choices, efforts, labels, action }: {
+  rows: LevelRow[]; choices: { key: string; label: string }[]; efforts: { key: string; label: string }[]; labels: Record<string, string>;
+  action: (level: string, patch: { model?: string; effort?: string; fallback?: string }) => Promise<void>;
+}) {
+  const [cur, setCur] = useState(rows);
+  const [pending, start] = useTransition();
+  const set = (level: string, patch: { model?: string; effort?: string; fallback?: string }) => {
+    setCur((r) => r.map((x) => (x.level === level ? { ...x, ...patch } : x)));
+    start(() => action(level, patch));
+  };
+  const name = (k: string) => labels[k] ?? k;
+  return (
+    <table className={"t models" + (pending ? " busy" : "")}>
+      <thead><tr><th>Poziom</th><th>Model</th><th>Wysiłek</th><th>Gdy limit</th></tr></thead>
+      <tbody>{cur.map((r) => (
+        <tr key={r.level}>
+          <td><b>{r.label}</b><div className="sub">{r.hint}</div></td>
+          <td><Picker cls="boxed" title={`Model dla poziomu ${r.label}`} trigger={<span className="pp-t">{name(r.model)}</span>} onPick={(k) => set(r.level, { model: k })}
+            options={choices.map((c) => ({ key: c.key, on: c.key === r.model, node: <span>{c.label}</span> }))} /></td>
+          <td><Picker cls="boxed" title={`Wysiłek dla poziomu ${r.label}`} trigger={<span className="pp-t">{efforts.find((e) => e.key === r.effort)?.label ?? r.effort}</span>} onPick={(k) => set(r.level, { effort: k })}
+            options={efforts.map((e) => ({ key: e.key, on: e.key === r.effort, node: <span>{e.label}</span> }))} /></td>
+          <td><Picker cls="boxed" title={`Model zapasowy dla poziomu ${r.label}: do końca limitu głównego`} trigger={<span className="pp-t">{r.fallback ? name(r.fallback) : "czekaj na koniec limitu"}</span>} onPick={(k) => set(r.level, { fallback: k })}
+            options={[...choices.filter((c) => c.key !== r.model).map((c) => ({ key: c.key, on: c.key === r.fallback, node: <span>{c.label}</span> })), { key: "", on: !r.fallback, node: <span>bez zapasowego: czekaj na koniec limitu</span> }]} /></td>
+        </tr>
+      ))}</tbody>
+    </table>
   );
 }

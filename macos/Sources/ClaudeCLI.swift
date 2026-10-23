@@ -55,6 +55,15 @@ enum ClaudeCLI {
         return await runner.run { _ in }
     }
 
+    // flagi z `claude --help` (np. --effort, --fallback-model): starsza wersja Claude Code nie zna nowej flagi i bieg padłby od razu
+    static func helpFlags(_ bin: String) async -> Set<String> {
+        let runner = ProcessRunner(bin: bin, args: ["--help"], cwd: Store.workDir.path, env: env(), maxSeconds: 20, stallSeconds: 20, json: false, maxText: 40_000)
+        let r = await runner.run { _ in }
+        guard r.ok, let re = try? NSRegularExpression(pattern: "--[a-z][a-z-]+") else { return [] }
+        let t = r.text
+        return Set(re.matches(in: t, range: NSRange(t.startIndex..., in: t)).compactMap { Range($0.range, in: t).map { String(t[$0]) } })
+    }
+
     // `claude --version` z limitem czasu; nil = nie da się uruchomić
     static func version(_ bin: String) async -> String? {
         let runner = ProcessRunner(bin: bin, args: ["--version"], cwd: Store.workDir.path, env: env(), maxSeconds: 20, stallSeconds: 20, json: false)
@@ -108,7 +117,8 @@ enum ClaudeCLI {
         return out
     }
 
-    static let limitPattern = "usage limit|rate limit|limit reached|too many requests|quota|resource[_ ]?exhausted|overloaded"
+    // „You've reached your Fable limit. Switch to another model…” (2026-10-18) też jest limitem
+    static let limitPattern = "usage limit|rate limit|limit reached|reached your [^.\\n]{0,40}limit|switch to another model|too many requests|quota|resource[_ ]?exhausted|overloaded"
     static let authPattern = "not logged in|please run /login|run /login|invalid api key|authentication[_ ]?error|failed to authenticate|unauthorized|oauth token (has )?expired|refresh token is no longer valid|could not be refreshed|session expired"
     static func isLimit(_ t: String) -> Bool { t.range(of: limitPattern, options: [.regularExpression, .caseInsensitive]) != nil }
     static func isAuth(_ t: String) -> Bool { t.range(of: authPattern, options: [.regularExpression, .caseInsensitive]) != nil }
