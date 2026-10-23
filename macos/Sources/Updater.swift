@@ -109,6 +109,15 @@ final class Updater: ObservableObject {
                 return
             }
             available = ver
+            // nowa wersja już leży w /Applications (instalator zrobił swoje), a działa jeszcze stara: wystarczy ponowne uruchomienie.
+            // Bez tego co 6 h otwierał się instalator, który kończył się „nie ma żadnego programu do zainstalowania” (2026-10-22, 0.1.11)
+            if let onDisk = installedVersion(), !Updater.isNewer(ver, than: onDisk) {
+                ready = onDisk
+                status = "Wersja \(onDisk) jest już zainstalowana, zadziała po ponownym uruchomieniu."
+                Log.write("aktualizacja: \(onDisk) już zainstalowana (działa \(currentVersion)), czeka na ponowne uruchomienie")
+                if auto { maybeRelaunch(onDisk) } else { askRelaunch(onDisk) }
+                return
+            }
             Log.write("aktualizacja: dostępna \(ver), mam \(currentVersion)")
             try await install(version: ver, zip: zip, pkg: pkg)
         } catch {
@@ -250,6 +259,11 @@ final class Updater: ObservableObject {
         status = "Wersja \(version) zainstalowana, zadziała po ponownym uruchomieniu."
         Log.write("aktualizacja \(currentVersion) → \(version) zainstalowana w \(target.path)")
         maybeRelaunch(version)
+    }
+
+    // wersja aplikacji na dysku (może być nowsza niż ta, która działa)
+    private func installedVersion() -> String? {
+        NSDictionary(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Contents/Info.plist"))?["CFBundleShortVersionString"] as? String
     }
 
     // adres z Task Hub kończy się na …/download?asset=…, więc nazwę pliku nadajemy sami (Instalator potrzebuje .pkg)
