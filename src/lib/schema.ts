@@ -205,6 +205,7 @@ export const Step = z.object({
   modelPick: z.string().nullable().optional(),      // wybór Piotra na karcie: null = auto
   escalation: z.number().int().optional(),          // o ile poziomów wyżej po oddanych krokach
   lastRun: z.object({ model: z.string().nullable(), effort: z.string().nullable(), at: z.string() }).nullable().optional(),   // „ostatnio: model · wysiłek”
+  cloud: z.object({ state: z.enum(["queued", "rung", "working"]), at: z.string(), rungAt: z.string().optional(), takenAt: z.string().optional(), failAt: z.string().optional() }).nullable().optional(),   // „Uruchom w chmurze”: kliknięte, odpalone z Maca, wzięte przez chmurę
 });
 export type Step = z.infer<typeof Step>;
 

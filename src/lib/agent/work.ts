@@ -121,6 +121,8 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
         add(depsDone ? approved : held, line + (depsDone && st.handoffAt ? ` (od ${st.handoffAt})` : ""));
         continue;
       }
+      // krok zlecony do chmury („Uruchom w chmurze”, paczka 13): robi go tylko sesja w chmurze przez cloud_work, nie mostek ani automat
+      if (st.cloud) continue;
       // plik na Macu zapisuje tylko bieg pracy mostka (aplikacja 0.1.7): inni go nie widzą
       if (st.tool === "file" && audience !== "work") continue;
       if (st.status === "handoff") { add(going, line + (st.handoffAt ? ` (od ${st.handoffAt})` : "") + (st.tool === "file" ? " (plik na Macu: dokończ jak w sekcji PLIKI NA MACU)" : "")); continue; }

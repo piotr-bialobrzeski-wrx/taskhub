@@ -55,6 +55,26 @@ enum ClaudeCLI {
         return await runner.run { _ in }
     }
 
+    // „Uruchom w chmurze” (paczka 13): odpala zaplanowane zadanie w projekcie Claude („Task Hub: kod w chmurze”) narzędziem RemoteTrigger
+    // Claude Code (konto claude.ai z /login; token zostaje w Claude Code). Bieg ma tylko to narzędzie (i ToolSearch, bo RemoteTrigger bywa odroczony),
+    // bez serwerów MCP, bez plików i powłoki; nic nie zmienia na Macu. Wynik: ok albo powód po ludzku
+    static func ringCloud(_ bin: String, trigger: String) async -> (ok: Bool, note: String) {
+        guard trigger.range(of: "^trig_[A-Za-z0-9]{8,64}$", options: .regularExpression) != nil else { return (false, "zły identyfikator zadania w chmurze") }
+        let f: URL
+        do { f = try Policy.writeFile(["mcpServers": [String: Any]()], name: "cloud-mcp.json") } catch { return (false, error.localizedDescription) }
+        let prompt = "Wywołaj narzędzie RemoteTrigger z action \"run\" i trigger_id \"\(trigger)\", bez body. Nic więcej nie rób. Odpowiedz jednym wierszem: OK, gdy narzędzie zwróciło HTTP 2xx, inaczej BŁĄD: i krótko, co zwróciło."
+        let args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--max-turns", "4", "--no-session-persistence",
+                    "--permission-mode", "dontAsk", "--tools", "RemoteTrigger,ToolSearch", "--allowedTools", "RemoteTrigger,ToolSearch",
+                    "--strict-mcp-config", "--mcp-config", f.path, "--setting-sources", "user", "--model", "haiku"]
+        let runner = ProcessRunner(bin: bin, args: args, cwd: Store.workDir.path, env: env(), maxSeconds: 120, stallSeconds: 90, onInit: { info in
+            info.tools.contains("RemoteTrigger") ? nil : "Claude Code na tym Macu nie ma narzędzia RemoteTrigger (w Terminalu: claude, potem /login kontem claude.ai, i claude update)"
+        })
+        let r = await runner.run { _ in }
+        let text = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if r.ok && text.uppercased().hasPrefix("OK") { return (true, "") }
+        return (false, String((text.isEmpty ? "Claude Code nie odpowiedział" : text).prefix(240)))
+    }
+
     // flagi z `claude --help` (np. --effort, --fallback-model): starsza wersja Claude Code nie zna nowej flagi i bieg padłby od razu
     static func helpFlags(_ bin: String) async -> Set<String> {
         let runner = ProcessRunner(bin: bin, args: ["--help"], cwd: Store.workDir.path, env: env(), maxSeconds: 20, stallSeconds: 20, json: false, maxText: 40_000)

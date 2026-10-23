@@ -6,6 +6,7 @@
 // przerywa bieg i wstrzymuje nowe na 10 minut.
 // Paczka 12: model, wysiłek i model zapasowy biegu dobiera Task Hub (poziom kroku); przy limicie modelu następny bieg idzie na zapasowym,
 // a gdy w limicie są wszystkie potrzebne modele, Task Hub odpowiada 429 z godziną powrotu.
+// Paczka 13: kroki kliknięte „Uruchom w chmurze” mostek tylko odpala w chmurze (ringCloud); kodu Task Hub na Macu nie zmienia.
 import Foundation
 
 struct BridgeWork {
@@ -15,6 +16,8 @@ struct BridgeWork {
     var pollMs: Int
     var runBridge: String?   // kto trzyma otwarty bieg (inny komputer), nil = wolne
     var key: String = ""     // odcisk listy pracy (serwer v2); pusty = nie wiadomo
+    var cloud: Int = 0       // kroki kliknięte „Uruchom w chmurze”, do odpalenia (paczka 13)
+    var cloudTrigger: String = ""
 }
 
 @MainActor
@@ -49,6 +52,7 @@ final class Bridge: ObservableObject {
     private var probe: Probe? = nil                  // ostatnia próba Claude Code (narzędzia, konektory, tryb)
     private var noSendsUntil: Date? = nil            // serwer nie dał wysyłki (204): przez chwilę nie pytamy
     private var lastReport: Date? = nil              // kiedy ostatnio zgłoszono listę konektorów do rejestru połączeń
+    private var cloudNext: Date? = nil               // odpalenie chmury po błędzie: nie częściej niż co kilka minut
     private let reportEvery: Double = 6 * 3600
     private let probeEvery: Double = 6 * 3600
     private let stopHold: Double = 10 * 60
@@ -170,6 +174,8 @@ final class Bridge: ObservableObject {
                 lastErr = ""
                 if state == .offline { state = .idle }
                 await reportConnections()
+                // „Uruchom w chmurze”: Piotr kliknął krok w Task Hub, a zrobi go wątek projektu Claude w chmurze; Mac tylko go odpala (bez pracy tutaj)
+                if w.cloud > 0 && !w.cloudTrigger.isEmpty && (cloudNext.map { Date() >= $0 } ?? true) && !Task.isCancelled { await ringCloud(w.cloudTrigger) }
                 // po udanym biegu pracy lista pracy bez zmian (np. krok oddany przez leave_step): kolejny bieg zrobiłby to samo,
                 // więc praca czeka do zmiany listy, „Sprawdź teraz” albo 20 minut
                 if let k = lastWorkKey {
@@ -260,7 +266,9 @@ final class Bridge: ObservableObject {
         let pending = (j["pending"] as? Int) ?? 0
         let sends = (j["sends"] as? Int) ?? 0
         let work = (j["work"] as? Int) ?? max(0, pending - sends)   // serwer bez v2: wszystko to praca
-        return BridgeWork(pending: pending, sends: sends, work: work, pollMs: (j["pollMs"] as? Int) ?? 0, runBridge: who, key: (j["key"] as? String) ?? "")
+        let cloud = j["cloud"] as? [String: Any]
+        return BridgeWork(pending: pending, sends: sends, work: work, pollMs: (j["pollMs"] as? Int) ?? 0, runBridge: who, key: (j["key"] as? String) ?? "",
+                          cloud: (cloud?["count"] as? Int) ?? 0, cloudTrigger: (cloud?["trigger"] as? String) ?? "")
     }
 
     private func touch(_ id: String, note: String?, model: String? = nil) async {
@@ -276,6 +284,18 @@ final class Bridge: ObservableObject {
             detail = "zatrzymuję bieg (zatrzymany w Task Hub)…"
             Log.write("bieg: zatrzymany w Task Hub")
         }
+    }
+
+    // odpalenie chmury: krótki bieg Claude Code z samym RemoteTrigger; wynik idzie do Task Hub (ok = zlecenia odpalone, błąd = notatka w zadaniu)
+    private func ringCloud(_ trigger: String) async {
+        guard let bin = ClaudeCLI.find(store.cfg.claude) else { cloudNext = Date().addingTimeInterval(300); return }
+        let was = detail
+        detail = "odpalam Claude w chmurze…"
+        let r = await ClaudeCLI.ringCloud(bin, trigger: trigger)
+        detail = was
+        cloudNext = Date().addingTimeInterval(r.ok ? 30 : 300)
+        Log.write(r.ok ? "chmura: odpalone zadanie \(trigger)" : "chmura: nie odpaliłem (\(r.note)), ponowię o \(ClaudeCLI.hhmm(cloudNext ?? Date()))")
+        _ = try? await request("POST", "/api/bridge/cloud", body: r.ok ? ["ok": true] : ["ok": false, "note": r.note])
     }
 
     // koniec biegu w Task Hub; osobne zadanie, żeby zgłoszenie wyszło także po wyłączeniu mostka (anulowana pętla)

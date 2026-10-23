@@ -15,6 +15,11 @@ export const RUN_STALE_MIN = 15;          // bieg bez sygnału przez 15 min wyga
 export const RUN_MAX_MIN = 45;            // najdłuższy bieg Claude Code
 export const SEND_MAX_MIN = 10;           // najdłuższy bieg wysyłki (jeden szkic)
 export const BRIDGE_VERSION = 2;          // najnowszy protokół mostka, który zna serwer
+// „Uruchom w chmurze” (paczka 13, punkt 3): zaplanowane zadanie w projekcie Claude „Task Hub: kod w chmurze” (każde odpalenie = nowy wątek projektu,
+// który bierze kliknięte kroki przez cloud_work / take_cloud_step). Odpala je mostek na Macu narzędziem RemoteTrigger Claude Code (konto Piotra);
+// id nie jest tajemnicą: odpalić je może tylko zalogowany właściciel. TASKHUB_CLOUD_TRIGGER nadpisuje id bez nowej wersji kodu
+export const CLOUD_TRIGGER = (process.env.TASKHUB_CLOUD_TRIGGER ?? "").trim() || "trig_01RpfNFfChqXf8St3tWBbXEx";
+export const RING_AGAIN_MIN = 20;         // odpalone, a niewzięte przez 20 min (sesja w chmurze nie ruszyła): mostek odpala jeszcze raz
 
 export type BridgeAuth = { ownerId: string; tokenId: string; name: string };
 // tylko token mostka; token biegu (rodzaj "run", ma go Claude Code w biegu) i token klienta dostają 401

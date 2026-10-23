@@ -35,7 +35,7 @@ import { Icon, plural } from "@/components/canvas/ui";
 import { InlineDate, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
 import { projColor } from "@/components/canvas/ui";
 import { PublishCard, cardModeOf } from "@/components/PublishCard";
-import { answerQuestionForm, restoreBlocksForm, backToTodo, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, removeStep, reopen, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
+import { answerQuestionForm, restoreBlocksForm, backToTodo, cancelCloudRun, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, removeStep, reopen, runInCloud, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -190,11 +190,11 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     if (!raw || !s.needsApproval || (m !== "proposed" && m !== "parked") || destOf(s)?.kind !== "send") return null;
     return connectorIssue(b.connections, b.companies, { app: raw, connectionId: s.connectionId, companyId: cur.project?.companyId ?? null });
   };
-  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} oldMac={protocolOf(bridge.meta.v) < 2} issue={issueOf(s)} model={modelOf(s)} />; });
+  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} />; });
 
   return (
     <>
-    <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || !!bubble || pending.length > 0 || t.steps.some((s) => s.status === "handoff") || (!!bp && !t.doneAt)} />
+    <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || !!bubble || pending.length > 0 || t.steps.some((s) => s.status === "handoff" || !!s.cloud) || (!!bp && !t.doneAt)} />
     <TaskCanvas
       task={{ id: t.id, title: t.title, base: cur.score.base, eff: cur.score.eff, why: cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; "), state: taskStateOf(t, b.tasks), progress: { done: t.steps.filter((s) => s.status === "done").length, all: t.steps.length }, estText: estTextOf(t), activity: taskActivity(t.id, w.run), pending: pending.length }}
       queue={queue}
@@ -207,10 +207,10 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
-function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, oldMac, issue, model }: {
+function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, oldMac, macAlive, issue, model }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null; company: string | null;
-  connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null; oldMac: boolean; issue: string | null;
+  connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null; oldMac: boolean; macAlive: boolean; issue: string | null;
   model: (StepModelInfo & { now: string }) | null;
 }) {
   // szczegóły są już w sekcji „Co”, więc blok tekstu z tą samą treścią odpada
@@ -242,7 +242,12 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // krok „Zleć w projekcie: …” robi wątek projektu Claude w chmurze: nagłówek mówi gdzie, a zamiast „Uruchom” jest polecenie do skopiowania
   const inProject = kind === "offline" && isProjectStep(s);
   const head0 = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined, draftsOf(s).length, optionsOf(s).chosen?.status === "sent");
-  const head = inProject && state === "ready" && !mode ? { ...head0, title: "Do zrobienia w projekcie w chmurze" } : head0;
+  // „Uruchom w chmurze” (paczka 13, punkt 3): kliknięte czeka, aż mostek na Macu odpali chmurę (queued), potem aż chmura weźmie krok (rung)
+  const cloud = s.status === "todo" && inProject ? s.cloud ?? null : null;
+  const cloudTitle = cloud?.state === "rung" ? "Chmura rusza" : cloud ? "Czeka na chmurę" : "Do zrobienia w projekcie w chmurze";
+  const head = inProject && state === "ready" && !mode ? { ...head0, title: cloudTitle } : head0;
+  const cloudNote = !cloud ? null : cloud.state === "rung" ? `Mac odpalił Claude w chmurze${cloud.rungAt ? ` o ${fmtTime(cloud.rungAt)}` : ""}; zaraz weźmie ten krok i zamknie go z wynikiem.`
+    : macAlive ? "Mac zaraz odpali Claude w chmurze; to trwa kilkanaście sekund." : "Aplikacja Task Hub na Macu teraz nie działa: chmura ruszy, gdy Mac wróci. Awaryjnie skopiuj polecenie i wklej je w projekcie Claude.";
   const draft = draftOf(s);   // wybrana opcja albo pierwszy szkic: linie raportu bez powtórki jej treści
   // raport bez powtórki streszczenia bloku zmian ani treści szkicu; „Do potwierdzenia: …” jako osobna linia
   const lines = reportLines(s.report, [...result.map((b) => b.summary), draft?.body]);
@@ -265,7 +270,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
     <div className={"zone ans now " + head.cls}>
       <div className="now-h">
         {s.status === "handoff" && !mode ? (activity ? <Activity text={activity.text} detail={activity.detail} since={activity.since} who="Claude" big />
-          : <span className="working" title={prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />Claude pracuje{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>)
+          : <span className="working" title={s.cloud ? "Claude w chmurze robi ten krok; wynik pojawi się tutaj" : prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />{s.cloud ? "Claude w chmurze pracuje" : "Claude pracuje"}{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>)
           : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
         {meta ? <small>· {meta}</small> : null}
         {target && isHttpUrl(target.url) ? <><span className="sp" /><a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
@@ -274,6 +279,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {s.tool === "file" && s.status === "todo" && oldMac ? <div className="note">Ten krok zapisze plik aplikacja Task Hub na Macu od wersji 0.1.7. Zaktualizuj ją w menu aplikacji.</div> : null}
       {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} issue={issue}
         waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} /> : null}
+      {cloudNote && !mode ? <div className="note">{cloudNote}</div> : null}
       {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
       {open.length && !done ? <BlocksView blocks={open} form={form} indexOf={indexOf} /> : null}
       {done && kind === "decision" && decisionText(s) ? <div className="note">{decisionText(s)}</div> : null}
@@ -290,8 +296,10 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
             {aiOn ? <form action={compose.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Składam…" title="Agent składa panel z faktów, migawek i załączników">Pokaż kontekst</PendingButton></form> : null}
             {!aiOn && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
           </>) : null}
-          {s.status === "todo" && inProject ? <CopyButton className="btn primary" text={projectPrompt(t, s, origin)} label="Kopiuj polecenie" title="Polecenie dla wątku w projekcie Claude w chmurze: wklej je tam; wątek przeczyta zadanie i zamknie ten krok" /> : null}
-          {s.status === "todo" && kind === "offline" ? <DoneAsk taskId={t.id} stepId={s.id} est={estOf(s)} title={s.title} primary={!inProject} /> : null}
+          {s.status === "todo" && inProject && !cloud && state === "ready" ? <form action={runInCloud.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude w chmurze weźmie ten krok (odpala go aplikacja Task Hub na Macu) i zamknie go z wynikiem" busy="Zlecam…"><Icon k="play" size={12} sw={2} /> Uruchom w chmurze</PendingButton></form> : null}
+          {cloud ? <form action={cancelCloudRun.bind(null, t.id, s.id)}><PendingButton className="btn" title="Chmura nie weźmie tego kroku; możesz zlecić go jeszcze raz" busy="Wycofuję…"><Icon k="stop" size={11} sw={2} /> Wycofaj</PendingButton></form> : null}
+          {s.status === "todo" && inProject ? <CopyButton className="btn" text={projectPrompt(t, s, origin)} label="Kopiuj polecenie" title="Awaryjnie: polecenie dla wątku w projekcie Claude w chmurze; wklej je tam, a wątek przeczyta zadanie i zamknie ten krok" /> : null}
+          {s.status === "todo" && kind === "offline" && !cloud ? <DoneAsk taskId={t.id} stepId={s.id} est={estOf(s)} title={s.title} primary={!inProject} /> : null}
           {s.status === "todo" && kind === "reading" ? <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Zapisuję…">Przeczytane</PendingButton></form> : null}
           {s.status === "todo" && kind === "decision" && !open.length ? <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Zapisuję…" title="Odpowiedzi już są; krok sprzed paczki 7 zamyka ten przycisk">Zrobione</PendingButton></form> : null}
           {s.status === "handoff" ? <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Krok wraca do zrobienia; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form> : null}

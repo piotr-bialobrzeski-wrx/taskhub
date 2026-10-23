@@ -239,7 +239,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     agentSec: Number(r.agentSec ?? 0), agentStartedAt: iso(r.agentStartedAt), doneBy: (r.doneBy as "owner" | "agent") ?? null,
     agentAt: iso(r.agentAt), openedAt: iso(r.openedAt),
     workLevel: (r.workLevel as string) ?? null, modelPick: (r.modelPick as string) ?? null, escalation: Number(r.escalation ?? 0),
-    lastRun: (r.lastRun as Step["lastRun"]) ?? null,
+    lastRun: (r.lastRun as Step["lastRun"]) ?? null, cloud: (r.cloud as Step["cloud"]) ?? null,
   };
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
@@ -256,7 +256,7 @@ function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
 const TASK_COLS = ["id", "owner_id", "project_id", "title", "title_original", "summary", "source", "level", "due", "done_at", "deleted_at", "note_text", "note_summary", "note_at", "pos", "created_at"];
 const STEP_COLS = ["id", "task_id", "position", "title", "detail", "tool", "status", "prev_status", "needs_approval", "est_min", "spent_sec", "spent_manual", "spent_at", "link", "handoff_at", "done_at",
   "report", "output", "review", "blocks", "blocks_at", "logged", "pos", "connection_id", "file_path", "approved_at", "approved_sig", "send_started_at", "agent_sec", "agent_started_at", "done_by",
-  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run"];
+  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud"];
 const taskCols = () => sql()(TASK_COLS);
 
 async function hydrate(rows: Row[]): Promise<Task[]> {
@@ -421,7 +421,7 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
   if (patch.review !== undefined) p.review = patch.review === null ? null : sql().json(patch.review as never);
   // zgoda Piotra trzyma się treści szkicu, stanu „czeka na wysyłkę”, narzędzia i połączenia; zmiana któregoś z nich ją kasuje
   const watch = patch.blocks !== undefined || patch.status !== undefined || patch.tool !== undefined || patch.connectionId !== undefined;
-  const [cur] = watch ? await sql()`select blocks, approved_sig, status, tool, connection_id from steps where id = ${id}` : [];
+  const [cur] = watch ? await sql()`select blocks, approved_sig, status, tool, connection_id, cloud from steps where id = ${id}` : [];
   const curBlocks = cur ? parseBlocks(cur.blocks) : null;
   const approvedSig = (cur?.approvedSig as string) ?? null;
   let keep = !!approvedSig;
@@ -431,6 +431,8 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
     blocks = g.blocks; keep &&= g.approved;
   }
   if (patch.status !== undefined && patch.status !== "handoff") keep = false;
+  // krok wraca do zrobienia (oddany, zatrzymany) albo się kończy: zlecenie do chmury gaśnie, chmura nie weźmie go drugi raz bez nowego kliknięcia
+  if (patch.status !== undefined && patch.status !== "handoff" && cur?.cloud) p.cloud = null;
   if (patch.tool !== undefined && normalizeTool(patch.tool) !== cur?.tool) keep = false;
   if (patch.connectionId !== undefined && (patch.connectionId ?? null) !== ((cur?.connectionId as string) ?? null)) keep = false;
   if (approvedSig && !keep) {
@@ -492,7 +494,7 @@ export async function reopenStep(ownerId: string, taskId: string, step: Step): P
   const status = step.prevStatus === "handoff" ? "todo" : step.prevStatus && step.prevStatus !== "done" ? (step.prevStatus as Step["status"]) : step.output ? "draft" : "todo";
   await sql().begin(async (tx) => {
     // ponowne otwarcie nie przywraca zgody: szkic trzeba zatwierdzić od nowa
-    await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null, done_by = null, agent_started_at = null, approved_at = null, approved_sig = null, send_started_at = null where id = ${step.id}`;
+    await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null, done_by = null, agent_started_at = null, approved_at = null, approved_sig = null, send_started_at = null, cloud = null where id = ${step.id}`;
     // „Zmień odpowiedź”: pytania na kartce wracają do zadania, poprzednia odpowiedź zostaje w prev (agent widzi zmianę); cofanie kartki nie ma do czego wracać
     if (stepKind(step) === "decision") {
       const blocks = (step.blocks ?? []).map((b): Block => (b.type === "question" && b.answer ? { ...b, answer: undefined, prev: b.answer } : b));
@@ -740,6 +742,56 @@ export async function markAgentStart(stepId: string): Promise<void> { await sql(
 export async function addAgentTime(stepId: string, sec: number): Promise<void> { await sql()`update steps set agent_sec = agent_sec + ${Math.max(0, Math.round(sec))}, agent_started_at = null where id = ${stepId}`; }
 // czas Piotra z zegara karty: dolicza się tylko, póki nie wpisał czasu ręcznie (ręczna poprawka wygrywa)
 export async function addOwnSec(stepId: string, sec: number): Promise<void> { await sql()`update steps set spent_sec = spent_sec + ${Math.max(0, Math.round(sec))}, spent_at = now() where id = ${stepId} and spent_manual = false`; }
+
+// ---------- „Uruchom w chmurze” (paczka 13, punkt 3) ----------
+// Piotr klika na kroku „Zleć w projekcie: …” / „Wdróż na produkcję” (tylko jego sesja w aplikacji, nigdy agent); mostek na Macu odpala zaplanowane zadanie
+// w chmurze (cloudToRing → markCloudRung), a sesja w chmurze bierze krok atomowo (takeCloudStep). Oddanie, zatrzymanie albo zamknięcie kroku kasuje zlecenie (writeStep).
+export type CloudItem = { step: Step; taskId: string; taskTitle: string; steps: Step[] };
+export async function queueCloud(ownerId: string, stepId: string): Promise<boolean> {
+  const r = await sql()`update steps s set cloud = jsonb_build_object('state', 'queued', 'at', now()) from tasks t
+    where t.id = s.task_id and t.owner_id = ${ownerId} and t.deleted_at is null and s.id = ${stepId} and s.status = 'todo' and s.cloud is null returning s.id`;
+  return r.length > 0;
+}
+export async function cancelCloud(ownerId: string, stepId: string): Promise<boolean> {
+  // wzięty przez chmurę krok zatrzymuje się jak każdy w toku („Zatrzymaj”); tu tylko zlecenie, którego chmura jeszcze nie wzięła
+  const r = await sql()`update steps s set cloud = null from tasks t where t.id = s.task_id and t.owner_id = ${ownerId} and s.id = ${stepId} and s.cloud->>'state' in ('queued', 'rung') returning s.id`;
+  return r.length > 0;
+}
+// kroki zlecone do chmury, jeszcze niewzięte (rung = Mac już odpalił chmurę, ale sesja jeszcze nie ruszyła)
+export async function listCloud(ownerId: string): Promise<CloudItem[]> {
+  const rows = await sql()`select s.task_id from steps s join tasks t on t.id = s.task_id
+    where t.owner_id = ${ownerId} and t.deleted_at is null and s.status = 'todo' and s.cloud->>'state' in ('queued', 'rung') order by s.cloud->>'at'`;
+  const ids = [...new Set(rows.map((r) => r.taskId as string))];
+  const out: CloudItem[] = [];
+  for (const id of ids) {
+    const t = await getTask(ownerId, id);
+    for (const st of t?.steps ?? []) if (t && st.status === "todo" && (st.cloud?.state === "queued" || st.cloud?.state === "rung")) out.push({ step: st, taskId: t.id, taskTitle: t.title, steps: t.steps });
+  }
+  return out.sort((a, b) => (a.step.cloud!.at < b.step.cloud!.at ? -1 : 1));
+}
+// ile zleceń czeka na odpalenie chmury: nowe kliknięcia i odpalone dawno, a niewzięte (np. sesja w chmurze nie ruszyła), z odstępem RING_AGAIN_MIN
+export async function cloudToRing(ownerId: string, againMin: number): Promise<number> {
+  const [r] = await sql()`select count(*)::int as n from steps s join tasks t on t.id = s.task_id
+    where t.owner_id = ${ownerId} and t.deleted_at is null and s.status = 'todo'
+      and (s.cloud->>'state' = 'queued' or (s.cloud->>'state' = 'rung' and (s.cloud->>'rungAt')::timestamptz < now() - make_interval(mins => ${againMin}))) `;
+  return Number(r?.n ?? 0);
+}
+export async function markCloudRung(ownerId: string, againMin: number): Promise<number> {
+  const r = await sql()`update steps s set cloud = s.cloud || jsonb_build_object('state', 'rung', 'rungAt', now()) from tasks t
+    where t.id = s.task_id and t.owner_id = ${ownerId} and s.status = 'todo'
+      and (s.cloud->>'state' = 'queued' or (s.cloud->>'state' = 'rung' and (s.cloud->>'rungAt')::timestamptz < now() - make_interval(mins => ${againMin}))) returning s.id`;
+  return r.length;
+}
+export async function noteCloudFail(ownerId: string, stepId: string): Promise<void> {
+  await sql()`update steps s set cloud = s.cloud || jsonb_build_object('failAt', now()) from tasks t where t.id = s.task_id and t.owner_id = ${ownerId} and s.id = ${stepId} and s.cloud is not null`;
+}
+// sesja w chmurze bierze krok: najwyżej raz (zlecenie musi czekać), krok przechodzi w toku i liczy się czas Claude'a
+export async function takeCloudStep(ownerId: string, stepId: string): Promise<boolean> {
+  const r = await sql()`update steps s set cloud = s.cloud || jsonb_build_object('state', 'working', 'takenAt', now()),
+      status = 'handoff', prev_status = 'todo', handoff_at = now(), agent_started_at = now() from tasks t
+    where t.id = s.task_id and t.owner_id = ${ownerId} and s.id = ${stepId} and s.status = 'todo' and s.cloud->>'state' in ('queued', 'rung') returning s.id`;
+  return r.length > 0;
+}
 
 // ---------- czat ----------
 // seenAt: agent wziął wiadomość do opracowania w bieżącym biegu; answeredAt: załatwiona (reply_chat albo odpowiedź agenta w aplikacji); obie null = czeka w kolejce

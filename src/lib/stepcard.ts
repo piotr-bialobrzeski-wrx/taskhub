@@ -162,12 +162,23 @@ export function stepKind(s: Pick<Step, "tool" | "title" | "blocks">): StepKind {
   if (s.blocks?.some((b) => b.type === "question")) return "decision";
   return READ_RE.test(s.title.trim()) ? "reading" : "offline";
 }
-// krok Piotra „Zleć w projekcie: …” (paczka 12, punkt 3): pracę robi wątek projektu Claude w chmurze, który uruchamia Piotr (zmiany w kodzie
-// Task Hub; zasada w bazie). Mostek i automat go nie biorą, bo to krok Piotra; karta daje polecenie do skopiowania zamiast „Uruchom”
+// krok Piotra „Zleć w projekcie: …” (paczka 12, punkt 3) i „Wdróż na produkcję” (paczka 13): pracę robi wątek projektu Claude w chmurze (zmiany w kodzie
+// Task Hub; zasada w bazie). Mostek i automat go nie robią, bo to krok Piotra; karta ma „Uruchom w chmurze” (paczka 13, punkt 3: mostek odpala
+// zaplanowane zadanie w chmurze) i awaryjnie polecenie do skopiowania
 export const PROJECT_RE = /^zleć w projekcie(?=[\s,:;]|$)/i;
-export const isProjectStep = (s: Pick<Step, "tool" | "title">) => isOwnerStep(s) && PROJECT_RE.test(s.title.trim());
+export const DEPLOY_RE = /^wdróż na produkcj[ęe](?=[\s,:;.]|$)/i;
+export const isProjectStep = (s: Pick<Step, "tool" | "title">) => isOwnerStep(s) && (PROJECT_RE.test(s.title.trim()) || DEPLOY_RE.test(s.title.trim()));
+export const isDeployStep = (s: Pick<Step, "tool" | "title">) => isOwnerStep(s) && DEPLOY_RE.test(s.title.trim());
 // polecenie dla wątku projektu: co zrobić, brief kroku i skąd wziąć resztę (wątek ma konektor Task Hub, więc czyta zadanie sam i zamyka krok)
 export function projectPrompt(t: Pick<Task, "id" | "title" | "steps">, s: Pick<Step, "id" | "title" | "detail">, appUrl: string): string {
+  if (DEPLOY_RE.test(s.title.trim())) {
+    const n = String(t.steps.findIndex((x) => x.id === s.id) + 1).padStart(2, "0");
+    return [
+      "Wdróż na produkcję bieżącą paczkę zmian Task Hub (to zgoda Piotra: „wypchnij paczkę”), według zasad wdrożenia z pamięci projektu.",
+      s.detail.trim(),
+      `Zadanie „${t.title}” (${appUrl}/tasks/${t.id}), krok ${n}. Po wdrożeniu zamknij ten krok (complete_step) z wynikiem: co weszło, commit na main i czy produkcja działa.`,
+    ].filter(Boolean).join("\n\n");
+  }
   const what = s.title.trim().replace(PROJECT_RE, "").replace(/^[\s,:;]+/, "") || s.title.trim();
   const n = String(t.steps.findIndex((x) => x.id === s.id) + 1).padStart(2, "0");
   return [

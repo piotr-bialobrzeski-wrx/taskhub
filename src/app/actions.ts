@@ -15,7 +15,7 @@ import { shortTitle, type Queue } from "@/lib/auto";
 import { fmtTime } from "@/lib/clock";
 import { connectorIssue, isGitDraft } from "@/lib/bridge";
 import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, shownSig, type Draft } from "@/lib/agent/approval";
-import { decisionText, destOf, openQuestions, stepKind } from "@/lib/stepcard";
+import { decisionText, destOf, isProjectStep, openQuestions, stepKind } from "@/lib/stepcard";
 import { isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -184,6 +184,20 @@ export async function handoff(taskId: string, stepId: string) {
   const o = await requireOwner();
   const { step } = await stepOf(o.id, taskId, stepId);
   if (step.status === "todo") await repo.updateStep(stepId, { status: "handoff", prevStatus: "todo", handoffAt: new Date().toISOString() });
+  refresh(taskId);
+}
+// „Uruchom w chmurze” (paczka 13, punkt 3): krok „Zleć w projekcie: …” / „Wdróż na produkcję” idzie do wątku projektu Claude w chmurze.
+// Zlecenie zapisuje tylko to kliknięcie (sesja Piotra); mostek na Macu odpala chmurę przy najbliższym pytaniu, chmura bierze krok przez take_cloud_step
+export async function runInCloud(taskId: string, stepId: string) {
+  const o = await requireOwner();
+  const { step } = await stepOf(o.id, taskId, stepId);
+  if (isProjectStep(step) && (await repo.queueCloud(o.id, stepId))) await repo.addChat(o.id, taskId, "agent", `Zlecone do chmury: „${shortTitle(step.title, 70)}”. Claude w chmurze weźmie ten krok i zamknie go z wynikiem.`, { stepId });
+  refresh(taskId);
+}
+export async function cancelCloudRun(taskId: string, stepId: string) {
+  const o = await requireOwner();
+  await stepOf(o.id, taskId, stepId);
+  await repo.cancelCloud(o.id, stepId);
   refresh(taskId);
 }
 // zatwierdzenie szkicu: krok, który coś wysyła, idzie do wysłania (mostek wyśle dokładnie zatwierdzoną treść); inny szkic jest po prostu gotowy

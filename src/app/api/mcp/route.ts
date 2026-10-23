@@ -9,7 +9,7 @@ import { audienceOf, workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago, connectorProblem, knownApp } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
 import { appName, Blocks, ChangedFile, Fact, isOwnerStep, normalizeTool, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
-import { destOf, doneChat, keepOwnerAnswers, READ_RE, sameTarget } from "@/lib/stepcard";
+import { destOf, doneChat, keepOwnerAnswers, projectPrompt, READ_RE, sameTarget } from "@/lib/stepcard";
 import { shortTitle } from "@/lib/auto";
 import { sql } from "@/lib/db";
 import { originOf, wwwAuthenticate } from "@/lib/oauth";
@@ -497,6 +497,30 @@ function buildHandler(auth: repo.TokenAuth) {
       // bieg pracy z doborem modelu widzi tylko swoją grupę pracy (model i wysiłek)
       const focus = scope?.kind === "work" && scope.runId ? (await repo.getBridgeRun(ownerId, scope.runId))?.focus ?? null : null;
       return text((await workSummary(ownerId, { audience, stepId: scope?.stepId ?? undefined, peek: audience === "send", focus })).text);
+    });
+
+    // „Uruchom w chmurze” (paczka 13, punkt 3): kroki, które Piotr kliknął w Task Hub, robi wątek projektu Claude w chmurze (zaplanowane zadanie
+    // „Task Hub: kod w chmurze”). Tylko konektor (klient); bieg mostka na Macu tych kroków nie widzi ani nie bierze, bo nie zmienia kodu Task Hub
+    server.registerTool("cloud_work", {
+      title: "Kroki do zrobienia w chmurze", description: "Kroki, które Piotr kliknął „Uruchom w chmurze” w Task Hub (zmiany w kodzie Task Hub, wdrożenie paczki). Dla każdego: take_cloud_step(stepId), zrób polecenie, complete_step z wynikiem albo leave_step z powodem. Pusta lista = nic do zrobienia.",
+      inputSchema: z.object({}),
+    }, async () => {
+      if (audience !== "client") return text("Kroki do chmury robi tylko wątek projektu Claude w chmurze (konektor Task Hub), nie bieg mostka.");
+      const items = await repo.listCloud(ownerId);
+      if (!items.length) return text("Nic nie czeka na chmurę.");
+      return text(items.map((it, i) => `${i + 1}. [${it.step.id}] „${it.step.title}” (zadanie „${it.taskTitle}” [${it.taskId}], zlecone ${it.step.cloud?.at ?? ""})\nPolecenie:\n${projectPrompt({ id: it.taskId, title: it.taskTitle, steps: it.steps }, it.step, appUrl())}`).join("\n\n"));
+    });
+
+    server.registerTool("take_cloud_step", {
+      title: "Biorę krok do chmury", description: "Bierze krok z cloud_work na wyłączność (najwyżej jedna sesja): krok przechodzi w toku, kafelek pokazuje pracę. Potem zrób polecenie i zamknij krok przez complete_step (albo leave_step z powodem).",
+      inputSchema: z.object({ stepId: z.string() }),
+    }, async (a) => {
+      if (audience !== "client") return text("Kroki do chmury robi tylko wątek projektu Claude w chmurze, nie bieg mostka.");
+      const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
+      if (!(await repo.takeCloudStep(ownerId, a.stepId))) return text("Nie wziąłem: ten krok nie czeka na chmurę (wzięła go już inna sesja, Piotr go wycofał albo nie kliknął „Uruchom w chmurze”). Pomiń go.");
+      await repo.addChat(ownerId, taskId, "agent", `Claude w chmurze wziął krok „${shortTitle((await stepById(a.stepId))?.title ?? "", 70)}”.`, { stepId: a.stepId });
+      await mark(a.stepId, "wziął krok do chmury");
+      return text("Krok w toku. Zrób polecenie z cloud_work i zamknij krok przez complete_step.");
     });
 
     server.registerTool("ask_question", {
