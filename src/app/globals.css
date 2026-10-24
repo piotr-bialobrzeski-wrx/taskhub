@@ -909,9 +909,10 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .wk-chips .lbl { margin: 0; flex: none; }
 .wk-chips .chip { flex: none; cursor: pointer; }
 .wk-chips .chip.now { background: color-mix(in srgb, var(--t-claude) 16%, transparent); color: var(--t-claude); font-weight: 600; }
-.wk-foot { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11px; line-height: 1.35; color: var(--sub); }
-.wk-foot .wk-ft { min-width: 0; }
-.wk-foot .btn { flex: none; }
+.wk-h .btn { flex: none; margin-left: auto; font-size: 12px; }   /* paczka 15: „Zatrzymaj” w rzędzie nagłówka */
+/* paczka 15: jeden rząd na dole dymka: przyciski z lewej, godzina z prawej */
+.ans-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.ans-row .ans-t { margin: 0 0 0 auto; flex: none; }
 /* dymki stoją na linii pola czatu, obok niego: szerokie do 380 px, gdy obok wyśrodkowanego doku jest miejsce; w węższym oknie mają 260 px,
    a dok (i wszystko, co liczy się od --side) zwęża się symetrycznie, żeby na nie nie wchodzić */
 .app { --fw: clamp(260px, calc((100vw - 720px) / 2 - 48px), 380px); }
@@ -979,3 +980,10 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
   .zacts, .addmenu { flex-direction: row; gap: 4px; }
   .zacts .mi, .addmenu .mi { flex: 1; justify-content: center; text-align: center; background: var(--accent-soft); }
 }
+
+/* ---------- paczka 15: nagłówek karty kroku = numer, tytuł, projekt; bez znaczka stanu; rzadkie akcje pod „⋮” ---------- */
+.d-bar .il.ttl:has(~ .sp) { flex: 0 1 auto; }
+.d-proj { flex: 0 1 auto; min-width: 0; max-width: 35%; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sub); white-space: nowrap; }
+.d-proj > span { overflow: hidden; text-overflow: ellipsis; }
+.d-proj .d { width: 8px; height: 8px; border-radius: 999px; background: var(--c, var(--sub)); flex: none; }
+.hm-why { display: block; margin-top: 4px; font-size: 12px; color: var(--sub); }   /* paczka 15: pełny powód pod krótkim wpisem agenta */

@@ -10,14 +10,15 @@ import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
 import { AddButton, AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import type { SearchItem } from "@/lib/search-core";
-import { AgentFeed, Dock, Namer, TileMenu, Toast, useToast } from "./widgets";
+import { AgentFeed, Dock, MoreMenu, Namer, TileMenu, Toast, useToast } from "./widgets";
 import type { FeedItem, WorkBubble } from "@/lib/feed";
 import { InlineText } from "@/components/StepFields";
 import { Activity } from "@/components/Activity";
 import { useOwnClock } from "@/components/OwnClock";
-import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, openedStep, saveStepPositions, stopWork, updateGroupAction } from "@/app/actions";
+import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, openedStep, removeStep, saveStepPositions, stopWork, updateGroupAction } from "@/app/actions";
 
 export type TaskCanvasProps = {
+  project: { name: string; color: string } | null;   // projekt zadania w nagłówku karty kroku (paczka 15, punkt 6)
   task: { id: string; title: string; base: number; eff: number; why: string; state: TaskStateKey; progress: { done: number; all: number }; estText: string; activity: TileActivity | null; pending: number };
   queue: Queue | null;                     // wiadomości Piotra bez odpowiedzi: kto je weźmie i kiedy (karta nad dokiem, historia rozmowy)
   steps: (StepTile & { toolName: string })[];
@@ -100,7 +101,10 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const openStep = (id: string) => { setSel(new Set()); setSelGroup(null); setPanel(id); setConfirm(false); seen(id); };
   // pasek panelu kroku: numer, tytuł (edycja klikiem, do 2 linii), stan; narzędzie jest w technikaliach, nie dubluje się tu
   const stepBar = (s: StepTile & { toolName: string }) => (
-    <><span className="n-num">{pad(s.idx)}</span><InlineText taskId={t.id} stepId={s.id} field="title" value={s.title} as="bar" placeholder="Tytuł kroku" /><span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span></>
+    <><span className="n-num">{pad(s.idx)}</span><InlineText taskId={t.id} stepId={s.id} field="title" value={s.title} as="bar" placeholder="Tytuł kroku" />
+      {/* paczka 15: bez znaczka stanu (stan mówi kolor kafelka i ramka „Teraz”); obok tytułu tylko projekt */}
+      {p.project ? <span className="d-proj" title={`Projekt: ${p.project.name}`}><i className="d" style={{ ["--c" as string]: p.project.color }} /><span>{p.project.name}</span></span> : null}
+      <span className="sp" /></>
   );
   const onGrip = (e: React.PointerEvent) => { e.preventDefault(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); grip.current = { x: e.clientX, w: dw }; setGripOn(true); };
   const onGripMove = (e: React.PointerEvent) => { const g = grip.current; if (!g) return; setGripW(clamp(g.w + (g.x - e.clientX), 360, window.innerWidth - 32)); };
@@ -223,6 +227,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
           <div className={"grip" + (gripOn ? " on" : "")} title="Przeciągnij, aby zmienić szerokość" onPointerDown={onGrip} onPointerMove={onGripMove} onPointerUp={endGrip} onPointerCancel={endGrip} />
           <div className="d-bar">
             {panel === "__task" ? p.taskBar : cur ? stepBar(cur) : null}
+            {cur ? <MoreMenu label="Więcej" items={[{ label: "Usuń krok", danger: true, confirm: "Usunąć ten krok? Tego nie da się cofnąć.", yes: "Tak, usuń", onPick: () => { const id = cur.id; setPanel(null); setSel(new Set()); run(() => removeStep(t.id, id), "Usunięto krok"); } }]} /> : null}
             <button className={"icobtn d-widen" + (wide && gripW == null ? " on" : "")} type="button" aria-label={wide ? "Węziej" : "Szerzej"} title={wide ? "Węziej" : "Szerzej (kartka obok siebie)"} aria-pressed={wide} onClick={widen}><Icon k="widen" size={14} sw={1.6} /></button>
             <button className="icobtn" type="button" aria-label="Zamknij" onClick={() => { setPanel(null); setSel(new Set()); }}><Icon k="x" size={12} sw={2} /></button>
           </div>

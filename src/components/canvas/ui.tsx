@@ -66,6 +66,7 @@ const PATHS: Record<string, string> = {
   browser: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M2 6h12M4.5 4.5h.01M6.5 4.5h.01"/>',
   // ikony interfejsu
   menu: '<path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>',
+  more: '<path d="M8 3.5h.01M8 8h.01M8 12.5h.01"/>',
   back: '<path d="M10 3 5 8l5 5"/>',
   logo: '<path d="M3 8h4M9 4h4M9 12h4M7 8l2-4M7 8l2 4"/>',
   x: '<path d="M4 4l8 8M12 4l-8 8"/>',

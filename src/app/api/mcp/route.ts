@@ -9,7 +9,7 @@ import { audienceOf, WAIT_RE, waitTarget, workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago, connectorProblem, knownApp } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
 import { appName, Blocks, ChangedFile, Fact, isOwnerStep, normalizeTool, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
-import { destOf, doneChat, keepOwnerAnswers, projectPrompt, READ_RE, sameTarget } from "@/lib/stepcard";
+import { destOf, doneChat, keepOwnerAnswers, leaveChat, whyOf, projectPrompt, READ_RE, sameTarget } from "@/lib/stepcard";
 import { shortTitle } from "@/lib/auto";
 import { sql } from "@/lib/db";
 import { originOf, wwwAuthenticate } from "@/lib/oauth";
@@ -17,6 +17,7 @@ import { externalLink as externalLinkOf } from "@/lib/links";
 import { appUrl } from "@/lib/session";
 import { securityReport } from "@/lib/security";
 import { isFilePath, isHttpUrl, sanitizeBlocks } from "@/lib/safeurl";
+import { unlazy } from "@/lib/format";
 import { AGENT_MAX_SEC, elapsedSec } from "@/lib/time";
 import { appKey, approvalSig, approvalValid, coerceAgentDrafts, draftOf, draftsOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable } from "@/lib/agent/approval";
 import { matchProjectName } from "@/lib/project-guess";
@@ -181,7 +182,7 @@ function buildHandler(auth: repo.TokenAuth) {
       const ax = att.length ? "ZAŁĄCZNIKI ZADANIA (grafikę albo plik tekstowy pokaże get_attachment; opis zapisz przez describe_attachment):\n" + att.map((a) => `- [${a.id}] ${a.kind} „${a.name ?? a.url ?? ""}”${a.mime ? ` (${a.mime})` : ""}${a.caption ? ` · ${a.caption}` : ""}${a.analysis ? `: ${a.analysis.slice(0, 400)}` : ""}`).join("\n") : "";
       // rozmowa w zadaniu: Piotr dopisuje tu wymagania i pytania; NOWE = jeszcze bez odpowiedzi agenta
       const chat = await repo.listChat(ownerId, taskId, 12);
-      const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy; NOWE [id] = Piotr napisał, nikt nie odpowiedział: zrób, o co prosi, i odpowiedz przez reply_chat z messageIds = [id] tej wiadomości, osobno po każdej załatwionej prośbie; gdy prośba zmienia zakres, najpierw add_steps z before):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${m.role === "user" ? stepRef(m) : ""}${m.role === "user" && !m.answeredAt ? ` NOWE [${m.id}]` : ""}: ${capText(m.text)}`).join("\n") : "";
+      const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy; NOWE [id] = Piotr napisał, nikt nie odpowiedział: zrób, o co prosi, i odpowiedz przez reply_chat z messageIds = [id] tej wiadomości, osobno po każdej załatwionej prośbie; gdy prośba zmienia zakres, najpierw add_steps z before):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${m.role === "user" ? stepRef(m) : ""}${m.role === "user" && !m.answeredAt ? ` NOWE [${m.id}]` : ""}: ${capText(m.text)}${whyOf(m) ? ` (powód: ${capText(whyOf(m)!)})` : ""}`).join("\n") : "";
       await markRun();
       return text(ctx + (fx ? "\n" + fx : "") + (kx ? "\n" + kx : "") + (dx ? "\n" + dx : "") + (qx ? "\n" + qx : "") + (ax ? "\n" + ax : "") + (cx ? "\n" + cx : ""));
     });
@@ -281,6 +282,8 @@ function buildHandler(auth: repo.TokenAuth) {
       const was = await stepById(a.stepId); if (!was) return text("Nie ma takiego kroku.");
       // kilka bloków draft = opcje tej samej rzeczy: różnią się treścią (inaczej wybór byłby niejednoznaczny) i idą do tej samej aplikacji;
       // podpis po sanitizeBlocks, jak przy zapisie i zgodzie: adres spoza http(s) wypada, więc nie może odróżniać dwóch opcji
+      // szkic z podtytułem tuż pod listą: pusta linia przed nim (paczka 15, punkt 15), zanim powstanie podpis zgody
+      a.blocks = a.blocks.map((b) => (b.type === "draft" && b.body ? { ...b, body: unlazy(b.body) } : b));
       const clean = sanitizeBlocks(a.blocks);
       const drafts = draftsOf({ blocks: clean });
       if (new Set(drafts.map((d) => approvalSig({ id: a.stepId, blocks: clean }, d))).size < drafts.length) return text("Nie zapisałem: dwa bloki draft o tej samej treści to jeden szkic; opcje różnią się treścią (title = nazwa opcji).");
@@ -372,7 +375,11 @@ function buildHandler(auth: repo.TokenAuth) {
         }
       }
       // w rozmowie tylko fakt; opis, pliki i adresy są na kartce kroku („Otwórz krok”)
-      await repo.addChat(ownerId, taskId, "agent", st ? doneChat({ ...st, filePath: a.file ?? st.filePath }, r.closed) : `Zrobione.${r.closed ? " Zadanie ukończone." : ""}`, { stepId: a.stepId, link: externalLink(a.link) ?? undefined });
+      // paczka 15, punkt 1: gdy ten krok odblokował krok Piotra, dymek mówi to wprost i „Otwórz krok” prowadzi do jego kroku
+      const byId = new Map(r.task.steps.map((x) => [x.id, x]));
+      const mine = st && !r.closed ? r.task.steps.find((x) => x.status === "todo" && isOwnerStep(x) && x.dependsOn.includes(st.id) && x.dependsOn.every((d) => byId.get(d)?.status === "done")) : undefined;
+      const said = st ? doneChat({ ...st, filePath: a.file ?? st.filePath }, r.closed) : `Zrobione.${r.closed ? " Zadanie ukończone." : ""}`;
+      await repo.addChat(ownerId, taskId, "agent", mine ? `${said} Kolejny krok wymaga Twojego udziału.` : said, mine ? { stepId: mine.id, steps: [a.stepId], link: externalLink(a.link) ?? undefined } : { stepId: a.stepId, link: externalLink(a.link) ?? undefined });
       // po wysyłce: inne otwarte kroki ze szkicem do tego samego miejsca są pewnie zbędne; agent sprawdza je teraz, a nie zostawia Piotrowi do zatwierdzenia
       const twins = st ? sameTarget(r.task.steps, st.id, st.blocks).open : [];
       const hint = twins.length ? ` Inne otwarte kroki ze szkicem do tego samego miejsca: ${twins.map((x) => `[${x.id}] „${x.title}”`).join(", ")}. Sprawdź, czy po tej wysyłce nie są zbędne; zbędne zamknij przez skip_step z powodem.` : "";
@@ -456,10 +463,11 @@ function buildHandler(auth: repo.TokenAuth) {
       else if (st.status === "handoff") await repo.updateStep(st.id, { status: st.prevStatus === "draft" ? "draft" : "todo", prevStatus: null, handoffAt: null });
       // czas od start_step liczy się mimo oddania (Claude próbował); bez start_step nic, bo oddany krok mógł nie być nawet zaczęty
       await repo.addAgentTime(st.id, await agentSecFor(st, { runClock: false }));
-      await repo.addChat(ownerId, taskId, "agent", `Nie zrobiłem kroku „${shortTitle(st.title, 70)}”: ${a.reason}`, { stepId: st.id });
       // na jaki krok czeka (paczka 14, punkt 1): waitFor albo krok wskazany w powodzie czekania; każde oddanie zapisuje to od nowa
       const all = (await repo.listTasks(ownerId)).flatMap((t) => t.steps.map((x) => ({ id: x.id, taskId: t.id, title: x.title })));
       const waitFor = a.waitFor && a.waitFor !== st.id && all.some((x) => x.id === a.waitFor) ? a.waitFor : waitTarget(a.reason, { id: st.id, taskId, title: st.title }, all);
+      // dymek krótko: stan i czego trzeba od Piotra (paczka 15, punkt 1); pełny powód zostaje w historii rozmowy i w kontekście agenta (why)
+      await repo.addChat(ownerId, taskId, "agent", leaveChat(st.title, a.reason, !!waitFor), { stepId: st.id, why: a.reason });
       await repo.setWaitFor(st.id, waitFor);
       // oddany w biegu mostka: następna próba idzie poziom wyżej (zasada „Dobór modelu i wysiłku”); wysyłka nie ma poziomu.
       // Oddanie z czekania („czeka na …”, „do zrobienia w projekcie w chmurze”, wskazany krok) to nie nieudana próba: poziom zostaje
@@ -539,7 +547,7 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("reply_chat", {
-      title: "Odpowiedz w rozmowie zadania", description: "Odpowiada Piotrowi w rozmowie zadania (1–3 zdania: co dopisałeś, numery i tytuły kroków, albo odpowiedź na pytanie; bez raportu z postępu). messageIds: id wiadomości Piotra, które ta odpowiedź załatwia (z get_task, przy NOWE); bez nich załatwia wszystkie dotychczasowe w zadaniu. Odpowiadaj osobno po każdej załatwionej prośbie, żeby Piotr widział, co już jest zrobione. stepId: krok, którego odpowiedź dotyczy (karta w rozmowie dostanie „Otwórz krok”); link: adres wyniku w zewnętrznej aplikacji. Gdy wszystkie kroki są zrobione i nic już nie czeka na odpowiedź, zadanie kończy się samo. Kroki, których dotknąłeś w tym biegu w tym zadaniu, dostaną w dymku przyciski „Otwórz krok” same; stepId wskazuje główny.",
+      title: "Odpowiedz w rozmowie zadania", description: "Odpowiada Piotrowi w rozmowie zadania: jedno krótkie, proste zdanie (pokazuje się jako dymek), zaczynające od tego, czego Piotr ma dokonać albo co się zmieniło (np. „Dopisałem kroki 04–05.”, „Potrzebuję Twojej decyzji w kroku 03.”); bez nazw z kodu i bez raportu z postępu, szczegóły na kartce kroku. messageIds: id wiadomości Piotra, które ta odpowiedź załatwia (z get_task, przy NOWE); bez nich załatwia wszystkie dotychczasowe w zadaniu. Odpowiadaj osobno po każdej załatwionej prośbie, żeby Piotr widział, co już jest zrobione. stepId: krok, którego odpowiedź dotyczy (karta w rozmowie dostanie „Otwórz krok”); link: adres wyniku w zewnętrznej aplikacji. Gdy wszystkie kroki są zrobione i nic już nie czeka na odpowiedź, zadanie kończy się samo. Kroki, których dotknąłeś w tym biegu w tym zadaniu, dostaną w dymku przyciski „Otwórz krok” same; stepId wskazuje główny.",
       inputSchema: z.object({ taskId: z.string(), text: z.string().min(1).max(1200), messageIds: z.array(z.string()).max(50).optional(), stepId: z.string().optional(), link: z.string().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");

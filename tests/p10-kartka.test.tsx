@@ -449,10 +449,10 @@ describe("opcje na karcie publikacji (punkt 3b/4)", () => {
     expect(hm).toContain('title="Claude zaktualizuje dokładnie tę treść w ClickUpie"');
     expect(hm).toContain('title="Claude wyśle dokładnie tę treść na Slacku"');
     expect(hm).toContain('<p class="pub-dest">#dev · wyśle wiadomość</p>');
-    // jeden szkic jak dotąd: jedna linia miejsca, pod przyciskami
+    // jeden szkic (paczka 15, punkt 14): bez linii miejsca pod przyciskami; miejsce mówi dymek przycisku i przycisk celu
     const h1 = card(step({ status: "draft", tool: "clickup", needsApproval: true, blocks: [A1] }), "proposed");
-    expect(count(h1, /class="pub-dest"/g)).toBe(1);
-    expect(h1.indexOf("Zatwierdź i zaktualizuj")).toBeLessThan(h1.indexOf("Ticket A1 · zmieni ticket"));
+    expect(count(h1, /class="pub-dest"/g)).toBe(0);
+    expect(h1).toContain("Zatwierdź i zaktualizuj");
   });
   it("„Otwórz podgląd” z bloku zmian tylko do zamknięcia kroku: po wysyłce ma go blok zmian pod kartą, karta zostawia „Zobacz zmiany”", () => {
     const changes: Block = { type: "changes", repo: "a/b", branch: "feat", preview: "https://podglad.example/x", files: [{ path: "src/a.ts" }] };

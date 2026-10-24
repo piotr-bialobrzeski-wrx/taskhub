@@ -13,7 +13,7 @@ import { Facts, Table } from "@/components/BlockRenderer";
 import { PendingButton } from "@/components/Pending";
 import { RichField } from "@/components/RichField";
 import { Markdown } from "@/lib/markdown";
-import { ConnectionHead, type StepConnection } from "@/components/StepFields";
+import type { StepConnection } from "@/components/StepFields";
 import { Activity } from "@/components/Activity";
 import { CopyButton } from "@/components/CopyButton";
 import { isHttpUrl, isLocalPath, safeHref } from "@/lib/safeurl";
@@ -37,6 +37,7 @@ export function cardModeOf(s: Step): CardMode | null {
 
 const PROMPT_APPS = new Set(["claudeapp", "code", "claude"]);
 const COMMENT_APPS = new Set(["figma", "github", "clickup"]);
+const MAIL_APPS = new Set(["gmail", "mail", "email", "outlook"]);
 // przycisk celu: ticket, wątek albo dokument, w którym coś się zmieni (tylko http(s))
 const openBtn = (l: { label: string; url: string } | null) => l && isHttpUrl(l.url)
   ? <a className="btn ico" href={l.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${l.url}`}>{l.label}<Icon k="ext" size={13} sw={1.6} /></a> : null;
@@ -69,7 +70,6 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   const body0 = d?.body ?? s.output;
   // dokąd idzie szkic (jedno źródło dla przycisku, linii pod nim i nagłówka po wysyłce); stary szkic bez bloku (sama treść) liczy się jak przy zgodzie
   const dest = destOf(s) ?? (body0?.trim() ? destOf({ ...s, blocks: [...(s.blocks ?? []), { type: "draft", target: { app: s.tool, action: "send" }, body: body0, status: "proposed" }] }) : null);
-  const hint = stays || pick || sentAlready ? null : destHint(dest);   // przy siatce każda opcja ma własną linię; po wysyłce nie ma czego obiecywać
   const label = (x: Draft) => optionLabel(x, drafts.indexOf(x));
   const opt = multi && chosen ? ` · ${label(chosen)}` : "";   // nazwa wybranej opcji w nagłówku po decyzji
   // nagłówek: po wysyłce samo miejsce (słowo i godzina stoją w nagłówku „Teraz”); przed decyzją sama aplikacja (miejsce jest pod przyciskiem)
@@ -111,8 +111,10 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       <div className="thread"><div className="msg mine"><div className="who">{who}</div>{di?.subject ? <h4>{di.subject}</h4> : null}<pre className="code">{body || "Brak treści."}</pre></div></div>
     ) : editable ? (
       // przed decyzją: samo pole z formatowaniem, bez ramki wiadomości (dokąd poleci mówi nagłówek karty), żeby nie zagnieżdżać trzech tła w sobie
+      // paczka 15, punkt 13: nad polem „Szkic”, nie tytuł ticketu; temat maila i tytuł nowego zadania zostają jako krótka linia, bo polecą razem z treścią
       <div className="pub-edit">
-        {di?.subject ? <h4>{di.subject}</h4> : null}
+        <div className="lbl">Szkic</div>
+        {di?.subject && (MAIL_APPS.has(app) || action === "create") ? <p className="sub">{MAIL_APPS.has(app) ? "Temat" : "Tytuł"}: {di.subject}</p> : null}
         <RichField key={s.id + sfx} value={body ?? ""} form={formId} onSave={saveDraftBody.bind(null, t.id, s.id, i)} />
         {di?.fields?.length ? <Facts facts={di.fields} /> : null}
       </div>
@@ -137,10 +139,12 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   const tl = pick || list || mode === "sent" || mode === "unsent" ? null : targetLink(s, s.blocks, d ?? undefined);
   // karta jednej opcji: stan i nazwa, przycisk celu tej opcji, podgląd, linia z miejscem tej opcji, własny przycisk „Zatwierdź: Opcja X” (bez czasownika
   // aplikacji: miejsce mówi przycisk celu i linia pod podglądem); tylko do odczytu bez przycisków, linii miejsca i formularza
+  const spread = new Set(drafts.map((x) => destHint(destOf({ ...s, blocks: [...(s.blocks ?? []).filter((b) => b.type !== "draft"), x] })))).size > 1;
   const optionCard = (di: Draft, i: number, ro: boolean) => {
     // miejsce tej opcji: z jej szkicu i klocków kontekstu kroku (blok zmian mówi, czy to commit albo prompt); każda opcja może iść gdzie indziej
     const od = destOf({ ...s, blocks: [...(s.blocks ?? []).filter((b) => b.type !== "draft"), di] });
-    const v = view(di, i, od), oh = ro || stays ? null : destHint(od);
+    // paczka 15, punkt 14: linia miejsca tylko wtedy, gdy opcje idą w różne miejsca (inaczej nie odróżnia opcji, a Piotr uznał ją za zbędną)
+    const v = view(di, i, od), oh = ro || stays || !spread ? null : destHint(od);
     return (
       <div key={i} className="block pub opt">
         <div className="pub-h">
@@ -168,8 +172,8 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
         <span className="tool-dot" style={{ ["--c" as string]: toolColor(app) }} />
         <span className="pub-t">{pick && !stays ? <b>{dest?.name ?? name}</b> : head}</span>
         <span className="sp" />
-        {mode === "proposed" || mode === "parked" ? (stays ? null : <ConnectionHead taskId={t.id} stepId={s.id} app={app} connectionId={s.connectionId} connections={connections} company={company} />)
-          : account ? <span className="pub-acc">{account}</span> : null}
+        {/* paczka 15, punkt 12: bez wyboru konta przed decyzją (konto dobiera agent; zmiana w „Szczegółach technicznych”); po wysyłce zostaje zapis, którym kontem */}
+        {mode === "proposed" || mode === "parked" ? null : account ? <span className="pub-acc">{account}</span> : null}
         {openBtn(tl)}
         {mode === "sent" && sentHref ? <a className="btn ico" href={sentHref} target="_blank" rel="noopener" title={sentHref}>{openLabel(normalizeTool(app))}<Icon k="ext" size={13} sw={1.6} /></a> : null}
         {mode === "sent" && s.filePath ? <CopyButton text={s.filePath} label="Kopiuj ścieżkę" /> : null}
@@ -196,14 +200,14 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
           {pick ? null : one.approve(mainLabel)}
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Szkic zostaje, krok wraca do zrobienia">Odłóż</PendingButton></form>
-          {issue ? <div className="note warn">{issue}</div> : hint ? <p className="pub-dest">{hint}</p> : null}
+          {issue ? <div className="note warn">{issue}</div> : null}
         </div>
       ) : mode === "parked" ? (
         <div className="actions">
           {pick ? null : one.approve(mainLabel)}
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
           <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn" title="Zamknij krok bez wysyłania">Zamknij bez wysyłki</PendingButton></form>
-          {issue ? <div className="note warn">{issue}</div> : hint ? <p className="pub-dest">{hint}</p> : null}
+          {issue ? <div className="note warn">{issue}</div> : null}
         </div>
       ) : mode === "sending" ? (
         <div className="actions">

@@ -27,6 +27,22 @@ export function foldsFor(state: CardState, mode: string | null, reading = false)
   const done = state === "done";
   return { brief: !done && !mode, material: !done || reading };
 }
+// główna treść a „Skąd” (paczka 15, punkty 8–9): „Skąd” to materiał z pochodzeniem (wątek, mail, komentarz, wszystko ze źródłem, także fakty
+// z przypisem), główna treść to to, co agent złożył sam (tabela, lista, notatka, treść bez źródła, odpowiedzi na pytania). Główna stoi zaraz
+// pod „Teraz”; „Skąd” idzie pod nią, domyślnie zwinięte, chyba że karta nie ma nic innego (wtedy materiał jest treścią)
+type WithSource = { source?: { app?: string; ref?: string; url?: string } | null };
+const hasSrc = (x: WithSource | undefined) => !!(x?.source && (x.source.app || x.source.ref || x.source.url));
+export function isSourced(b: Block): boolean {
+  if (b.type === "thread" || b.type === "mail" || b.type === "comment" || b.type === "media" || b.type === "link") return true;
+  if (b.type === "facts") return b.facts.some((f) => hasSrc(f as WithSource));
+  if (b.type === "list") return hasSrc(b as WithSource) || b.items.some((i) => hasSrc(i as WithSource));
+  return hasSrc(b as WithSource);
+}
+export function splitMain(material: Block[]): { main: Block[]; sources: Block[] } {
+  const main = material.filter((b) => !isSourced(b));
+  return main.length ? { main, sources: material.filter(isSourced) } : { main: [], sources: material };
+}
+
 // zrobiony odczyt: krok zamknięty przez Claude'a bez szkicu i bez zmian w kodzie, którego kartka niesie treść (paczka 9, punkt 1:
 // do tej pory treść ticketu leżała pod zwiniętą linią „Skąd” i Piotr widział tylko link)
 const CONTENT_KINDS = new Set(["free", "facts", "thread", "table", "list", "mail", "comment", "text", "media"]);
@@ -217,6 +233,20 @@ export function doneChat(s: Pick<Step, "title" | "tool" | "blocks"> & { filePath
   if (d?.kind === "push") return `Wypchnąłem na GitHub: ${q(s.title)}.${tail}`;
   return `Zrobione: ${q(s.title)}.${tail}`;
 }
+
+// dymek po oddaniu kroku (paczka 15, punkt 1): jedno zdanie o stanie i o tym, czego trzeba od Piotra; powód idzie osobno (actions.why)
+export const CLOUD_WAIT_RE = /^[\s„"'(]*do zrobienia w projekcie w chmurze/i;
+export function leaveChat(title: string, reason: string, waits: boolean): string {
+  const q = `„${shortTitle(title, 70)}”`;
+  if (CLOUD_WAIT_RE.test(reason)) return `Krok ${q} czeka, aż uruchomisz go w chmurze.`;
+  if (waits || /^[\s„"'(]*czeka(m|my|ją)?(?=[\s,:;.]|$)/i.test(reason)) return `Krok ${q} czeka na inny krok. Nic nie musisz robić.`;
+  return `Nie zrobiłem kroku ${q}. Potrzebuję, abyś coś zrobił.`;
+}
+// pełny powód przy krótkim dymku (zapisany w actions wpisu rozmowy)
+export const whyOf = (m: { actions?: unknown }): string | null => {
+  const w = (m.actions as { why?: unknown } | null | undefined)?.why;
+  return typeof w === "string" && w.trim() ? w.trim() : null;
+};
 
 const steps = (n: number) => (n === 1 ? "1 krok" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? `${n} kroki` : `${n} kroków`);
 // nagłówek sekcji „Teraz”: stan słowami i kolor bloku; po wysyłce słowo z celu („Utworzono”, „Wysłano”), strona dokłada godzinę;

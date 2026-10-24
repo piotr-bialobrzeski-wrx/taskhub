@@ -30,8 +30,24 @@ export const decodeEntities = (s: string) => s.replace(/&(amp|lt|gt);/g, (_, e: 
 const decodeLegacy = (md: string) => outsideCode(md, decodeEntities);
 // z edytora: encje wracają do znaków, a „snake\_case” (ucieczka edytora między literami) do „snake_case”
 export const fromEditorMd = (md: string) => outsideCode(md, (t) => decodeEntities(t).replace(/(?<=[\p{L}\p{N}])\\_(?=[\p{L}\p{N}])/gu, "_"));
+// paczka 15, punkt 15: linia od lewego brzegu tuż pod punktem listy („3. …\n**B: Table behavior**\n4. …”) Markdown dokleja do tego punktu
+// (wcięty podtytuł w środku listy, w edytorze i w ClickUpie); agent chce tam nowy akapit, więc dostaje pustą linię przed sobą. Kod bez zmian
+export function unlazy(md: string): string {
+  const out: string[] = [];
+  let fence: string | null = null, prevLi = false;
+  for (const raw of md.split("\n")) {
+    const f = /^\s*(`{3,}|~{3,})/.exec(raw);
+    if (fence) { out.push(raw); if (f && f[1][0] === fence[0] && f[1].length >= fence.length) fence = null; continue; }
+    if (f) fence = f[1];
+    const li = /^\s*(?:[-*+]|\d+[.)])\s+/.test(raw);
+    if (!f && prevLi && !li && raw.trim() && !/^\s/.test(raw)) out.push("");
+    out.push(raw);
+    prevLi = li;
+  }
+  return out.join("\n");
+}
 // do edytora: „<” poza kodem jako „&lt;”, żeby „Array<Item>” czy „<@U123>” nie zniknęły jako HTML
-export const toEditorMd = (md: string) => outsideCode(md, (t) => t.replace(/</g, "&lt;"));
+export const toEditorMd = (md: string) => outsideCode(unlazy(md), (t) => t.replace(/</g, "&lt;"));
 
 type Line =
   | { k: "h"; level: number; text: string }

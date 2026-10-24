@@ -23,19 +23,19 @@ import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estTe
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed, workBubble } from "@/lib/feed";
-import { decisionText, destOf, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, readingResult, reportLines, splitBlocks, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
+import { decisionText, destOf, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
 import { GrowTextarea } from "@/components/GrowTextarea";
-import { ConfirmButton, DoneAsk, InlineText, PromptBox, StepMeta, type StepConnection, type StepModelInfo } from "@/components/StepFields";
+import { DoneAsk, InlineText, PromptBox, StepMeta, type StepConnection, type StepModelInfo } from "@/components/StepFields";
 import { choiceOf, LEVEL_LABELS, modelConfig, modelLabel, runLabel, stepLevel } from "@/lib/agent/models";
 import { agentLabel, indexFrom } from "@/lib/search";
 import { Icon, plural } from "@/components/canvas/ui";
 import { InlineDate, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
 import { projColor } from "@/components/canvas/ui";
 import { PublishCard, cardModeOf } from "@/components/PublishCard";
-import { answerQuestionForm, restoreBlocksForm, backToTodo, cancelCloudRun, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, removeStep, reopen, runInCloud, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
+import { answerQuestionForm, restoreBlocksForm, backToTodo, cancelCloudRun, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, reopen, runInCloud, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -196,6 +196,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     <>
     <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || !!bubble || pending.length > 0 || t.steps.some((s) => s.status === "handoff" || !!s.cloud) || (!!bp && !t.doneAt)} />
     <TaskCanvas
+      project={cur.project ? { name: cur.project.name, color: projColor(cur.project.color) } : null}
       task={{ id: t.id, title: t.title, base: cur.score.base, eff: cur.score.eff, why: cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; "), state: taskStateOf(t, b.tasks), progress: { done: t.steps.filter((s) => s.status === "done").length, all: t.steps.length }, estText: estTextOf(t), activity: taskActivity(t.id, w.run), pending: pending.length }}
       queue={queue}
       steps={tiles}
@@ -231,8 +232,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // karta publikacji zastępuje blok szkicu i rząd akcji: decyzja stoi przy miejscu docelowym i podglądzie
   const mode = cardModeOf(s);
   const done = s.status === "done";
-  // trzy stałe sekcje (paczka 2, punkt 8): „Teraz” = stan i jedyny wyróżniony blok (akcje, czynność Claude, karta publikacji albo wynik),
-  // „Co” = brief, „Skąd” = materiały; wynik kroku (blok zmian w kodzie) idzie do „Teraz”, nie między materiały; po zrobieniu „Co” i „Skąd” zwijają się do linii
+  // sekcje (paczka 2, punkt 8; paczka 15): „Teraz” = stan i jedyny wyróżniony blok (akcje, czynność Claude, karta publikacji albo wynik),
+  // pod nim główna treść, potem „Skąd” = materiały; wynik kroku (blok zmian w kodzie) idzie do „Teraz”, nie między materiały
   const { result, material: material0 } = splitBlocks(blocks);
   const material = open.length ? material0.filter((b) => !(open as Block[]).includes(b)) : material0;   // otwarte pytania decyzji stoją w „Teraz”, nie między materiałami
   const form = s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined;
@@ -261,7 +262,6 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // miejsce docelowe (ticket, wątek, dokument) w nagłówku „Teraz” tylko bez karty publikacji: karta ma własny przycisk celu w nagłówku (przy opcjach
   // każda swój); po wysyłce jego miejsce zajmuje link do wyniku
   const target = !done && !mode ? targetLink(s, s.blocks) : null;
-  const kinds = kindsOf(material);
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
   const took = whoDid(s) === "Ty" ? spentMin(s) : agentMin;
@@ -326,26 +326,36 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
     </div>
   );
   const brief = <InlineText taskId={t.id} stepId={s.id} field="detail" value={s.detail} as="p" placeholder="Dodaj szczegóły: co dokładnie, gdzie, dla kogo…" />;
-  const co = folds.brief ? <div className="zone"><div className="lbl">Co</div>{brief}</div>
-    : <details className="fold"><summary><span className="k">Co</span><span className="t">{s.detail.trim() || "bez szczegółów"}</span><Icon k="chev" size={10} sw={2.2} /></summary>{brief}</details>;
   // kartka zmieniona przez agenta po odpowiedzi Piotra: jedno kliknięcie przywraca poprzednią wersję (drugie wraca do zmienionej)
   const undo = s.hasPrevBlocks && !done ? (
     <form action={restoreBlocksForm} className="undo"><input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="stepId" value={s.id} /><button type="submit" className="btn sm">Cofnij zmianę kartki</button></form>
   ) : null;
-  const skad = material.length ? (folds.material
-    ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span>{undo}</div><BlocksView blocks={material} form={form} indexOf={indexOf} /></div>
-    : <details className="fold"><summary><span className="k">Skąd</span><span className="t">{kinds}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView blocks={material} form={form} indexOf={indexOf} /></details>) : null;
+  // paczka 15 (punkty 7–9): bez sekcji „Co” (opis kroku idzie na dół, do zwiniętych informacji); główna treść zaraz pod „Teraz”,
+  // „Skąd” (materiał z pochodzeniem) pod nią i zwinięte; karta z kartą publikacji i odczyt bez zmian (materiał jest tam treścią)
+  const split = mode || readingResult(s, material) ? { main: [], sources: material } : splitMain(material);
+  const main = split.main.length && folds.material ? <div className="zone src main">{undo ? <div className="lbl">{undo}</div> : null}<BlocksView blocks={split.main} form={form} indexOf={indexOf} /></div>
+    : split.main.length ? <details className="fold"><summary><span className="k">Wynik</span><span className="t">{kindsOf(split.main)}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView blocks={split.main} form={form} indexOf={indexOf} /></details> : null;
+  const kinds = kindsOf(split.sources);
+  const srcOpen = folds.material && !split.main.length;   // „Skąd” rozwinięte tylko, gdy na karcie nie ma innej treści
+  const skad = split.sources.length ? (srcOpen
+    ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span>{split.main.length ? null : undo}</div><BlocksView blocks={split.sources} form={form} indexOf={indexOf} /></div>
+    : <details className="fold"><summary><span className="k">Skąd</span><span className="t">{kinds}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView blocks={split.sources} form={form} indexOf={indexOf} /></details>) : null;
+  // krok bez żadnej treści od agenta: opis zostaje na wierzchu, inaczej karta byłaby pusta
+  const bare = !material.length && !result.length && !mode;
   return (
     <>
-      <div className="pctx" title={`Zadanie: ${t.title}`}><span className="d" style={{ ["--c" as string]: ctx.color }} /><span><b>{t.title}</b> · {ctx.text}</span></div>
-      {mode && skad && folds.material ? (cmp ? <>{skad}{now}{co}</> : <><div className="zones two">{now}{skad}</div>{co}</>) : <>{now}{co}{skad}</>}
+      {mode && skad && srcOpen ? (cmp ? <>{skad}{now}</> : <div className="zones two">{now}{skad}</div>) : <>{now}{main}{skad}</>}
+      {bare ? <div className="zone">{brief}</div> : null}
       <details className="edit tech">
         <summary><span className="k">Szczegóły techniczne</span> · {tech}</summary>
         <div className="stack">
+          {/* paczka 15, punkt 6: zadanie, projekt i firma tylko tutaj, na dole karty */}
+          <div className="pctx"><span className="d" style={{ ["--c" as string]: ctx.color }} /><span>Zadanie <b>{t.title}</b> · {ctx.text}</span></div>
+          {bare ? null : <div className="zone"><div className="lbl">Opis kroku</div>{brief}</div>}
           <StepMeta taskId={t.id}
             step={{ id: s.id, tool: s.tool, own, agentMin, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null, connectionId: s.connectionId }}
             steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title, done: x.status === "done" }))}
-            connections={connections} showConnection={!mode} model={done ? null : model}
+            connections={connections} showConnection model={done ? null : model}
             calText={calOn && cal ? `Z Twoich czasów (${cal.n} ${plural(cal.n, "krok", "kroki", "kroków")}): takie kroki trwają zwykle ×${String(cal.k).replace(".", ",")}.` : null} />
           <InlineText taskId={t.id} stepId={s.id} field="link" value={s.link ?? ""} as="small" placeholder="Dodaj link do wyniku (ticket, wydarzenie, mail)…" shown={s.link ? "Link: " + s.link.replace(/^https?:\/\//, "").slice(0, 70) : undefined} />
         </div>
@@ -364,7 +374,6 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           </div>
         </details>
       ) : null}
-      <div className="actions"><ConfirmButton label="Usuń krok" question="Usunąć ten krok? Tego nie da się cofnąć." yes="Tak, usuń" action={removeStep.bind(null, t.id, s.id)} /></div>
     </>
   );
 }

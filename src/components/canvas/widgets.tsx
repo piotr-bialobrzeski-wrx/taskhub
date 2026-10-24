@@ -8,7 +8,6 @@ import { loadChat, type ChatVM } from "@/app/actions";
 import type { Queue } from "@/lib/auto";
 import { workFoot, type FeedItem, type WorkBubble } from "@/lib/feed";
 import { Activity, useMinutes } from "@/components/Activity";
-import { safeHref } from "@/lib/safeurl";
 import { Icon, Lvl, projColor, type ProjectVM } from "./ui";
 
 // ---------- menu wyboru przy przycisku ----------
@@ -165,7 +164,7 @@ export function ChatHistory({ taskId, title, onClose, queue = null, version = ""
                   <Fragment key={m.id}>
                     {i === 0 || dayOf(m.createdAt) !== dayOf(msgs[i - 1].createdAt) ? <div className="hm-day">{dayLabel(m.createdAt)}</div> : null}
                     <div id={"hm-" + m.id} className={"hm " + m.role + (m.role === "user" && !m.answeredAt ? " q" : "")}>
-                      <div className="hm-b">{m.text}</div>
+                      <div className="hm-b">{m.text}{m.why ? <span className="hm-why">{m.why}</span> : null}</div>
                       <span className="hm-t">{m.role === "agent" ? "Claude · " : ""}{timeOf(m.createdAt)}</span>
                       {stateLine(m, msgs, lastPending)}
                     </div>
@@ -308,6 +307,43 @@ export function RemovePop({ label, question, onYes }: { label: string; question:
   );
 }
 
+// ---------- menu „⋮” w nagłówku karty (paczka 15, punkt 10): rzadkie akcje schowane, wyrównane do prawej; akcja z pytaniem pyta w tym samym dymku ----------
+export type MoreItem = { label: string; danger?: boolean; confirm?: string; yes?: string; onPick: () => void };
+export function MoreMenu({ label, items }: { label: string; items: MoreItem[] }) {
+  const [open, setOpen] = useState(false);
+  const [ask, setAsk] = useState<MoreItem | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ left: 0, top: 0 });
+  useEffect(() => {
+    if (!open) { setAsk(null); return; }
+    const r = btn.current!.getBoundingClientRect();
+    setPos({ left: Math.max(8, Math.min(r.right - 220, window.innerWidth - 228)), top: r.bottom + 6 });
+    const close = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".ppmenu") && !btn.current?.contains(e.target as Node)) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", close); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", key); };
+  }, [open]);
+  return (
+    <>
+      <button ref={btn} className="icobtn" type="button" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}><Icon k="more" size={14} sw={2.6} /></button>
+      {open ? createPortal(
+        ask ? (
+          <div className="ppmenu glass pop" role="dialog" aria-label={ask.label} style={{ position: "fixed", left: pos.left, top: pos.top, width: 220 }} onPointerDown={(e) => e.stopPropagation()}>
+            <span className="sub">{ask.confirm}</span>
+            <div className="row" style={{ gap: "var(--s-2)", justifyContent: "flex-end" }}>
+              <button className="btn" type="button" onClick={() => setOpen(false)}>Anuluj</button>
+              <button className="btn danger" type="button" onClick={() => { setOpen(false); ask.onPick(); }}>{ask.yes ?? "Tak"}</button>
+            </div>
+          </div>
+        ) : (
+          <div className="ppmenu glass tmenu" role="menu" style={{ position: "fixed", left: pos.left, top: pos.top, minWidth: 180 }} onPointerDown={(e) => e.stopPropagation()}>
+            {items.map((it, i) => <button key={i} type="button" role="menuitem" className={"pp-opt" + (it.danger ? " danger" : "")} onClick={() => { if (it.confirm) setAsk(it); else { setOpen(false); it.onPick(); } }}>{it.label}</button>)}
+          </div>
+        ), document.body) : null}
+    </>
+  );
+}
+
 // ---------- menu kafelka na prawy klik: te same akcje co pasek zaznaczenia, w miejscu kliknięcia (paczka 2, punkt 2) ----------
 export type MenuItem = { label: string; danger?: boolean; onPick: () => void };
 export function TileMenu({ at, items, onClose }: { at: { x: number; y: number }; items: MenuItem[]; onClose: () => void }) {
@@ -363,20 +399,18 @@ export function AgentFeed({ items, work = null, onStop, stepLabel, onStep, class
   return (
     <div className={"feed " + className} style={style} role="log" aria-live="polite" aria-label="Odpowiedzi Claude">
       {shown.map((m) => {
-        const step = m.stepId && stepLabel ? stepLabel(m.stepId) : null, link = safeHref(m.link);   // wynik tylko http(s) albo plik Task Hub
-        // inne kroki dotknięte w tym biegu: małe przyciski z numerem, tylko gdy nie ma linku do wyniku (dymek zostaje krótki)
-        const more = !link && stepLabel && onStep ? m.steps.map((id) => ({ id, label: stepLabel(id) })).filter((x): x is { id: string; label: string } => !!x.label) : [];
+        const step = m.stepId && stepLabel ? stepLabel(m.stepId) : null;
+        // paczka 15: bez „Otwórz wynik” (wynik jest na karcie kroku); inne kroki dotknięte w tym biegu jako małe przyciski z numerem
+        const more = stepLabel && onStep ? m.steps.map((id) => ({ id, label: stepLabel(id) })).filter((x): x is { id: string; label: string } => !!x.label) : [];
         return (
           <div key={m.id} className="fb glass">
             <div className="ans-text">{m.text}</div>
-            <span className="ans-t">Claude · {m.at}</span>
-            {step || link || more.length ? (
-              <div className="ans-acts">
-                {step && onStep ? <button className="btn" type="button" onClick={() => onStep(m.stepId!)}>Otwórz krok {step}</button> : null}
-                {more.map((x) => <button key={x.id} className="btn sm" type="button" title={`Otwórz krok ${x.label}`} onClick={() => onStep!(x.id)}>{x.label}</button>)}
-                {link ? <a className="btn ico" href={link} target="_blank" rel="noopener" title={link}>Otwórz wynik<Icon k="ext" size={13} sw={1.6} /></a> : null}
-              </div>
-            ) : null}
+            {/* jeden rząd na dole: przyciski z lewej, godzina z prawej */}
+            <div className="ans-row">
+              {step && onStep ? <button className="btn" type="button" onClick={() => onStep(m.stepId!)}>Otwórz krok {step}</button> : null}
+              {more.map((x) => <button key={x.id} className="btn sm" type="button" title={`Otwórz krok ${x.label}`} onClick={() => onStep!(x.id)}>{x.label}</button>)}
+              <span className="ans-t">Claude · {m.at}</span>
+            </div>
             <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => close(m.id)}><Icon k="x" size={12} sw={2} /></button>
           </div>
         );
@@ -385,7 +419,7 @@ export function AgentFeed({ items, work = null, onStop, stepLabel, onStep, class
     </div>
   );
 }
-// dymek pracy: „wysłane” (kropka, tytuł, cytat, „Ty · 19:41”, X) albo „Claude pracuje” (kropki, minuty, cytat, co teraz, chipy kroków, stopka, „Zatrzymaj”)
+// dymek pracy: „wysłane” (kropka, tytuł, cytat, „Ty · 19:41”, X) albo „Claude pracuje” (kropki, minuty, „Zatrzymaj”, cytat, co teraz, chipy kroków)
 function WorkCard({ b, onStop, onStep, onClose }: { b: WorkBubble; onStop?: (runId: string) => Promise<unknown> | void; onStep?: (stepId: string) => void; onClose: () => void }) {
   const min = useMinutes(b.kind === "working" ? b.since : "");
   const [busy, setBusy] = useState(false);
@@ -394,13 +428,20 @@ function WorkCard({ b, onStop, onStep, onClose }: { b: WorkBubble; onStop?: (run
       <div className="wk-h"><i className="wk-dot" aria-hidden="true" />{b.title}</div>
       {b.line ? <div className="wk-line">{b.line}</div> : null}
       <div className="wk-q">{b.quote}</div>
-      <span className="ans-t">Ty · {b.at}</span>
+      <div className="ans-row"><span className="ans-t">Ty · {b.at}</span></div>
       <button className="icobtn ans-x" type="button" aria-label="Zamknij" title="Zamknij" onClick={onClose}><Icon k="x" size={12} sw={2} /></button>
     </div>
   );
   return (
     <div className="fb glass work on">
-      <div className="wk-h"><span className="dots" aria-hidden="true"><i /><i /><i /></span><span className="wk-t">Claude pracuje</span>{min !== null && min >= 1 ? <span className="act-m">{min} min</span> : null}</div>
+      {/* paczka 15: bez stopki z urządzeniem i godziną (zostaje w podpowiedzi); „Zatrzymaj” w rzędzie nagłówka, po prawej */}
+      <div className="wk-h" title={workFoot(b)}>
+        <span className="dots" aria-hidden="true"><i /><i /><i /></span><span className="wk-t">Claude pracuje</span>{min !== null && min >= 1 ? <span className="act-m">{min} min</span> : null}
+        {b.stoppable && onStop ? (
+          <button className="btn sm ico" type="button" disabled={busy} title="Przerywa bieżącą pracę Claude na Macu. Wróci za 10 minut albo od razu, gdy napiszesz."
+            onClick={async () => { setBusy(true); try { await onStop(b.runId); } finally { setBusy(false); } }}><Icon k="stop" size={12} sw={1.6} />{busy ? "Zatrzymuję…" : "Zatrzymaj"}</button>
+        ) : null}
+      </div>
       {b.quote ? <div className="wk-q">{b.quote}</div> : null}
       <div className="wk-now" aria-live="off">Teraz: {b.now}{b.detail ? <span className="act-d"> · {b.detail}</span> : null}</div>
       {b.chips.length ? (
@@ -410,13 +451,6 @@ function WorkCard({ b, onStop, onStep, onClose }: { b: WorkBubble; onStop?: (run
           {b.more ? <span className="chip">+{b.more}</span> : null}
         </div>
       ) : null}
-      <div className="wk-foot">
-        <span className="wk-ft">{workFoot(b)}</span><span className="sp" />
-        {b.stoppable && onStop ? (
-          <button className="btn sm ico" type="button" disabled={busy} title="Przerywa bieżącą pracę Claude na Macu. Wróci za 10 minut albo od razu, gdy napiszesz."
-            onClick={async () => { setBusy(true); try { await onStop(b.runId); } finally { setBusy(false); } }}><Icon k="stop" size={12} sw={1.6} />{busy ? "Zatrzymuję…" : "Zatrzymaj"}</button>
-        ) : null}
-      </div>
     </div>
   );
 }
