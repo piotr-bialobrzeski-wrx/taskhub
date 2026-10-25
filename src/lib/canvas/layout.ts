@@ -111,10 +111,54 @@ export function reassign(groups: LGroup[], P: Record<string, Pos>, size: Size, c
   for (const [id, gid] of Object.entries(owner)) if (gid && !out[gid].includes(id)) out[gid].push(id);
   return out;
 }
+// Świat kanwy: od (x0, y0) do (w, h). Góra i lewa działają jak dół i prawa: kafelek odsunięty ponad pierwszy (albo w lewo) poszerza świat w tę stronę z zapasem.
+export const MARGIN = { left: OX, top: OY, right: 420, bottom: 160 };
 export function bounds(P: Record<string, Pos>, groups: LGroup[], size: Size, origin: Pos | null) {
-  let mx = 0, my = 0;
-  Object.values(P).forEach((p) => { mx = Math.max(mx, p.x + size.w); my = Math.max(my, p.y + size.h); });
-  if (origin) { mx = Math.max(mx, origin.x + size.w); my = Math.max(my, origin.y + size.h); }
-  groups.forEach((g) => { mx = Math.max(mx, g.x + g.w); my = Math.max(my, g.y + g.h); });
-  return { w: mx + 420, h: my + 160 };
+  let mx = 0, my = 0, nx = Infinity, ny = Infinity;
+  const add = (x: number, y: number, w: number, h: number) => { mx = Math.max(mx, x + w); my = Math.max(my, y + h); nx = Math.min(nx, x); ny = Math.min(ny, y); };
+  Object.values(P).forEach((p) => add(p.x, p.y, size.w, size.h));
+  if (origin) add(origin.x, origin.y, size.w, size.h);
+  groups.forEach((g) => add(g.x, g.y, g.w, g.h));
+  return { x0: Math.min(0, nx - MARGIN.left), y0: Math.min(0, ny - MARGIN.top), w: mx + MARGIN.right, h: my + MARGIN.bottom };
+}
+
+// Strzałka od prawej krawędzi kafelka A (wysokość ay) do lewej krawędzi B. Zwykle łuk; gdy łuk przeszedłby przez inny kafelek
+// (zależność przez kilka kolumn), strzałka idzie szczeliną: w prawo do odstępu za A, pionowo do wolnego pasa między wierszami,
+// poziomo do odstępu przed B i do B. Kafelki to prostokąty `obstacles` (bez A i B).
+export type Rect = { x: number; y: number; w: number; h: number };
+const PADR = 6;
+const hitsRect = (x: number, y: number, rs: Rect[]) => rs.some((r) => x > r.x - PADR && x < r.x + r.w + PADR && y > r.y - PADR && y < r.y + r.h + PADR);
+const segHits = (x1: number, y1: number, x2: number, y2: number, rs: Rect[]) =>
+  rs.some((r) => Math.max(x1, x2) > r.x - PADR && Math.min(x1, x2) < r.x + r.w + PADR && Math.max(y1, y2) > r.y - PADR && Math.min(y1, y2) < r.y + r.h + PADR);
+export function edgePath(x1: number, y1: number, x2: number, y2: number, obstacles: Rect[]): string {
+  const k = Math.max(40, Math.abs(x2 - x1) / 2);
+  const curve = `M${x1} ${y1} C${x1 + k} ${y1}, ${x2 - k} ${y2}, ${x2} ${y2}`;
+  if (x2 - x1 < 2 * GX) return curve;   // sąsiednie kolumny (albo strzałka wstecz): między nimi nie ma kafelków
+  const between = obstacles.filter((r) => r.x + r.w > x1 && r.x < x2);
+  // próbki łuku Béziera: czy przechodzi przez kafelek
+  let crosses = false;
+  for (let i = 1; i < 24 && !crosses; i++) {
+    const t = i / 24, u = 1 - t;
+    const x = u * u * u * x1 + 3 * u * u * t * (x1 + k) + 3 * u * t * t * (x2 - k) + t * t * t * x2;
+    const y = u * u * u * y1 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y2;
+    crosses = hitsRect(x, y, between);
+  }
+  if (!crosses) return curve;
+  const xa = x1 + GX / 2, xb = x2 - GX / 2;
+  // pas poziomy: wysokość źródła, celu, albo tuż nad / pod którymś kafelkiem po drodze; najbliższy wolny
+  const cands = [y1, y2, ...between.flatMap((r) => [r.y - GY / 2, r.y + r.h + GY / 2])];
+  const ok = (y: number) => !segHits(xa, y, xb, y, between) && !segHits(xa, y1, xa, y, between) && !segHits(xb, y, xb, y2, between);
+  const yc = cands.filter(ok).sort((a, b) => Math.abs(a - y1) + Math.abs(a - y2) - (Math.abs(b - y1) + Math.abs(b - y2)))[0];
+  if (yc === undefined) return curve;
+  // łamana z zaokrąglonymi narożnikami
+  const pts: [number, number][] = [[x1, y1], [xa, y1], [xa, yc], [xb, yc], [xb, y2], [x2, y2]]
+    .filter((p, i, a) => i === 0 || p[0] !== a[i - 1][0] || p[1] !== a[i - 1][1]) as [number, number][];
+  let d = `M${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1], [cx, cy] = pts[i], [nx, ny] = pts[i + 1];
+    const r = Math.min(12, Math.hypot(cx - px, cy - py) / 2, Math.hypot(nx - cx, ny - cy) / 2);
+    const ax = cx - Math.sign(cx - px) * r, ay = cy - Math.sign(cy - py) * r, bx = cx + Math.sign(nx - cx) * r, by = cy + Math.sign(ny - cy) * r;
+    d += ` L${ax} ${ay} Q${cx} ${cy}, ${bx} ${by}`;
+  }
+  return d + ` L${pts[pts.length - 1][0]} ${pts[pts.length - 1][1]}`;
 }
