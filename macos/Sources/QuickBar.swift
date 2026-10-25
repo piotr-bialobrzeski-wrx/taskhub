@@ -14,6 +14,7 @@ struct QuickFile: Identifiable {
     var mime: String
     var data: Data
     var preview: NSImage?
+    var image: NSImage? = nil        // pełna grafika do podglądu (paczka 19)
 }
 
 // wpis historii: 10 ostatnich wysłanych; sent == nil = w trakcie wysyłki
@@ -50,6 +51,7 @@ final class QuickBarModel: ObservableObject {
     @Published var files: [QuickFile] = []
     @Published var history: [QuickSent] = []    // od najstarszej do najnowszej (najnowsza tuż nad paskiem)
     @Published var showHistory = false
+    @Published var previewId: UUID? = nil       // grafika otwarta w podglądzie nad paskiem (paczka 19)
     @Published var error = ""
     @Published var textHeight: CGFloat = QuickBarModel.minText
     @Published var histContent: CGFloat = 0
@@ -113,6 +115,7 @@ final class QuickBarModel: ObservableObject {
         if history.count > QuickBarModel.keep { history.removeFirst(history.count - QuickBarModel.keep) }
         text = ""
         files = []
+        previewId = nil
         error = ""
         save()
         close()
@@ -165,10 +168,33 @@ final class QuickBarModel: ObservableObject {
         let s = QuickBarModel.shrink(name: name, mime: mime, data: data)
         guard s.data.count <= QuickBarModel.maxFile else { flash("„\(name)” jest za duży (maks. 4 MB)."); return }
         let preview = s.mime.hasPrefix("image/") ? QuickBarModel.thumb(s.data) : nil
-        files.append(QuickFile(name: s.name, mime: s.mime, data: s.data, preview: preview))
+        files.append(QuickFile(name: s.name, mime: s.mime, data: s.data, preview: preview, image: preview == nil ? nil : NSImage(data: s.data)))
     }
 
-    func remove(_ id: UUID) { files.removeAll { $0.id == id } }
+    // ---------- podgląd grafik (paczka 19): klik w miniaturę, kosz, strzałki przy więcej niż jednej grafice ----------
+    var images: [QuickFile] { files.filter { $0.image != nil } }
+
+    func openPreview(_ id: UUID) {
+        showHistory = false
+        previewId = id
+    }
+
+    func stepPreview(_ d: Int) {
+        let im = images
+        guard im.count > 1, let i = im.firstIndex(where: { $0.id == previewId }) else { return }
+        previewId = im[(i + d + im.count) % im.count].id
+    }
+
+    // usunięcie grafiki otwartej w podglądzie pokazuje następną (albo poprzednią, gdy była ostatnia); bez grafik podgląd się zamyka
+    func remove(_ id: UUID) {
+        if previewId == id {
+            let im = images
+            let i = im.firstIndex(where: { $0.id == id }) ?? 0
+            let rest = im.filter { $0.id != id }
+            previewId = rest.isEmpty ? nil : rest[min(i, rest.count - 1)].id
+        }
+        files.removeAll { $0.id == id }
+    }
 
     // jak w doku: duże grafiki zmniejszamy do 1800 px (JPEG), mieszczą się w limicie i są tańsze dla agenta
     static func shrink(name: String, mime: String, data: Data) -> (name: String, mime: String, data: Data) {
@@ -276,7 +302,10 @@ struct BarTextField: NSViewRepresentable {
                 m.send()
                 return true
             }
-            if sel == #selector(NSResponder.cancelOperation(_:)) { m.close(); return true }
+            if sel == #selector(NSResponder.cancelOperation(_:)) {
+                if m.previewId != nil { m.previewId = nil } else { m.close() }   // Esc najpierw zamyka podgląd grafiki
+                return true
+            }
             return false
         }
     }
@@ -409,22 +438,32 @@ struct BarSendButton: View {
     }
 }
 
+// chip załącznika: grafika otwiera podgląd kliknięciem w miniaturę albo nazwę; kosz usuwa (jak w doku w Task Hub)
 struct BarChip: View {
     let f: QuickFile
+    let open: () -> Void
     let remove: () -> Void
     var body: some View {
         HStack(spacing: 6) {
             if let img = f.preview {
-                Image(nsImage: img).resizable().scaledToFill().frame(width: 22, height: 22).clipShape(Circle())
+                Button(action: open) {
+                    HStack(spacing: 6) {
+                        Image(nsImage: img).resizable().scaledToFill().frame(width: 22, height: 22).clipShape(Circle())
+                        name
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Podgląd")
             } else {
                 let ext = (f.name as NSString).pathExtension
                 Text(ext.isEmpty ? "PLIK" : String(ext.prefix(4)).uppercased())
                     .font(.system(size: 9.5, weight: .bold)).foregroundColor(Theme.sub)
                     .frame(width: 22, height: 22).background(Circle().fill(Theme.surface))
+                name
             }
-            Text(f.name).font(.system(size: 12)).foregroundColor(Theme.text).lineLimit(1).truncationMode(.middle).frame(maxWidth: 200, alignment: .leading)
             Button(action: remove) {
-                Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundColor(Theme.sub).frame(width: 18, height: 18).contentShape(Circle())
+                Image(systemName: "trash").font(.system(size: 10.5, weight: .medium)).foregroundColor(Theme.sub).frame(width: 18, height: 18).contentShape(Circle())
             }
             .buttonStyle(.plain)
             .help("Usuń \(f.name)")
@@ -434,6 +473,85 @@ struct BarChip: View {
         .frame(height: 28)
         .background(Capsule().fill(Theme.accentSoft))
         .help(f.name)
+    }
+
+    private var name: some View {
+        Text(f.name).font(.system(size: 12)).foregroundColor(Theme.text).lineLimit(1).truncationMode(.middle).frame(maxWidth: 200, alignment: .leading)
+    }
+}
+
+// podgląd grafiki nad paskiem, w miejscu historii: nazwa, „2 z 3”, kosz i zamknięcie u góry, strzałki po bokach przy więcej niż jednej grafice
+struct PreviewPanel: View {
+    @ObservedObject var m: QuickBarModel
+
+    // rozmiar liczony wprost (bez skalowania w górę): okno paska bierze wysokość z treści, więc musi być znana od razu
+    static func fit(_ img: NSImage, maxH: CGFloat) -> CGSize {
+        let w = max(img.size.width, 1), h = max(img.size.height, 1)
+        let k = min((QuickBarModel.width - 12) / w, maxH / h, 1)
+        return CGSize(width: floor(w * k), height: floor(h * k))
+    }
+
+    static func boxHeight(_ maxHist: CGFloat) -> CGFloat { max(160, maxHist - 52) }
+
+    var body: some View {
+        let im = m.images
+        Group {
+            if let i = im.firstIndex(where: { $0.id == m.previewId }), let img = im[i].image {
+                let f = im[i]
+                let size = PreviewPanel.fit(img, maxH: PreviewPanel.boxHeight(m.maxHist))
+                VStack(spacing: 6) {
+                    HStack(spacing: 6) {
+                        Text(f.name).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text).lineLimit(1).truncationMode(.middle)
+                        if im.count > 1 {
+                            Text("\(i + 1) z \(im.count)").font(.system(size: 12)).foregroundColor(Theme.sub).fixedSize()
+                        }
+                        Spacer(minLength: 8)
+                        BarIconButton(symbol: "trash", help: "Usuń \(f.name)") { m.remove(f.id) }
+                        BarIconButton(symbol: "xmark", help: "Zamknij podgląd (Esc)") { m.previewId = nil }
+                    }
+                    .padding(.leading, 8)
+                    ZStack {
+                        Image(nsImage: img).resizable().frame(width: size.width, height: size.height)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        if im.count > 1 {
+                            HStack {
+                                PreviewNav(symbol: "chevron.left", help: "Poprzednia grafika") { m.stepPreview(-1) }
+                                Spacer()
+                                PreviewNav(symbol: "chevron.right", help: "Następna grafika") { m.stepPreview(1) }
+                            }
+                            .padding(.horizontal, 8)
+                        }
+                    }
+                    .frame(width: QuickBarModel.width - 12, height: max(size.height, 56))
+                }
+                .padding(6)
+                .background(Glass(radius: 20))
+            }
+        }
+    }
+}
+
+// okrągła strzałka na grafice: jasne tło, żeby było ją widać na każdym obrazku
+struct PreviewNav: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(Theme.text)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(Theme.surface.opacity(hover ? 1 : 0.88)))
+                .overlay(Circle().stroke(Theme.line, lineWidth: 1))
+                .shadow(color: Color.black.opacity(0.18), radius: 6, x: 0, y: 2)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -508,7 +626,7 @@ struct QuickBarView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            if m.showHistory { HistoryPanel(m: m) }
+            if m.previewId != nil { PreviewPanel(m: m) } else if m.showHistory { HistoryPanel(m: m) }
             bar
         }
         .frame(width: QuickBarModel.width)
@@ -519,7 +637,7 @@ struct QuickBarView: View {
             if !m.files.isEmpty {
                 // chipy w jednym rzędzie (bez zawijania), przewijane w bok
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) { ForEach(m.files) { f in BarChip(f: f) { m.remove(f.id) } } }
+                    HStack(spacing: 6) { ForEach(m.files) { f in BarChip(f: f, open: { m.openPreview(f.id) }, remove: { m.remove(f.id) }) } }
                         .padding(.horizontal, 4)
                 }
                 .frame(height: 28)
@@ -541,7 +659,7 @@ struct QuickBarView: View {
                     }
                 }
                 .frame(height: m.textHeight)
-                BarIconButton(symbol: "clock.arrow.circlepath", on: m.showHistory, help: m.showHistory ? "Zamknij historię" : "Ostatnio wysłane") { m.showHistory.toggle() }
+                BarIconButton(symbol: "clock.arrow.circlepath", on: m.showHistory, help: m.showHistory ? "Zamknij historię" : "Ostatnio wysłane") { m.previewId = nil; m.showHistory.toggle() }
                     .padding(.bottom, 1)
                 BarSendButton(enabled: m.canSend) { m.send() }
             }
@@ -626,7 +744,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             bottom = f.minY + f.height * 0.28
             model.maxHist = max(160, min(560, f.maxY - bottom - QuickBarModel.maxText - 60))
         }
-        model.showHistory = false      // po otwarciu sam pasek, bez historii
+        model.showHistory = false      // po otwarciu sam pasek, bez historii i podglądu
+        model.previewId = nil
         model.error = ""
         let front = NSWorkspace.shared.frontmostApplication
         previousApp = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
@@ -670,6 +789,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         if !model.files.isEmpty { h += 34 }
         if !model.error.isEmpty { h += 22 }
         if model.showHistory { h += 8 + min(max(model.histContent, 40), model.maxHist) }
+        if model.previewId != nil { h += 8 + 56 + PreviewPanel.boxHeight(model.maxHist) }
         return h
     }
 

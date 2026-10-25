@@ -198,6 +198,37 @@ export function ChatHistory({ taskId, title, onClose, queue = null, version = ""
   );
 }
 
+// podgląd grafik dodanych do pola czatu (paczka 19): duża grafika na rozmytym tle, kosz jak w polu, strzałki przy więcej niż jednej grafice;
+// Esc zamyka, ← i → przechodzą między grafikami, klik obok grafiki zamyka
+function ImageView({ items, current, onPick, onClose, onRemove }: { items: Att[]; current: string; onPick: (key: string) => void; onClose: () => void; onRemove: (key: string) => void }) {
+  const i = Math.max(0, items.findIndex((a) => a.key === current));
+  const a = items[i];
+  const many = items.length > 1;
+  const go = (d: number) => onPick(items[(i + d + items.length) % items.length].key);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
+      else if (many && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); e.stopPropagation(); go(e.key === "ArrowLeft" ? -1 : 1); }
+    };
+    document.addEventListener("keydown", key, true);
+    return () => document.removeEventListener("keydown", key, true);
+  });
+  return createPortal(
+    <div className="imgview" role="dialog" aria-modal="true" aria-label={"Podgląd: " + a.file.name} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="iv-bar glass">
+        <span className="iv-name" title={a.file.name}>{a.file.name}</span>
+        {many ? <span className="iv-count">{i + 1} z {items.length}</span> : null}
+        <button className="icobtn" type="button" aria-label={"Usuń " + a.file.name} title="Usuń" onClick={() => onRemove(a.key)}><Icon k="trash" size={15} sw={1.7} /></button>
+        <button className="icobtn" type="button" aria-label="Zamknij podgląd" title="Zamknij (Esc)" onClick={onClose}><Icon k="x" size={13} sw={2} /></button>
+      </div>
+      <img className="iv-img" src={a.preview!} alt={a.file.name} onClick={(e) => e.stopPropagation()} />
+      {many ? <>
+        <button className="iv-nav prev glass" type="button" aria-label="Poprzednia grafika" title="Poprzednia (←)" onClick={() => go(-1)}><Icon k="chevL" size={18} sw={1.9} /></button>
+        <button className="iv-nav next glass" type="button" aria-label="Następna grafika" title="Następna (→)" onClick={() => go(1)}><Icon k="chevR" size={18} sw={1.9} /></button>
+      </> : null}
+    </div>, document.body);
+}
+
 function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone, hist, onHistory }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void; hist: boolean; onHistory: () => void }) {
   const { pending } = useFormStatus();
   const ta = useRef<HTMLTextAreaElement>(null);
@@ -205,13 +236,19 @@ function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone
   const grow = () => { const el = ta.current; if (!el) return; el.style.height = "34px"; el.style.height = Math.min(168, el.scrollHeight) + "px"; };
   useEffect(() => { if (!pending && ta.current) { ta.current.value = ""; grow(); onDone(); } }, [pending]);   // eslint-disable-line react-hooks/exhaustive-deps
   const canSend = () => !!ta.current?.value.trim() || atts.length > 0;
+  const [view, setView] = useState<string | null>(null);   // klucz grafiki otwartej w podglądzie
+  const imgs = atts.filter((a) => a.preview);
   return (
     <>
+      {view && imgs.some((a) => a.key === view) ? <ImageView items={imgs} current={view} onPick={setView} onClose={() => setView(null)}
+        onRemove={(key) => { const i = imgs.findIndex((a) => a.key === key); const rest = imgs.filter((a) => a.key !== key); setView(rest.length ? rest[Math.min(i, rest.length - 1)].key : null); onRemove(key); }} /> : null}
       {atts.length ? (
         <div className="att">{atts.map((a) => (
           <span key={a.key} className="att-item" title={a.file.name}>
-            {a.preview ? <img src={a.preview} alt="" /> : <span className="ph">{extOf(a.file.name)}</span>}<span>{a.file.name}</span>
-            <button type="button" aria-label={"Usuń " + a.file.name} onClick={() => onRemove(a.key)}><Icon k="x" size={10} sw={2.2} /></button>
+            {a.preview
+              ? <button type="button" className="att-open" aria-label={"Podgląd " + a.file.name} title="Podgląd" onClick={() => setView(a.key)}><img src={a.preview} alt="" /><span>{a.file.name}</span></button>
+              : <><span className="ph">{extOf(a.file.name)}</span><span>{a.file.name}</span></>}
+            <button type="button" aria-label={"Usuń " + a.file.name} title="Usuń" onClick={() => onRemove(a.key)}><Icon k="trash" size={12} sw={1.8} /></button>
           </span>
         ))}</div>
       ) : null}
