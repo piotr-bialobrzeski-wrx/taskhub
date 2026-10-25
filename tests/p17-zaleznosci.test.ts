@@ -21,5 +21,6 @@ describe("kartki zrobionych zależności w kroku Piotra", () => {
     expect(depCardsFor(steps, { ...solve, status: "done" })).toEqual([]);
     expect(depCardsFor(steps, { ...solve, tool: "claude" })).toEqual([]);
     expect(depCardsFor([{ ...prep, status: "todo" }, solve], solve)).toEqual([]);
+    expect(depCardsFor([{ ...prep, blocks: [{ type: "text", body: "Test jest w kroku 02." } as Block] }, solve], solve)).toEqual([]);
   });
 });
