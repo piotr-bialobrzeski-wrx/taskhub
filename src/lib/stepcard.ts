@@ -34,6 +34,37 @@ export function depCardsFor(steps: Pick<Step, "id" | "title" | "status" | "tool"
   });
 }
 
+// paczka 19, punkt 1: kartka decyzji „Zdecyduj …” / „Wybierz …” po prototypie ma przycisk „Otwórz prototyp” z adresem najnowszego podglądu.
+// Adres bierze się z wyniku zrobionego kroku z „prototyp” w tytule (np. „Zleć w projekcie: prototyp …”, „… poprawki prototypu …”), od którego
+// decyzja zależy; idzie wstecz przez inne kroki-prototypy i wcześniejsze decyzje (prototyp poprawiany po pierwszej decyzji), najnowszy po doneAt.
+// Bez adresu http (albo tylko commit na GitHubie) nie ma przycisku
+export const PROTO_RE = /prototyp/i;
+type ProtoStep = Pick<Step, "id" | "title" | "status" | "tool" | "dependsOn" | "link" | "doneAt" | "blocks">;
+const protoUrl = (x: ProtoStep): string | null => {
+  const preview = (x.blocks ?? []).find((b): b is Changes => b.type === "changes" && isHttpUrl(b.preview))?.preview;
+  if (preview) return preview;
+  return x.link && isHttpUrl(x.link) && !/^https?:\/\/(www\.)?github\.com\//i.test(x.link) ? x.link : null;
+};
+export function prototypeLink(steps: ProtoStep[], s: Pick<Step, "dependsOn" | "status" | "tool" | "blocks">): string | null {
+  if (s.status === "done" || !isOwnerStep(s) || !openQuestions(s).length) return null;
+  const byId = new Map(steps.map((x) => [x.id, x]));
+  const seen = new Set<string>(), found: ProtoStep[] = [];
+  const walk = (ids: string[]) => {
+    for (const id of ids) {
+      const x = byId.get(id);
+      if (!x || seen.has(id)) continue;
+      seen.add(id);
+      const proto = PROTO_RE.test(x.title);
+      if (proto && x.status === "done" && protoUrl(x)) found.push(x);
+      // dalej tylko przez prototypy i decyzje: dłuższy łańcuch (np. kroki z kodem przed prototypem) to już inna sprawa
+      if (proto || (isOwnerStep(x) && x.blocks?.some((b) => b.type === "question"))) walk(x.dependsOn);
+    }
+  };
+  walk(s.dependsOn);
+  const last = found.sort((a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? ""))[0];
+  return last ? protoUrl(last) : null;
+}
+
 // co jest rozwinięte: brief („Co”) i materiały („Skąd”) zwijają się po zrobieniu; przy szkicu brief ustępuje karcie publikacji;
 // zrobiony odczyt Claude'a (reading) trzyma materiały rozwinięte, bo one są jego wynikiem (treść ticketu, wątku), nie tłem
 export function foldsFor(state: CardState, mode: string | null, reading = false): { brief: boolean; material: boolean } {

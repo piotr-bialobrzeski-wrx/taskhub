@@ -24,7 +24,7 @@ import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
-import { decisionText, depCardsFor, destOf, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
+import { decisionText, depCardsFor, destOf, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -265,6 +265,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // miejsce docelowe (ticket, wątek, dokument) w nagłówku „Teraz” tylko bez karty publikacji: karta ma własny przycisk celu w nagłówku (przy opcjach
   // każda swój); po wysyłce jego miejsce zajmuje link do wyniku
   const target = !done && !mode ? targetLink(s, s.blocks) : null;
+  const proto = !mode ? prototypeLink(t.steps, s) : null;   // paczka 19, punkt 1: decyzja po prototypie otwiera jego najnowszy podgląd
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
   const took = whoDid(s) === "Ty" ? spentMin(s) : agentMin;
@@ -277,7 +278,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           : <span className="working" title={s.cloud ? "Claude w chmurze robi ten krok; wynik pojawi się tutaj" : prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />{s.cloud ? "Claude w chmurze pracuje" : "Claude pracuje"}{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>)
           : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
         {meta ? <small>· {meta}</small> : null}
-        {target && isHttpUrl(target.url) ? <><span className="sp" /><a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
+        {proto ? <><span className="sp" /><a className="btn ico" href={proto} target="_blank" rel="noopener" title={`Najnowszy podgląd prototypu: ${proto}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a></> : null}
+        {target && isHttpUrl(target.url) ? <>{proto ? null : <span className="sp" />}<a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
         {done && s.filePath ? <><span className="sp" /><CopyButton text={s.filePath} label="Kopiuj ścieżkę" /></> : null}
       </div>
       {s.tool === "file" && s.status === "todo" && oldMac ? <div className="note">Ten krok zapisze plik aplikacja Task Hub na Macu od wersji 0.1.7. Zaktualizuj ją w menu aplikacji.</div> : null}
