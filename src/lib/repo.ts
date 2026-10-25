@@ -456,13 +456,17 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
   if (patch.workLevel !== undefined) p.work_level = normalizeLevel(patch.workLevel);
   if (patch.modelPick !== undefined) p.model_pick = isModelName(patch.modelPick) ? patch.modelPick.trim() : null;
   if (!Object.keys(p).length) return;
-  await sql()`update steps set ${sql()(p)} where id = ${id}`;
+  const [u] = await sql()`update steps set ${sql()(p)} where id = ${id} returning task_id`;
+  // zrobiony krok może odblokować krok zlecony do chmury w rozmowie (paczka 19, punkt 2)
+  if (patch.status === "done" && u) await startAutoCloud(u.taskId as string);
 }
 export async function setStepDependencies(id: string, dependsOn: string[]): Promise<void> {
   await sql().begin(async (tx) => {
     await tx`delete from step_dependencies where step_id = ${id}`;
     if (dependsOn.length) await tx`insert into step_dependencies ${tx(dependsOn.filter((d) => d !== id).map((d) => ({ step_id: id, depends_on_id: d })))} on conflict do nothing`;
   });
+  const [r] = await sql()`select task_id from steps where id = ${id}`;
+  if (r) await startAutoCloud(r.taskId as string);
 }
 export async function deleteStep(id: string): Promise<void> { await sql()`delete from steps where id = ${id}`; }
 
@@ -757,7 +761,36 @@ export async function queueCloud(ownerId: string, stepId: string): Promise<boole
 }
 export async function cancelCloud(ownerId: string, stepId: string): Promise<boolean> {
   // wzięty przez chmurę krok zatrzymuje się jak każdy w toku („Zatrzymaj”); tu tylko zlecenie, którego chmura jeszcze nie wzięła
-  const r = await sql()`update steps s set cloud = null from tasks t where t.id = s.task_id and t.owner_id = ${ownerId} and s.id = ${stepId} and s.cloud->>'state' in ('queued', 'rung') returning s.id`;
+  const r = await sql()`update steps s set cloud = null from tasks t where t.id = s.task_id and t.owner_id = ${ownerId} and s.id = ${stepId} and s.cloud->>'state' in ('auto', 'queued', 'rung') returning s.id`;
+  return r.length > 0;
+}
+// paczka 19, punkt 2: krok „Zleć w projekcie: …” dodany przez agenta na wyraźne polecenie Piotra w rozmowie zadania (msg = id tej wiadomości) rusza w chmurze
+// bez drugiego kliknięcia: polecenie w rozmowie jest zgodą. Najpierw „auto” (czeka na swoje kroki), promoteCloud zamienia je w zwykłe zlecenie, gdy wszystkie są zrobione
+export async function armCloud(ownerId: string, stepId: string, msgId: string): Promise<boolean> {
+  const r = await sql()`update steps s set cloud = jsonb_build_object('state', 'auto', 'at', now(), 'msg', ${msgId}::text), left_at = null from tasks t
+    where t.id = s.task_id and t.owner_id = ${ownerId} and t.deleted_at is null and s.id = ${stepId} and s.status = 'todo' and s.cloud is null returning s.id`;
+  return r.length > 0;
+}
+// „auto” bez niezrobionych zależności → zlecenie do chmury (mostek odpali ją jak po kliknięciu); zwraca kroki, które właśnie ruszyły
+export async function promoteCloud(taskId: string): Promise<{ id: string; title: string }[]> {
+  return (await sql()`update steps s set cloud = jsonb_build_object('state', 'queued', 'at', now(), 'msg', s.cloud->>'msg')
+    where s.task_id = ${taskId} and s.status = 'todo' and s.cloud->>'state' = 'auto'
+      and not exists (select 1 from step_dependencies d join steps x on x.id = d.depends_on_id where d.step_id = s.id and x.status <> 'done')
+    returning s.id, s.title`).map((r) => ({ id: r.id as string, title: r.title as string }));
+}
+// promoteCloud z linią w rozmowie zadania: Piotr widzi, że krok ruszył bez jego kliknięcia
+export async function startAutoCloud(taskId: string): Promise<string[]> {
+  const went = await promoteCloud(taskId);
+  if (went.length) {
+    const [t] = await sql()`select owner_id from tasks where id = ${taskId}`;
+    for (const x of went) if (t) await addChat(t.ownerId as string, taskId, "agent", `Zlecone do chmury: „${shortTitle(x.title, 70)}”, tak jak prosiłeś w rozmowie. Claude w chmurze weźmie ten krok i zamknie go z wynikiem.`, { stepId: x.id });
+  }
+  return went.map((x) => x.id);
+}
+// wiadomość Piotra w tym zadaniu z ostatniej doby: tylko taka może zlecić krok do chmury (agent nie zleca sam z siebie)
+export async function ownerChatIn(ownerId: string, taskId: string, msgId: string): Promise<boolean> {
+  if (!/^[0-9a-f-]{36}$/i.test(msgId)) return false;
+  const r = await sql()`select 1 from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and id = ${msgId} and role = 'user' and created_at > now() - interval '24 hours'`;
   return r.length > 0;
 }
 // kroki zlecone do chmury, jeszcze niewzięte (rung = Mac już odpalił chmurę, ale sesja jeszcze nie ruszyła)

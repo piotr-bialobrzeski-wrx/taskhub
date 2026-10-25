@@ -35,13 +35,13 @@ export function stepStateOf(t: Task, s: Step, all: Task[]): StepStateKey {
 }
 
 // wygląd kafelka kroku (paczka 18, tabela stanów z kroku „Zdecyduj o ramkach i etykietach kafelka”):
-// Agent pracuje (bieg mostka „teraz”, krok w toku, zlecenie do chmury) → Agent oddał → Twoja kolej (szkic, decyzja, czynność) → Zaplanowane (kto zrobi) → Zrobione
+// Agent pracuje (bieg mostka „teraz”, krok w toku, zlecenie do chmury; zlecone w rozmowie, a czekające na inne kroki to Zaplanowane) → Agent oddał → Twoja kolej (szkic, decyzja, czynność) → Zaplanowane (kto zrobi) → Zrobione
 const DECIDE_RE = /^\s*(zdecyduj|wybierz|rozstrzygnij)\b/i;
 export function stepLook(s: Step, state: StepStateKey, now: boolean): Look {
   if (state === "done") return { key: "done", label: "Zrobione" };
   // zatwierdzony szkic czeka na bieg wysyłki: agent weźmie go sam, ale jeszcze nie pracuje
   const sendWait = state === "handoff" && !!s.approvedAt && !s.agentStartedAt;
-  if (now || s.cloud || (state === "handoff" && !sendWait)) return { key: "live", label: "Agent pracuje" };
+  if (now || (s.cloud && s.cloud.state !== "auto") || (state === "handoff" && !sendWait)) return { key: "live", label: "Agent pracuje" };
   if (s.leftAt) return { key: "help", label: "Potrzebna pomoc" };
   if (state === "draft") return { key: "mine", label: "Zatwierdź szkic" };
   const own = isOwnerStep(s);
