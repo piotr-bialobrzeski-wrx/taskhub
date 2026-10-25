@@ -27,7 +27,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("update_step: dependsOn", async 
     const t = await repo.createTask(owner, { title: "Paczka", steps: [{ title: "A" }, { title: "B", dependsOn: ["n1"] }, { title: "C", dependsOn: ["n1", "n2"] }, { title: "Wdróż", dependsOn: ["n1", "n2", "n3"] }] });
     const [a, b, c] = t.steps;
     expect(await call("update_step", { stepId: c.id, dependsOn: [] })).toContain("Zmieniono");
-    expect(await call("update_step", { stepId: b.id, dependsOn: [] })).toContain("Zmieniono");
+    expect(await call("update_step", { stepId: b.id, dependsOn: "[]" })).toContain("Zmieniono");
     expect(await call("update_step", { stepId: a.id, title: "A2" })).toContain("Zmieniono");
     const d = await depsOf(t.id);
     expect(d).toMatchObject({ A2: [], B: [], C: [] });
@@ -42,5 +42,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("update_step: dependsOn", async 
     expect(await call("update_step", { stepId: x.id, dependsOn: [other.steps[0].id] })).toContain("nie pasują");
     expect(await call("update_step", { stepId: x.id, dependsOn: [x.id] })).toContain("nie pasują");
     expect(await depsOf(t.id)).toMatchObject({ X: [], Y: [x.id] });
+    expect(await call("update_step", { stepId: y.id, dependsOn: `["${x.id}"]` })).toContain("Zmieniono");
+    expect(await call("update_step", { stepId: y.id, dependsOn: "" })).toContain("Zmieniono");
+    expect(await depsOf(t.id)).toMatchObject({ Y: [] });
   });
 });

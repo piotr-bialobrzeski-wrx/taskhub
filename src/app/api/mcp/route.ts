@@ -34,6 +34,14 @@ export const maxDuration = 60;
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 const json = (v: unknown) => text(JSON.stringify(v, null, 1));
 // krok należy do właściciela tokenu? zwraca id zadania
+// lista id kroków; klient z nieodświeżonym opisem narzędzia przysyła ją jako napis ("[]", JSON albo id po przecinku)
+const idList = z.preprocess((v) => {
+  if (typeof v !== "string") return v;
+  const t = v.trim();
+  if (t.startsWith("[")) { try { return JSON.parse(t); } catch { return v; } }
+  return t ? t.split(",").map((x) => x.trim()).filter(Boolean) : [];
+}, z.array(z.string()));
+
 async function ownedStep(ownerId: string, stepId: string): Promise<string | null> {
   const [r] = await sql()`select s.task_id from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId}`;
   return r ? (r.taskId as string) : null;
@@ -260,7 +268,7 @@ function buildHandler(auth: repo.TokenAuth) {
 
     server.registerTool("update_step", {
       title: "Zmień krok", description: "Zmienia tytuł, opis, narzędzie, szacunek, link, połączenie albo poziom pracy kroku (tool = klucz jak w create_task; link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket; connection = nazwa z list_connections, pusty napis zdejmuje; workLevel jak w add_steps, pusty napis = z narzędzia; dependsOn = pełna nowa lista id kroków tego zadania, na których wynik krok naprawdę czeka, zastępuje dotychczasowe strzałki, [] = krok niezależny).",
-      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), tool: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional(), workLevel: z.string().optional(), dependsOn: z.array(z.string()).optional() }),
+      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), tool: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional(), workLevel: z.string().optional(), dependsOn: idList.optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId);
       if (!taskId) return text("Nie ma takiego kroku.");
