@@ -45,7 +45,22 @@ export function waitTarget(reason: string, self: StepRef, steps: StepRef[]): str
   }
   return null;
 }
-export type WorkSummary = { text: string; counts: WorkCounts; total: number; choices?: Choice[]; sig?: string };
+// kolejka agenta (paczka 18): każda pozycja listy pracy z kluczem; Piotr ustawia kolejność w panelu w lewym dolnym rogu (ustawienie queueOrder),
+// a lista pracy daje te pozycje na początek, w jego kolejności (sekcja NAJPIERW), i od nich bieg bierze model
+export type QueueKind = "chat" | "going" | "breakdown" | "answer" | "step" | "file" | "draft" | "title";
+export type QueueItem = { key: string; kind: QueueKind; taskId: string; taskTitle: string; stepId: string | null; label: string; rank: number; line: string; taken: boolean; choice: Choice | null };
+export const QUEUE_KINDS: Record<QueueKind, string> = { chat: "odpowiedź na Twoją wiadomość", going: "krok w toku", breakdown: "rozpisanie na kroki", answer: "Twoja odpowiedź na pytanie", step: "krok do zrobienia", file: "plik na Macu", draft: "szkic do zatwierdzenia", title: "skrócenie tytułu" };
+export const queueOrderOf = (settings: Record<string, unknown>): string[] => (Array.isArray(settings.queueOrder) ? settings.queueOrder.filter((x): x is string => typeof x === "string") : []);
+// kolejność kolejki: najpierw pozycje ustawione przez Piotra (w jego kolejności), potem reszta tak, jak bierze ją agent (sekcje listy po kolei)
+export function orderQueue<T extends Pick<QueueItem, "key" | "rank">>(items: T[], order: string[]): T[] {
+  const at = new Map(order.map((k, i) => [k, i]));
+  return items.map((x, i) => ({ x, i })).sort((a, b) => {
+    const pa = at.get(a.x.key), pb = at.get(b.x.key);
+    if (pa != null || pb != null) return pa == null ? 1 : pb == null ? -1 : pa - pb;
+    return a.x.rank - b.x.rank || a.i - b.i;
+  }).map((y) => y.x);
+}
+export type WorkSummary = { text: string; counts: WorkCounts; total: number; choices?: Choice[]; sig?: string; items?: QueueItem[] };
 // kto pyta: bridge-v1 = stara aplikacja mostka (0.1.6, skrypt Node) wysyła zatwierdzone szkice jak dotąd; client = konektor OAuth i automat co godzinę,
 // work = bieg pracy mostka v2: oba bez zatwierdzonych szkiców (wysyła je osobny bieg wysyłki); send = bieg wysyłki: tylko jego jeden krok (stepId)
 export type WorkAudience = "bridge-v1" | "client" | "work" | "send";
@@ -98,39 +113,54 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
   const stepOf = new Map(tasks.flatMap((t) => t.steps.map((st) => [st.id, st] as const)));
   const projectOf = new Map(tasks.map((t) => [t.id, projects.find((p) => p.id === t.projectId)?.name ?? null]));
   // grupy z miejscem sekcji na liście (wiadomości, w toku, rozpisanie, odpowiedzi, gotowe, pliki, szkice, tytuły): bieg bierze grupę pierwszej pozycji
-  const seen: { rank: number; c: Choice }[] = [];
+  const seen: { rank: number; c: Choice; key: string | null }[] = [];
   let skipped = 0;
-  // pozycja w grupie biegu (albo bez focus: zawsze)
-  const take = (c: Choice | null, rank: number): boolean => {
-    if (c) seen.push({ rank, c });
+  const items: QueueItem[] = [];
+  // pozycja w grupie biegu (albo bez focus: zawsze); q: pozycja kolejki (bez q tylko liczy się do grup)
+  const take = (c: Choice | null, rank: number, q?: Omit<QueueItem, "rank" | "taken" | "choice">): boolean => {
+    if (c) seen.push({ rank, c, key: q?.key ?? null });
     const ok = !opts.focus || (c?.key ?? "") === opts.focus;
     if (!ok) skipped++;
+    if (q && !items.some((x) => x.key === q.key)) items.push({ ...q, rank, taken: ok, choice: c });
     return ok;
   };
   const forStep = (st: Step, taskId: string) => (cfg ? stepChoice(cfg, st, { weight: weightOf.get(taskId) }) : null);
   // wiadomość albo odpowiedź przy kroku idzie na poziomie tego kroku (kartka Piotra co najmniej Analiza), bez kroku na Analizie
   const forTaskMsg = (taskId: string, stepId?: string | null) => { const st = stepId ? stepOf.get(stepId) : undefined; return cfg ? (st ? forStep(st, taskId) : choiceOf(cfg, "analysis")) : null; };
-  const chat = allChat.filter((m) => take(forTaskMsg(m.taskId, (m.actions as { stepId?: string } | null)?.stepId), 0));
+  const chatStep = (m: (typeof allChat)[number]) => (m.actions as { stepId?: string } | null)?.stepId ?? null;
+  const chat = allChat.filter((m) => take(forTaskMsg(m.taskId, chatStep(m)), 0, { key: `chat:${m.taskId}`, kind: "chat", taskId: m.taskId, taskTitle: m.taskTitle, stepId: chatStep(m), label: `Twoja wiadomość: „${m.text.replace(/\s+/g, " ").slice(0, 80)}”`, line: `wiadomość w zadaniu [${m.taskId}] „${m.taskTitle}” (sekcja WIADOMOŚCI PIOTRA)` }));
   const open = scoreAll(tasks, projects, samples).filter((s) => !s.task.doneAt && !s.task.deletedAt);
   const unfinished = new Set(tasks.filter((t) => !t.doneAt && !t.deletedAt).map((t) => t.id));
   const free = open.filter((s) => !s.task.dependsOn.some((d) => unfinished.has(d)));   // zadania, które nie czekają na inne zadania
   const openQ = await repo.listQuestions(ownerId, { open: true });
   const waitingTask = new Set(openQ.map((q) => q.taskId));
   // rozpisanie zadania zawsze na Strategii
-  const noSteps = free.filter((s) => !s.task.steps.length && !waitingTask.has(s.task.id) && take(cfg ? choiceOf(cfg, "strategy") : null, 3));
+  const noSteps = free.filter((s) => !s.task.steps.length && !waitingTask.has(s.task.id) && take(cfg ? choiceOf(cfg, "strategy") : null, 3,
+    { key: `task:${s.task.id}`, kind: "breakdown", taskId: s.task.id, taskTitle: s.task.title, stepId: null, label: "Rozpisanie na kroki", line: `rozpisanie zadania [${s.task.id}] „${s.task.title}” (sekcja ZADANIA BEZ KROKÓW)` }));
   const attN = await repo.countAttachments(noSteps.map((s) => s.task.id));
   // tytuły zadań wpisane jako cała wiadomość Piotra (dłuższe niż 6 słów albo zdanie z kropką), których agent jeszcze nie skrócił
   // samo skrócenie tytułu to Mechanika
-  const longTitles = open.filter((s) => !s.task.titleOriginal && isLongTitle(s.task.title) && take(cfg ? choiceOf(cfg, "mechanics") : null, 8));
-  const answered = allAnswered.filter((q) => take(forTaskMsg(q.taskId, q.stepId), 4));
+  const longTitles = open.filter((s) => !s.task.titleOriginal && isLongTitle(s.task.title) && take(cfg ? choiceOf(cfg, "mechanics") : null, 8,
+    { key: `title:${s.task.id}`, kind: "title", taskId: s.task.id, taskTitle: s.task.title, stepId: null, label: "Skrócenie tytułu", line: `tytuł zadania [${s.task.id}] (sekcja TYTUŁY DO SKRÓCENIA)` }));
+  const titleOf = new Map(tasks.map((t) => [t.id, t.title]));
+  const answered = allAnswered.filter((q) => take(forTaskMsg(q.taskId, q.stepId), 4,
+    { key: `answer:${q.id}`, kind: "answer", taskId: q.taskId, taskTitle: titleOf.get(q.taskId) ?? "", stepId: q.stepId ?? null, label: `Twoja odpowiedź: „${String(q.answer ?? "").slice(0, 80)}”`, line: `odpowiedź na pytanie w zadaniu [${q.taskId}] (sekcja ODPOWIEDZI PIOTRA)` }));
   const going: string[] = [], approved: string[] = [], ready: string[] = [], approval: string[] = [], held: string[] = [], files: string[] = [];
   const RANK = new Map<string[], number>([[going, 1], [approved, 2], [held, 2], [ready, 5], [files, 6], [approval, 7]]);
+  const KIND = new Map<string[], QueueKind>([[going, "going"], [ready, "step"], [files, "file"], [approval, "draft"]]);
+  const SECTION = new Map<string[], string>([[going, "KROKI W TOKU"], [ready, "KROKI DO ZROBIENIA BEZ ZGODY"], [files, "PLIKI NA MACU"], [approval, "KROKI WYMAGAJĄCE ZGODY PIOTRA"]]);
   for (const s of free) {
     if (waitingTask.has(s.task.id)) continue;
     for (const st of s.task.steps) {
       const c = forStep(st, s.task.id);
       const line = `- krok [${st.id}] „${st.title}” (${st.tool}) w zadaniu [${s.task.id}] „${s.task.title}”${st.detail ? ": " + st.detail.slice(0, 200) : ""}`;
-      const add = (list: string[], l: string) => { if (take(c, RANK.get(list) ?? 5)) list.push(l); };
+      const n = s.task.steps.indexOf(st) + 1;
+      // zatwierdzone szkice do wysłania nie są pracą agenta (wysyła je osobny bieg), więc nie wchodzą do kolejki
+      const add = (list: string[], l: string) => {
+        const kind = KIND.get(list);
+        const q = kind ? { key: `step:${st.id}`, kind, taskId: s.task.id, taskTitle: s.task.title, stepId: st.id, label: `Krok ${String(n).padStart(2, "0")}: ${st.title}`, line: `krok [${st.id}] „${st.title}” w zadaniu [${s.task.id}] (sekcja ${SECTION.get(list)})` } : undefined;
+        if (take(c, RANK.get(list) ?? 5, q)) list.push(l);
+      };
       const depsDone = st.dependsOn.every((d) => s.task.steps.find((x) => x.id === d)?.status === "done");
       // szkic ze zgodą Piotra (podpis treści): wysyła go stary mostek z tej listy albo osobny bieg wysyłki; zgoda nieważna albo wysyłka w toku = nic dla agenta
       if (st.status === "handoff" && (st.approvedAt || st.sendStartedAt || draftOf(st)?.status === "approved")) {
@@ -176,14 +206,36 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
     longTitles.length ? `TYTUŁY DO SKRÓCENIA (update_task z nowym title, nic więcej; ${TITLE_RULE}; pierwotny tytuł zostaje zapisany sam):\n` + longTitles.map((s) => `- zadanie [${s.task.id}] „${s.task.title}”`).join("\n") : "",
     openQ.length ? `ZADANIA CZEKAJĄCE NA ODPOWIEDŹ PIOTRA (pomiń): ${[...waitingTask].map((id) => `[${id}]`).join(", ")}` : "",
   ].filter(Boolean).join("\n\n");
+  // kolejność ustawiona przez Piotra: te pozycje na początku listy, a bieg bierze model pierwszej z nich
+  const ordered = orderQueue(items, queueOrderOf(settings));
+  const pinAt = new Map(queueOrderOf(settings).map((k, i) => [k, i]));
+  const pinned = new Set(pinAt.keys());
+  const first = ordered.filter((x) => x.taken && pinned.has(x.key));
+  const firstText = first.length ? "NAJPIERW, W TEJ KOLEJNOŚCI (Piotr ustawił kolejność pracy w Task Hub: zrób te pozycje przed resztą listy, jedna po drugiej, każdą tak, jak mówi jej sekcja niżej):\n" + first.map((x, i) => `${i + 1}. ${x.line}`).join("\n") + "\n\n" : "";
   const choices: Choice[] = [];
-  for (const { c } of [...seen].sort((a, b) => a.rank - b.rank)) if (!choices.some((x) => x.key === c.key)) choices.push(c);
+  const eff = seen.map((x) => ({ ...x, rank: x.key && pinAt.has(x.key) ? -1000 + pinAt.get(x.key)! : x.rank })).sort((a, b) => a.rank - b.rank);
+  for (const { c } of eff) if (!choices.some((x) => x.key === c.key)) choices.push(c);
   // bieg z doborem modelu: na początku listy, na czym pracuje i że reszta idzie osobnym biegiem
   const focus = opts.focus ? choices.find((c) => c.key === opts.focus) ?? null : null;
   const head = opts.focus && total ? `TEN BIEG: ${focus ? runLabel(focus.model, focus.effort) : opts.focus.replace("|", " · ")}. Rób tylko pozycje z tej listy.${skipped ? ` Pozostałe (${skipped}) zrobi osobny bieg na modelu dobranym do ich poziomu, więc ich nie szukaj i nie bierz się za nie (także za kroki, które dodasz przy rozpisaniu).` : ""}\n\n` : "";
-  return { text: out ? head + out + "\n\n" + PLAIN_LANG : "Nic nie czeka na agenta.", counts, total, choices, sig: seen.map((x) => x.c.key).join(",") };
+  return { text: out ? head + firstText + out + "\n\n" + PLAIN_LANG : "Nic nie czeka na agenta.", counts, total, choices, sig: eff.map((x) => x.c.key).join(","), items: ordered };
 }
 
 // jak pisać do Piotra (długość, słownictwo, język) mówią wyłącznie jego zasady w bazie, które sam edytuje (zasada „Rozmowa z Piotrem
 // i treści na zewnątrz”); kod tylko odsyła do nich, żeby styl był w jednym miejscu (Piotr, 2026-10-24)
 export const PLAIN_LANG = "JAK PISAĆ DO PIOTRA (kartka kroku, summary, powód oddania, reply_chat): długość, słownictwo i język mówią zasady z get_rules; trzymaj się ich, tu nie ma osobnych reguł stylu.";
+
+// ---------- kolejka agenta w lewym dolnym rogu (paczka 18) ----------
+// now: to, nad czym Claude pracuje teraz (bieg mostka); items: reszta kolejki w kolejności, w jakiej ją weźmie (bez pozycji bieżącego kroku)
+export type QueueEntry = { key: string; kind: string; taskId: string; taskTitle: string; stepId: string | null; label: string };
+export type QueueNow = { taskId: string | null; taskTitle: string; label: string | null; since: string };
+export type AgentQueue = { now: QueueNow | null; items: QueueEntry[] };
+export async function agentQueue(ownerId: string, run: { taskId: string | null; stepId: string | null; since: string; kind?: string } | null): Promise<AgentQueue> {
+  const [w, tasks] = await Promise.all([workSummary(ownerId, { peek: true, audience: "work" }), run?.taskId ? repo.listTasks(ownerId) : Promise.resolve([])]);
+  const t = run?.taskId ? tasks.find((x) => x.id === run.taskId) : null;
+  const sIdx = t && run?.stepId ? t.steps.findIndex((s) => s.id === run.stepId) : -1;
+  const now: QueueNow | null = run ? { taskId: run.taskId, taskTitle: t?.title ?? (run.kind === "send" ? "Wysyłka" : "Praca w tle"), label: sIdx >= 0 ? `Krok ${String(sIdx + 1).padStart(2, "0")}: ${t!.steps[sIdx].title}` : null, since: run.since } : null;
+  const items = (w.items ?? []).filter((x) => !(run?.stepId && x.stepId === run.stepId && x.key === `step:${run.stepId}`))
+    .map((x) => ({ key: x.key, kind: QUEUE_KINDS[x.kind], taskId: x.taskId, taskTitle: x.taskTitle, stepId: x.stepId, label: x.label }));
+  return { now, items };
+}

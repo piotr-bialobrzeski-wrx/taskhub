@@ -844,6 +844,12 @@ export async function markChatAnswered(ownerId: string, taskId: string, ids?: st
     where owner_id = ${ownerId} and task_id = ${taskId} and role = 'user' and answered_at is null ${ids ? sql()`and id in ${sql()(ids)}` : sql()``} returning id`;
   return rows.map((r) => r.id as string);
 }
+// „Wycofaj” w dymku kolejki (paczka 18): Piotr zabiera swoje wiadomości bez odpowiedzi z kolejki agenta; zostają w historii rozmowy z oznaczeniem withdrawn
+export async function withdrawChat(ownerId: string, taskId: string): Promise<number> {
+  const rows = await sql()`update chat_messages set answered_at = now(), seen_at = coalesce(seen_at, now()), actions = coalesce(actions, '{}'::jsonb) || '{"withdrawn": true}'::jsonb
+    where owner_id = ${ownerId} and task_id = ${taskId} and role = 'user' and answered_at is null returning id`;
+  return rows.length;
+}
 // wiadomości wzięte w biegu, który właśnie się skończył, a bez odpowiedzi: wracają do kolejki (następny bieg widzi je jako NOWE); nic nie ginie po cichu
 async function requeueChat(ownerId: string, since: Date | string | null): Promise<void> {
   if (!since) return;

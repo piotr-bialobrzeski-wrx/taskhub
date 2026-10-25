@@ -12,10 +12,12 @@ import { SearchPill } from "./SearchPill";
 import type { SearchItem } from "@/lib/search-core";
 import { AgentFeed, Dock, MoreMenu, Namer, TileMenu, Toast, useToast } from "./widgets";
 import type { FeedItem, WorkBubble } from "@/lib/feed";
+import type { AgentQueue } from "@/lib/agent/work";
+import { QueuePanel } from "./Queue";
 import { InlineText } from "@/components/StepFields";
 import { Activity } from "@/components/Activity";
 import { useOwnClock } from "@/components/OwnClock";
-import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, openedStep, removeStep, saveStepPositions, stopWork, updateGroupAction } from "@/app/actions";
+import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, openedStep, queueNext, removeStep, saveStepPositions, stopWork, updateGroupAction, withdrawMessages } from "@/app/actions";
 
 export type TaskCanvasProps = {
   project: { name: string; color: string } | null;   // projekt zadania w nagłówku karty kroku (paczka 15, punkt 6)
@@ -24,6 +26,7 @@ export type TaskCanvasProps = {
   steps: (StepTile & { toolName: string })[];
   groups: GroupVM[]; index: SearchItem[];
   aiOn: boolean; agent: string; feed: FeedItem[];
+  agentQueue: AgentQueue;                  // kolejka agenta: wskaźnik w lewym dolnym rogu (paczka 18)
   work: WorkBubble | null;                 // dymek pracy nad polem czatu: Claude pracuje nad tym zadaniem albo wysłana wiadomość czeka
   focus: string | null;
   runbar: ReactNode;                       // treść paska stanu nad kanwą
@@ -238,7 +241,9 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {p.questions && !n && !group ? <div className={"answer glass" + (panel ? " withpanel" : "")} aria-live="polite">{p.questions}</div> : null}
       {/* odpowiedzi agenta (to, co jest w historii rozmowy) w lewym dolnym rogu ekranu */}
       <AgentFeed items={p.feed} work={p.work} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} className={panel ? "withpanel" : ""} style={{ ["--dw" as string]: dw + "px" }}
-        stepLabel={(id) => (byId.has(id) ? pad(byId.get(id)!.idx) : null)} onStep={openStep} />
+        stepLabel={(id) => (byId.has(id) ? pad(byId.get(id)!.idx) : null)} onStep={openStep}
+        queue={<QueuePanel queue={p.agentQueue} taskId={t.id} onToast={show} />}
+        onQueueNext={(key) => run(async () => show(await queueNext(key, t.id)))} onWithdraw={() => run(async () => show(await withdrawMessages(t.id)))} />
 
       <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
         queue={ctxGlobal ? null : p.queue} version={`${p.feed.at(-1)?.id ?? ""}|${p.queue?.n ?? 0}|${p.queue?.kind ?? ""}|${p.queue?.activity?.text ?? ""}`}

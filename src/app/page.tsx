@@ -14,6 +14,7 @@ import { ARCHIVE_AFTER_MS, isArchivedDone } from "@/lib/search-core";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
+import { agentQueue } from "@/lib/agent/work";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
   const o = await requireOwner();
   const [b, chatLog, groups, questions, bridge, stamp, pending] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 8), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null), repo.countPendingChat(o.id)]);
   const run = liveActivity(bridge.run);
+  const aq = await agentQueue(o.id, run ? { taskId: run.taskId, stepId: run.stepId, since: run.since, kind: run.kind } : null);
   const now = Date.now();
   const live = sortByPriority(b.scored.filter((s) => !s.task.deletedAt));
   // ukończone zostają na kanwie do końca dnia, potem idą do archiwum (ta sama reguła co w indeksie szukajki)
@@ -54,6 +56,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
       aiOn={providers.length > 0}
       agent={agentLabel(providers)}
       feed={agentFeed(chatLog)}
+      agentQueue={aq}
       archive={{
         done: doneArch.map((s) => row(s, `ukończone ${fmtDate(s.task.doneAt!)}`)),
         trash: trash.map((s) => row(s, `w koszu, zniknie za ${Math.max(1, Math.ceil((new Date(s.task.deletedAt!).getTime() + repo.TRASH_DAYS * DAY - Date.now()) / DAY))} dni`)),

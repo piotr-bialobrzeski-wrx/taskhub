@@ -9,6 +9,8 @@ import { Icon, Lvl, ToolIcon, TS_LABEL, TS_SHORT, GCOL, plural, projColor, toolC
 import { AgentFeed, Dock, Namer, PrioPicker, ProjectPicker, TileMenu, Toast, useToast } from "./widgets";
 import { msgCount } from "@/lib/auto";
 import type { FeedItem } from "@/lib/feed";
+import type { AgentQueue } from "@/lib/agent/work";
+import { QueuePanel } from "./Queue";
 import { AddButton, AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import { Projects, type ProjectPatch } from "./Projects";
@@ -22,6 +24,7 @@ export type BoardInitial = { view?: string; p?: string; t?: string; focus?: stri
 export type BoardProps = {
   tasks: TaskTile[]; groups: GroupVM[]; projects: ProjectRow[]; companies: CompanyRow[]; projTasks: ProjTask[]; index: SearchItem[]; initial: BoardInitial;
   aiOn: boolean; agent: string; feed: FeedItem[];
+  agentQueue: AgentQueue;   // kolejka agenta w lewym dolnym rogu (paczka 18)
   archive: { done: ArchRow[]; trash: ArchRow[]; trashDays: number };
 };
 type LayoutSnap = { items: { id: string; x: number; y: number }[]; groups: { id: string; x: number; y: number; w: number; h: number; auto: boolean }[] };
@@ -97,7 +100,7 @@ export function layoutSnapshot(api: CanvasApi | null, ids: string[], groups: Gro
 
 export function Board(p: BoardProps) {
   const router = useRouter();
-  const { toast, run } = useToast();
+  const { toast, show, run } = useToast();
   const { view, onView } = useView("board");
   const api = useRef<CanvasApi | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -333,7 +336,7 @@ export function Board(p: BoardProps) {
         </div>
       ) : null}
 
-      {off ? null : <AgentFeed items={p.feed} />}
+      {off ? null : <AgentFeed items={p.feed} queue={<QueuePanel queue={p.agentQueue} onToast={show} />} />}
 
       {off ? null : <Dock action={chat} taskId={null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"} placeholder="Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" />}
       <Toast text={toast} />

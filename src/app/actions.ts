@@ -15,6 +15,7 @@ import { shortTitle, type Queue } from "@/lib/auto";
 import { fmtTime } from "@/lib/clock";
 import { connectorIssue, isGitDraft } from "@/lib/bridge";
 import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, shownSig, type Draft } from "@/lib/agent/approval";
+import { workSummary } from "@/lib/agent/work";
 import { decisionText, destOf, isProjectStep, openQuestions, stepKind } from "@/lib/stepcard";
 import { isAppCodeStep, isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
 
@@ -310,6 +311,38 @@ export async function stopWork(taskId: string, runId: string): Promise<string> {
   refresh(taskId);
   return until ? `Zatrzymane. Claude wróci o ${fmtTime(until)} albo od razu, gdy napiszesz.` : "Ta praca już się skończyła.";
 }
+// ---------- kolejka agenta (paczka 18) ----------
+// zapisana kolejność wygrywa z tą, w jakiej agent sam bierze pracę (lista pracy daje te pozycje na początek); klucze pozycji, których już nie ma, odpadają przy zapisie
+const QUEUE_KEY = /^(chat|task|title|answer|step):[0-9a-f-]{36}$/i;
+async function saveQueue(ownerId: string, keys: string[]): Promise<void> {
+  const live = new Set(((await workSummary(ownerId, { peek: true, audience: "work" })).items ?? []).map((x) => x.key));
+  const clean = [...new Set(keys.filter((k) => typeof k === "string" && QUEUE_KEY.test(k) && live.has(k)))].slice(0, 200);
+  await repo.setUserSettings(ownerId, { queueOrder: clean });
+}
+// przeciąganie w panelu kolejki: cała nowa kolejność
+export async function reorderQueue(keys: string[], taskId?: string | null): Promise<string> {
+  const o = await requireOwner();
+  if (!Array.isArray(keys)) return "Nie udało się zmienić kolejności.";
+  await saveQueue(o.id, keys);
+  refresh(taskId);
+  return "Kolejność zmieniona. Bieżąca praca nie jest przerywana.";
+}
+// „Następne”: pozycja idzie na pierwsze miejsce, zaraz po bieżącej pracy
+export async function queueNext(key: string, taskId?: string | null): Promise<string> {
+  const o = await requireOwner();
+  const items = (await workSummary(o.id, { peek: true, audience: "work" })).items ?? [];
+  if (!items.some((x) => x.key === key)) return "Tej pozycji nie ma już w kolejce.";
+  await saveQueue(o.id, [key, ...items.map((x) => x.key).filter((k) => k !== key)]);
+  refresh(taskId);
+  return "Przesunięte na pierwsze miejsce. Bieżąca praca nie jest przerywana.";
+}
+// „Wycofaj”: wiadomości Piotra w zadaniu wychodzą z kolejki, zanim agent je weźmie
+export async function withdrawMessages(taskId: string): Promise<string> {
+  const o = await requireOwner();
+  const n = await repo.withdrawChat(o.id, taskId);
+  refresh(taskId);
+  return n ? "Wiadomość wycofana z kolejki." : "Claude już wziął tę wiadomość.";
+}
 export async function openedStep(taskId: string, stepId: string) {
   const o = await requireOwner();
   await repo.stepOpened(o.id, taskId, stepId);
@@ -536,13 +569,13 @@ export async function batchSteps(taskId: string, ids: string[], op: { done?: boo
 // historia rozmowy (dok → ikona zegara): strona po 50 wpisów, od najstarszego; before = kursor na starsze.
 // Wiadomość Piotra niesie swój stan (wzięta, odpowiedziano), odpowiedź agenta listę wiadomości, które załatwia; queue = stan kolejki zadania (null, gdy nic nie czeka)
 const CHAT_PAGE = 50;
-export type ChatVM = { id: string; role: "user" | "agent"; text: string; createdAt: string; seenAt: string | null; answeredAt: string | null; answers: string[] | null; stepId: string | null; link: string | null; why: string | null };
+export type ChatVM = { id: string; role: "user" | "agent"; text: string; createdAt: string; seenAt: string | null; answeredAt: string | null; answers: string[] | null; stepId: string | null; link: string | null; why: string | null; withdrawn?: boolean };
 export async function loadChat(taskId: string | null, before: string | null): Promise<{ msgs: ChatVM[]; queue: Queue | null }> {
   const o = await requireOwner();
   const [rows, queue] = await Promise.all([repo.listChat(o.id, taskId, CHAT_PAGE, before), taskId ? taskQueue(o.id, taskId) : Promise.resolve(null)]);
   const msgs = rows.map((m) => {
-    const a = (m.actions ?? null) as { answers?: string[]; stepId?: string; link?: string; why?: string } | null;
-    return { id: m.id, role: m.role, text: m.text, createdAt: m.createdAt, seenAt: m.seenAt, answeredAt: m.answeredAt, answers: a?.answers ?? null, stepId: a?.stepId ?? null, link: a?.link ?? null, why: typeof a?.why === "string" ? a.why : null };
+    const a = (m.actions ?? null) as { answers?: string[]; stepId?: string; link?: string; why?: string; withdrawn?: boolean } | null;
+    return { id: m.id, role: m.role, text: m.text, createdAt: m.createdAt, seenAt: m.seenAt, answeredAt: m.answeredAt, answers: a?.answers ?? null, stepId: a?.stepId ?? null, link: a?.link ?? null, why: typeof a?.why === "string" ? a.why : null, ...(a?.withdrawn ? { withdrawn: true } : {}) };
   });
   return { msgs, queue };
 }

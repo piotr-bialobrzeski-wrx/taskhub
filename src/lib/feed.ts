@@ -5,6 +5,7 @@ import { holdText, msgCount, type Worker } from "./auto";
 import { nowText } from "./live";
 import type { ChatMessage } from "./repo";
 import type { Task } from "./schema";
+import type { AgentQueue } from "./agent/work";
 
 // steps: inne kroki, których agent dotknął w tym biegu (małe przyciski „04”, „05” obok „Otwórz krok 03”)
 export type FeedItem = { id: string; text: string; at: string; stepId: string | null; link: string | null; steps: string[] };
@@ -25,11 +26,13 @@ export function agentFeed(log: ChatMessage[], now = Date.now()): FeedItem[] {
 export type WorkChip = { id: string; label: string; now: boolean };
 export type WorkBubble =
   | { kind: "working"; runId: string; quote: string | null; now: string; detail: string | null; chips: WorkChip[]; more: number; where: string; since: string; at: string; later: number; stoppable: boolean }
-  | { kind: "sent"; id: string; title: string; line: string | null; quote: string; at: string };
+  | { kind: "sent"; id: string; title: string; line: string | null; quote: string; at: string; queue?: SentQueue };
+// paczka 18: wiadomość czeka w kolejce agenta: pozycja (1 = następna), z ilu, kto teraz pracuje (link do zadania), klucz do „Następne”
+export type SentQueue = { pos: number; of: number; key: string; nowTask: { id: string; title: string } | null };
 export const CHIPS_MAX = 2;
 const pad = (n: number) => String(n).padStart(2, "0");
 
-export function workBubble({ task, w, pending, busy, now = new Date() }: { task: Pick<Task, "id" | "steps">; w: Worker; pending: ChatMessage[]; busy: string | null; now?: Date }): WorkBubble | null {
+export function workBubble({ task, w, pending, busy, queue = null, now = new Date() }: { task: Pick<Task, "id" | "steps">; w: Worker; pending: ChatMessage[]; busy: string | null; queue?: AgentQueue | null; now?: Date }): WorkBubble | null {
   const run = w.run, newest = pending.at(-1) ?? null;
   const taken = pending.filter((m) => m.seenAt && run && m.seenAt >= run.since);
   if (run && run.kind !== "send" && (run.taskId === task.id || taken.length)) {
@@ -46,6 +49,12 @@ export function workBubble({ task, w, pending, busy, now = new Date() }: { task:
   }
   if (!newest) return null;
   const base = { kind: "sent" as const, id: newest.id, quote: newest.text, at: fmtTime(newest.createdAt), line: null };
+  // kolejka agenta: wiadomość tego zadania ma swoje miejsce w kolejce, a Claude pracuje gdzie indziej albo przed nią jest inna praca
+  const key = `chat:${task.id}`, at = queue ? queue.items.findIndex((x) => x.key === key) : -1;
+  if (queue && at >= 0 && (run || at > 0) && !(run && run.kind === "send")) {
+    const nowTask = queue.now?.taskId ? { id: queue.now.taskId, title: queue.now.taskTitle } : null;
+    return { ...base, title: `W kolejce: ${at + 1}. z ${queue.items.length}`, line: nowTask ? `Claude kończy zadanie „${nowTask.title}”` : null, queue: { pos: at + 1, of: queue.items.length, key, nowTask } };
+  }
   if (run && run.kind === "send") return { ...base, title: "Wysłane, Claude zacznie po bieżącej wysyłce" };
   if (run) return { ...base, title: "Wysłane, Claude zacznie po bieżącej pracy", line: busy ? `Teraz kończy: „${busy}”` : null };
   if (w.alive && w.hold) return { ...base, title: `Wysłane, ale ${w.name ? w.name : "Mac"} stoi: ${holdText(w.hold)}` };

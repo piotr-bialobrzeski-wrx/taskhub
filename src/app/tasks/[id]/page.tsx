@@ -23,6 +23,7 @@ import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estTe
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed, workBubble } from "@/lib/feed";
+import { agentQueue } from "@/lib/agent/work";
 import { decisionText, depCardsFor, destOf, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
@@ -84,7 +85,8 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   // Pasek: tylko to, czego dymek nie mówi (stan kroków widać po kolorach kafelków): czeka na inne zadanie, trwa wysyłka z tego zadania, zadanie bez kroków
   const who = bp ? noStepsWho(w, t.id, busy) : null;
   const queue = pending.length ? queueWho(w, t.id, pending.length, busy) : null;
-  const bubble = workBubble({ task: t, w, pending, busy });
+  const aq = await agentQueue(o.id, w.run ? { taskId: w.run.taskId, stepId: w.run.stepId, since: w.run.since, kind: w.run.kind } : null);
+  const bubble = workBubble({ task: t, w, pending, busy, queue: aq });
   const sending = w.run && w.run.kind === "send" && w.run.taskId === t.id ? w.run : null;
   // pasek ma zawsze jedną krótką linię; pełne zdanie i szczegóły (ścieżki, polecenia) są w podpowiedzi po najechaniu
   const runbar = waits.length ? <span className="rb-t" title={waits.map((x) => x.title).join(", ")}><b>Czeka na zadanie:</b> {waits.map((x) => x.title).join(", ")}</span>
@@ -199,6 +201,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       project={cur.project ? { name: cur.project.name, color: projColor(cur.project.color) } : null}
       task={{ id: t.id, title: t.title, base: cur.score.base, eff: cur.score.eff, why: cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; "), state: taskStateOf(t, b.tasks), progress: { done: t.steps.filter((s) => s.status === "done").length, all: t.steps.length }, estText: estTextOf(t), activity: taskActivity(t.id, w.run), pending: pending.length }}
       queue={queue}
+      agentQueue={aq}
       steps={tiles}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
       aiOn={aiOn} agent={agentLabel(providers)} index={indexFrom(b)}

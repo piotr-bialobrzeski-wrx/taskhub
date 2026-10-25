@@ -141,6 +141,7 @@ export function ChatHistory({ taskId, title, onClose, queue = null, version = ""
   const answerOf = (m: Msg, all: Msg[]) => all.find((a) => a.role === "agent" && a.answers?.includes(m.id)) ?? (m.answeredAt ? all.find((a) => a.role === "agent" && a.createdAt >= m.answeredAt!) ?? null : null);
   const stateLine = (m: Msg, all: Msg[], lastPending: string | null) => {
     if (m.role !== "user") return null;
+    if (m.withdrawn) return <span className="hm-s">Wycofana z kolejki {timeOf(m.answeredAt!)}</span>;
     if (m.answeredAt) {
       const a = answerOf(m, all);
       return a ? <button type="button" className="hm-s ok" onClick={() => flash(a.id)} title="Pokaż odpowiedź">Odpowiedź {timeOf(a.createdAt)}</button> : <span className="hm-s ok">Odpowiedź {timeOf(m.answeredAt)}</span>;
@@ -381,8 +382,10 @@ export function InlineName({ name, label, onRename }: { name: string; label: str
 
 // Dymki agenta w lewym dolnym rogu: najnowszy na samym dole, starsze wyżej; każdy zamyka się X (zapamiętane w tej przeglądarce)
 // work: dymek pracy (ostatni, nad polem czatu): Claude pracuje nad tym zadaniem albo wysłana wiadomość czeka; onStop: „Zatrzymaj” bieg pracy v2
-export function AgentFeed({ items, work = null, onStop, stepLabel, onStep, className = "", style }: {
-  items: FeedItem[]; work?: WorkBubble | null; onStop?: (runId: string) => Promise<unknown> | void; stepLabel?: (stepId: string) => string | null; onStep?: (stepId: string) => void; className?: string; style?: React.CSSProperties;
+// queue: wskaźnik kolejki agenta pod dymkami (paczka 18); onQueueNext / onWithdraw: „Następne” i „Wycofaj” w dymku wiadomości czekającej w kolejce
+export function AgentFeed({ items, work = null, onStop, stepLabel, onStep, queue = null, onQueueNext, onWithdraw, className = "", style }: {
+  items: FeedItem[]; work?: WorkBubble | null; onStop?: (runId: string) => Promise<unknown> | void; stepLabel?: (stepId: string) => string | null; onStep?: (stepId: string) => void;
+  queue?: ReactNode; onQueueNext?: (key: string) => Promise<unknown> | void; onWithdraw?: () => Promise<unknown> | void; className?: string; style?: React.CSSProperties;
 }) {
   const KEY = "th-feed-off";
   const [off, setOff] = useState<Set<string> | null>(null);   // null do montażu: serwer nie zna zamkniętych, więc nic nie miga
@@ -395,7 +398,7 @@ export function AgentFeed({ items, work = null, onStop, stepLabel, onStep, class
   const shown = off ? items.filter((m) => !off.has(m.id)) : [];
   // dymek „wysłane” zamyka się jak odpowiedź (klucz po wiadomości); dymek „Claude pracuje” nie ma X, znika z końcem pracy
   const card = work && off && !(work.kind === "sent" && off.has("w:" + work.id)) ? work : null;
-  if (!shown.length && !card) return null;
+  if (!shown.length && !card && !queue) return null;
   return (
     <div className={"feed " + className} style={style} role="log" aria-live="polite" aria-label="Odpowiedzi Claude">
       {shown.map((m) => {
@@ -415,14 +418,32 @@ export function AgentFeed({ items, work = null, onStop, stepLabel, onStep, class
           </div>
         );
       })}
-      {card ? <WorkCard b={card} onStop={onStop} onStep={onStep} onClose={() => { if (card.kind === "sent") close("w:" + card.id); }} /> : null}
+      {card ? <WorkCard b={card} onStop={onStop} onStep={onStep} onQueueNext={onQueueNext} onWithdraw={onWithdraw} onClose={() => { if (card.kind === "sent") close("w:" + card.id); }} /> : null}
+      {queue}
     </div>
   );
 }
 // dymek pracy: „wysłane” (kropka, tytuł, cytat, „Ty · 19:41”, X) albo „Claude pracuje” (kropki, minuty, „Zatrzymaj”, cytat, co teraz, chipy kroków)
-function WorkCard({ b, onStop, onStep, onClose }: { b: WorkBubble; onStop?: (runId: string) => Promise<unknown> | void; onStep?: (stepId: string) => void; onClose: () => void }) {
+function WorkCard({ b, onStop, onStep, onQueueNext, onWithdraw, onClose }: { b: WorkBubble; onStop?: (runId: string) => Promise<unknown> | void; onStep?: (stepId: string) => void; onQueueNext?: (key: string) => Promise<unknown> | void; onWithdraw?: () => Promise<unknown> | void; onClose: () => void }) {
   const min = useMinutes(b.kind === "working" ? b.since : "");
   const [busy, setBusy] = useState(false);
+  const act = async (fn?: () => Promise<unknown> | void) => { if (!fn) return; setBusy(true); try { await fn(); } finally { setBusy(false); } };
+  // paczka 18: wiadomość czeka w kolejce agenta: „W kolejce: 2. z 4”, cytat, kto teraz pracuje (link), „Następne” i „Wycofaj”
+  if (b.kind === "sent" && b.queue) {
+    const q = b.queue;
+    return (
+      <div className="fb glass work wait">
+        <div className="wk-h"><span className="dots still" aria-hidden="true"><i /><i /><i /></span><span className="wk-t">{b.title}</span></div>
+        <div className="wk-q">{b.quote}</div>
+        {q.nowTask ? <div className="wk-line">Claude kończy zadanie <a href={`/tasks/${q.nowTask.id}`}>„{q.nowTask.title}”</a></div> : null}
+        <div className="ans-row">
+          {q.pos > 1 && onQueueNext ? <button className="btn sm" type="button" disabled={busy} title="Przesuwa na pierwsze miejsce, po bieżącej pracy" onClick={() => act(() => onQueueNext(q.key))}>Następne</button> : <span className="q-first">następne w kolejce</span>}
+          {onWithdraw ? <button className="btn sm" type="button" disabled={busy} title="Zabiera wiadomość z kolejki; zostaje w historii rozmowy" onClick={() => act(onWithdraw)}>Wycofaj</button> : null}
+          <span className="ans-t">Ty · {b.at}</span>
+        </div>
+      </div>
+    );
+  }
   if (b.kind === "sent") return (
     <div className="fb glass work sent">
       <div className="wk-h"><i className="wk-dot" aria-hidden="true" />{b.title}</div>
@@ -436,7 +457,7 @@ function WorkCard({ b, onStop, onStep, onClose }: { b: WorkBubble; onStop?: (run
     <div className="fb glass work on">
       {/* paczka 15: bez stopki z urządzeniem i godziną (zostaje w podpowiedzi); „Zatrzymaj” w rzędzie nagłówka, po prawej */}
       <div className="wk-h" title={workFoot(b)}>
-        <span className="dots" aria-hidden="true"><i /><i /><i /></span><span className="wk-t">Claude pracuje</span>{min !== null && min >= 1 ? <span className="act-m">{min} min</span> : null}
+        <span className="dots" aria-hidden="true"><i /><i /><i /></span><span className="wk-t">Claude pracuje w tym zadaniu</span>{min !== null && min >= 1 ? <span className="act-m">{min} min</span> : null}
         {b.stoppable && onStop ? (
           <button className="btn sm ico" type="button" disabled={busy} title="Przerywa bieżącą pracę Claude na Macu. Wróci za 10 minut albo od razu, gdy napiszesz."
             onClick={async () => { setBusy(true); try { await onStop(b.runId); } finally { setBusy(false); } }}><Icon k="stop" size={12} sw={1.6} />{busy ? "Zatrzymuję…" : "Zatrzymaj"}</button>
