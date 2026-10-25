@@ -914,10 +914,15 @@ export async function listGroups(ownerId: string, taskId: string | null): Promis
 }
 export async function createGroup(ownerId: string, taskId: string | null, name: string, members: string[], rect?: { x: number; y: number; w: number; h: number }): Promise<Group> {
   const [{ n }] = await sql()`select count(*)::int as n from canvas_groups where owner_id = ${ownerId}`;
-  const r0 = rect ?? { x: 0, y: 0, w: 0, h: 0 };
+  // kolumny prostokąta są całkowite, a kanwa liczy w ułamkach (powiększenie, środek widoku): ułamek wywracał zapis grupy
+  const r0 = rect ? roundRect(rect) : { x: 0, y: 0, w: 0, h: 0 };
   const [r] = await sql()`insert into canvas_groups (owner_id, task_id, name, color, x, y, w, h, members, auto) values (${ownerId}, ${taskId}, ${name.slice(0, 60)}, ${Number(n) % 8}, ${r0.x}, ${r0.y}, ${r0.w}, ${r0.h}, ${members}, ${!rect}) returning id`;
   await releaseMembers(ownerId, taskId, r.id as string, members);
   return (await listGroups(ownerId, taskId)).find((g) => g.id === r.id)!;
+}
+function roundRect(r: { x: number; y: number; w: number; h: number }) {
+  const i = (v: number) => Math.round(Number(v) || 0);
+  return { x: i(r.x), y: i(r.y), w: i(r.w), h: i(r.h) };
 }
 // kafelek należy do jednej grupy na kanwie: wchodząc do nowej, wypada z poprzedniej (inaczej znikał z nowej, bo rysujemy go tylko w pierwszej)
 async function releaseMembers(ownerId: string, taskId: string | null, keepId: string, members: string[]): Promise<void> {
@@ -928,7 +933,7 @@ async function releaseMembers(ownerId: string, taskId: string | null, keepId: st
 export async function updateGroup(ownerId: string, id: string, patch: Partial<Omit<Group, "id" | "taskId">>): Promise<void> {
   const p: Row = {};
   if (patch.name !== undefined) p.name = patch.name.slice(0, 60);
-  for (const k of ["x", "y", "w", "h", "color"] as const) if (patch[k] !== undefined) p[k] = patch[k];
+  for (const k of ["x", "y", "w", "h", "color"] as const) if (patch[k] !== undefined) p[k] = Math.round(Number(patch[k]) || 0);
   if (patch.members !== undefined) p.members = patch.members;
   if (patch.auto !== undefined) p.auto = patch.auto;
   if (!Object.keys(p).length) return;

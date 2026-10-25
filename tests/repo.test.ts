@@ -91,6 +91,16 @@ describe.skipIf(!DB)("repo", async () => {
     for (const g of again) await repo.deleteGroup(owner, g.id);
   });
 
+  it("grupa z prostokątem w ułamkach (powiększenie kanwy, środek widoku) zapisuje się zaokrąglona", async () => {
+    const a = await repo.createTask(owner, { title: "Grupa w ułamkach" });
+    const g = await repo.createGroup(owner, null, "Ułamki", [a.id], { x: 10.5, y: 20.25, w: 300.7, h: 199.4 });
+    expect([g.x, g.y, g.w, g.h]).toEqual([11, 20, 301, 199]);
+    await repo.updateGroup(owner, g.id, { x: 5.6, w: 120.2 });
+    const after = (await repo.listGroups(owner, null)).find((x) => x.id === g.id)!;
+    expect([after.x, after.w]).toEqual([6, 120]);
+    await repo.deleteGroup(owner, g.id);
+  });
+
   it("zadanie z krokami i zależnościami po indeksie; kolejność kroków", async () => {
     const t = await repo.createTask(owner, { title: "Wysłać ofertę", summary: "cel", level: 4, steps: [
       { title: "Zebrać dane", tool: "clickup", estMin: 20 },
