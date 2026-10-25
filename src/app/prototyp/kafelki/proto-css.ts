@@ -26,7 +26,11 @@ export const PROTO_CSS = `
   padding: calc(var(--bw) / var(--z, 1)); pointer-events: none;
   background: conic-gradient(from var(--a), transparent 0 65%, color-mix(in srgb, var(--sc) 25%, white) 88%, var(--sc) 100%);
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; animation: run-light 1.4s linear infinite; }
-@media (prefers-reduced-motion: reduce) { .node.pt::after { animation: none !important; } }
+/* spinner przy etykiecie, w pasku (B) i w znaczku (C) */
+.pt-spin { animation: pt-rot .9s linear infinite; flex: none; }
+@keyframes pt-rot { to { transform: rotate(360deg); } }
+.node.pt .pt-st { display: inline-flex; align-items: center; gap: 4px; }
+@media (prefers-reduced-motion: reduce) { .node.pt::after, .pt-spin { animation: none !important; } }
 
 /* etykieta stanu: kolor stanu, tekst przyciemniony do kontrastu */
 .node.pt .pt-st { background: color-mix(in srgb, var(--sc) 16%, transparent); color: color-mix(in srgb, var(--sc) 62%, var(--text)); box-shadow: none; }

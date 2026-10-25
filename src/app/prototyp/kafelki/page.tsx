@@ -9,21 +9,22 @@ export const metadata: Metadata = { title: "Prototyp: stany kafelka", robots: { 
 type State = { key: string; name: string; when: string; label: string; ico: string; tool: string; toolName: string; title: string; meta: string };
 // 5 stanów z kartki kroku 04; kilka kafelków na stan, żeby było widać różne etykiety i oba kolory „Zaplanowane”.
 const STATES: State[] = [
-  { key: "live", name: "Agent pracuje", when: "Agent robi krok teraz na Macu", label: "Agent pracuje", ico: "dots", tool: "claude", toolName: "Dokument", title: "Przygotuj szkic odpowiedzi", meta: "Teraz: czyta wątek w Slacku" },
-  { key: "live", name: "Agent pracuje", when: "Agent robi krok w chmurze po „Uruchom w chmurze”", label: "Agent pracuje", ico: "dots", tool: "manual", toolName: "Ty", title: "Zleć w projekcie: naprawa grupy", meta: "W chmurze od 11:08" },
+  { key: "live", name: "Agent pracuje", when: "Agent robi krok teraz na Macu", label: "Agent pracuje", ico: "spin", tool: "claude", toolName: "Dokument", title: "Przygotuj szkic odpowiedzi", meta: "Teraz: czyta wątek w Slacku" },
+  { key: "live", name: "Agent pracuje", when: "Agent robi krok w chmurze po „Uruchom w chmurze”", label: "Agent pracuje", ico: "spin", tool: "manual", toolName: "Ty", title: "Zleć w projekcie: naprawa grupy", meta: "W chmurze od 11:08" },
   { key: "mine", name: "Twoja kolej", when: "Szkic czeka na Twoją zgodę", label: "Zatwierdź szkic", ico: "check", tool: "slack", toolName: "Slack", title: "Odpowiedz Kindze w wątku copy", meta: "Slack · #shiftwow-design" },
   { key: "mine", name: "Twoja kolej", when: "Decyzja albo czynność po Twojej stronie", label: "Zdecyduj", ico: "you", tool: "manual", toolName: "Ty", title: "Zdecyduj, które tickety wracają", meta: "~10 min" },
+  { key: "mine", name: "Twoja kolej", when: "Czynność po Twojej stronie poza aplikacją", label: "Zrób", ico: "you", tool: "manual", toolName: "Ty", title: "Nagraj wideo z zachowaniem piesków", meta: "~15 min" },
   { key: "help", name: "Agent oddał", when: "Agent nie dał rady i podał powód", label: "Potrzebna pomoc", ico: "alert", tool: "gmail", toolName: "Gmail", title: "Wyślij behawiorystce link do wideo", meta: "Brak dostępu do Dysku Google" },
   { key: "plan-ag", name: "Zaplanowane (agent)", when: "Czeka na wcześniejsze kroki, agent weźmie go sam", label: "Zaplanowane", ico: "plan", tool: "clickup", toolName: "ClickUp", title: "Sprawdź duplikaty w BA&UX TODO", meta: "Po kroku 02" },
   { key: "plan-me", name: "Zaplanowane (Ty)", when: "Czeka na wcześniejsze kroki, potem Twój ruch", label: "Zaplanowane", ico: "plan", tool: "manual", toolName: "Ty", title: "Zatwierdź tematy na retrospektywę", meta: "Po kroku 03 · ~5 min" },
   { key: "done", name: "Zrobione", when: "Krok zamknięty", label: "Zrobione", ico: "check", tool: "claude", toolName: "Dokument", title: "Przygotuj propozycję kolejki", meta: "Zrobione 10:59" },
 ];
 const LEGEND = STATES.filter((s, i) => STATES.findIndex((x) => x.key === s.key) === i);
-const TASKS = ["Analiza odrzuconych ticketów", "Grupy, kafelki, kolejka", "Duplikaty w BA&UX TODO", "Story akceptacji danych", "Kartka porównania", "Wideo dla behawiorystki", "Tematy na retrospektywę", "Paczki czekające na wdrożenie"];
-const PROJ = [["Shiftwow", "var(--p3)"], ["Task Hub", "var(--accent)"], ["Shiftwow", "var(--p3)"], ["Shiftwow", "var(--p3)"], ["Task Hub", "var(--accent)"], ["", ""], ["Shiftwow", "var(--p3)"], ["Task Hub", "var(--accent)"]];
+const TASKS = ["Analiza odrzuconych ticketów", "Grupy, kafelki, kolejka", "Duplikaty w BA&UX TODO", "Zabezpieczenia dla Task Hub", "Story akceptacji danych", "Kartka porównania", "Wideo dla behawiorystki", "Tematy na retrospektywę", "Paczki czekające na wdrożenie"];
+const PROJ = [["Shiftwow", "var(--p3)"], ["Task Hub", "var(--accent)"], ["Shiftwow", "var(--p3)"], ["Task Hub", "var(--accent)"], ["Shiftwow", "var(--p3)"], ["Task Hub", "var(--accent)"], ["", ""], ["Shiftwow", "var(--p3)"], ["Task Hub", "var(--accent)"]];
 
 const ICO: Record<string, string> = {
-  dots: '<circle cx="4" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="12" cy="8" r="1.4"/>',
+  spin: '<path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5" />',
   cloud: '<path d="M4.5 12.5a3 3 0 0 1-.3-6 4 4 0 0 1 7.7 1A2.5 2.5 0 0 1 11.5 12.5z"/>',
   plan: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',
   check: '<path d="M4 8.5l2.6 2.5L12 5.5"/>',
@@ -31,15 +32,18 @@ const ICO: Record<string, string> = {
   alert: '<path d="M8 4v5M8 11.8h.01"/>',
 };
 const SIco = ({ k, size = 14 }: { k: string; size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: ICO[k] }} />
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={k === "spin" ? "pt-spin" : undefined} dangerouslySetInnerHTML={{ __html: ICO[k] }} />
 );
+
+// etykieta stanu; „Agent pracuje” ma obracający się spinner
+const Label = ({ s }: { s: State }) => <span className="st pt-st">{s.key === "live" ? <SIco k="spin" size={11} /> : null}{s.label}</span>;
 
 function StepTile({ s, i, v }: { s: State; i: number; v: string }) {
   return (
     <div className={`node pt s-${s.key} v-${v}`}>
       {v === "b" ? <span className="pt-bar"><SIco k={s.ico} /><span>{s.label}</span></span> : null}
       {v === "c" ? <span className="pt-badge" title={s.label}><SIco k={s.ico} /></span> : null}
-      <span className="n-top"><span className="n-num">{String(i + 1).padStart(2, "0")}</span><ToolChip tool={s.tool} label={s.toolName} />{v !== "b" ? <span className="st pt-st">{s.label}</span> : null}</span>
+      <span className="n-top"><span className="n-num">{String(i + 1).padStart(2, "0")}</span><ToolChip tool={s.tool} label={s.toolName} />{v !== "b" ? <Label s={s} /> : null}</span>
       <span className="n-title">{s.title}</span>
       <span className="n-meta">{s.meta}</span>
     </div>
@@ -61,7 +65,7 @@ function TaskTile({ s, i, v }: { s: State; i: number; v: string }) {
       </span>
       <span className="t-row" style={{ marginTop: "auto" }}>
         <Lvl base={3} eff={3} />
-        {v !== "b" ? <span className="st pt-st">{s.label}</span> : null}
+        {v !== "b" ? <Label s={s} /> : null}
       </span>
       <span className="t-row"><span className="bar"><b style={{ width: `${(i * 13) % 100}%` }} /></span><span className="cnt">{(i % 4) + 1}/6 · ~{10 + i * 5} min</span></span>
     </div>
