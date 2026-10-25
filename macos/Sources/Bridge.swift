@@ -104,6 +104,25 @@ final class Bridge: ObservableObject {
         start()
     }
 
+    // zamknięcie aplikacji: pętla nie dożyje końca biegu, więc koniec zgłaszamy tu, czekając najwyżej 3 s.
+    // Bez tego bieg wisiał w Task Hub do wygaśnięcia (15 min), krok pokazywał „Claude pracuje”, a mostek nie brał nowej pracy
+    func shutdown() {
+        let id = isRunningNow ? runId : nil
+        stop()
+        guard let id, let url = URL(string: store.baseURL + "/api/bridge/run/\(id)") else { return }
+        var r = URLRequest(url: url)
+        r.httpMethod = "PATCH"
+        r.timeoutInterval = 3
+        r.setValue("Bearer \(store.cfg.token.trimmingCharacters(in: .whitespaces))", forHTTPHeaderField: "Authorization")
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.setValue(ClaudeCLI.userAgent, forHTTPHeaderField: "User-Agent")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["outcome": Outcome.stopped.rawValue, "note": "aplikacja Task Hub zamknięta w trakcie biegu"])
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: r) { _, _, _ in done.signal() }.resume()
+        let ok = done.wait(timeout: .now() + 3) == .success
+        Log.write("bieg \(id.prefix(8)): " + (ok ? "zgłoszony jako przerwany (zamknięcie aplikacji)" : "nie zdążyłem zgłosić przerwania, Task Hub zamknie go sam po 15 min"))
+    }
+
     // „Sprawdź teraz”: przerwij czekanie, zapomnij o odłożonym terminie (także po „Zatrzymaj”)
     func poke() {
         guard running else { return }

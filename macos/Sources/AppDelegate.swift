@@ -55,13 +55,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return !visible && self.bridge.state != .running
         }
         updater.askRelaunch = { [weak self] v in self?.askRelaunch(v) }
+        updater.isBusy = { [weak self] in self?.bridge.isRunningNow == true }
+        bridge.$isRunningNow.removeDuplicates().filter { !$0 }.receive(on: DispatchQueue.main).sink { [weak self] _ in Task { @MainActor in self?.updater.bridgeIdle() } }.store(in: &bag)
         updater.startSchedule()
     }
 
     private func askRelaunch(_ version: String) {
         let a = NSAlert()
         a.messageText = "Task Hub \(version) gotowy"
-        a.informativeText = "Nowa wersja jest już zainstalowana. Uruchomić aplikację ponownie teraz? Mostek wznowi pracę po chwili."
+        a.informativeText = bridge.isRunningNow
+            ? "Nowa wersja jest już zainstalowana. Mostek właśnie pracuje, więc aplikacja uruchomi się ponownie zaraz po końcu tej pracy."
+            : "Nowa wersja jest już zainstalowana. Uruchomić aplikację ponownie teraz? Mostek wznowi pracę po chwili."
         a.addButton(withTitle: "Uruchom ponownie")
         a.addButton(withTitle: "Później")
         NSApp.activate(ignoringOtherApps: true)
@@ -83,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        bridge.stop()
+        bridge.shutdown()
         Notifier.shared.runEnded()
         Log.write("Task Hub koniec")
     }

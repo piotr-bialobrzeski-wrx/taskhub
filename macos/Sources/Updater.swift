@@ -45,6 +45,8 @@ final class Updater: ObservableObject {
     private let store: Store
     var canRelaunchQuietly: () -> Bool = { false }
     var askRelaunch: (String) -> Void = { _ in }
+    var isBusy: () -> Bool = { false }                     // trwa bieg mostka: ponowne uruchomienie czeka na jego koniec
+    private var relaunchPending = false
 
     init(store: Store) { self.store = store }
 
@@ -279,8 +281,16 @@ final class Updater: ObservableObject {
         if canRelaunchQuietly() { relaunch() } else { askRelaunch(version) }
     }
 
-    // nowa instancja startuje po sekundzie, ta kończy pracę
+    // nowa instancja startuje po sekundzie, ta kończy pracę. W trakcie biegu czekamy na jego koniec: restart w środku wysyłki
+    // zostawiał bieg otwarty w Task Hub na 15 min, a krok pokazywał „Claude pracuje” (2026-10-25, 0.1.13 → 0.1.15)
     func relaunch() {
+        if isBusy() {
+            if !relaunchPending { Log.write("ponowne uruchomienie: czeka na koniec biegu mostka") }
+            relaunchPending = true
+            status = "Uruchomię ponownie po zakończeniu bieżącej pracy mostka."
+            return
+        }
+        relaunchPending = false
         let path = Bundle.main.bundleURL.path.replacingOccurrences(of: "\"", with: "\\\"")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -288,5 +298,10 @@ final class Updater: ObservableObject {
         do { try p.run() } catch { Log.write("ponowne uruchomienie: \(error.localizedDescription)"); return }
         Log.write("ponowne uruchomienie po aktualizacji")
         NSApp.terminate(nil)
+    }
+
+    // mostek skończył bieg: odłożone ponowne uruchomienie rusza teraz
+    func bridgeIdle() {
+        if relaunchPending { relaunch() }
     }
 }
