@@ -259,15 +259,29 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("update_step", {
-      title: "Zmień krok", description: "Zmienia tytuł, opis, narzędzie, szacunek, link, połączenie albo poziom pracy kroku (tool = klucz jak w create_task; link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket; connection = nazwa z list_connections, pusty napis zdejmuje; workLevel jak w add_steps, pusty napis = z narzędzia).",
-      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), tool: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional(), workLevel: z.string().optional() }),
+      title: "Zmień krok", description: "Zmienia tytuł, opis, narzędzie, szacunek, link, połączenie albo poziom pracy kroku (tool = klucz jak w create_task; link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket; connection = nazwa z list_connections, pusty napis zdejmuje; workLevel jak w add_steps, pusty napis = z narzędzia; dependsOn = pełna nowa lista id kroków tego zadania, na których wynik krok naprawdę czeka, zastępuje dotychczasowe strzałki, [] = krok niezależny).",
+      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), tool: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional(), workLevel: z.string().optional(), dependsOn: z.array(z.string()).optional() }),
     }, async (a) => {
-      if (!(await ownedStep(ownerId, a.stepId))) return text("Nie ma takiego kroku.");
+      const taskId = await ownedStep(ownerId, a.stepId);
+      if (!taskId) return text("Nie ma takiego kroku.");
+      const deps = a.dependsOn === undefined ? undefined : [...new Set(a.dependsOn)];
+      if (deps) {
+        const t = await repo.getTask(ownerId, taskId);
+        const steps = new Map((t?.steps ?? []).map((x) => [x.id, x.dependsOn]));
+        const bad = deps.filter((d) => d === a.stepId || !steps.has(d));
+        if (bad.length) return text(`Zależności tylko od innych kroków tego samego zadania; nie pasują: ${bad.join(", ")}.`);
+        // pętla: któryś z nowych poprzedników (pośrednio) czeka na ten krok
+        steps.set(a.stepId, deps);
+        const seen = new Set<string>();
+        const reaches = (from: string): boolean => (steps.get(from) ?? []).some((d) => d === a.stepId || (!seen.has(d) && (seen.add(d), reaches(d))));
+        if (reaches(a.stepId)) return text("Zależności tworzyłyby pętlę: któryś z podanych kroków czeka (pośrednio) na ten krok. Nic nie zmieniono.");
+      }
       const connectionId = a.connection === undefined ? undefined : await connectionIdOf(a.connection);
       if (a.connection?.trim() && !connectionId) return text("Nie ma takiego połączenia (list_connections).");
       const was = await stepById(a.stepId);
       if (a.workLevel?.trim() && !normalizeLevel(a.workLevel)) return text("Nieznany poziom pracy: strategy, analysis, execution albo mechanics (Strategia, Analiza, Wykonanie, Mechanika).");
       await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, tool: a.tool, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null, connectionId, workLevel: a.workLevel === undefined ? undefined : a.workLevel.trim() || null });
+      if (deps) await repo.setStepDependencies(a.stepId, deps);
       await mark(a.stepId, "zmienił krok");
       // zmiana narzędzia albo połączenia kroku z zatwierdzonym szkicem kasuje zgodę (inne konto, inna aplikacja niż te, które Piotr widział)
       if (was?.approvedAt && !(await stepById(a.stepId))?.approvedAt) return text("Zmieniono. Zgoda Piotra na szkic tego kroku wygasła (zmienione narzędzie albo połączenie): szkic wrócił do zatwierdzenia.");
