@@ -107,9 +107,10 @@ async function sendRun(a: BridgeAuth, bridge: string): Promise<Response> {
     // kilka kont tej samej aplikacji, a krok nie wskazuje żadnego: model nie może zgadywać, z którego wysłać
     if (p?.kind === "many") return refuse(a.ownerId, s, `na komputerze ${bridge} jest kilka kont ${toolLabel(normalizeTool(t.app))} (${p.servers.map((x) => `„${x}”`).join(", ")}), a krok nie wskazuje, którym wysłać (wybierz połączenie na karcie szkicu)`);
   }
-  // zatwierdzony szkic do wysłania to Mechanika (zasada „Dobór modelu i wysiłku”); commit robi aplikacja bez modelu
+  // zatwierdzony szkic do wysłania to Mechanika (zasada „Dobór modelu i wysiłku”), chyba że Piotr wybrał model na karcie kroku
+  // (paczka 20: wybór „Sonnet” na karcie szkicu był pomijany i wysyłka szła na modelu Mechaniki); commit robi aplikacja bez modelu
   const settings = git ? {} : await repo.userSettings(a.ownerId), cfg = modelConfig(settings);
-  const sp = cfg ? pickRun([choiceOf(cfg, "mechanics")], activeLimits(settings.modelLimits)) : null;
+  const sp = cfg ? pickRun([choiceOf(cfg, "mechanics", s.step.modelPick)], activeLimits(settings.modelLimits)) : null;
   const pick = sp && !("blockedUntil" in sp) ? sp : null;
   const run = await repo.startBridgeRun(a.ownerId, a.tokenId, bridge, "send", s.step.id, pick ? runModel(pick) : null);
   if (!run) return busy(a.ownerId);

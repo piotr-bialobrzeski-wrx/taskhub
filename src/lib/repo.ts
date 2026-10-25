@@ -575,7 +575,8 @@ export async function clearApproval(ownerId: string, stepId: string, opts: { not
   return true;
 }
 // notatka po biegu wysyłki, który nie potwierdził wysyłki (bez ponawiania: Piotr sprawdza i zatwierdza ponownie)
-export const unconfirmedSendNote = (app: string) => `Wysyłka nie została potwierdzona. Sprawdź w ${toolLabel(app)}, czy poszło, i zatwierdź ponownie, jeśli trzeba.`;
+// paczka 20: z nazwą kroku, bo bez niej notatka po nieudanej wysyłce jednego kroku wyglądała jak alarm po udanej wysyłce innego
+export const unconfirmedSendNote = (app: string, title?: string | null) => `Wysyłka${title ? ` „${shortTitle(title, 60)}”` : ""} nie została potwierdzona. Sprawdź w ${toolLabel(app)}, czy poszło, i zatwierdź ponownie, jeśli trzeba.`;
 // bieg wysyłki bierze szkic: atomowo i najwyżej raz (tylko gdy nikt go jeszcze nie wziął, zgoda jest ważna, a kroki przed nim są zrobione)
 export async function markSendStarted(ownerId: string, stepId: string): Promise<boolean> {
   return sql().begin(async (tx) => {
@@ -1081,7 +1082,7 @@ async function afterRuns(ownerId: string, runs: Row[]): Promise<void> {
     await revokeRunTokens(ownerId, r.id as string);
     if (r.kind !== "send" || !r.stepId) continue;
     const stepId = r.stepId as string;
-    const [s] = await sql()`select task_id, status, blocks, send_started_at from steps where id = ${stepId}`;
+    const [s] = await sql()`select task_id, title, status, blocks, send_started_at from steps where id = ${stepId}`;
     if (!s || s.status === "done") continue;
     // znacznik wysyłki jest tego biegu (jeden otwarty bieg na właściciela): jego zgoda wraca do Piotra. Bez znacznika Piotr już ją cofnął
     // („Zatrzymaj”) albo zatwierdził szkic od nowa w trakcie biegu: nowej zgody nie ruszamy
@@ -1092,7 +1093,7 @@ async function afterRuns(ownerId: string, runs: Row[]): Promise<void> {
     const blocks = parseBlocks(s.blocks), d = draftOf({ blocks });
     // commit z aplikacji na Macu: aplikacja wie, co się nie udało (np. commit jest, push nie), więc piszemy powód
     const why = d && isGitDraft(d, blocks) && r.outcome === "error" && typeof r.note === "string" && r.note.trim() ? r.note.trim().slice(0, 500).replace(/([^.!?])$/, "$1.") : "";
-    await addChat(ownerId, s.taskId as string, "agent", why ? `Commit nie wyszedł: ${why} Szkic wrócił do zatwierdzenia; zatwierdź go ponownie, gdy to poprawisz.` : unconfirmedSendNote(d?.target.app ?? "aplikacji docelowej"), { stepId });
+    await addChat(ownerId, s.taskId as string, "agent", why ? `Commit nie wyszedł: ${why} Szkic wrócił do zatwierdzenia; zatwierdź go ponownie, gdy to poprawisz.` : unconfirmedSendNote(d?.target.app ?? "aplikacji docelowej", s.title as string), { stepId });
   }
 }
 // bieg, który aplikacja na Macu ma przerwać przy najbliższym sygnale: zatrzymany w Task Hub (stop_at) albo bieg wysyłki, którego zgodę Piotr wycofał

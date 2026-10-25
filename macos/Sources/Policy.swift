@@ -82,6 +82,9 @@ enum Policy {
     // kandydaci na narzędzie-próbkę (pierwsze, które próba pokazała i którego bieg i tak nie potrzebuje)
     static let canaries = ["NotebookEdit", "EnterWorktree", "ExitWorktree", "CronCreate", "CronDelete", "CronList", "Monitor", "PushNotification", "ScheduleWakeup", "RemoteTrigger", "Agent", "Task"]
     static let sendHubTools = ["get_task", "get_rules", "list_connections", "add_facts", "complete_step", "leave_step"]
+    // lista zadań sesji Claude Code (nowsze wersje dają ją zamiast TodoWrite albo obok niego); nie ma nic wspólnego z zadaniami Task Hub.
+    // Bieg pracy może nią planować; bieg wysyłki jej nie dostaje (paczka 20: Sonnet brał TaskGet za get_task Task Hub, strażnik go blokował i krok wracał)
+    static let sessionTaskTools = ["TaskCreate", "TaskGet", "TaskList", "TaskUpdate"]
     // w folderach z kodem piaskownica nie zapisze tego, co uruchamia programy poza nią (haki i ustawienia gita, ustawienia
     // edytorów i Claude Code); dla work/ Claude Code chroni to sam (sprawdzone na 2.1.304: echo >> .git/config = Read-only file system)
     static let protectedInRepo = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info", ".git/modules", ".git/worktrees",
@@ -299,7 +302,7 @@ enum Policy {
         let dirs = [work] + folders
         let conn = connectorTools(probe.info)
         // WebFetch zostaje (research, ceny, dokumentacja); Read tylko w work/ i folderach z kodem, więc pliki z dysku nie mają czym wyjść
-        var allow = ["mcp__" + hub, "Glob", "Grep", "TodoWrite", "ToolSearch", "WebSearch", "WebFetch"]
+        var allow = ["mcp__" + hub, "Glob", "Grep", "TodoWrite", "ToolSearch", "WebSearch", "WebFetch"] + sessionTaskTools
         for d in dirs { allow.append("Read(/\(d)/**)") }
         // duży wynik narzędzia Claude Code zapisuje w ~/.claude/projects/<katalog roboczy>/ i każe go przeczytać przez Read
         let results = home + "/.claude/projects/" + String(work.map { (c: Character) -> Character in c.isASCII && (c.isLetter || c.isNumber) ? c : "-" })
@@ -310,7 +313,7 @@ enum Policy {
         allow += bashAllow.map { "Bash(\($0):*)" }
         var deny = conn.write + bashDeny.map { "Bash(\($0):*)" } + secretReadRules()
         let canary = try pickCanary(probe.info, excluded: allow + deny)
-        let builtins: [String] = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "TodoWrite", "ToolSearch", "WebSearch", "WebFetch", canary]
+        let builtins: [String] = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "TodoWrite", "ToolSearch", "WebSearch", "WebFetch", canary] + sessionTaskTools
         // tryb zwykły (bez --tools): pozostałe wbudowane narzędzia z próby (Agent, NotebookEdit…) wprost zablokowane, bo reguły „allow”
         // z ~/.claude/settings.json Piotra też obowiązują; zablokowane w argumentach, więc init nie może ich pokazać
         let extra = probe.restricted ? [] : plainExtras(probe.info, keep: builtins, deny: deny)
@@ -401,9 +404,10 @@ enum Policy {
         let allow = sendHubTools.map { "mcp__\(hub)__\($0)" } + names.map { "mcp__" + $0 }
         let others = known.subtracting(names).subtracting([hub]).sorted()
         let base = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"]
-        var deny = base + others.map { "mcp__" + $0 } + secretReadRules()
+        // listy zadań sesji: zablokowane, ale bez przerywania biegu, gdy jakaś wersja Claude Code pokaże je mimo to (strażnik i tak odmówi)
+        var deny = base + ["TodoWrite"] + sessionTaskTools + others.map { "mcp__" + $0 } + secretReadRules()
         let canary = try pickCanary(probe.info, excluded: allow + deny)
-        let builtins = ["Read", "TodoWrite", "ToolSearch", canary]
+        let builtins = ["Read", "ToolSearch", canary]
         let extra = probe.restricted ? [] : plainExtras(probe.info, keep: builtins, deny: deny)   // jak w biegu „work”
         deny += extra
         let hk = try hooks(probe)

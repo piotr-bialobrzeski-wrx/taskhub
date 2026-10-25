@@ -176,7 +176,7 @@ describe.skipIf(!DB)("poprawki wysyłki (baza)", async () => {
     expect(s2.step.id).toBe(b.stepId);
     await actions.backToTodo(b.taskId, b.stepId);
     expect((await patch(s2.run.id, { outcome: "stopped" })).status).toBe(200);
-    expect(await chat(b.taskId)).toContain(repo.unconfirmedSendNote("slack"));
+    expect(await chat(b.taskId)).toContain(repo.unconfirmedSendNote("slack", "Wysyłka zatrzymana"));
     expect((await get(b.taskId, b.stepId)).status).toBe("todo");
   });
 

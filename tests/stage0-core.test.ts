@@ -345,7 +345,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("Etap 0: zgoda Piotra, tokeny bi
     expect(s).toMatchObject({ status: "draft", approvedAt: null, sendStartedAt: null });
     expect(repo.draftOf(s)?.status).toBe("proposed");
     const chat = await repo.listChat(owner, a.taskId);
-    expect(chat.at(-1)?.text).toBe("Wysyłka nie została potwierdzona. Sprawdź w Slack, czy poszło, i zatwierdź ponownie, jeśli trzeba.");
+    expect(chat.at(-1)?.text).toBe("Wysyłka „Napisz na #dev” nie została potwierdzona. Sprawdź w Slack, czy poszło, i zatwierdź ponownie, jeśli trzeba.");
     expect(await repo.clearApproval(owner, a.stepId, { note: "drugi raz" })).toBe(false);           // nic do cofnięcia: bez drugiej notatki
     // commit zrobiony przez aplikację na Macu: krok zrobiony, szkic wysłany
     await repo.approveDraft(owner, a.stepId);

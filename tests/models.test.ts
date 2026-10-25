@@ -177,6 +177,23 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("dobór modelu: mostek i konekto
     await repo.setUserSettings(owner, { models: MODELS });
   });
 
+  it("bieg wysyłki: Mechanika (Haiku · niski), a wybór Piotra na karcie szkicu (Sonnet) wygrywa", async () => {
+    const t = await repo.createTask(owner, { title: "Wysyłka", steps: [{ title: "Napisz na #dev", tool: "slack", needsApproval: true }] });
+    const id = t.steps[0].id;
+    await repo.updateStep(id, { status: "draft", blocks: [{ type: "draft", status: "proposed", body: "Cześć", target: { app: "slack", action: "send", where: "#dev" } } as never] });
+    const send = async () => run.POST(new Request("http://x/api/bridge/run", { method: "POST", headers: H(tok), body: JSON.stringify({ bridge: "mini", v: 2, kind: "send" }) }));
+    expect(await repo.approveDraft(owner, id)).toBe(true);
+    let b = await (await send()).json();
+    expect(b).toMatchObject({ kind: "send", step: { id }, model: "haiku", effort: "low" });
+    await patch(b.run.id, { outcome: "stopped" });
+    await actions.patchStep(t.id, id, { modelPick: "sonnet" });
+    expect(await repo.approveDraft(owner, id)).toBe(true);
+    b = await (await send()).json();
+    expect(b).toMatchObject({ kind: "send", step: { id }, model: "sonnet", effort: "low", fallbackModel: "haiku" });
+    await closeOpen();
+    await sql()`delete from tasks where id = ${t.id}`;
+  });
+
   it("bez doboru w ustawieniach bieg idzie jak dotąd: bez modelu, list_work bez nagłówka", async () => {
     await repo.setUserSettings(owner, { models: null });
     const b = await (await postRun()).json();

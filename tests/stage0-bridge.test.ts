@@ -54,6 +54,11 @@ describe("prompty mostka", () => {
     expect(p).toContain(`complete_step ze stepId "S1"`);
     expect(p).toContain(`leave_step ze stepId "S1"`);
     expect(p).not.toContain("list_work");
+    // paczka 20: narzędzia Task Hub pełnymi nazwami serwera biegu, bez wbudowanej listy zadań sesji (TaskGet na Sonnecie)
+    expect(p).toContain(`mcp__task-hub__get_task z taskId "T1"`);
+    expect(p).toContain(`mcp__task-hub__complete_step ze stepId "S1"`);
+    expect(p).toContain(`mcp__task-hub__leave_step ze stepId "S1"`);
+    expect(p).toContain("TaskGet");
   });
   it("wersja protokołu: brak albo 1 = v1, 2 i wyżej = v2", () => {
     expect([protocolOf(undefined), protocolOf("1"), protocolOf(2), protocolOf("2"), protocolOf("3"), protocolOf("x")]).toEqual([1, 1, 2, 2, 2, 1]);
@@ -331,12 +336,12 @@ describe.skipIf(!DB)("mostek v2 na serwerze", async () => {
     const sa = await step(a.taskId, a.stepId);
     expect(sa).toMatchObject({ status: "draft", approvedAt: null, sendStartedAt: null });
     expect(repo.draftOf(sa)?.status).toBe("proposed");
-    expect(await chat(a.taskId)).toContain(repo.unconfirmedSendNote("clickup"));
+    expect(await chat(a.taskId)).toContain(repo.unconfirmedSendNote("clickup", "Mostek v2: opis w ClickUp"));
     expect(await repo.tokenForSecret(s1.token)).toBeNull();
     // Piotr zatrzymał wysyłkę: stopped przyjęte, zgoda cofnięta z notatką, token biegu zgasł
     expect((await patch(s2.run.id, { outcome: "stopped" })).status).toBe(200);
     expect((await step(b.taskId, b.stepId)).approvedAt).toBeNull();
-    expect(await chat(b.taskId)).toContain("Wysyłka nie została potwierdzona. Sprawdź w Slack, czy poszło, i zatwierdź ponownie, jeśli trzeba.");
+    expect(await chat(b.taskId)).toContain("Wysyłka „Mostek v2: wiadomość na Slacku” nie została potwierdzona. Sprawdź w Slack, czy poszło, i zatwierdź ponownie, jeśli trzeba.");
     expect(await repo.tokenForSecret(s2.token)).toBeNull();
     expect((await postRun({ bridge: "mini", v: 2, kind: "send" })).status).toBe(204);   // bez automatycznego ponawiania
     await sql()`delete from tasks where owner_id = ${owner}`;
