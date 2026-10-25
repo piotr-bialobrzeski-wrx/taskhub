@@ -3,7 +3,7 @@
 // Rysuje tylko to, co dostanie; co znaczy kafelek i co robią akcje, decyduje rodzic (Board / TaskCanvas).
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { bounds, centerOf, computePositions, groupAt, reassign, type DropChange, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
+import { bounds, centerOf, computePositions, edgePath, groupAt, reassign, type DropChange, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
 import { GCOL, Icon } from "./ui";
 
 export type CanvasItem = LItem & { cls: string; done?: boolean; aria: string };
@@ -85,18 +85,22 @@ export function Canvas(p: CanvasProps) {
   }, []);
 
   // zmiana powiększenia: punkt pod kursorem (albo środek) zostaje w miejscu; przewinięcie liczymy po przerysowaniu sceny, nie przed
+  // Świat zaczyna się w (x0, y0) ≤ 0, gdy kafelek leży nad pierwszym albo na lewo od niego; lewy górny róg świata (punkt 0, 0) leży wtedy
+  // o -x0·zoom, -y0·zoom dalej od marginesu. wx, wy = punkt świata pod pikselem px, py kanwy.
+  const org = useRef({ x: 0, y: 0 });
+  const edge = (z: number) => ({ x: padRef.current.x - org.current.x * z, y: padRef.current.y - org.current.y * z });
   const anchor = useRef<{ wx: number; wy: number; px: number; py: number } | null>(null);
   const setZoom = useCallback((nz: number, cx?: number, cy?: number) => {
     const c = canvasRef.current; if (!c) return;
     nz = clamp(nz, 0.35, 1.6);
-    const px = cx ?? c.clientWidth / 2, py = cy ?? c.clientHeight / 2, pd = padRef.current;
-    setZoomState((z) => { anchor.current = { wx: (c.scrollLeft + px - pd.x) / z, wy: (c.scrollTop + py - pd.y) / z, px, py }; return nz; });
+    const px = cx ?? c.clientWidth / 2, py = cy ?? c.clientHeight / 2;
+    setZoomState((z) => { const e = edge(z); anchor.current = { wx: (c.scrollLeft + px - e.x) / z, wy: (c.scrollTop + py - e.y) / z, px, py }; return nz; });
     try { localStorage.setItem("th-zoom-" + p.zoomKey, String(nz)); } catch { /* brak storage */ }
   }, [p.zoomKey]);
   useLayoutEffect(() => {
     const a = anchor.current, c = canvasRef.current; if (!a || !c) return;
-    anchor.current = null; const pd = padRef.current;
-    c.scrollLeft = a.wx * zoom + pd.x - a.px; c.scrollTop = a.wy * zoom + pd.y - a.py;
+    anchor.current = null; const e = edge(zoom);
+    c.scrollLeft = a.wx * zoom + e.x - a.px; c.scrollTop = a.wy * zoom + e.y - a.py;
   }, [zoom]);
   // pole z procentami: wpisanie liczby ustawia powiększenie (35–160)
   const [zEdit, setZEdit] = useState<string | null>(null);
@@ -109,6 +113,12 @@ export function Canvas(p: CanvasProps) {
   const P = useMemo(() => ({ ...layout.P, ...override }), [layout.P, override]);
   const lg = useMemo(() => layout.groups.map((g) => ({ ...(p.groups.find((x) => x.id === g.id) ?? ({} as CanvasGroup)), ...g, ...(gOverride[g.id] ?? {}) })) as CanvasGroup[], [layout.groups, p.groups, gOverride]);
   const bb = bounds(P, lg, p.size, layout.origin);
+  // świat urósł w górę albo w lewo (kafelek odsunięty ponad pierwszy): przewijamy o tyle samo, żeby widok został w miejscu
+  useLayoutEffect(() => {
+    const c = canvasRef.current, o = org.current; if (!c || (o.x === bb.x0 && o.y === bb.y0)) return;
+    c.scrollLeft += (o.x - bb.x0) * zoom; c.scrollTop += (o.y - bb.y0) * zoom;
+    org.current = { x: bb.x0, y: bb.y0 };
+  }, [bb.x0, bb.y0, zoom]);
 
   const worldPoint = (ev: { clientX: number; clientY: number }): Pos => {
     const r = worldRef.current!.getBoundingClientRect();
@@ -157,7 +167,7 @@ export function Canvas(p: CanvasProps) {
       if (!d.moved && Math.hypot(dx, dy) < 4) return;
       d.moved = true;
       const o: Record<string, Pos> = {};
-      d.group.forEach((g) => { o[g.k] = { x: Math.max(0, g.ox + dx), y: Math.max(60, g.oy + dy) }; });
+      d.group.forEach((g) => { o[g.k] = { x: g.ox + dx, y: g.oy + dy }; });   // bez granicy: w górę i w lewo świat rośnie jak w dół i w prawo
       setOverride((prev) => ({ ...prev, ...o }));
     } else if (d.kind === "gmove" || d.kind === "gresize") {
       const dx = (ev.clientX - d.sx) / zoom, dy = (ev.clientY - d.sy) / zoom;
@@ -165,12 +175,11 @@ export function Canvas(p: CanvasProps) {
       d.moved = true;
       const g: Partial<CanvasGroup> = { auto: false };
       if (d.kind === "gmove") {
-        const mx = Math.max(dx, -d.ox), my = Math.max(dy, 60 - d.oy);
-        g.x = d.ox + mx; g.y = d.oy + my;
-        const o: Record<string, Pos> = {}; d.mem.forEach((m) => { o[m.k] = { x: m.ox + mx, y: m.oy + my }; });
+        g.x = d.ox + dx; g.y = d.oy + dy;
+        const o: Record<string, Pos> = {}; d.mem.forEach((m) => { o[m.k] = { x: m.ox + dx, y: m.oy + dy }; });
         setOverride((prev) => ({ ...prev, ...o }));
-      } else if (d.corner === "tr") { g.w = Math.max(200, d.ow + dx); g.h = Math.max(120, d.oh - Math.max(dy, 60 - d.oy)); g.y = d.oy + d.oh - g.h; }
-      else if (d.corner === "bl") { g.h = Math.max(120, d.oh + dy); g.w = Math.max(200, d.ow - Math.max(dx, -d.ox)); g.x = d.ox + d.ow - g.w; }
+      } else if (d.corner === "tr") { g.w = Math.max(200, d.ow + dx); g.h = Math.max(120, d.oh - dy); g.y = d.oy + d.oh - g.h; }
+      else if (d.corner === "bl") { g.h = Math.max(120, d.oh + dy); g.w = Math.max(200, d.ow - dx); g.x = d.ox + d.ow - g.w; }
       else { g.w = Math.max(200, d.ow + dx); g.h = Math.max(120, d.oh + dy); }
       setGOverride((prev) => ({ ...prev, [d.g.id]: { ...(prev[d.g.id] ?? {}), ...g } }));
     } else if (d.kind === "link") {
@@ -230,9 +239,9 @@ export function Canvas(p: CanvasProps) {
     p.apiRef.current = {
       positions: () => P,
       groupRects: () => Object.fromEntries(lg.map((g) => [g.id, { x: g.x, y: g.y, w: g.w, h: g.h }])),
-      viewCenter: () => { const c = canvasRef.current, pd = padRef.current; return c ? { x: (c.scrollLeft + c.clientWidth / 2 - pd.x) / zoom, y: (c.scrollTop + c.clientHeight / 2 - pd.y) / zoom } : { x: 300, y: 300 }; },
+      viewCenter: () => { const c = canvasRef.current, e = edge(zoom); return c ? { x: (c.scrollLeft + c.clientWidth / 2 - e.x) / zoom, y: (c.scrollTop + c.clientHeight / 2 - e.y) / zoom } : { x: 300, y: 300 }; },
       // środek widoku na kafelku (margines wokół świata pozwala wyśrodkować każdy, także skrajny)
-      centerOn: (id) => { const c = canvasRef.current, q = P[id], pd = padRef.current; if (!c || !q) return; c.scrollTo({ left: (q.x + p.size.w / 2) * zoom + pd.x - c.clientWidth / 2, top: (q.y + p.size.h / 2) * zoom + pd.y - c.clientHeight / 2, behavior: "smooth" }); },
+      centerOn: (id) => { const c = canvasRef.current, q = P[id], e = edge(zoom); if (!c || !q) return; c.scrollTo({ left: (q.x + p.size.w / 2) * zoom + e.x - c.clientWidth / 2, top: (q.y + p.size.h / 2) * zoom + e.y - c.clientHeight / 2, behavior: "smooth" }); },
     };
   });
 
@@ -321,8 +330,8 @@ export function Canvas(p: CanvasProps) {
     if (!mx) return;
     const panel = document.querySelector<HTMLElement>(".detail:not([hidden])");
     const avail = c.clientWidth - (panel ? panel.offsetWidth + 40 : 40);
-    const z = clamp(Math.min(avail / (mx + 20), (c.clientHeight - 100) / (my + 20), 1.2), 0.35, 1.6);
-    setZoomState(z); c.scrollTo(padRef.current.x, padRef.current.y);
+    const z = clamp(Math.min(avail / (mx - bb.x0 + 20), (c.clientHeight - 100) / (my - bb.y0 + 20), 1.2), 0.35, 1.6);
+    setZoomState(z); c.scrollTo(padRef.current.x, padRef.current.y);   // lewy górny róg świata (x0, y0) przy krawędzi widoku
   };
 
   // pigułka powiększenia siedzi w górnym pasku ekranu (.zslot), a jej rozwijane menu w portalu (pasek ma backdrop-filter)
@@ -348,9 +357,12 @@ export function Canvas(p: CanvasProps) {
   // ---------- strzałki ----------
   const edges: ReactNode[] = [];
   const H = p.size.h;
+  // kafelki jako przeszkody: strzałka przez kilka kolumn omija je szczeliną zamiast biec pod nimi
+  const tiles = Object.values(P).map((q) => ({ x: q.x, y: q.y, w: p.size.w, h: H }));
+  if (layout.origin) tiles.push({ ...layout.origin, w: p.size.w, h: H });
   const curve = (a: Pos, aw: number, ay: number, b: Pos, done: boolean, key: string | null) => {
-    const x1 = a.x + aw, y1 = a.y + ay, x2 = b.x - 4, y2 = b.y + H / 2, k = Math.max(40, Math.abs(x2 - x1) / 2);
-    const d = `M${x1} ${y1} C${x1 + k} ${y1}, ${x2 - k} ${y2}, ${x2} ${y2}`;
+    const x1 = a.x + aw, y1 = a.y + ay, x2 = b.x - 4, y2 = b.y + H / 2;
+    const d = edgePath(x1, y1, x2, y2, tiles.filter((r) => !(r.x === a.x && r.y === a.y) && !(r.x === b.x && r.y === b.y)));
     if (!key) return <path key={"s" + b.x + b.y} className="edge start" markerEnd="url(#ah)" d={d} />;
     return <g key={key}><path className="edge-hit" data-edge={key} d={d}><title>Kliknij, aby usunąć to połączenie</title></path><path className={"edge" + (done ? " done" : "")} markerEnd={`url(#${done ? "ah-done" : "ah"})`} d={d} /></g>;
   };
@@ -365,8 +377,8 @@ export function Canvas(p: CanvasProps) {
 
   return (
     <div ref={canvasRef} className={"canvas" + (zoom < 0.6 ? " far" : "") + (panning ? " panning" : "") + (drag?.kind === "link" ? " connecting" : "")} onPointerDown={onCanvasDown} onPointerMove={onCanvasMove} onPointerUp={endBand} onPointerCancel={endBand} onWheel={onWheel}>
-      <div className="stage" style={{ width: Math.max(bb.w * zoom, 10) + 2 * pad.x, height: Math.max(bb.h * zoom, 10) + 2 * pad.y }}>
-        <div ref={worldRef} className="world" style={{ transform: `scale(${zoom})`, ["--z" as string]: zoom, width: bb.w, height: bb.h, left: pad.x, top: pad.y }} onPointerDown={onWorldDown} onPointerMove={onWorldMove} onPointerUp={endDrag} onPointerCancel={endDrag}
+      <div className="stage" style={{ width: Math.max((bb.w - bb.x0) * zoom, 10) + 2 * pad.x, height: Math.max((bb.h - bb.y0) * zoom, 10) + 2 * pad.y }}>
+        <div ref={worldRef} className="world" style={{ transform: `scale(${zoom})`, ["--z" as string]: zoom, width: bb.w, height: bb.h, left: pad.x - bb.x0 * zoom, top: pad.y - bb.y0 * zoom }} onPointerDown={onWorldDown} onPointerMove={onWorldMove} onPointerUp={endDrag} onPointerCancel={endDrag}
           onContextMenu={(ev) => { const n = (ev.target as HTMLElement).closest<HTMLElement>(".node"); if (!n) return; ev.preventDefault(); if (p.onMenu) p.onMenu(n.dataset.origin ? null : n.dataset.id ?? null, { x: ev.clientX, y: ev.clientY }); }}   /* prawy klik na kafelku: własne menu zamiast menu przeglądarki („Wczytaj ponownie” w aplikacji na Maca) */
           onKeyDown={(ev) => { if (ev.key !== "Enter" && ev.key !== " ") return; const n = (ev.target as HTMLElement).closest<HTMLElement>(".node"); if (!n) return; ev.preventDefault(); if (n.dataset.origin) p.onOpen(null); else if (n.dataset.id) p.onOpen(n.dataset.id); }}>
           {lg.map((g) => (
