@@ -300,7 +300,8 @@ export async function createTask(ownerId: string, input: NewTask): Promise<Task>
   return (await getTask(ownerId, id))!;
 }
 // before: id kroku, przed którym nowe kroki mają wejść (np. przed publikacją): dostają jego miejsce w kolejności, dziedziczą jego pierwotne zależności
-// (gdy nie podały własnych; bez kroków dopisanych przed nim wcześniej), a on zaczyna czekać na nie; kroki za nim przesuwają się dalej
+// (gdy nie podały własnych; bez kroków dopisanych przed nim wcześniej), a on zaczyna czekać na nie; kroki za nim przesuwają się dalej.
+// dependsOn podane wprost (także pusta lista = krok niezależny) wygrywa z dziedziczeniem: agent wskazuje tylko prawdziwe zależności
 export async function addSteps(taskId: string, steps: NewStep[], opts: { before?: string | null } = {}): Promise<Step[]> {
   const [bef] = opts.before ? await sql()`select id, position from steps where id = ${opts.before} and task_id = ${taskId}` : [];
   if (bef) await sql()`update steps set position = position + ${steps.length} where task_id = ${taskId} and position >= ${Number(bef.position)}`;
@@ -329,7 +330,7 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
     // inaczej każde kolejne dopisanie tworzy fałszywy łańcuch (12 → 13 → 14 → 15)
     const inherited = (await sql()`select d.depends_on_id from step_dependencies d join steps s on s.id = d.depends_on_id join steps b on b.id = d.step_id
       where d.step_id = ${bef.id as string} and s.created_at <= b.created_at`).map((r) => r.dependsOnId as string);
-    const own = new Set(links.map((l) => l.step_id));
+    const own = new Set(created.filter((_, i) => steps[i].dependsOn !== undefined).map((c) => c.id));
     const inh = created.filter((c) => !own.has(c.id)).flatMap((c) => inherited.map((d) => ({ step_id: c.id, depends_on_id: d })));
     const needed = new Set(links.map((l) => l.depends_on_id));
     const tails = created.filter((c) => !needed.has(c.id)).map((c) => ({ step_id: bef.id as string, depends_on_id: c.id }));

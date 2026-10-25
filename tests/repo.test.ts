@@ -147,6 +147,17 @@ describe.skipIf(!DB)("repo", async () => {
     expect(fresh.steps.at(-1)!.dependsOn.sort()).toEqual([a.id, b.id, c.id, d.id].sort());
   });
 
+  it("add_steps z before i dependsOn podanym wprost: agent wskazuje prawdziwe zależności, pusta lista = krok niezależny", async () => {
+    const t = await repo.createTask(owner, { title: "Paczka z niezależnymi", steps: [{ title: "Zmiana A" }, { title: "Zmiana B" }, { title: "Wdróż na produkcję", dependsOn: ["n1", "n2"] }] });
+    const [a, b, dep] = t.steps;
+    const [c, d, e] = await repo.addSteps(t.id, [{ title: "Zmiana C", dependsOn: [] }, { title: "Zmiana D", dependsOn: [b.id] }, { title: "Zmiana E", dependsOn: ["n1"] }], { before: dep.id });
+    expect(c.dependsOn).toEqual([]);                  // niezależny: nie dziedziczy A i B
+    expect(d.dependsOn).toEqual([b.id]);              // tylko wskazana zależność, bez A
+    expect(e.dependsOn).toEqual([c.id]);              // zależność w tej paczce
+    const fresh = (await repo.getTask(owner, t.id))!;
+    expect(fresh.steps.at(-1)!.dependsOn.sort()).toEqual([a.id, b.id, d.id, e.id].sort()); // zbiorczy czeka na ogony (C przez E)
+  });
+
   it("załącznik z danymi: adres /api/files/<id>, lista bez danych, plik tylko dla właściciela", async () => {
     const t = await repo.createTask(owner, { title: "Z załącznikiem" });
     const png = Buffer.from("89504e470d0a1a0a", "hex");
