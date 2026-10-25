@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, TASK_SIZE } from "@/lib/canvas/layout";
-import { Icon, Lvl, ToolIcon, TS_LABEL, TS_SHORT, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
+import { Icon, LookBar, Lvl, ToolIcon, TS_LABEL, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
 import { AgentFeed, Dock, Namer, PrioPicker, ProjectPicker, TileMenu, Toast, useToast } from "./widgets";
 import { msgCount } from "@/lib/auto";
 import type { FeedItem } from "@/lib/feed";
@@ -37,6 +37,7 @@ export function TaskTileView({ t }: { t: TaskTile }) {
   const cnt = !t.progress.all ? t.estText : badges >= 2 ? `${t.progress.done}/${t.progress.all}` : `${t.progress.done}/${t.progress.all} · ${t.estText}`;
   return (
     <>
+      <LookBar look={t.look} />
       <span className="t-head">
         <span className="t-ico" style={{ ["--c" as string]: toolColor(t.tool) }}><ToolIcon tool={t.tool} /></span>
         <span className="t-main">
@@ -48,7 +49,6 @@ export function TaskTileView({ t }: { t: TaskTile }) {
       <span className="t-row" style={{ marginTop: "auto" }}>
         <Lvl base={t.base} eff={t.eff} why={t.why} />
         {t.due ? <span className={"st due " + t.due.cls} title={"Termin: " + t.due.iso}>{t.due.text}</span> : null}
-        <span className={"st " + t.state} title={TS_LABEL[t.state]}>{TS_SHORT[t.state]}</span>
       </span>
       {t.activity ? (
         <span className="t-row"><Activity text={t.activity.text} detail={t.activity.detail} since={t.activity.since} who="Claude" /></span>
@@ -155,7 +155,7 @@ export function Board(p: BoardProps) {
   const hitIds = useMemo(() => new Set(p.index.filter((it) => it.kind === "task" && matches(it.hay, words)).map((it) => it.id)), [p.index, words]);
   const hits = useMemo(() => (words.length ? p.tasks.filter((t) => hitIds.has(t.id)) : p.tasks), [p.tasks, words, hitIds]);
   // w trakcie szukania pasujące kafelki zostają, reszta blednie
-  const items: CanvasItem[] = useMemo(() => p.tasks.map((t) => ({ id: t.id, dependsOn: t.dependsOn, pos: t.pos, cls: "task " + t.state + (t.activity ? " agent" : "") + (words.length ? (hitIds.has(t.id) ? " hit" : " dim") : ""), done: t.state === "done", aria: "Otwórz zadanie " + t.title })), [p.tasks, words.length, hitIds]);
+  const items: CanvasItem[] = useMemo(() => p.tasks.map((t) => ({ id: t.id, dependsOn: t.dependsOn, pos: t.pos, cls: "task lk lk-" + t.look.key + (words.length ? (hitIds.has(t.id) ? " hit" : " dim") : ""), done: t.state === "done", aria: "Otwórz zadanie " + t.title })), [p.tasks, words.length, hitIds]);
   const groups: CanvasGroup[] = useMemo(() => p.groups.map((g) => ({ ...g })), [p.groups]);
   const group = selGroup ? p.groups.find((g) => g.id === selGroup) ?? null : null;
   const open = (id: string) => router.push(`/tasks/${id}`);

@@ -9,6 +9,28 @@ export type StepStateKey = "done" | "draft" | "handoff" | "blocked" | "ready";
 export const TS_LABEL: Record<TaskStateKey, string> = { done: "Ukończone", draft: "Do zatwierdzenia", active: "W toku", blocked: "Czeka", new: "Nowe" };
 export const TS_SHORT: Record<TaskStateKey, string> = { ...TS_LABEL, draft: "Do zatw." };   // na kafelku, obok terminu
 export const ST_LABEL: Record<StepStateKey, string> = { done: "Zrobione", ready: "Do zrobienia", draft: "Do zatwierdzenia", blocked: "Czeka", handoff: "Pracuje" };
+// wygląd kafelka (paczka 18, wariant B „Ramka i pasek z etykietą”): 5 stanów z jednej palety; „Zaplanowane” w kolorze tego, kto zrobi krok
+export type LookKey = "live" | "mine" | "help" | "plan-ag" | "plan-me" | "done";
+export type Look = { key: LookKey; label: string };
+const LOOK_PATH: Record<LookKey, string> = {
+  live: '<path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5" />',
+  mine: '<circle cx="8" cy="5.5" r="2.5"/><path d="M3.5 13.5a4.5 4.5 0 0 1 9 0"/>',
+  help: '<path d="M8 4v5M8 11.8h.01"/>',
+  "plan-ag": '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',
+  "plan-me": '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',
+  done: '<path d="M4 8.5l2.6 2.5L12 5.5"/>',
+};
+// pasek u góry kafelka: ikona stanu (przy „Agent pracuje” obracający się spinner) i etykieta; szkic do zgody ma ptaszek zamiast ludzika
+export function LookBar({ look }: { look: Look }) {
+  const k = look.key === "mine" && look.label === "Zatwierdź szkic" ? "done" : look.key;
+  return (
+    <span className="lk-bar" title={look.label}>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+        className={look.key === "live" ? "lk-spin" : undefined} dangerouslySetInnerHTML={{ __html: LOOK_PATH[k] }} />
+      <span>{look.label}</span>
+    </span>
+  );
+}
 
 // ---------- modele kafelków (liczone na serwerze, rysowane u klienta) ----------
 export type TaskTile = {
@@ -21,6 +43,7 @@ export type TaskTile = {
   pending: number;   // wiadomości Piotra w zadaniu bez odpowiedzi agenta (chip „2 wiadomości”)
   tool: string; pos: Pos | null; dependsOn: string[];
   activity: TileActivity | null;
+  look: Look;        // ramka i pasek: stan najważniejszego kroku (Twoja kolej, Agent oddał, Agent pracuje, Zaplanowane)
 };
 // co mostek robi teraz na tym kafelku (pasek z kropkami): czynność, szczegół (np. polecenie), od kiedy trwa bieg
 export type TileActivity = { text: string; detail: string | null; since: string };
@@ -34,6 +57,7 @@ export type StepTile = {
   fresh: boolean;            // agent zmienił krok, Piotr jeszcze go nie otworzył: kropka
   pos: Pos | null; dependsOn: string[];
   activity: TileActivity | null;
+  look: Look;                // ramka i pasek z etykietą (paczka 18)
 };
 export type GroupVM = { id: string; name: string; color: number; x: number; y: number; w: number; h: number; members: string[]; auto: boolean };
 export type ProjectVM = { id: string; name: string; color: number };

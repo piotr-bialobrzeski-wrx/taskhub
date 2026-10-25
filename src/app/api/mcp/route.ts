@@ -473,6 +473,8 @@ function buildHandler(auth: repo.TokenAuth) {
       // Oddanie z czekania („czeka na …”, „do zrobienia w projekcie w chmurze”, wskazany krok) to nie nieudana próba: poziom zostaje
       const waits = !!waitFor || WAIT_RE.test(a.reason);
       if ((scope?.kind === "work" || kind === "bridge") && !waits) await repo.bumpEscalation(st.id);
+      // kafelek „Potrzebna pomoc” (paczka 18): tylko prawdziwe oddanie; czekanie to „Zaplanowane”
+      if (!waits) await repo.markLeft(st.id);
       await mark(st.id, "oddał krok");
       await markRun();
       return text("Krok oddany.");

@@ -364,9 +364,9 @@ export function Canvas(p: CanvasProps) {
   const dropGroup = drag?.kind === "move" && drag.moved && P[drag.id] ? groupAt(lg, centerOf(P[drag.id], p.size))?.id ?? null : null;
 
   return (
-    <div ref={canvasRef} className={"canvas" + (panning ? " panning" : "") + (drag?.kind === "link" ? " connecting" : "")} onPointerDown={onCanvasDown} onPointerMove={onCanvasMove} onPointerUp={endBand} onPointerCancel={endBand} onWheel={onWheel}>
+    <div ref={canvasRef} className={"canvas" + (zoom < 0.6 ? " far" : "") + (panning ? " panning" : "") + (drag?.kind === "link" ? " connecting" : "")} onPointerDown={onCanvasDown} onPointerMove={onCanvasMove} onPointerUp={endBand} onPointerCancel={endBand} onWheel={onWheel}>
       <div className="stage" style={{ width: Math.max(bb.w * zoom, 10) + 2 * pad.x, height: Math.max(bb.h * zoom, 10) + 2 * pad.y }}>
-        <div ref={worldRef} className="world" style={{ transform: `scale(${zoom})`, width: bb.w, height: bb.h, left: pad.x, top: pad.y }} onPointerDown={onWorldDown} onPointerMove={onWorldMove} onPointerUp={endDrag} onPointerCancel={endDrag}
+        <div ref={worldRef} className="world" style={{ transform: `scale(${zoom})`, ["--z" as string]: zoom, width: bb.w, height: bb.h, left: pad.x, top: pad.y }} onPointerDown={onWorldDown} onPointerMove={onWorldMove} onPointerUp={endDrag} onPointerCancel={endDrag}
           onContextMenu={(ev) => { const n = (ev.target as HTMLElement).closest<HTMLElement>(".node"); if (!n) return; ev.preventDefault(); if (p.onMenu) p.onMenu(n.dataset.origin ? null : n.dataset.id ?? null, { x: ev.clientX, y: ev.clientY }); }}   /* prawy klik na kafelku: własne menu zamiast menu przeglądarki („Wczytaj ponownie” w aplikacji na Maca) */
           onKeyDown={(ev) => { if (ev.key !== "Enter" && ev.key !== " ") return; const n = (ev.target as HTMLElement).closest<HTMLElement>(".node"); if (!n) return; ev.preventDefault(); if (n.dataset.origin) p.onOpen(null); else if (n.dataset.id) p.onOpen(n.dataset.id); }}>
           {lg.map((g) => (

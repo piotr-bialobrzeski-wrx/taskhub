@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, STEP_SIZE } from "@/lib/canvas/layout";
-import { Icon, Lvl, ST_LABEL, TS_LABEL, ToolChip, plural, type GroupVM, type StepTile, type TaskStateKey, type TileActivity } from "./ui";
+import { Icon, LookBar, Lvl, ST_LABEL, TS_LABEL, ToolChip, plural, type GroupVM, type StepTile, type TaskStateKey, type TileActivity } from "./ui";
 import { waiting, type Queue } from "@/lib/auto";
 import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
 import { AddButton, AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
@@ -84,7 +84,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const [opened, setOpened] = useState<Set<string>>(new Set());
   const seen = (id: string) => { const s = byId.get(id); if (s?.fresh && !opened.has(id)) { setOpened((o) => new Set(o).add(id)); void openedStep(t.id, id); } };
   useEffect(() => { if (panel && panel !== "__task") seen(panel); });   // krok zmienił się, gdy jego panel był otwarty: to też otwarcie
-  const items: CanvasItem[] = useMemo(() => p.steps.map((s) => ({ id: s.id, dependsOn: s.dependsOn, pos: s.pos, cls: s.state + (panel === s.id ? " sel" : "") + (s.dim ? " dim" : "") + (s.glow ? " " + s.glow : ""), done: s.state === "done", aria: `Krok ${s.idx}: ${s.title}` })), [p.steps, panel]);
+  const items: CanvasItem[] = useMemo(() => p.steps.map((s) => ({ id: s.id, dependsOn: s.dependsOn, pos: s.pos, cls: "lk lk-" + s.look.key + (panel === s.id ? " sel" : ""), done: s.state === "done", aria: `Krok ${s.idx}: ${s.title}` })), [p.steps, panel]);
   const groups: CanvasGroup[] = useMemo(() => p.groups.map((g) => ({ ...g })), [p.groups]);
   const group = selGroup ? p.groups.find((g) => g.id === selGroup) ?? null : null;
   const ids = [...sel], n = sel.size, word = plural(n, "krok", "kroki", "kroków");
@@ -137,7 +137,9 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {view === "canvas" ? (
         <Canvas zoomKey={"task"} apiRef={api} items={items} size={STEP_SIZE} groups={groups} render={(id) => { const s = byId.get(id)!; return (
             <>
-              <span className="n-top"><span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} /><span className={"st " + s.state}>{ST_LABEL[s.state]}</span></span>
+              {/* paczka 18, wariant B: pasek z etykietą stanu u góry zamiast plakietki obok narzędzia */}
+              <LookBar look={s.look} />
+              <span className="n-top"><span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} /></span>
               <span className="n-title">{s.title}</span>
               {/* dolna linia: praca na żywo → co Claude zrobił w tym biegu → dokąd poszło → plan; kropka = zmienione, jeszcze nieotwarte */}
               <span className="n-meta">{s.activity ? <Activity text={s.activity.text} detail={s.activity.detail} since={s.activity.since} />

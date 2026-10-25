@@ -4,7 +4,7 @@ import { dueLeftH, isComplete, whyText } from "../priority";
 import { agentMinOf, estOf, fmtMin, spentMin, taskAgent, taskEst, taskSpent } from "../time";
 import { isOwnerStep, toolLabel, type Step, type Task } from "../schema";
 import { destOf, tileDest, tileDestHref, whoDid } from "../stepcard";
-import type { StepStateKey, StepTile, TaskStateKey, TaskTile } from "@/components/canvas/ui";
+import type { Look, StepStateKey, StepTile, TaskStateKey, TaskTile } from "@/components/canvas/ui";
 
 export { fmtDate, fmtTime } from "../clock";   // zawsze czas polski (serwer liczy w UTC)
 import { fmtDate, fmtTime } from "../clock";
@@ -34,6 +34,36 @@ export function stepStateOf(t: Task, s: Step, all: Task[]): StepStateKey {
   return s.dependsOn.every((d) => t.steps.find((x) => x.id === d)?.status === "done") ? "ready" : "blocked";
 }
 
+// wygląd kafelka kroku (paczka 18, tabela stanów z kroku „Zdecyduj o ramkach i etykietach kafelka”):
+// Agent pracuje (bieg mostka „teraz”, krok w toku, zlecenie do chmury) → Agent oddał → Twoja kolej (szkic, decyzja, czynność) → Zaplanowane (kto zrobi) → Zrobione
+const DECIDE_RE = /^\s*(zdecyduj|wybierz|rozstrzygnij)\b/i;
+export function stepLook(s: Step, state: StepStateKey, now: boolean): Look {
+  if (state === "done") return { key: "done", label: "Zrobione" };
+  // zatwierdzony szkic czeka na bieg wysyłki: agent weźmie go sam, ale jeszcze nie pracuje
+  const sendWait = state === "handoff" && !!s.approvedAt && !s.agentStartedAt;
+  if (now || s.cloud || (state === "handoff" && !sendWait)) return { key: "live", label: "Agent pracuje" };
+  if (s.leftAt) return { key: "help", label: "Potrzebna pomoc" };
+  if (state === "draft") return { key: "mine", label: "Zatwierdź szkic" };
+  const own = isOwnerStep(s);
+  if (state === "ready" && own) {
+    const ask = (s.blocks ?? []).some((b) => b.type === "question") || DECIDE_RE.test(s.title);
+    return { key: "mine", label: ask ? "Zdecyduj" : "Zrób" };
+  }
+  return { key: own ? "plan-me" : "plan-ag", label: "Zaplanowane" };
+}
+// kafelek zadania bierze stan najważniejszego kroku w kolejności: Twoja kolej, Agent oddał, Agent pracuje, Zaplanowane (kolor wg pierwszego otwartego kroku)
+export function taskLook(t: Task, state: TaskStateKey, steps: Look[], working: boolean, questions: number): Look {
+  if (state === "done") return { key: "done", label: "Zrobione" };
+  const mine = steps.find((l) => l.key === "mine");
+  if (mine) return mine;
+  if (questions) return { key: "mine", label: "Zdecyduj" };
+  const help = steps.find((l) => l.key === "help");
+  if (help) return help;
+  if (working || steps.some((l) => l.key === "live")) return { key: "live", label: "Agent pracuje" };
+  const next = t.steps.findIndex((x) => x.status !== "done");
+  return next >= 0 ? steps[next] : { key: "plan-ag", label: "Zaplanowane" };
+}
+
 // czas na kafelku zadania: szacunek i czas Piotra (jego kroki); zadanie bez kroków Piotra pokazuje czas Claude'a
 export function estText(t: Task): string {
   if (!t.steps.length) return "bez kroków";
@@ -45,8 +75,11 @@ export function estText(t: Task): string {
 // activity: co mostek robi teraz, gdy pracuje nad tym zadaniem (kafelek pokazuje to zamiast licznika); pending: wiadomości Piotra bez odpowiedzi
 export function taskTile(s: Scored, all: Task[], questions: number, live: LiveActivity | null = null, pending = 0): TaskTile {
   const t = s.task, state = taskStateOf(t, all);
+  const activity = taskActivity(t.id, live);
+  const looks = t.steps.map((x) => stepLook(x, stepStateOf(t, x, all), live?.stepId === x.id));
   return {
-    activity: taskActivity(t.id, live), pending,
+    look: taskLook(t, state, looks, !!activity, questions),
+    activity, pending,
     id: t.id, title: t.title, summary: state === "done" && t.noteSummary ? t.noteSummary : t.summary, state,
     base: s.score.base, eff: s.score.eff, why: whyText(s.score),
     project: s.project ? { id: s.project.id, name: s.project.name, color: s.project.color } : null,
@@ -76,7 +109,7 @@ export function stepTile(t: Task, s: Step, all: Task[], live: LiveActivity | nul
   const touched = glow === "touched" && run ? `Claude ${run.what} · ${fmtTime(run.at)}` : null;
   const fresh = !glow && !!s.agentAt && (!s.openedAt || s.agentAt > s.openedAt);
   const activity = live && live.stepId === s.id ? { text: onTileText(live.text), detail: live.detail, since: live.since } : null;
-  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, ...m, dim, glow, touched, fresh, pos: s.pos, dependsOn: s.dependsOn, activity };
+  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, ...m, dim, glow, touched, fresh, pos: s.pos, dependsOn: s.dependsOn, activity, look: stepLook(s, state, glow === "live") };
 }
 
 // jedna dolna linia kafelka i wiersza listy: praca w toku → dokąd poszło albo pójdzie → kto zrobił, o której, ile to zajęło → plan

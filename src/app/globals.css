@@ -85,6 +85,48 @@ a { color: var(--accent); }
 .lrow.live, .lrow.touched { box-shadow: 0 1px 6px var(--shadow), 0 0 0 1.5px var(--t-claude); }
 .n-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--t-claude); box-shadow: 0 0 0 2px var(--surface); }
 @media (prefers-reduced-motion: reduce) { .node.live::after, .feed .fb.work.on::after { animation: none; background: var(--t-claude); } }
+/* paczka 18, wariant B „Ramka i pasek z etykietą”: 5 stanów z jednej palety (Agent pracuje, Twoja kolej, Agent oddał, Zaplanowane, Zrobione).
+   Ramka to outline, więc obwódki zaznaczenia (.sel, .picked) zostają pod nią; grubość ramki dzielimy przez powiększenie (--z), żeby przy oddaleniu nie chudła */
+:root { --lk-or: #F97316; --lk-bl: #2563EB; --lk-vi: #9333EA; --lk-rd: #DC2626; --lk-gr: #9CA3AF; }
+.node.lk { --bw: 3px; --sc: var(--sub); padding-top: calc(var(--s-3) + 24px); padding-bottom: var(--s-3); gap: 4px;
+  outline: calc(var(--bw) / var(--z, 1)) solid var(--sc); outline-offset: 0; box-shadow: 0 2px 10px var(--shadow); }
+.node.task.lk { gap: 6px; }
+.node.lk:not(.sel) { background: color-mix(in srgb, var(--sc) 8%, var(--surface)); }
+.node.lk-live { --sc: var(--lk-or); }
+.node.lk-mine { --sc: var(--lk-bl); }
+.node.lk-help { --sc: var(--lk-rd); }
+.node.lk-plan-ag { --sc: var(--lk-vi); }
+.node.lk-plan-me { --sc: var(--lk-bl); }
+.node.lk-plan-ag, .node.lk-plan-me { --bw: 2px; outline-style: dashed; }
+.node.lk-plan-ag:not(.sel), .node.lk-plan-me:not(.sel) { background: color-mix(in srgb, var(--sc) 5%, var(--surface)); }
+.node.lk-done { --sc: var(--lk-gr); outline: none; }
+.node.lk-done:not(.sel) { background: var(--surface); }
+.node.lk-done:not(.sel):not(.picked):not(.dragging):not(.dim):not(:hover) { opacity: .6; }
+.node.lk.sel, .node.lk.drop { outline-offset: 3px; }
+.node.lk.picked, .node.lk.dragging, .node.lk.hit { outline-offset: 2px; }
+.node.lk-live { box-shadow: 0 2px 10px var(--shadow), 0 0 18px color-mix(in srgb, var(--sc) 35%, transparent); }
+.node.lk-live::after { content: ""; position: absolute; inset: calc(-1 * var(--bw) / var(--z, 1)); border-radius: calc(var(--r-md) + var(--bw) / var(--z, 1));
+  padding: calc(var(--bw) / var(--z, 1)); pointer-events: none;
+  background: conic-gradient(from var(--a), transparent 0 65%, color-mix(in srgb, var(--sc) 25%, white) 88%, var(--sc) 100%);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; animation: run-light 1.4s linear infinite; }
+.lk-bar { position: absolute; left: 0; right: 0; top: 0; height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 var(--s-5);
+  border-radius: var(--r-md) var(--r-md) 0 0; background: color-mix(in srgb, var(--sc) 82%, #000); color: #fff; font-size: 11.5px; font-weight: 650;
+  white-space: nowrap; overflow: hidden; pointer-events: none; }
+.lk-bar svg { flex: none; }
+.node.lk-done .lk-bar { background: color-mix(in srgb, var(--sc) 30%, var(--surface)); color: var(--sub); }
+.node.lk-plan-ag .lk-bar, .node.lk-plan-me .lk-bar { background: color-mix(in srgb, var(--sc) 10%, transparent); color: color-mix(in srgb, var(--sc) 62%, var(--text));
+  border-bottom: calc(1px / var(--z, 1)) dashed var(--sc); }
+.node.lk .n-dot { top: 32px; }
+.lk-spin { animation: lk-rot .9s linear infinite; }
+@keyframes lk-rot { to { transform: rotate(360deg); } }
+/* przy oddaleniu (poniżej 60%) pasek rośnie, żeby stan dało się przeczytać; tytuł w jednej linii, bez dolnej linii */
+.canvas.far .node.lk { padding-top: calc(var(--s-3) + 56px); }
+.canvas.far .lk-bar { height: 56px; gap: 8px; padding: 0 12px; font-size: 20px; }
+.canvas.far .lk-bar svg { width: 28px; height: 28px; }
+.canvas.far .node.lk .n-title { -webkit-line-clamp: 1; }
+.canvas.far .node.lk:not(.task) .n-meta { display: none; }
+.canvas.far .node.lk .n-dot { top: 64px; }
+@media (prefers-reduced-motion: reduce) { .node.lk-live::after, .lk-spin { animation: none !important; } }
 .node.dragging { cursor: grabbing; box-shadow: 0 18px 40px var(--shadow), 0 0 0 2px var(--accent); z-index: 3; }
 /* otwarty krok (paczka 6, punkt 2): wypełnienie w kolorze akcentu, gruba ramka i poświata; „Gotowy” ma tylko cienką ramkę */
 .node.sel { background: color-mix(in srgb, var(--accent) 22%, var(--surface));

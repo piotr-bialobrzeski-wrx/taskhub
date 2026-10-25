@@ -204,7 +204,8 @@ export const Step = z.object({
   workLevel: z.string().nullable().optional(),      // poziom pracy (strategy, analysis, execution, mechanics); null = z narzędzia
   modelPick: z.string().nullable().optional(),      // wybór Piotra na karcie: null = auto
   escalation: z.number().int().optional(),          // o ile poziomów wyżej po oddanych krokach
-  waitFor: z.string().nullable().optional(),        // oddany, bo czeka na ten krok (dowolne zadanie); do jego zrobienia nie wraca do list_work
+  waitFor: z.string().nullable().optional(),
+  leftAt: z.string().nullable().optional(),         // agent oddał krok, bo nie dał rady (nie z czekania): kafelek „Potrzebna pomoc” do następnej zmiany stanu        // oddany, bo czeka na ten krok (dowolne zadanie); do jego zrobienia nie wraca do list_work
   lastRun: z.object({ model: z.string().nullable(), effort: z.string().nullable(), at: z.string() }).nullable().optional(),   // „ostatnio: model · wysiłek”
   cloud: z.object({ state: z.enum(["queued", "rung", "working"]), at: z.string(), rungAt: z.string().optional(), takenAt: z.string().optional(), failAt: z.string().optional() }).nullable().optional(),   // „Uruchom w chmurze”: kliknięte, odpalone z Maca, wzięte przez chmurę
 });

@@ -240,6 +240,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     agentAt: iso(r.agentAt), openedAt: iso(r.openedAt),
     workLevel: (r.workLevel as string) ?? null, modelPick: (r.modelPick as string) ?? null, escalation: Number(r.escalation ?? 0),
     lastRun: (r.lastRun as Step["lastRun"]) ?? null, cloud: (r.cloud as Step["cloud"]) ?? null, waitFor: (r.waitFor as string) ?? null,
+    leftAt: iso(r.leftAt),
   };
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
@@ -256,7 +257,7 @@ function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
 const TASK_COLS = ["id", "owner_id", "project_id", "title", "title_original", "summary", "source", "level", "due", "done_at", "deleted_at", "note_text", "note_summary", "note_at", "pos", "created_at"];
 const STEP_COLS = ["id", "task_id", "position", "title", "detail", "tool", "status", "prev_status", "needs_approval", "est_min", "spent_sec", "spent_manual", "spent_at", "link", "handoff_at", "done_at",
   "report", "output", "review", "blocks", "blocks_at", "logged", "pos", "connection_id", "file_path", "approved_at", "approved_sig", "send_started_at", "agent_sec", "agent_started_at", "done_by",
-  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for"];
+  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for", "left_at"];
 const taskCols = () => sql()(TASK_COLS);
 
 async function hydrate(rows: Row[]): Promise<Task[]> {
@@ -404,7 +405,7 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
   if (patch.title !== undefined) p.title = patch.title.slice(0, 200);
   if (patch.detail !== undefined) p.detail = patch.detail;
   if (patch.tool !== undefined) { p.tool = normalizeTool(patch.tool); if (p.tool === "file") p.needs_approval = false; }   // plik na Macu nigdy nie czeka na zgodę
-  if (patch.status !== undefined) p.status = patch.status;
+  if (patch.status !== undefined) { p.status = patch.status; p.left_at = null; }   // nowy stan kroku: „Potrzebna pomoc” gaśnie
   if (patch.prevStatus !== undefined) p.prev_status = patch.prevStatus;
   if (patch.needsApproval !== undefined) p.needs_approval = patch.needsApproval;
   if (patch.estMin !== undefined) p.est_min = roundQ(patch.estMin);
@@ -494,7 +495,7 @@ export async function reopenStep(ownerId: string, taskId: string, step: Step): P
   const status = step.prevStatus === "handoff" ? "todo" : step.prevStatus && step.prevStatus !== "done" ? (step.prevStatus as Step["status"]) : step.output ? "draft" : "todo";
   await sql().begin(async (tx) => {
     // ponowne otwarcie nie przywraca zgody: szkic trzeba zatwierdzić od nowa
-    await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null, done_by = null, agent_started_at = null, approved_at = null, approved_sig = null, send_started_at = null, cloud = null where id = ${step.id}`;
+    await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null, done_by = null, agent_started_at = null, approved_at = null, approved_sig = null, send_started_at = null, cloud = null, left_at = null where id = ${step.id}`;
     // „Zmień odpowiedź”: pytania na kartce wracają do zadania, poprzednia odpowiedź zostaje w prev (agent widzi zmianę); cofanie kartki nie ma do czego wracać
     if (stepKind(step) === "decision") {
       const blocks = (step.blocks ?? []).map((b): Block => (b.type === "question" && b.answer ? { ...b, answer: undefined, prev: b.answer } : b));
@@ -738,7 +739,9 @@ export async function listSamples(ownerId: string): Promise<TimeSample[]> {
   return rows.map((r) => ({ tool: r.tool as string, projectId: (r.projectId as string) ?? null, estMin: Number(r.estMin), spentMin: Number(r.spentMin), who: r.who === "agent" ? "agent" as const : "owner" as const }));
 }
 // czas Claude'a: start_step stawia znacznik; zamknięcie albo oddanie kroku dolicza sekundy i go kasuje
-export async function markAgentStart(stepId: string): Promise<void> { await sql()`update steps set agent_started_at = now() where id = ${stepId}`; }
+export async function markAgentStart(stepId: string): Promise<void> { await sql()`update steps set agent_started_at = now(), left_at = null where id = ${stepId}`; }
+// agent oddał krok, bo nie dał rady (leave_step bez czekania): kafelek „Potrzebna pomoc”
+export async function markLeft(stepId: string): Promise<void> { await sql()`update steps set left_at = now() where id = ${stepId}`; }
 export async function addAgentTime(stepId: string, sec: number): Promise<void> { await sql()`update steps set agent_sec = agent_sec + ${Math.max(0, Math.round(sec))}, agent_started_at = null where id = ${stepId}`; }
 // czas Piotra z zegara karty: dolicza się tylko, póki nie wpisał czasu ręcznie (ręczna poprawka wygrywa)
 export async function addOwnSec(stepId: string, sec: number): Promise<void> { await sql()`update steps set spent_sec = spent_sec + ${Math.max(0, Math.round(sec))}, spent_at = now() where id = ${stepId} and spent_manual = false`; }
@@ -748,7 +751,7 @@ export async function addOwnSec(stepId: string, sec: number): Promise<void> { aw
 // w chmurze (cloudToRing → markCloudRung), a sesja w chmurze bierze krok atomowo (takeCloudStep). Oddanie, zatrzymanie albo zamknięcie kroku kasuje zlecenie (writeStep).
 export type CloudItem = { step: Step; taskId: string; taskTitle: string; steps: Step[] };
 export async function queueCloud(ownerId: string, stepId: string): Promise<boolean> {
-  const r = await sql()`update steps s set cloud = jsonb_build_object('state', 'queued', 'at', now()) from tasks t
+  const r = await sql()`update steps s set cloud = jsonb_build_object('state', 'queued', 'at', now()), left_at = null from tasks t
     where t.id = s.task_id and t.owner_id = ${ownerId} and t.deleted_at is null and s.id = ${stepId} and s.status = 'todo' and s.cloud is null returning s.id`;
   return r.length > 0;
 }
@@ -788,7 +791,7 @@ export async function noteCloudFail(ownerId: string, stepId: string): Promise<vo
 // sesja w chmurze bierze krok: najwyżej raz (zlecenie musi czekać), krok przechodzi w toku i liczy się czas Claude'a
 export async function takeCloudStep(ownerId: string, stepId: string): Promise<boolean> {
   const r = await sql()`update steps s set cloud = s.cloud || jsonb_build_object('state', 'working', 'takenAt', now()),
-      status = 'handoff', prev_status = 'todo', handoff_at = now(), agent_started_at = now() from tasks t
+      status = 'handoff', prev_status = 'todo', handoff_at = now(), agent_started_at = now(), left_at = null from tasks t
     where t.id = s.task_id and t.owner_id = ${ownerId} and s.id = ${stepId} and s.status = 'todo' and s.cloud->>'state' in ('queued', 'rung') returning s.id`;
   return r.length > 0;
 }

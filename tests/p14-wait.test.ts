@@ -85,6 +85,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("oddanie z czekania, czekanie na
     let now = await stepNow(t.id, s.id);
     expect(now.escalation).toBe(0);
     expect(now.waitFor).toBe(target.id);
+    expect(now.leftAt).toBeNull();   // czekanie to „Zaplanowane”, nie „Potrzebna pomoc” (paczka 18)
     expect(await call(b.token, "list_work", { force: true })).not.toContain(s.id);
     await repo.endBridgeRun(owner, b.run.id, "done");
     // tamten zrobiony: krok wraca
@@ -96,6 +97,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("oddanie z czekania, czekanie na
     now = await stepNow(t.id, s.id);
     expect(now.escalation).toBe(1);
     expect(now.waitFor).toBeNull();
+    expect(now.leftAt).toBeTruthy();   // prawdziwe oddanie: kafelek „Potrzebna pomoc”
+    expect(await call(b.token, "start_step", { stepId: s.id })).toBe("Krok w toku.");
+    expect((await stepNow(t.id, s.id)).leftAt).toBeNull();   // nowa próba gasi „Potrzebna pomoc”
+    expect(await call(b.token, "leave_step", { stepId: s.id, reason: "nadal nie rozumiem" })).toBe("Krok oddany.");
     // waitFor wprost, bez cudzysłowu; obcy identyfikator nie przechodzi
     const t2 = await repo.createTask(owner, { title: "Dwa kroki", steps: [{ title: "Pierwszy", tool: "claude" }, { title: "Drugi", tool: "claude" }] });
     expect(await call(b.token, "leave_step", { stepId: t2.steps[1].id, reason: "czekam, aż pierwszy skończy inny bieg", waitFor: t2.steps[0].id })).toBe("Krok oddany.");
