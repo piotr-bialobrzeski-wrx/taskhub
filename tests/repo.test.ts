@@ -134,6 +134,19 @@ describe.skipIf(!DB)("repo", async () => {
     expect(r.title).toBe("Poprawić ekran Intake w prototypie"); expect(r.titleOriginal).toBe("Poprawić ekran");
   });
 
+  it("add_steps z before kilka razy: niezależne dopisane kroki nie tworzą łańcucha, krok docelowy czeka na wszystkie", async () => {
+    const t = await repo.createTask(owner, { title: "Paczka zmian", steps: [{ title: "Zmiana A" }, { title: "Wdróż na produkcję", dependsOn: ["n1"] }] });
+    const [a, dep] = t.steps;
+    const [b] = await repo.addSteps(t.id, [{ title: "Zmiana B" }], { before: dep.id });
+    const [c] = await repo.addSteps(t.id, [{ title: "Zmiana C" }], { before: dep.id });
+    const [d] = await repo.addSteps(t.id, [{ title: "Zmiana D" }], { before: dep.id });
+    expect(b.dependsOn).toEqual([a.id]);
+    expect(c.dependsOn).toEqual([a.id]);              // bez B
+    expect(d.dependsOn).toEqual([a.id]);              // bez B i C
+    const fresh = (await repo.getTask(owner, t.id))!;
+    expect(fresh.steps.at(-1)!.dependsOn.sort()).toEqual([a.id, b.id, c.id, d.id].sort());
+  });
+
   it("załącznik z danymi: adres /api/files/<id>, lista bez danych, plik tylko dla właściciela", async () => {
     const t = await repo.createTask(owner, { title: "Z załącznikiem" });
     const png = Buffer.from("89504e470d0a1a0a", "hex");

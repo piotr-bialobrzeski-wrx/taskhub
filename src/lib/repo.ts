@@ -299,8 +299,8 @@ export async function createTask(ownerId: string, input: NewTask): Promise<Task>
   if (input.steps?.length) await addSteps(id, input.steps);
   return (await getTask(ownerId, id))!;
 }
-// before: id kroku, przed którym nowe kroki mają wejść (np. przed publikacją): dostają jego miejsce w kolejności, dziedziczą jego zależności
-// (gdy nie podały własnych), a on zaczyna czekać na nie; kroki za nim przesuwają się dalej
+// before: id kroku, przed którym nowe kroki mają wejść (np. przed publikacją): dostają jego miejsce w kolejności, dziedziczą jego pierwotne zależności
+// (gdy nie podały własnych; bez kroków dopisanych przed nim wcześniej), a on zaczyna czekać na nie; kroki za nim przesuwają się dalej
 export async function addSteps(taskId: string, steps: NewStep[], opts: { before?: string | null } = {}): Promise<Step[]> {
   const [bef] = opts.before ? await sql()`select id, position from steps where id = ${opts.before} and task_id = ${taskId}` : [];
   if (bef) await sql()`update steps set position = position + ${steps.length} where task_id = ${taskId} and position >= ${Number(bef.position)}`;
@@ -324,8 +324,11 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
   // nowe kroki to nowa praca: zadanie, które zamknęło się samo (wszystkie dotychczasowe kroki gotowe), wraca do pracy, inaczej list_work go nie widzi
   if (created.length) await sql()`update tasks set done_at = null where id = ${taskId} and done_at is not null`;
   if (bef) {
-    // dziedziczenie: nowy krok bez własnych zależności czeka na to, na co czekał krok „before”; „before” czeka na ostatnie z nowych (te, na które żaden nowy nie czeka)
-    const inherited = (await sql()`select depends_on_id from step_dependencies where step_id = ${bef.id as string}`).map((r) => r.dependsOnId as string);
+    // dziedziczenie: nowy krok bez własnych zależności czeka na to, na co czekał krok „before”; „before” czeka na ostatnie z nowych (te, na które żaden nowy nie czeka).
+    // Dziedziczy tylko zależności starsze od kroku „before” (te, które miał przed pierwszym dopisaniem): kroki dopisane przed nim wcześniej to rodzeństwo, nie poprzednicy,
+    // inaczej każde kolejne dopisanie tworzy fałszywy łańcuch (12 → 13 → 14 → 15)
+    const inherited = (await sql()`select d.depends_on_id from step_dependencies d join steps s on s.id = d.depends_on_id join steps b on b.id = d.step_id
+      where d.step_id = ${bef.id as string} and s.created_at <= b.created_at`).map((r) => r.dependsOnId as string);
     const own = new Set(links.map((l) => l.step_id));
     const inh = created.filter((c) => !own.has(c.id)).flatMap((c) => inherited.map((d) => ({ step_id: c.id, depends_on_id: d })));
     const needed = new Set(links.map((l) => l.depends_on_id));
