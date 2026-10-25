@@ -62,8 +62,26 @@ export function ProjectPicker({ projects, value, cls, onPick }: { projects: Proj
   );
 }
 
+// termin jest opcjonalny: puste pole mówi „Bez terminu” (samo <input type="date"> w Safari pokazuje wtedy dzisiejszą datę, jakby była ustawiona),
+// klik otwiera kalendarz przeglądarki, × czyści termin
 export function InlineDate({ value, onChange, min }: { value: string | null; onChange: (v: string | null) => void; min?: string }) {
-  return <input className="date-in" type="date" defaultValue={value ?? ""} min={min} aria-label="Termin zadania" onChange={(e) => onChange(e.currentTarget.value || null)} />;
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  const inp = useRef<HTMLInputElement>(null);
+  const set = (nv: string | null) => { setV(nv); onChange(nv); };
+  const open = () => {
+    const e = inp.current; if (!e) return;
+    try { e.showPicker(); } catch { e.focus(); }
+  };
+  return (
+    <span className={"date-in" + (v ? "" : " empty")}>
+      <button type="button" className="date-pick" aria-label={v ? "Zmień termin zadania" : "Ustaw termin zadania"} title="Najpóźniejsza data wykonania" onClick={open}>
+        {v ? fmtDateLong(v + "T12:00") : "Bez terminu"}
+      </button>
+      {v ? <button type="button" className="date-clear" aria-label="Usuń termin" title="Bez terminu" onClick={() => set(null)}><Icon k="x" size={12} /></button> : null}
+      <input ref={inp} type="date" tabIndex={-1} aria-hidden="true" value={v ?? ""} min={min} onChange={(e) => set(e.currentTarget.value || null)} />
+    </span>
+  );
 }
 
 // ---------- dok: jedno pole, rośnie do 6 linii, Enter wysyła; załączniki z dysku, ze schowka (Ctrl+V) i przeciągnięte ----------

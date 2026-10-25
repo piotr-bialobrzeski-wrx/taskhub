@@ -300,7 +300,13 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .why b.down { color: var(--sub); }
 .handoff-box { display: flex; flex-direction: column; gap: var(--s-3); }
 .date-in { height: 34px; padding: 0 var(--s-4); border: 0; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600; }
-.date-in:focus { outline: none; box-shadow: inset 0 0 0 1px var(--accent); }
+.date-in { position: relative; display: inline-flex; align-items: center; gap: 2px; padding: 0 var(--s-2) 0 var(--s-4); white-space: nowrap; }
+.date-in:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
+.date-in .date-pick { all: unset; cursor: pointer; height: 100%; display: inline-flex; align-items: center; padding-right: var(--s-2); }
+.date-in.empty .date-pick { color: var(--sub); font-weight: 500; }
+.date-in .date-clear { all: unset; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 999px; color: var(--sub); }
+.date-in .date-clear:hover { background: var(--line); color: var(--text); }
+.date-in input[type="date"] { position: absolute; left: var(--s-4); bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; pointer-events: none; }
 .gal { display: flex; flex-direction: column; gap: var(--s-4); }
 .gal-item { display: grid; grid-template-columns: 96px 1fr; gap: var(--s-4); align-items: start; }
 .gal-item img { width: 96px; height: 72px; object-fit: cover; border-radius: var(--r-sm); box-shadow: 0 0 0 1px var(--line); display: block; }
