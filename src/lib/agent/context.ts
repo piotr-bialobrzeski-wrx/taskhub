@@ -186,7 +186,7 @@ export function cardText(steps: CardStep[], max = 6000, doneMax = 3000, doneTota
     used += cut.length;
     const who = ownerCard(s)
       ? "(zrobiony krok Piotra: ODPOWIEDŹ PIOTRA i WYNIK to jego decyzja; tej kartki nie zmieniaj przez set_blocks, stosuj ją w krokach po nim)"
-      : "(Twój zrobiony krok, do wglądu; kartkę uzupełnij przez set_blocks tylko na prośbę Piotra)";
+      : "(Twój zrobiony krok, do wglądu; kartkę uzupełnij przez set_blocks tylko na prośbę Piotra; Piotr widzi ją też na kartce swojego kroku, który od niej zależy, w sekcji „Z kroku …”, więc jej treści tam nie kopiuj)";
     out.push(`KARTKA ZROBIONEGO KROKU ${s.id} „${s.title}” ${who}:\n${cut}`);
   }
   if (skipped) out.push(`(pominięto ${skipped} kartek zrobionych kroków: limit ${doneTotal} znaków)`);

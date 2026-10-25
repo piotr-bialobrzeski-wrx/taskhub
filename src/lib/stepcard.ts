@@ -21,6 +21,18 @@ export function splitBlocks(blocks: Block[]): { result: Changes[]; material: Blo
 }
 export const kindsOf = (blocks: Block[]) => [...new Set(blocks.map((b) => KIND_LABEL[b.type] ?? b.type))].join(", ");
 
+// paczka 17, punkt 1: otwarty krok Piotra pokazuje kartki zrobionych kroków Claude'a, od których zależy (np. „Przygotuj test” → „Rozwiąż test”),
+// bo materiał, na którym Piotr pracuje, leży na kartce kroku przed nim; bez szkiców i pytań (to sprawy tamtego kroku), bez faktów kroku (ukryte)
+export type DepCard = { id: string; idx: number; title: string; blocks: Block[] };
+export function depCardsFor(steps: Pick<Step, "id" | "title" | "status" | "tool" | "doneBy" | "blocks">[], s: Pick<Step, "dependsOn" | "status" | "tool">): DepCard[] {
+  if (s.status === "done" || !isOwnerStep(s)) return [];
+  return steps.flatMap((x, i) => {
+    if (!s.dependsOn.includes(x.id) || x.status !== "done" || doneByOf(x) !== "agent") return [];
+    const blocks = splitBlocks(x.blocks ?? []).material.filter((b) => b.type !== "question");
+    return blocks.length ? [{ id: x.id, idx: i + 1, title: x.title, blocks }] : [];
+  });
+}
+
 // co jest rozwinięte: brief („Co”) i materiały („Skąd”) zwijają się po zrobieniu; przy szkicu brief ustępuje karcie publikacji;
 // zrobiony odczyt Claude'a (reading) trzyma materiały rozwinięte, bo one są jego wynikiem (treść ticketu, wątku), nie tłem
 export function foldsFor(state: CardState, mode: string | null, reading = false): { brief: boolean; material: boolean } {

@@ -23,7 +23,7 @@ import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estTe
 import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed, workBubble } from "@/lib/feed";
-import { decisionText, destOf, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
+import { decisionText, depCardsFor, destOf, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -340,12 +340,17 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const skad = split.sources.length ? (srcOpen
     ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span>{split.main.length ? null : undo}</div><BlocksView blocks={split.sources} form={form} indexOf={indexOf} /></div>
     : <details className="fold"><summary><span className="k">Skąd</span><span className="t">{kinds}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView blocks={split.sources} form={form} indexOf={indexOf} /></details>) : null;
+  // paczka 17, punkt 1: materiał z kroków Claude'a, od których zależy ten krok Piotra, stoi na jego kartce (tylko do odczytu)
+  const fromDeps = depCardsFor(t.steps, s).map((d) => (
+    <div key={d.id} className="zone src"><div className="lbl">Z kroku {String(d.idx).padStart(2, "0")}<span className="n">{d.title}</span></div><BlocksView blocks={d.blocks} /></div>
+  ));
   // krok bez żadnej treści od agenta: opis zostaje na wierzchu, inaczej karta byłaby pusta
   const bare = !material.length && !result.length && !mode;
   return (
     <>
       {mode && skad && srcOpen ? (cmp ? <>{skad}{now}</> : <div className="zones two">{now}{skad}</div>) : <>{now}{main}{skad}</>}
       {bare ? <div className="zone">{brief}</div> : null}
+      {fromDeps}
       <details className="edit tech">
         <summary><span className="k">Szczegóły techniczne</span> · {tech}</summary>
         <div className="stack">
