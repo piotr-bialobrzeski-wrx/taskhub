@@ -24,7 +24,7 @@ import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
-import { decisionText, depCardsFor, destOf, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
+import { decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -48,7 +48,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const cur = b.scored.find((s) => s.task.id === id);
   if (!cur) notFound();
   const t = cur.task;
-  const [factsPerStep, attachments, chatLog, groups, questions, bridge, stamp, pending] = await Promise.all([
+  // paczka 19: zrobiony krok bez zlecenia na kartce (wynik je zastąpił) bierze je z poprzedniej wersji kartki
+  const prevIds = t.steps.filter((s) => s.status === "done" && s.hasPrevBlocks && !hasOrder(s.blocks)).map((s) => s.id);
+  const [factsPerStep, attachments, chatLog, groups, questions, bridge, stamp, pending, prevBlocks] = await Promise.all([
     Promise.all(t.steps.map((s) => repo.listFacts({ stepId: s.id }))),
     repo.listAttachments({ taskId: t.id }),
     repo.listChat(o.id, t.id, 8),
@@ -57,6 +59,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS),
     repo.changeStamp(o.id, id),
     repo.listPendingChat(o.id, t.id),
+    repo.prevBlocksOf(prevIds),
   ]);
   const providers = availableProviders(), aiOn = providers.length > 0;
   // dobór modelu kroku agenta (Ustawienia → Agent): co da „auto”, wybór Piotra i czym zrobił go ostatni bieg
@@ -192,7 +195,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     if (!raw || !s.needsApproval || (m !== "proposed" && m !== "parked") || destOf(s)?.kind !== "send") return null;
     return connectorIssue(b.connections, b.companies, { app: raw, connectionId: s.connectionId, companyId: cur.project?.companyId ?? null });
   };
-  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} project={cur.project?.name ?? null} />; });
+  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} project={cur.project?.name ?? null} prev={prevBlocks.get(s.id) ?? null} />; });
 
   return (
     <>
@@ -211,14 +214,14 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
-function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, oldMac, macAlive, issue, model, project }: {
+function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, oldMac, macAlive, issue, model, project, prev }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null; company: string | null;
   connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null; oldMac: boolean; macAlive: boolean; issue: string | null;
-  model: (StepModelInfo & { now: string }) | null; project: string | null;
+  model: (StepModelInfo & { now: string }) | null; project: string | null; prev: Block[] | null;
 }) {
   // szczegóły są już w sekcji „Co”, więc blok tekstu z tą samą treścią odpada
-  const blocks = (s.blocks?.length ? s.blocks : composeStatic(s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
+  const blocks = (s.blocks?.length ? s.blocks : composeStatic(s.status === "done" ? { ...s, output: "" } : s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
   // kalibracja tylko dla kroków Piotra (jego szacunki); czas Claude'a liczy się sam
   const own = isOwnerStep(s), agentMin = agentMinOf(s);
   const cal = own ? calibrationFor(samples, s.tool, "owner") : null;
@@ -255,7 +258,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
     : macAlive ? "Mac zaraz odpali Claude w chmurze; to trwa kilkanaście sekund." : "Aplikacja Task Hub na Macu teraz nie działa: chmura ruszy, gdy Mac wróci. Awaryjnie skopiuj polecenie i wklej je w projekcie Claude.";
   const draft = draftOf(s);   // wybrana opcja albo pierwszy szkic: linie raportu bez powtórki jej treści
   // raport bez powtórki streszczenia bloku zmian ani treści szkicu; „Do potwierdzenia: …” jako osobna linia
-  const lines = reportLines(s.report, [...result.map((b) => b.summary), draft?.body]);
+  const lines = reportLines(s.report, [...result.map((b) => b.summary), draft?.body, done && kind === "decision" ? decisionText(s) : null]);
   const outputExtra = done && s.output && s.output.trim() !== (s.report ?? "").trim() && !s.blocks?.length && mode !== "sent" ? s.output : null;
   // linki w rzędzie akcji: po wysyłce żadnych (karta ma link do wyniku); zrobiony krok z blokiem zmian pod kartą nie powtarza „Otwórz podgląd”,
   // bo ten przycisk niesie blok zmian (BlockRenderer); „Repozytorium” i inne linki zostają
@@ -336,7 +339,17 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // paczka 15 (punkty 7–9): bez sekcji „Co” (opis kroku idzie na dół, do zwiniętych informacji); główna treść zaraz pod „Teraz”,
   // „Skąd” (materiał z pochodzeniem) pod nią i zwinięte; karta z kartą publikacji i odczyt bez zmian (materiał jest tam treścią)
   const split = mode || readingResult(s, material) ? { main: [], sources: material } : splitMain(material);
-  const main = split.main.length && folds.material ? <div className="zone src main">{undo ? <div className="lbl">{undo}</div> : null}<BlocksView blocks={split.main} form={form} indexOf={indexOf} /></div>
+  // paczka 19 (wariant A): zrobiony krok ma pod wynikiem sekcję „Zlecenie” z klockami sprzed zamknięcia, każdy z ptaszkiem; pytanie pokazuje
+  // wybraną odpowiedź. Bez zmian: karta publikacji (wysłany szkic jest zleceniem) i zrobiony odczyt Claude'a (materiał jest jego wynikiem)
+  const order = done && !mode && !readingResult(s, material) ? doneOrder(s, split.main, prev) : [];
+  const tick = <span className="tick" aria-hidden="true"><Icon k="check" size={11} sw={2.6} /></span>;
+  const orderZone = order.length ? (
+    <div className="zone order">
+      <div className="lbl">Zlecenie<span className="done-mark">{tick}Zrobione, {whoDid(s)}{s.doneAt ? `, ${fmtTime(s.doneAt)}` : ""}</span></div>
+      {order.map((b, i) => <div key={i} className="order-b">{tick}<BlocksView blocks={[b]} /></div>)}
+    </div>
+  ) : null;
+  const main = order.length ? orderZone : split.main.length && folds.material ? <div className="zone src main">{undo ? <div className="lbl">{undo}</div> : null}<BlocksView blocks={split.main} form={form} indexOf={indexOf} /></div>
     : split.main.length ? <details className="fold"><summary><span className="k">Wynik</span><span className="t">{kindsOf(split.main)}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView blocks={split.main} form={form} indexOf={indexOf} /></details> : null;
   const kinds = kindsOf(split.sources);
   const srcOpen = folds.material && !split.main.length;   // „Skąd” rozwinięte tylko, gdy na karcie nie ma innej treści
@@ -348,7 +361,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
     <div key={d.id} className="zone src"><div className="lbl">Z kroku {String(d.idx).padStart(2, "0")}<span className="n">{d.title}</span></div><BlocksView blocks={d.blocks} /></div>
   ));
   // krok bez żadnej treści od agenta: opis zostaje na wierzchu, inaczej karta byłaby pusta
-  const bare = !material.length && !result.length && !mode;
+  const bare = !material.length && !result.length && !mode && !order.length;
   return (
     <>
       {mode && skad && srcOpen ? (cmp ? <>{skad}{now}</> : <div className="zones two">{now}{skad}</div>) : <>{now}{main}{skad}</>}

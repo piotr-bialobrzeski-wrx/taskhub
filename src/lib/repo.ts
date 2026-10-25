@@ -1202,6 +1202,14 @@ export async function answerBlockQuestion(stepId: string, index: number, answer:
   await sql()`update steps set blocks = ${sql().json(sanitizeBlocks(p.data) as never)} where id = ${stepId}`;   // treść szkicu bez zmian: zgoda zostaje
   return b.text;
 }
+// poprzednie wersje kartek (paczka 19): zlecenie na karcie zrobionego kroku, gdy wynik zastąpił klocki sprzed zamknięcia; tylko dla podanych kroków
+export async function prevBlocksOf(stepIds: string[]): Promise<Map<string, Block[]>> {
+  const out = new Map<string, Block[]>();
+  if (!stepIds.length) return out;
+  const rows = await sql()`select id, blocks_prev from steps where id in ${sql()(stepIds)} and blocks_prev is not null`;
+  for (const r of rows) { const b = parseBlocks(r.blocksPrev); if (b) out.set(r.id as string, b); }
+  return out;
+}
 // cofnięcie ostatniej zmiany kartki: poprzednia i obecna wersja zamieniają się miejscami (drugie cofnięcie przywraca zmianę).
 // Cofnięcie nie wskrzesza zgody ani wysyłki: przywrócony szkic przechodzi przez tę samą kontrolę co każdy zapis.
 export async function restorePrevBlocks(stepId: string): Promise<boolean> {

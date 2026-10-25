@@ -8,6 +8,7 @@ import { rulesText } from "@/lib/agent/context";
 import { audienceOf, WAIT_RE, waitTarget, workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago, connectorProblem, knownApp } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
+import { composeStatic } from "@/lib/agent/compose";
 import { appName, Blocks, ChangedFile, Fact, isOwnerStep, normalizeTool, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
 import { destOf, doneChat, keepOwnerAnswers, leaveChat, whyOf, projectPrompt, READ_RE, sameTarget } from "@/lib/stepcard";
 import { shortTitle } from "@/lib/auto";
@@ -392,7 +393,9 @@ function buildHandler(auth: repo.TokenAuth) {
         // wysłany commit: pliki na kartce zostają te zatwierdzone (są w podpisie); dochodzi tylko podgląd i opis, inaczej szkic wróciłby do „niewysłany”
         if (d0?.status === "sent" && old && isGitDraft(d0, st.blocks)) await repo.updateStep(st.id, { blocks: (st.blocks ?? []).map((b): Block => (b === old ? { ...old, preview: a.preview ?? old.preview, summary: a.summary.slice(0, 2000) } : b)) });
         else {
-          const rest = (st.blocks ?? []).filter((b) => b.type !== "changes").slice(0, 11);
+          // krok bez zapisanej kartki (w czasie pracy składana z opisu, faktów i załączników): ten układ zostaje jako zlecenie pod wynikiem (paczka 19)
+          const was = st.blocks?.length ? st.blocks : composeStatic({ ...st, output: "" }, await repo.listFacts({ stepId: st.id }), await repo.listAttachments({ taskId }));
+          const rest = was.filter((b) => b.type !== "changes").slice(0, 11);
           await repo.updateStep(st.id, { blocks: [...rest, { type: "changes", repo: a.repo, branch: a.branch, preview: a.preview, summary: a.summary.slice(0, 2000), files: a.changes ?? [] }] });
         }
       }

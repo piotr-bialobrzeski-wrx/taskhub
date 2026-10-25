@@ -1067,3 +1067,14 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .d-proj > span { overflow: hidden; text-overflow: ellipsis; }
 .d-proj .d { width: 8px; height: 8px; border-radius: 999px; background: var(--c, var(--sub)); flex: none; }
 .hm-why { display: block; margin-top: 4px; font-size: 12px; color: var(--sub); }   /* paczka 15: pełny powód pod krótkim wpisem agenta */
+
+/* ---------- paczka 19: karta zrobionego kroku, wariant A „Wynik na górze, zlecenie pod nim” ---------- */
+.zone.order > .lbl { display: flex; align-items: center; gap: var(--s-2); }
+.zone.order .tick { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 999px; background: var(--ok); color: #fff; flex: none; }
+.zone.order .done-mark { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 11.5px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ok); white-space: nowrap; }
+.order-b { position: relative; }
+.order-b > .tick { position: absolute; top: 10px; right: 10px; z-index: 1; }
+.order-b .block, .order-b .note, .order-b > .stack > p { padding-right: 36px; }
+/* pytanie w zleceniu: wybrana odpowiedź zielona, pozostałe przygaszone */
+.order-b .block.q .chip:not(.on) { opacity: .45; }
+.order-b .block.q .chip.on { background: var(--ok-soft); color: var(--ok); box-shadow: inset 0 0 0 1.5px var(--ok); font-weight: 600; }

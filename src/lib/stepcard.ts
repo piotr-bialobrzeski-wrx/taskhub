@@ -56,6 +56,18 @@ export function splitMain(material: Block[]): { main: Block[]; sources: Block[] 
   return main.length ? { main, sources: material.filter(isSourced) } : { main: [], sources: material };
 }
 
+// paczka 19 (wariant A „Wynik na górze, zlecenie pod nim”): zrobiony krok pokazuje pod wynikiem zlecenie, czyli klocki kartki sprzed zamknięcia.
+// Skąd je brać: główna treść obecnej kartki; gdy wynik ją zastąpił (zostały same zmiany w kodzie albo materiał ze źródłem), poprzednia wersja
+// kartki (blocks_prev); gdy i tam nic, opis kroku, z którego karta była składana w czasie pracy (krok bez zapisanej kartki)
+const orderOf = (blocks: Block[] | null | undefined): Block[] => splitMain(splitBlocks(blocks ?? []).material).main;
+export const hasOrder = (blocks: Block[] | null | undefined): boolean => orderOf(blocks).length > 0;
+export function doneOrder(s: Pick<Step, "detail">, main: Block[], prev: Block[] | null): Block[] {
+  if (main.length) return main;
+  const old = orderOf(prev);
+  if (old.length) return old;
+  return s.detail.trim() ? [{ type: "text", body: s.detail.trim() }] : [];
+}
+
 // zrobiony odczyt: krok zamknięty przez Claude'a bez szkicu i bez zmian w kodzie, którego kartka niesie treść (paczka 9, punkt 1:
 // do tej pory treść ticketu leżała pod zwiniętą linią „Skąd” i Piotr widział tylko link)
 const CONTENT_KINDS = new Set(["free", "facts", "thread", "table", "list", "mail", "comment", "text", "media"]);
