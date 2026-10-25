@@ -178,6 +178,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("dobór modelu: mostek i konekto
   });
 
   it("bieg wysyłki: Mechanika (Haiku · niski), a wybór Piotra na karcie szkicu (Sonnet) wygrywa", async () => {
+    // własny konektor Slack na tym Macu: bez niego wynik zależał od połączeń zostawionych przez inne pliki testów
+    await repo.upsertBridgeConnections(owner, "mini", [{ name: "claude.ai Slack", ok: true }]);
     const t = await repo.createTask(owner, { title: "Wysyłka", steps: [{ title: "Napisz na #dev", tool: "slack", needsApproval: true }] });
     const id = t.steps[0].id;
     await repo.updateStep(id, { status: "draft", blocks: [{ type: "draft", status: "proposed", body: "Cześć", target: { app: "slack", action: "send", where: "#dev" } } as never] });
