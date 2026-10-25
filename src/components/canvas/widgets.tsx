@@ -229,12 +229,27 @@ function ImageView({ items, current, onPick, onClose, onRemove }: { items: Att[]
     </div>, document.body);
 }
 
-function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone, hist, onHistory }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void; hist: boolean; onHistory: () => void }) {
+// szkic niewysłanej wiadomości (paczka 19, punkt 3): osobno dla każdego miejsca czatu (główna kanwa, zadanie, krok), w przeglądarce, więc przetrwa
+// przejście do innego zadania i odświeżenie strony; znika po wysłaniu
+export const draftKeyOf = (taskId: string | null, stepId: string | null) => "th-draft-" + (!taskId ? "main" : stepId ? "s-" + stepId : "t-" + taskId);
+const readDraft = (key: string) => { try { return localStorage.getItem(key) ?? ""; } catch { return ""; } };
+const writeDraft = (key: string, v: string) => { try { if (v.trim()) localStorage.setItem(key, v); else localStorage.removeItem(key); } catch { /* brak storage */ } };
+function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone, hist, onHistory, draftKey }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void; hist: boolean; onHistory: () => void; draftKey: string }) {
   const { pending } = useFormStatus();
   const ta = useRef<HTMLTextAreaElement>(null);
   const pick = useRef<HTMLInputElement>(null);
   const grow = () => { const el = ta.current; if (!el) return; el.style.height = "34px"; el.style.height = Math.min(168, el.scrollHeight) + "px"; };
-  useEffect(() => { if (!pending && ta.current) { ta.current.value = ""; grow(); onDone(); } }, [pending]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // inne miejsce czatu: pole pokazuje jego szkic (tekst poprzedniego miejsca jest już zapisany przy każdym wpisaniu)
+  useEffect(() => { if (ta.current) { ta.current.value = readDraft(draftKey); grow(); } }, [draftKey]);
+  // po wysłaniu (pending: tak → nie) pole i szkic miejsca, z którego poszła wiadomość, są puste
+  const sentFrom = useRef<string | null>(null);
+  useEffect(() => {
+    if (pending) { sentFrom.current = draftKey; return; }
+    if (sentFrom.current === null) return;
+    writeDraft(sentFrom.current, ""); sentFrom.current = null;
+    if (ta.current) { ta.current.value = ""; grow(); }
+    onDone();
+  }, [pending]);   // eslint-disable-line react-hooks/exhaustive-deps
   const canSend = () => !!ta.current?.value.trim() || atts.length > 0;
   const [view, setView] = useState<string | null>(null);   // klucz grafiki otwartej w podglądzie
   const imgs = atts.filter((a) => a.preview);
@@ -256,7 +271,7 @@ function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone
       <div className="dock-row">
         <button className="icobtn" type="button" aria-label="Dodaj plik lub grafikę" title="Dodaj plik lub grafikę (albo wklej Ctrl+V / przeciągnij tutaj)" disabled={pending} onClick={() => pick.current?.click()}><Icon k="clip" size={15} sw={1.7} /></button>
         <input ref={pick} type="file" multiple onChange={(e) => { onFiles([...(e.currentTarget.files ?? [])]); e.currentTarget.value = ""; }} />
-        <textarea ref={ta} name="text" rows={1} placeholder={pending ? busyText : placeholder} aria-label="Wiadomość" disabled={pending} onInput={grow}
+        <textarea ref={ta} name="text" rows={1} placeholder={pending ? busyText : placeholder} aria-label="Wiadomość" disabled={pending} onInput={(e) => { grow(); writeDraft(draftKey, e.currentTarget.value); }}
           onPaste={(e) => { const files = [...e.clipboardData.files]; if (!files.length) return; if (!e.clipboardData.getData("text/plain")) e.preventDefault(); onFiles(files); }}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (canSend()) e.currentTarget.form?.requestSubmit(); } }} />
         <button className={"icobtn" + (hist ? " on" : "")} type="button" aria-label={hist ? "Zamknij historię" : "Historia rozmowy"} title={hist ? "Zamknij historię" : "Historia rozmowy"} aria-pressed={hist} onClick={onHistory}><Icon k={hist ? "x" : "history"} size={hist ? 13 : 15} sw={hist ? 2 : 1.7} /></button>
@@ -305,7 +320,7 @@ export function Dock({ action, taskId, stepId = null, placeholder, busyText, con
         <input type="hidden" name="taskId" value={taskId ?? ""} /><input type="hidden" name="stepId" value={stepId ?? ""} />
         <input ref={filesIn} type="file" name="files" multiple tabIndex={-1} aria-hidden="true" />
         {context ? <div className="ctxrow">{context}</div> : null}
-        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} hist={hist} onHistory={() => setHist((h) => !h)} />
+        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} hist={hist} onHistory={() => setHist((h) => !h)} draftKey={draftKeyOf(taskId, stepId)} />
       </form>
     </div>
   );

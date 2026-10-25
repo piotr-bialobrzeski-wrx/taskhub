@@ -207,7 +207,7 @@ export const Step = z.object({
   waitFor: z.string().nullable().optional(),
   leftAt: z.string().nullable().optional(),         // agent oddał krok, bo nie dał rady (nie z czekania): kafelek „Potrzebna pomoc” do następnej zmiany stanu        // oddany, bo czeka na ten krok (dowolne zadanie); do jego zrobienia nie wraca do list_work
   lastRun: z.object({ model: z.string().nullable(), effort: z.string().nullable(), at: z.string() }).nullable().optional(),   // „ostatnio: model · wysiłek”
-  cloud: z.object({ state: z.enum(["queued", "rung", "working"]), at: z.string(), rungAt: z.string().optional(), takenAt: z.string().optional(), failAt: z.string().optional() }).nullable().optional(),   // „Uruchom w chmurze”: kliknięte, odpalone z Maca, wzięte przez chmurę
+  cloud: z.object({ state: z.enum(["auto", "queued", "rung", "working"]), at: z.string(), msg: z.string().optional(), rungAt: z.string().optional(), takenAt: z.string().optional(), failAt: z.string().optional() }).nullable().optional(),   // „Uruchom w chmurze”: kliknięte, odpalone z Maca, wzięte przez chmurę; auto = zlecone w rozmowie, ruszy samo po krokach, na które czeka (paczka 19)
 });
 export type Step = z.infer<typeof Step>;
 

@@ -24,7 +24,7 @@ import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
-import { decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
+import { decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -199,7 +199,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
 
   return (
     <>
-    <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || !!bubble || pending.length > 0 || t.steps.some((s) => s.status === "handoff" || !!s.cloud) || (!!bp && !t.doneAt)} />
+    <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || !!bubble || pending.length > 0 || t.steps.some((s) => s.status === "handoff" || (!!s.cloud && s.cloud.state !== "auto")) || (!!bp && !t.doneAt)} />
     <TaskCanvas
       project={cur.project ? { name: cur.project.name, color: projColor(cur.project.color) } : null}
       task={{ id: t.id, title: t.title, base: cur.score.base, eff: cur.score.eff, why: cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; "), state: taskStateOf(t, b.tasks), progress: { done: t.steps.filter((s) => s.status === "done").length, all: t.steps.length }, estText: estTextOf(t), activity: taskActivity(t.id, w.run), pending: pending.length }}
@@ -254,7 +254,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const cloud = s.status === "todo" && inProject ? s.cloud ?? null : null;
   const cloudTitle = cloud?.state === "rung" ? "Chmura rusza" : cloud ? "Czeka na chmurę" : "Do zrobienia w projekcie w chmurze";
   const head = inProject && state === "ready" && !mode ? { ...head0, title: cloudTitle } : head0;
-  const cloudNote = !cloud ? null : cloud.state === "rung" ? `Mac odpalił Claude w chmurze${cloud.rungAt ? ` o ${fmtTime(cloud.rungAt)}` : ""}; zaraz weźmie ten krok i zamknie go z wynikiem.`
+  const cloudNote = !cloud ? null : cloud.state === "auto" ? "Zleciłeś ten krok w rozmowie: ruszy w chmurze sam, gdy skończą się kroki, na które czeka."
+    : cloud.state === "rung" ? `Mac odpalił Claude w chmurze${cloud.rungAt ? ` o ${fmtTime(cloud.rungAt)}` : ""}; zaraz weźmie ten krok i zamknie go z wynikiem.`
     : macAlive ? "Mac zaraz odpali Claude w chmurze; to trwa kilkanaście sekund." : "Aplikacja Task Hub na Macu teraz nie działa: chmura ruszy, gdy Mac wróci. Awaryjnie skopiuj polecenie i wklej je w projekcie Claude.";
   const draft = draftOf(s);   // wybrana opcja albo pierwszy szkic: linie raportu bez powtórki jej treści
   // raport bez powtórki streszczenia bloku zmian ani treści szkicu; „Do potwierdzenia: …” jako osobna linia
@@ -268,6 +269,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // miejsce docelowe (ticket, wątek, dokument) w nagłówku „Teraz” tylko bez karty publikacji: karta ma własny przycisk celu w nagłówku (przy opcjach
   // każda swój); po wysyłce jego miejsce zajmuje link do wyniku
   const target = !done && !mode ? targetLink(s, s.blocks) : null;
+  const proto = !mode ? prototypeLink(t.steps, s) : null;   // paczka 19, punkt 1: decyzja po prototypie otwiera jego najnowszy podgląd
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
   const took = whoDid(s) === "Ty" ? spentMin(s) : agentMin;
@@ -280,7 +282,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           : <span className="working" title={s.cloud ? "Claude w chmurze robi ten krok; wynik pojawi się tutaj" : prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />{s.cloud ? "Claude w chmurze pracuje" : "Claude pracuje"}{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>)
           : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
         {meta ? <small>· {meta}</small> : null}
-        {target && isHttpUrl(target.url) ? <><span className="sp" /><a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
+        {proto ? <><span className="sp" /><a className="btn ico" href={proto} target="_blank" rel="noopener" title={`Najnowszy podgląd prototypu: ${proto}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a></> : null}
+        {target && isHttpUrl(target.url) ? <>{proto ? null : <span className="sp" />}<a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
         {done && s.filePath ? <><span className="sp" /><CopyButton text={s.filePath} label="Kopiuj ścieżkę" /></> : null}
       </div>
       {s.tool === "file" && s.status === "todo" && oldMac ? <div className="note">Ten krok zapisze plik aplikacja Task Hub na Macu od wersji 0.1.7. Zaktualizuj ją w menu aplikacji.</div> : null}
@@ -304,7 +307,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
             {!aiOn && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
           </>) : null}
           {s.status === "todo" && inProject && !cloud && state === "ready" ? <form action={runInCloud.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude w chmurze weźmie ten krok (odpala go aplikacja Task Hub na Macu) i zamknie go z wynikiem" busy="Zlecam…"><Icon k="play" size={12} sw={2} /> Uruchom w chmurze</PendingButton></form> : null}
-          {cloud ? <form action={cancelCloudRun.bind(null, t.id, s.id)}><PendingButton className="btn" title="Chmura nie weźmie tego kroku; możesz zlecić go jeszcze raz" busy="Wycofuję…"><Icon k="stop" size={11} sw={2} /> Wycofaj</PendingButton></form> : null}
+          {cloud ? <form action={cancelCloudRun.bind(null, t.id, s.id)}><PendingButton className="btn" title={cloud.state === "auto" ? "Krok nie ruszy sam; uruchomisz go przyciskiem, gdy będzie gotowy" : "Chmura nie weźmie tego kroku; możesz zlecić go jeszcze raz"} busy="Wycofuję…"><Icon k="stop" size={11} sw={2} /> Wycofaj</PendingButton></form> : null}
           {s.status === "todo" && inProject ? <CopyButton className="btn" text={projectPrompt(t, s, origin)} label="Kopiuj polecenie" title="Awaryjnie: polecenie dla wątku w projekcie Claude w chmurze; wklej je tam, a wątek przeczyta zadanie i zamknie ten krok" /> : null}
           {s.status === "todo" && kind === "offline" && !cloud ? <DoneAsk taskId={t.id} stepId={s.id} est={estOf(s)} title={s.title} primary={!inProject} /> : null}
           {s.status === "todo" && kind === "reading" ? <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Zapisuję…">Przeczytane</PendingButton></form> : null}
