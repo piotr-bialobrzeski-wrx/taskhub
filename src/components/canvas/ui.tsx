@@ -102,6 +102,8 @@ const PATHS: Record<string, string> = {
   list: '<rect x="2" y="3" width="12" height="4" rx="1.5"/><rect x="2" y="9" width="12" height="4" rx="1.5"/>',
   send: '<path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/>',
   chev: '<path d="m4 6 4 4 4-4"/>',
+  chevL: '<path d="m10 4-4 4 4 4"/>',
+  chevR: '<path d="m6 4 4 4-4 4"/>',
   widen: '<path d="M2 8h12M2 8l3-3M2 8l3 3M14 8l-3-3M14 8l-3 3"/>',
   check: '<path d="M4 8.5l2.6 2.5L12 5.5"/>',
   clip: '<path d="M10.6 5.4 6.4 9.6a1.4 1.4 0 0 0 2 2l4.6-4.6a2.9 2.9 0 0 0-4.1-4.1L4.3 7.5a4.4 4.4 0 0 0 6.2 6.2l3.3-3.3"/>',
