@@ -51,6 +51,14 @@ export function stepLook(s: Step, state: StepStateKey, now: boolean): Look {
   }
   return { key: own ? "plan-me" : "plan-ag", label: "Zaplanowane" };
 }
+// krok „teraz” biegu: wskazany przez agenta albo, gdy bieg pracuje w zadaniu bez wskazania kroku (np. po rozpisaniu od razu zbiera fakty
+// do szkicu), pierwszy gotowy krok agenta; inaczej taki krok udawałby „Zaplanowane” z przyciskiem „Uruchom”, choć agent już nad nim siedzi
+export function liveStepId(t: Task, all: Task[], live: LiveActivity | null): string | null {
+  if (!live || live.taskId !== t.id) return null;
+  if (live.stepId) return t.steps.some((x) => x.id === live.stepId) ? live.stepId : null;
+  if (live.kind === "send") return null;
+  return t.steps.find((x) => x.status === "todo" && !isOwnerStep(x) && !x.cloud && stepStateOf(t, x, all) === "ready")?.id ?? null;
+}
 // kafelek zadania bierze stan najważniejszego kroku w kolejności: Twoja kolej, Agent oddał, Agent pracuje, Zaplanowane (kolor wg pierwszego otwartego kroku)
 export function taskLook(t: Task, state: TaskStateKey, steps: Look[], working: boolean, questions: number): Look {
   if (state === "done") return { key: "done", label: "Zrobione" };
@@ -76,7 +84,8 @@ export function estText(t: Task): string {
 export function taskTile(s: Scored, all: Task[], questions: number, live: LiveActivity | null = null, pending = 0): TaskTile {
   const t = s.task, state = taskStateOf(t, all);
   const activity = taskActivity(t.id, live);
-  const looks = t.steps.map((x) => stepLook(x, stepStateOf(t, x, all), live?.stepId === x.id));
+  const nowId = liveStepId(t, all, live);
+  const looks = t.steps.map((x) => stepLook(x, stepStateOf(t, x, all), nowId === x.id));
   return {
     look: taskLook(t, state, looks, !!activity, questions),
     activity, pending,
@@ -105,10 +114,11 @@ export function stepTile(t: Task, s: Step, all: Task[], live: LiveActivity | nul
   // praca na żywo (paczka 7, punkt 3): krok „teraz” biegu ma biegnące światełko, kroki dotknięte w tym biegu stałą obwódkę z tym, co Claude zrobił;
   // po biegu kropka, póki Piotr nie otworzy zmienionego kroku (nigdy razem z obwódką)
   const run = live?.steps?.[s.id] ?? null;
-  const glow: StepTile["glow"] = live?.stepId === s.id ? "live" : run ? "touched" : null;
+  const now = liveStepId(t, all, live) === s.id;
+  const glow: StepTile["glow"] = now ? "live" : run ? "touched" : null;
   const touched = glow === "touched" && run ? `Claude ${run.what} · ${fmtTime(run.at)}` : null;
   const fresh = !glow && !!s.agentAt && (!s.openedAt || s.agentAt > s.openedAt);
-  const activity = live && live.stepId === s.id ? { text: onTileText(live.text), detail: live.detail, since: live.since } : null;
+  const activity = live && now ? { text: onTileText(live.text), detail: live.detail, since: live.since } : null;
   return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, ...m, dim, glow, touched, fresh, pos: s.pos, dependsOn: s.dependsOn, activity, look: stepLook(s, state, glow === "live") };
 }
 

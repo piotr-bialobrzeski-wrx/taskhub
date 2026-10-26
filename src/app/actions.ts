@@ -311,6 +311,8 @@ export async function stopWork(taskId: string, runId: string): Promise<string> {
   refresh(taskId);
   return until ? `Zatrzymane. Claude wróci o ${fmtTime(until)} albo od razu, gdy napiszesz.` : "Ta praca już się skończyła.";
 }
+// „Zatrzymaj” na karcie kroku, nad którym agent pracuje (paczka 21): to samo co w dymku pracy, bez toastu
+export async function stopWorkForm(taskId: string, runId: string): Promise<void> { await stopWork(taskId, runId); }
 // ---------- kolejka agenta (paczka 18) ----------
 // zapisana kolejność wygrywa z tą, w jakiej agent sam bierze pracę (lista pracy daje te pozycje na początek); klucze pozycji, których już nie ma, odpadają przy zapisie
 const QUEUE_KEY = /^(chat|task|title|answer|step):[0-9a-f-]{36}$/i;

@@ -271,6 +271,9 @@ function buildHandler(auth: repo.TokenAuth) {
       }
       await markRun();
       const out = json({ steps: steps.map((s, i) => ({ id: s.id, title: s.title, ...(a.steps[i]?.done !== undefined ? { done: true } : {}), ...(armed.includes(s) ? { cloud: true } : {}) })), ...(bef ? { before: { id: bef.id, title: bef.title, draftReset: reset } } : {}) });
+      // paczka 21: bez start_step kafelek kroku nie wie, że agent już nad nim pracuje (pokazywał „Zaplanowane” i „Uruchom”)
+      if (steps.some((s, i) => a.steps[i]?.done === undefined && !isOwnerStep(s)))
+        out.content.push({ type: "text", text: "Gdy od razu bierzesz się za któryś z tych kroków (zbierasz fakty, piszesz szkic), najpierw wywołaj start_step z jego id, żeby Piotr widział na kafelku, że nad nim pracujesz." });
       // krok „Przeczytaj …” dla Piotra: łagodna uwaga, kroki zostają (Piotr może je zamknąć jednym „Przeczytane”)
       if (a.steps.some((s) => s.done === undefined && normalizeTool(s.tool) === "manual" && READ_RE.test(s.title.trim())))
         out.content.push({ type: "text", text: "Uwaga: nie twórz Piotrowi kroków „Przeczytaj …”: wynik zapisz jako swój krok zrobiony (done), a fakty potrzebne do decyzji połóż na kartce kroku „Zdecyduj …”." });

@@ -36,7 +36,7 @@ import { Icon, plural } from "@/components/canvas/ui";
 import { InlineDate, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
 import { projColor } from "@/components/canvas/ui";
 import { PublishCard, cardModeOf } from "@/components/PublishCard";
-import { answerQuestionForm, restoreBlocksForm, backToTodo, cancelCloudRun, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, reopen, runInCloud, saveReport, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
+import { answerQuestionForm, restoreBlocksForm, backToTodo, cancelCloudRun, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, reopen, runInCloud, saveReport, stopWorkForm, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -195,7 +195,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     if (!raw || !s.needsApproval || (m !== "proposed" && m !== "parked") || destOf(s)?.kind !== "send") return null;
     return connectorIssue(b.connections, b.companies, { app: raw, connectionId: s.connectionId, companyId: cur.project?.companyId ?? null });
   };
-  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} project={cur.project?.name ?? null} prev={prevBlocks.get(s.id) ?? null} />; });
+  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} runId={w.run?.stoppable ? w.run.runId ?? null : null} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} project={cur.project?.name ?? null} prev={prevBlocks.get(s.id) ?? null} />; });
 
   return (
     <>
@@ -214,10 +214,10 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
-function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, oldMac, macAlive, issue, model, project, prev }: {
+function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, runId, oldMac, macAlive, issue, model, project, prev }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null; company: string | null;
-  connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null; oldMac: boolean; macAlive: boolean; issue: string | null;
+  connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null; runId: string | null; oldMac: boolean; macAlive: boolean; issue: string | null;
   model: (StepModelInfo & { now: string }) | null; project: string | null; prev: Block[] | null;
 }) {
   // szczegóły są już w sekcji „Co”, więc blok tekstu z tą samą treścią odpada
@@ -278,10 +278,11 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const now = (
     <div className={"zone ans now " + head.cls}>
       <div className="now-h">
-        {s.status === "handoff" && !mode ? (activity ? <Activity text={activity.text} detail={activity.detail} since={activity.since} who="Claude" big />
+        {(s.status === "handoff" || (s.status === "todo" && activity)) && !mode ? (activity ? <Activity text={activity.text} detail={activity.detail} since={activity.since} who="Claude" big />
           : <span className="working" title={s.cloud ? "Claude w chmurze robi ten krok; wynik pojawi się tutaj" : prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />{s.cloud ? "Claude w chmurze pracuje" : "Claude pracuje"}{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>)
           : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
-        {meta ? <small>· {meta}</small> : null}
+        {meta && !(s.status === "todo" && activity) ? <small>· {meta}</small> : null}
+        {activity && runId && !mode && !done ? <><span className="sp" /><form action={stopWorkForm.bind(null, t.id, runId)}><PendingButton className="btn ico" busy="Zatrzymuję…" title="Przerywa tę pracę Claude'a; wróci do niej później albo od razu, gdy napiszesz"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form></> : null}
         {proto ? <><span className="sp" /><a className="btn ico" href={proto} target="_blank" rel="noopener" title={`Najnowszy podgląd prototypu: ${proto}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a></> : null}
         {target && isHttpUrl(target.url) ? <>{proto ? null : <span className="sp" />}<a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
         {done && s.filePath ? <><span className="sp" /><CopyButton text={s.filePath} label="Kopiuj ścieżkę" /></> : null}
@@ -304,7 +305,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           {s.status === "todo" && kind === "agent" && !inProject ? (<>
             {aiOn && !ext ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Agent przygotowuje…">Przygotuj</PendingButton></form> : null}
             {aiOn ? <form action={compose.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Składam…" title="Agent składa panel z faktów, migawek i załączników">Pokaż kontekst</PendingButton></form> : null}
-            {!aiOn && state === "ready" ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
+            {!aiOn && state === "ready" && !activity ? <form action={handoff.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude weźmie ten krok teraz; kafelek pokaże, że trwa praca" busy="Uruchamiam…"><Icon k="play" size={12} sw={2} /> Uruchom</PendingButton></form> : null}
           </>) : null}
           {s.status === "todo" && inProject && !cloud && state === "ready" ? <form action={runInCloud.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude w chmurze weźmie ten krok (odpala go aplikacja Task Hub na Macu) i zamknie go z wynikiem" busy="Zlecam…"><Icon k="play" size={12} sw={2} /> Uruchom w chmurze</PendingButton></form> : null}
           {cloud ? <form action={cancelCloudRun.bind(null, t.id, s.id)}><PendingButton className="btn" title={cloud.state === "auto" ? "Krok nie ruszy sam; uruchomisz go przyciskiem, gdy będzie gotowy" : "Chmura nie weźmie tego kroku; możesz zlecić go jeszcze raz"} busy="Wycofuję…"><Icon k="stop" size={11} sw={2} /> Wycofaj</PendingButton></form> : null}

@@ -198,7 +198,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {namer === "group" ? <Namer label="Nazwa grupy" placeholder={n ? `Nazwa grupy dla ${n} ${word}` : "Nazwa grupy"} onClose={() => setNamer(null)} onSubmit={(name) => { const members = ids; const rect = groupRect(members); setNamer(null); setSel(new Set()); setPanel(null); run(async () => { await freeze(members); const id = await createGroupAction(t.id, name, members, rect); setSelGroup(id); }); }} /> : null}
       {tmenu ? <TileMenu at={tmenu} onClose={() => setTmenu(null)} items={(() => { const id = tmenu.id; if (!id) return [{ label: "Otwórz zadanie", onPick: () => { setSel(new Set()); setPanel("__task"); } }]; const st = byId.get(id), on = sel.has(id), done = st?.state === "done"; return [
         { label: "Otwórz", onPick: () => openStep(id) },
-        ...(st && st.state === "ready" && st.tool !== "manual" && !p.aiOn ? [{ label: "Uruchom", onPick: () => run(() => handoff(t.id, id), "Claude bierze ten krok") }] : []),
+        ...(st && st.state === "ready" && st.look.key !== "live" && st.tool !== "manual" && !p.aiOn ? [{ label: "Uruchom", onPick: () => run(() => handoff(t.id, id), "Claude bierze ten krok") }] : []),
         { label: on ? "Odznacz" : "Zaznacz", onPick: () => { const s = new Set(sel); if (on) s.delete(id); else s.add(id); setSel(s); } },
         { label: "Zgrupuj", onPick: () => { setSel(new Set([...sel, id])); setNamer("group"); } },
         { label: done ? "Wróć do pracy" : "Oznacz jako zrobione", onPick: () => run(() => batchSteps(t.id, [id], { done: !done }), done ? "Przywrócono do pracy" : "Oznaczono jako zrobione") },
