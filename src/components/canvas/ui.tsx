@@ -69,7 +69,7 @@ export type ProjTask = { id: string; title: string; state: TaskStateKey; base: n
 // ---------- kolory i ikony narzędzi ----------
 export const TOOL_COLORS: Record<string, string> = {
   slack: "var(--t-slack)", gmail: "var(--t-mail)", clickup: "var(--t-clickup)", calendar: "var(--t-calendar)", claude: "var(--t-claude)",
-  claudeapp: "var(--t-claude)", code: "var(--t-claude)", manual: "var(--t-manual)", github: "var(--t-github)", figma: "var(--t-figma)", browser: "var(--t-mail)",
+  claudeapp: "var(--t-claude)", code: "var(--t-claude)", manual: "var(--t-manual)", github: "var(--t-github)", figma: "var(--t-figma)", mural: "var(--t-mural)", browser: "var(--t-mail)",
 };
 export const toolColor = (tool: string) => TOOL_COLORS[tool] ?? "var(--sub)";
 
@@ -87,6 +87,7 @@ const PATHS: Record<string, string> = {
   code: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="m5 7 2 1.5L5 10M8.5 10h3"/>',
   github: '<circle cx="8" cy="8" r="5.5"/><path d="M6 13.5v-2c0-.6.2-1 .5-1.3C5 10 4 9.3 4 7.6c0-.6.2-1.1.5-1.5-.1-.3-.2-1 .1-1.6 0 0 .6 0 1.6.7a5.5 5.5 0 0 1 3.6 0c1-.7 1.6-.7 1.6-.7.3.6.2 1.3.1 1.6.3.4.5.9.5 1.5 0 1.7-1 2.4-2.5 2.6.3.3.5.7.5 1.3v2"/>',
   figma: '<path d="M6 2.5h4a2 2 0 0 1 0 4H6a2 2 0 0 1 0-4z"/><path d="M6 6.5h2v4H6a2 2 0 0 1 0-4z"/><circle cx="10" cy="8.5" r="2"/><path d="M6 10.5h2v2a2 2 0 1 1-2-2z"/>',
+  mural: '<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><rect x="4.5" y="5" width="3" height="3"/><rect x="8.5" y="7.5" width="3" height="3"/>',
   browser: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M2 6h12M4.5 4.5h.01M6.5 4.5h.01"/>',
   // ikony interfejsu
   menu: '<path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>',

@@ -13,7 +13,7 @@ import { groupBlocks } from "@/lib/stepcard";
 // gdzie blok pytania ma zapisać odpowiedź (panel kroku); bez tego pytanie jest tylko do odczytu
 export type BlockForm = { taskId: string; stepId: string };
 
-const TOOL_COLORS: Record<string, string> = { slack: "var(--t-slack)", gmail: "var(--t-mail)", clickup: "var(--t-clickup)", calendar: "var(--t-calendar)", claude: "var(--t-claude)", claudeapp: "var(--t-claude)", code: "var(--t-claude)", manual: "var(--t-manual)", github: "var(--t-github)", figma: "var(--t-figma)" };
+const TOOL_COLORS: Record<string, string> = { slack: "var(--t-slack)", gmail: "var(--t-mail)", clickup: "var(--t-clickup)", calendar: "var(--t-calendar)", claude: "var(--t-claude)", claudeapp: "var(--t-claude)", code: "var(--t-claude)", manual: "var(--t-manual)", github: "var(--t-github)", figma: "var(--t-figma)", mural: "var(--t-mural)" };
 export const toolColor = (app: string) => TOOL_COLORS[app] ?? "var(--sub)";
 
 // nagłówek klocka kontekstu: kropka aplikacji, nazwa, miejsce (ref), licznik, przycisk „Otwórz w <app>” gdy jest adres (jeden kształt

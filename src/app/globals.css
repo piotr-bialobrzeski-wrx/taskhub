@@ -7,7 +7,7 @@
   --accent: #5A5CE6; --accent-2: #6A6CF0; --accent-text: #FFFFFF; --accent-soft: rgba(90, 92, 230, 0.10); --shadow: rgba(58, 60, 130, 0.14);
   --ok: #2E8A5C; --ok-soft: rgba(46, 138, 92, 0.12); --warn: #A86A12; --warn-soft: rgba(224, 160, 48, 0.16); --danger: #D93B4F;
   --p1: #E2603A; --p2: #D99A1E; --p3: #2E9C8A; --p4: #8A8CA8;
-  --t-slack: #7B4FA8; --t-mail: #2F7DD1; --t-clickup: #D6467F; --t-claude: #C2693F; --t-calendar: #2E9C8A; --t-manual: #6E7090; --t-github: #3E4350; --t-figma: #8A4FE0;
+  --t-slack: #7B4FA8; --t-mail: #2F7DD1; --t-clickup: #D6467F; --t-claude: #C2693F; --t-calendar: #2E9C8A; --t-manual: #6E7090; --t-github: #3E4350; --t-figma: #8A4FE0; --t-mural: #E8416B;
   --claude: var(--t-claude);
   --s-1: 4px; --s-2: 6px; --s-3: 8px; --s-4: 12px; --s-5: 16px; --s-6: 20px; --s-7: 24px;
   --r-sm: 12px; --r-md: 14px; --r-lg: 20px; --r-pill: 999px;
@@ -22,7 +22,7 @@
     --line: rgba(236, 236, 245, 0.10); --edge: rgba(236, 236, 245, 0.30); --accent: #7C7EF5; --accent-2: #8B8DF7; --accent-text: #FFFFFF;
     --accent-soft: rgba(124, 126, 245, 0.16); --shadow: rgba(0, 0, 0, 0.45); --ok: #5CC28F; --ok-soft: rgba(92, 194, 143, 0.14);
     --warn: #E6B055; --warn-soft: rgba(230, 176, 85, 0.16); --danger: #F0697A; --p1: #F07E5A; --p2: #E8B44A; --p3: #4FC2AE; --p4: #9A9CB8;
-    --t-slack: #A47BD1; --t-mail: #5FA3EA; --t-clickup: #EC6FA0; --t-claude: #DE8B62; --t-calendar: #4FC2AE; --t-manual: #9A9CB8; --t-github: #C9D1D9; --t-figma: #B48CF5;
+    --t-slack: #A47BD1; --t-mail: #5FA3EA; --t-clickup: #EC6FA0; --t-claude: #DE8B62; --t-calendar: #4FC2AE; --t-manual: #9A9CB8; --t-github: #C9D1D9; --t-figma: #B48CF5; --t-mural: #F27593;
     color-scheme: dark;
   }
 }

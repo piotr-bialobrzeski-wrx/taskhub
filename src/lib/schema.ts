@@ -282,7 +282,7 @@ export type Connection = z.infer<typeof Connection>;
 // aplikacja z nazwy konektora: "slack" → slack, "gmail-pirxey" → gmail, "Mail" → gmail, "clickup" → clickup; nieznana → nazwa w małych literach
 const APP_ALIASES: [RegExp, string][] = [
   [/slack/i, "slack"], [/gmail|\bmail|poczta|outlook/i, "gmail"], [/clickup/i, "clickup"], [/calendar|kalendarz/i, "calendar"],
-  [/figma/i, "figma"], [/github/i, "github"], [/notion/i, "notion"], [/hubspot/i, "hubspot"], [/clockify/i, "clockify"],
+  [/figma/i, "figma"], [/mural/i, "mural"], [/github/i, "github"], [/notion/i, "notion"], [/hubspot/i, "hubspot"], [/clockify/i, "clockify"],
   [/fireflies/i, "fireflies"], [/drive/i, "drive"], [/linkedin/i, "linkedin"], [/jira/i, "jira"], [/task[-_ ]?hub/i, "taskhub"], [/google|workspace/i, "google"],
 ];
 export const appOfLabel = (label: string) => APP_ALIASES.find(([re]) => re.test(label))?.[1] ?? label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
@@ -336,7 +336,7 @@ export type TimeSample = z.infer<typeof TimeSample>;
 // ---------- narzędzia kroków: etykiety do UI, nie schematy ----------
 export const TOOL_LABELS: Record<string, string> = {
   slack: "Slack", gmail: "E-mail", clickup: "ClickUp", calendar: "Kalendarz", claude: "Dokument",
-  claudeapp: "Claude", code: "Claude Code", manual: "Ty", browser: "Przeglądarka", github: "GitHub", figma: "Figma",
+  claudeapp: "Claude", code: "Claude Code", manual: "Ty", browser: "Przeglądarka", github: "GitHub", figma: "Figma", mural: "Mural",
   whatsapp: "WhatsApp", sheets: "Arkusz Google", docs: "Dokument Google", file: "Plik na Macu",
 };
 export const toolLabel = (tool: string) => TOOL_LABELS[tool] ?? tool;
@@ -353,7 +353,7 @@ export const doneByOf = (s: Pick<Step, "tool" | "doneBy">): "owner" | "agent" =>
 export const DECISION_TITLE_RE = /^(wybierz|zdecyduj|ustal|wybór|decyzja|zatwierdź)(?=[\s,:;]|$)/i;
 // „w ClickUpie”, „na Slacku”: dokąd idzie treść, odmienione; nieznana aplikacja dostaje „· Nazwa”
 export const TOOL_IN: Record<string, string> = {
-  clickup: "w ClickUpie", slack: "na Slacku", gmail: "mailem", calendar: "w kalendarzu", github: "na GitHubie", figma: "w Figmie", whatsapp: "na WhatsAppie",
+  clickup: "w ClickUpie", slack: "na Slacku", gmail: "mailem", calendar: "w kalendarzu", github: "na GitHubie", figma: "w Figmie", mural: "w Muralu", whatsapp: "na WhatsAppie",
   sheets: "w arkuszu Google", docs: "w dokumencie Google", file: "na Macu",
 };
 export const inApp = (app: string) => TOOL_IN[app] ?? `· ${toolLabel(app)}`;
