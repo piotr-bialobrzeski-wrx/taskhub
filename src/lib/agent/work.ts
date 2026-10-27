@@ -1,6 +1,6 @@
 // Co czeka na agenta: jedna funkcja dla list_work (tekst dla Claude) i dla mostka na komputerze (same liczby, bez skutków ubocznych).
 import * as repo from "@/lib/repo";
-import { isAppCodeStep, type Step } from "@/lib/schema";
+import { isAppCodeStep, type Step, type Task } from "@/lib/schema";
 import { brief, scoreAll } from "./context";
 import { approvalValid, draftOf, isPromptDraft, isSendable, type Draft } from "./approval";
 import { choiceOf, modelConfig, runLabel, stepChoice, type Choice } from "./models";
@@ -90,8 +90,9 @@ export type Sendable = { taskId: string; taskTitle: string; step: Step; draft: D
 
 // szkice do wysłania: ważna zgoda, nikt ich jeszcze nie wziął, kroki przed nimi zrobione; najdawniej zatwierdzony pierwszy.
 // Zatwierdzony prompt (Claude Code, Claude) to nie wysyłka: wykonuje go bieg pracy (KROKI W TOKU)
-export async function listSendable(ownerId: string): Promise<Sendable[]> {
-  const [tasks, openQ] = await Promise.all([repo.listTasks(ownerId), repo.listQuestions(ownerId, { open: true })]);
+// preloaded: zadania już wczytane przez wołającego (bez kosza); każde pełne czytanie bazy zadań to transfer z Supabase
+export async function listSendable(ownerId: string, preloaded?: Task[]): Promise<Sendable[]> {
+  const [tasks, openQ] = await Promise.all([preloaded ?? repo.listTasks(ownerId), repo.listQuestions(ownerId, { open: true })]);
   const unfinished = new Set(tasks.filter((t) => !t.doneAt && !t.deletedAt).map((t) => t.id));
   const waiting = new Set(openQ.map((q) => q.taskId));
   const out: Sendable[] = [];
@@ -118,11 +119,12 @@ async function sendSummary(ownerId: string, stepId: string | undefined): Promise
 
 // peek: tylko policz, nie oznaczaj odpowiedzi Piotra jako odczytanych (mostek zagląda tu co kilkanaście sekund)
 // focus: bieg pracy mostka z doborem modelu widzi tylko swoją grupę („model|wysiłek”); resztę zrobi osobny bieg na modelu dobranym do niej
-export async function workSummary(ownerId: string, opts: { peek?: boolean; audience?: WorkAudience; stepId?: string; focus?: string | null } = {}): Promise<WorkSummary> {
+// tasks: zadania już wczytane przez wołającego (bez kosza), żeby strona i puls mostka nie czytały całej bazy drugi raz
+export async function workSummary(ownerId: string, opts: { peek?: boolean; audience?: WorkAudience; stepId?: string; focus?: string | null; tasks?: Task[] } = {}): Promise<WorkSummary> {
   const audience = opts.audience ?? "bridge-v1";
   if (audience === "send") return sendSummary(ownerId, opts.stepId);
   const sends = audience === "bridge-v1";   // tylko stary mostek wysyła z listy pracy; reszta nie widzi zatwierdzonych szkiców
-  const [tasks, projects, samples, allAnswered, allChat, settings] = await Promise.all([repo.listTasks(ownerId), repo.listProjects(ownerId), repo.listSamples(ownerId), repo.listQuestions(ownerId, { answeredUnseen: true }), repo.listUnseenChat(ownerId), repo.userSettings(ownerId)]);
+  const [tasks, projects, samples, allAnswered, allChat, settings] = await Promise.all([opts.tasks ?? repo.listTasks(ownerId), repo.listProjects(ownerId), repo.listSamples(ownerId), repo.listQuestions(ownerId, { answeredUnseen: true }), repo.listUnseenChat(ownerId), repo.userSettings(ownerId)]);
   // dobór modelu: każda pozycja listy dostaje grupę (model i wysiłek z poziomu kroku); bez konfiguracji wszystko w jednej, pustej grupie
   const cfg = modelConfig(settings);
   const weightOf = new Map(tasks.map((t) => [t.id, projects.find((p) => p.id === t.projectId)?.weight ?? null]));
@@ -251,8 +253,10 @@ export const PLAIN_LANG = "JAK PISAĆ DO PIOTRA (kartka kroku, summary, powód o
 export type QueueEntry = { key: string; kind: string; taskId: string; taskTitle: string; stepId: string | null; label: string };
 export type QueueNow = { taskId: string | null; taskTitle: string; label: string | null; since: string };
 export type AgentQueue = { now: QueueNow | null; items: QueueEntry[] };
-export async function agentQueue(ownerId: string, run: { taskId: string | null; stepId: string | null; since: string; kind?: string } | null): Promise<AgentQueue> {
-  const [w, tasks] = await Promise.all([workSummary(ownerId, { peek: true, audience: "work" }), run?.taskId ? repo.listTasks(ownerId) : Promise.resolve([])]);
+// preloaded: zadania strony (bundle, także kosz); bez nich kolejka czyta bazę sama
+export async function agentQueue(ownerId: string, run: { taskId: string | null; stepId: string | null; since: string; kind?: string } | null, preloaded?: Task[]): Promise<AgentQueue> {
+  const live = preloaded?.filter((t) => !t.deletedAt);
+  const [w, tasks] = await Promise.all([workSummary(ownerId, { peek: true, audience: "work", tasks: live }), live ? Promise.resolve(live) : run?.taskId ? repo.listTasks(ownerId) : Promise.resolve([])]);
   const t = run?.taskId ? tasks.find((x) => x.id === run.taskId) : null;
   const sIdx = t && run?.stepId ? t.steps.findIndex((s) => s.id === run.stepId) : -1;
   const now: QueueNow | null = run ? { taskId: run.taskId, taskTitle: t?.title ?? (run.kind === "send" ? "Wysyłka" : "Praca w tle"), label: sIdx >= 0 ? `Krok ${String(sIdx + 1).padStart(2, "0")}: ${t!.steps[sIdx].title}` : null, since: run.since } : null;

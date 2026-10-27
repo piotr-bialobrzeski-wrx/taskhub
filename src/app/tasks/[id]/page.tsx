@@ -88,7 +88,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   // Pasek: tylko to, czego dymek nie mówi (stan kroków widać po kolorach kafelków): czeka na inne zadanie, trwa wysyłka z tego zadania, zadanie bez kroków
   const who = bp ? noStepsWho(w, t.id, busy) : null;
   const queue = pending.length ? queueWho(w, t.id, pending.length, busy) : null;
-  const aq = await agentQueue(o.id, w.run ? { taskId: w.run.taskId, stepId: w.run.stepId, since: w.run.since, kind: w.run.kind } : null);
+  const aq = await agentQueue(o.id, w.run ? { taskId: w.run.taskId, stepId: w.run.stepId, since: w.run.since, kind: w.run.kind } : null, b.tasks);
   const bubble = workBubble({ task: t, w, pending, busy, queue: aq });
   const sending = w.run && w.run.kind === "send" && w.run.taskId === t.id ? w.run : null;
   // pasek ma zawsze jedną krótką linię; pełne zdanie i szczegóły (ścieżki, polecenia) są w podpowiedzi po najechaniu

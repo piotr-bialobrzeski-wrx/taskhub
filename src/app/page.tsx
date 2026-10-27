@@ -25,7 +25,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
   const o = await requireOwner();
   const [b, chatLog, groups, questions, bridge, stamp, pending] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 8), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null), repo.countPendingChat(o.id)]);
   const run = liveActivity(bridge.run);
-  const aq = await agentQueue(o.id, run ? { taskId: run.taskId, stepId: run.stepId, since: run.since, kind: run.kind } : null);
+  const aq = await agentQueue(o.id, run ? { taskId: run.taskId, stepId: run.stepId, since: run.since, kind: run.kind } : null, b.tasks);
   const now = Date.now();
   const live = sortByPriority(b.scored.filter((s) => !s.task.deletedAt));
   // ukończone zostają na kanwie do końca dnia, potem idą do archiwum (ta sama reguła co w indeksie szukajki)

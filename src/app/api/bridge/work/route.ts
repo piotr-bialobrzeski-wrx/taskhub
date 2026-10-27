@@ -47,7 +47,8 @@ export async function GET(req: Request) {
   }
   const [c, st, ring] = await Promise.all([
     cached(a.ownerId, 2, async () => {
-      const [w, sends] = await Promise.all([workSummary(a.ownerId, { peek: true, audience: "work" }), listSendable(a.ownerId)]);
+      const tasks = await repo.listTasks(a.ownerId);   // jedno czytanie bazy zadań na obie listy
+      const [w, sends] = await Promise.all([workSummary(a.ownerId, { peek: true, audience: "work", tasks }), listSendable(a.ownerId, tasks)]);
       // key: odcisk listy pracy; ten sam po udanym biegu = bieg niczego nie ruszył (np. krok oddany przez leave_step), aplikacja nie powtarza go od razu
       const key = w.total ? createHash("sha256").update(w.text + (w.sig ?? "")).digest("hex").slice(0, 16) : "";
       return { work: w.total, counts: w.counts, key, sends: sends.length };
