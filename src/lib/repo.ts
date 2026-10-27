@@ -290,17 +290,39 @@ async function hydrate(rows: Row[]): Promise<Task[]> {
   stepRows.forEach((s) => { const st = rowToStep(s, sdep.get(s.id as string) ?? []); byTask.set(st.taskId, [...(byTask.get(st.taskId) ?? []), st]); });
   return rows.map((r) => rowToTask(r, byTask.get(r.id as string) ?? [], tdep.get(r.id as string) ?? []));
 }
+// Pamięć zadań w instancji serwera (transfer z Supabase): pełne zadania z krokami trzymamy tu, a z bazy przy każdym czytaniu bierzemy
+// tylko odcisk każdego zadania (xmin wiersza zadania, jego kroków i strzałek; zmienia się przy każdej zmianie wiersza). Pełną treść
+// pobieramy wyłącznie dla zadań, których odcisk się zmienił. Wołający dostaje kopie, więc nie zepsuje pamięci, zmieniając wynik.
+type TaskSnap = { fp: string; task: Task };
+const taskMem = new Map<string, Map<string, TaskSnap>>();
+const TASK_FP = (ownerId: string, id: string | null) => sql()`select t.id, t.deleted_at, md5(concat_ws('|', t.xmin::text,
+    (select string_agg(s.id::text || ':' || s.xmin::text, ',' order by s.id) from steps s where s.task_id = t.id),
+    (select string_agg(sd.step_id::text || '>' || sd.depends_on_id::text, ',' order by sd.step_id, sd.depends_on_id) from step_dependencies sd join steps s on s.id = sd.step_id where s.task_id = t.id),
+    (select string_agg(td.depends_on_id::text, ',' order by td.depends_on_id) from task_dependencies td where td.task_id = t.id))) as fp
+  from tasks t where t.owner_id = ${ownerId} ${id ? sql()`and t.id = ${id}` : sql()``} order by t.created_at, t.id`;
+
+async function memTasks(ownerId: string, id: string | null = null): Promise<{ task: Task; deletedAt: string | null }[]> {
+  const fps = await TASK_FP(ownerId, id);
+  let mem = taskMem.get(ownerId);
+  if (!mem) { mem = new Map(); taskMem.set(ownerId, mem); }
+  const stale = fps.filter((r) => mem!.get(r.id as string)?.fp !== r.fp);
+  if (stale.length) {
+    const fpOf = new Map(stale.map((r) => [r.id as string, r.fp as string]));
+    const fresh = await hydrate(await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} and id in ${sql()([...fpOf.keys()])}`);
+    for (const t of fresh) mem.set(t.id, { fp: fpOf.get(t.id)!, task: t });
+  }
+  if (!id) { const live = new Set(fps.map((r) => r.id as string)); for (const k of [...mem.keys()]) if (!live.has(k)) mem.delete(k); }
+  return fps.flatMap((r) => { const m = mem!.get(r.id as string); return m ? [{ task: structuredClone(m.task), deletedAt: iso(r.deletedAt) }] : []; });
+}
 export async function listTasks(ownerId: string, opts: { trash?: boolean; all?: boolean } = {}): Promise<Task[]> {
-  const rows = opts.all
-    ? await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} order by created_at`
-    : opts.trash
-      ? await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} and deleted_at is not null order by deleted_at desc`
-      : await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} and deleted_at is null order by created_at`;
-  return hydrate(rows);
+  const all = await memTasks(ownerId);
+  if (opts.all) return all.map((x) => x.task);
+  if (opts.trash) return all.filter((x) => x.deletedAt).sort((a, b) => b.deletedAt!.localeCompare(a.deletedAt!)).map((x) => x.task);
+  return all.filter((x) => !x.deletedAt).map((x) => x.task);
 }
 export async function getTask(ownerId: string, id: string): Promise<Task | null> {
-  const rows = await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} and id = ${id}`;
-  return (await hydrate(rows))[0] ?? null;
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  return (await memTasks(ownerId, id))[0]?.task ?? null;
 }
 export type NewStep = { title: string; detail?: string; tool?: string; needsApproval?: boolean; estMin?: number; link?: string; dependsOn?: string[] /* indeksy lub id */; connectionId?: string | null; workLevel?: string | null };
 export type NewTask = { title: string; summary?: string; source?: string; level?: number; due?: string | null; projectId?: string | null; steps?: NewStep[]; dependsOn?: string[] };
