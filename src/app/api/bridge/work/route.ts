@@ -33,6 +33,9 @@ export async function GET(req: Request) {
   for (const k of ["host", "runner", "state", "until", "v"]) { const v = q.get(k); if (v) meta[k] = v.slice(0, 120); }
   if (meta.state && meta.state !== "check" && !meta.until) meta.until = "";   // stary termin po limicie nie zostaje w meta, gdy mostek już go nie zgłasza
   await repo.bridgeSeen(a.tokenId, meta);
+  // odcisk folderów i narzędzi z Ustawień aplikacji (0.1.17+): zmiana oddaje do pracy kroki, które agent oddał z braku dostępu (paczka 22)
+  const access = q.get("access");
+  if (access && /^[0-9a-f]{1,32}$/.test(access)) await repo.recordBridgeAccess(a.ownerId, (meta.host || "mac").slice(0, 80), access);
   await repo.expireBridgeRuns(a.ownerId, RUN_STALE_MIN);
   if (protocolOf(q.get("v")) < 2) {
     // v1 bez zmian: zatwierdzone szkice liczą się do pracy, wysyła je ten sam bieg

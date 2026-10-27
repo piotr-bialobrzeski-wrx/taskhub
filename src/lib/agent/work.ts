@@ -45,6 +45,22 @@ export function waitTarget(reason: string, self: StepRef, steps: StepRef[]): str
   }
   return null;
 }
+// ostatnia zmiana folderów i narzędzi w aplikacji na Macu (którykolwiek komputer); ustawienie bridgeAccess = { komputer: { key, at } }
+export function bridgeAccessAt(settings: Record<string, unknown>): string | null {
+  const m = settings.bridgeAccess;
+  if (!m || typeof m !== "object") return null;
+  let last: string | null = null;
+  for (const v of Object.values(m as Record<string, unknown>)) {
+    const at = v && typeof v === "object" ? (v as { at?: unknown }).at : null;
+    if (typeof at === "string" && (!last || at > last)) last = at;
+  }
+  return last;
+}
+// krok oddany o leftAt wraca do pracy, gdy po oddaniu przyszło coś nowego (sygnał Piotra w zadaniu albo zmiana w aplikacji na Macu)
+export function retryAfterLeft(leftAt: string, signalAt: string | null | undefined, accessAt: string | null): boolean {
+  const left = Date.parse(leftAt);
+  return [signalAt, accessAt].some((x) => !!x && Date.parse(x) > left);
+}
 // kolejka agenta (paczka 18): każda pozycja listy pracy z kluczem; Piotr ustawia kolejność w panelu w lewym dolnym rogu (ustawienie queueOrder),
 // a lista pracy daje te pozycje na początek, w jego kolejności (sekcja NAJPIERW), i od nich bieg bierze model
 export type QueueKind = "chat" | "going" | "breakdown" | "answer" | "step" | "file" | "draft" | "title";
@@ -132,7 +148,8 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
   const open = scoreAll(tasks, projects, samples).filter((s) => !s.task.doneAt && !s.task.deletedAt);
   const unfinished = new Set(tasks.filter((t) => !t.doneAt && !t.deletedAt).map((t) => t.id));
   const free = open.filter((s) => !s.task.dependsOn.some((d) => unfinished.has(d)));   // zadania, które nie czekają na inne zadania
-  const openQ = await repo.listQuestions(ownerId, { open: true });
+  const [openQ, signals] = await Promise.all([repo.listQuestions(ownerId, { open: true }), repo.lastOwnerSignals(ownerId)]);
+  const accessAt = bridgeAccessAt(settings);
   const waitingTask = new Set(openQ.map((q) => q.taskId));
   // rozpisanie zadania zawsze na Strategii
   const noSteps = free.filter((s) => !s.task.steps.length && !waitingTask.has(s.task.id) && take(cfg ? choiceOf(cfg, "strategy") : null, 3,
@@ -180,6 +197,10 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
       if (!depsDone) continue;
       // oddany, bo czeka na inny krok (także z innego zadania): wraca na listę dopiero, gdy tamten jest zrobiony (paczka 14, punkt 1)
       if (st.waitFor && stepOf.has(st.waitFor) && stepOf.get(st.waitFor)!.status !== "done") continue;
+      // oddany, bo czeka na Piotra (brak folderu, dostępu, narzędzia albo już na najwyższym poziomie): nie wraca co kilka minut z tym samym
+      // powodem (paczka 22), tylko po czymś nowym: wiadomość albo odpowiedź w tym zadaniu, zmiana folderów i narzędzi w aplikacji na Macu,
+      // zmiana kroku (czyści left_at). Inny oddany krok wraca od razu na mocniejszym modelu (eskalacja)
+      if (st.leftAt && st.need && !retryAfterLeft(st.leftAt, signals[s.task.id], accessAt)) continue;
       // krok z kodem w projekcie Task Hub robi wątek w chmurze na zlecenie Piotra, nie bieg mostka ani automat (paczka 14, punkt 1)
       if (isAppCodeStep(st, projectOf.get(s.task.id))) continue;
       if (st.tool === "manual") continue;
@@ -201,7 +222,7 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
     // bez starego mostka: konektor i bieg pracy tylko czytają; zmiana w aplikacji zewnętrznej to zawsze szkic (krok bez zgody mógł dodać agent)
     ready.length ? (sends ? "KROKI DO ZROBIENIA BEZ ZGODY (start_step, zrób swoimi konektorami, complete_step z linkiem; fakty przez add_facts):\n"
       : "KROKI DO ZROBIENIA BEZ ZGODY (tylko czytanie i analiza: start_step, czytaj swoimi konektorami, complete_step z linkiem; fakty przez add_facts. Gdy krok ma coś wysłać albo zmienić w aplikacji zewnętrznej (wiadomość, komentarz, ticket, wydarzenie, plik w Dysku Google), nie rób tego, nawet jeśli krok nie wymaga zgody: przygotuj szkic przez set_blocks jako blok draft ze status proposed; po zatwierdzeniu przez Piotra wyśle go mostek Task Hub):\n") + ready.join("\n") : "",
-    files.length ? "PLIKI NA MACU (start_step → zapisz nowy plik narzędziem Write w folderze z linii „Foldery na pliki” na końcu polecenia → tę samą treść pokaż na kartce przez set_blocks jako klocek free → complete_step z polem file = pełna ścieżka; gdy folderu nie ma na liście: leave_step z powodem „Dodaj folder <ścieżka> w Ustawieniach aplikacji Task Hub na Macu (Foldery na pliki)”):\n" + files.join("\n") : "",
+    files.length ? "PLIKI NA MACU (start_step → zapisz nowy plik narzędziem Write w folderze z linii „Foldery na pliki” na końcu polecenia → tę samą treść pokaż na kartce przez set_blocks jako klocek free → complete_step z polem file = pełna ścieżka; gdy folderu nie ma na liście: leave_step z powodem „Dodaj folder <ścieżka> w Ustawieniach aplikacji Task Hub na Macu (Foldery na pliki)” i polem needFolder (kind files, ta ścieżka)):\n" + files.join("\n") : "",
     approval.length ? "KROKI WYMAGAJĄCE ZGODY PIOTRA (przygotuj gotowy szkic przez set_blocks jako blok draft ze status proposed; niczego nie wysyłaj, krok sam przejdzie do zatwierdzenia):\n" + approval.join("\n") : "",
     longTitles.length ? `TYTUŁY DO SKRÓCENIA (update_task z nowym title, nic więcej; ${TITLE_RULE}; pierwotny tytuł zostaje zapisany sam):\n` + longTitles.map((s) => `- zadanie [${s.task.id}] „${s.task.title}”`).join("\n") : "",
     openQ.length ? `ZADANIA CZEKAJĄCE NA ODPOWIEDŹ PIOTRA (pomiń): ${[...waitingTask].map((id) => `[${id}]`).join(", ")}` : "",

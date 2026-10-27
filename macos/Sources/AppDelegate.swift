@@ -103,8 +103,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "connect": connect(url)
         case "reload": web.reload()       // ze strony zastępczej w oknie
         case "settings": showSettings()
+        case "add-folder": addFolder(url)
         default: Log.write("link taskhub://\(url.host ?? "") pominięty")
         }
+    }
+
+    // taskhub://add-folder?kind=code|files|tools&path=… (paczka 22): przycisk „Dodaj folder” na karcie kroku, który Claude oddał z braku folderu.
+    // Zawsze z pytaniem pokazującym ścieżkę (link może przyjść z dowolnej strony); folder sprawdzony jak przy dodawaniu w Ustawieniach
+    private func addFolder(_ link: URL) {
+        let q = URLComponents(url: link, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let kind = (q.first { $0.name == "kind" }?.value ?? "code").lowercased()
+        var raw = (q.first { $0.name == "path" }?.value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("~") { raw = FileManager.default.homeDirectoryForCurrentUser.path + raw.dropFirst() }
+        let section = kind == "files" ? "Foldery na pliki" : kind == "tools" ? "Foldery z narzędziami" : "Foldery z kodem"
+        guard raw.hasPrefix("/"), raw.count < 1024 else { showSettings(); return }
+        let path = Store.normalizedFolder(URL(fileURLWithPath: raw))
+        if let why = Store.folderProblem(path) {
+            Log.write("link dodania folderu odrzucony (\(path)): \(why)")
+            alert("Nie dodałem folderu \(path).", "Powód: \(why). Dodaj właściwy folder w Ustawieniach aplikacji (\(section)).")
+            showSettings()
+            return
+        }
+        let current = kind == "files" ? store.cfg.fileFolders : kind == "tools" ? store.cfg.toolFolders : store.cfg.codeFolders
+        if current.contains(path) { showSettings(); return }
+        let what = kind == "files" ? "Claude będzie mógł zapisywać w nim nowe pliki (bez czytania)."
+            : kind == "tools" ? "Claude w tle dostanie serwery narzędzi z jego .mcp.json (czytanie bez pytania, zmiany jako szkic do Twojej zgody)."
+            : "Claude będzie mógł czytać w nim pliki, zmieniać je i uruchamiać testy (bez commitów i wysyłki)."
+        let a = NSAlert()
+        a.messageText = "Dodać folder \((path as NSString).lastPathComponent) do „\(section)”?"
+        a.informativeText = path + "\n\n" + what + " Dodaj tylko wtedy, gdy przed chwilą sam kliknąłeś „Dodaj folder” w Task Hub."
+        a.addButton(withTitle: "Dodaj")
+        a.addButton(withTitle: "Anuluj")
+        a.buttons[1].keyEquivalent = "\u{1b}"
+        NSApp.activate(ignoringOtherApps: true)
+        guard a.runModal() == .alertFirstButtonReturn else { Log.write("link dodania folderu: anulowano (\(path))"); return }
+        var c = store.cfg
+        switch kind {
+        case "files": c.fileFolders.append(path)
+        case "tools": c.toolFolders.append(path)
+        default: c.codeFolders.append(path)
+        }
+        store.cfg = c
+        Log.write("dodano folder z linku (\(section)): \(path)")
+        showSettings()
     }
 
     // Link połączenia zmienia adres i token mostka, więc nigdy nie działa po cichu: tylko https (http wyłącznie lokalnie),

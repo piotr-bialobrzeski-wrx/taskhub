@@ -240,7 +240,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     agentAt: iso(r.agentAt), openedAt: iso(r.openedAt),
     workLevel: (r.workLevel as string) ?? null, modelPick: (r.modelPick as string) ?? null, escalation: Number(r.escalation ?? 0),
     lastRun: (r.lastRun as Step["lastRun"]) ?? null, cloud: (r.cloud as Step["cloud"]) ?? null, waitFor: (r.waitFor as string) ?? null,
-    leftAt: iso(r.leftAt),
+    leftAt: iso(r.leftAt), need: (r.need as Step["need"]) ?? null,
   };
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
@@ -257,7 +257,7 @@ function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
 const TASK_COLS = ["id", "owner_id", "project_id", "title", "title_original", "summary", "source", "level", "due", "done_at", "deleted_at", "note_text", "note_summary", "note_at", "pos", "created_at"];
 const STEP_COLS = ["id", "task_id", "position", "title", "detail", "tool", "status", "prev_status", "needs_approval", "est_min", "spent_sec", "spent_manual", "spent_at", "link", "handoff_at", "done_at",
   "report", "output", "review", "blocks", "blocks_at", "logged", "pos", "connection_id", "file_path", "approved_at", "approved_sig", "send_started_at", "agent_sec", "agent_started_at", "done_by",
-  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for", "left_at"];
+  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for", "left_at", "need"];
 const taskCols = () => sql()(TASK_COLS);
 
 async function hydrate(rows: Row[]): Promise<Task[]> {
@@ -668,8 +668,8 @@ export async function listAttachments(where: { stepId?: string; taskId?: string 
   return rows.map(rowToAttachment);
 }
 // plik wklejony w doku ląduje w bazie (data); adres /api/files/<id> działa po zalogowaniu, agent czyta go przez MCP get_attachment
-export async function addAttachment(where: { stepId?: string; taskId?: string }, a: { kind: Attachment["kind"]; name?: string; url?: string; storagePath?: string; mime?: string; bytes?: number; caption?: string; analysis?: string; keep?: boolean; expiresAt?: string | null; data?: Buffer }): Promise<Attachment> {
-  const id = randomUUID();
+export async function addAttachment(where: { stepId?: string; taskId?: string }, a: { id?: string; kind: Attachment["kind"]; name?: string; url?: string; storagePath?: string; mime?: string; bytes?: number; caption?: string; analysis?: string; keep?: boolean; expiresAt?: string | null; data?: Buffer }): Promise<Attachment> {
+  const id = a.id ?? randomUUID();
   const url = a.url ?? (a.data ? `/api/files/${id}` : null);
   const [r] = await sql()`insert into attachments (id, task_id, step_id, kind, name, url, storage_path, mime, bytes, caption, analysis, keep, expires_at, data)
     values (${id}, ${where.taskId ?? null}, ${where.stepId ?? null}, ${a.kind}, ${a.name ?? null}, ${url}, ${a.storagePath ?? null}, ${a.mime ?? null}, ${a.bytes ?? (a.data ? a.data.length : null)}, ${a.caption ?? null}, ${a.analysis ?? null}, ${!!a.keep}, ${a.expiresAt ?? null}, ${a.data ?? null}) returning ${sql()(ATT_COLS)}`;
@@ -750,7 +750,26 @@ export async function listSamples(ownerId: string): Promise<TimeSample[]> {
 // czas Claude'a: start_step stawia znacznik; zamknięcie albo oddanie kroku dolicza sekundy i go kasuje
 export async function markAgentStart(stepId: string): Promise<void> { await sql()`update steps set agent_started_at = now(), left_at = null where id = ${stepId}`; }
 // agent oddał krok, bo nie dał rady (leave_step bez czekania): kafelek „Potrzebna pomoc”
-export async function markLeft(stepId: string): Promise<void> { await sql()`update steps set left_at = now() where id = ${stepId}`; }
+export async function markLeft(stepId: string, need: Step["need"] = null): Promise<void> { await sql()`update steps set left_at = now(), need = ${need ? sql().json(need as never) : null} where id = ${stepId}`; }
+// ostatni sygnał Piotra w każdym zadaniu (jego wiadomość albo odpowiedź na pytanie): krok oddany z braku dostępu wraca po nim do pracy (paczka 22)
+export async function lastOwnerSignals(ownerId: string): Promise<Record<string, string>> {
+  const rows = await sql()`select task_id, max(at) as at from (
+      select task_id, created_at as at from chat_messages where owner_id = ${ownerId} and role = 'user' and task_id is not null
+      union all
+      select task_id, answered_at as at from questions where owner_id = ${ownerId} and answered_at is not null and task_id is not null
+    ) x group by task_id`;
+  const out: Record<string, string> = {};
+  for (const r of rows) { const at = iso(r.at); if (at) out[r.taskId as string] = at; }
+  return out;
+}
+// odcisk folderów i narzędzi z Ustawień aplikacji na Macu (paczka 22), osobno dla każdego komputera; zapis tylko przy zmianie,
+// at = chwila zmiany. Po niej kroki oddane z braku dostępu wracają do pracy (bridgeAccessAt)
+export async function recordBridgeAccess(ownerId: string, host: string, key: string): Promise<boolean> {
+  const rows = await sql()`update users set settings = jsonb_set(settings, '{bridgeAccess}', coalesce(settings->'bridgeAccess', '{}'::jsonb)
+      || jsonb_build_object(${host}::text, jsonb_build_object('key', ${key}::text, 'at', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))))
+    where id = ${ownerId} and coalesce(settings->'bridgeAccess'->${host}->>'key', '') <> ${key} returning id`;
+  return rows.length > 0;
+}
 export async function addAgentTime(stepId: string, sec: number): Promise<void> { await sql()`update steps set agent_sec = agent_sec + ${Math.max(0, Math.round(sec))}, agent_started_at = null where id = ${stepId}`; }
 // czas Piotra z zegara karty: dolicza się tylko, póki nie wpisał czasu ręcznie (ręczna poprawka wygrywa)
 export async function addOwnSec(stepId: string, sec: number): Promise<void> { await sql()`update steps set spent_sec = spent_sec + ${Math.max(0, Math.round(sec))}, spent_at = now() where id = ${stepId} and spent_manual = false`; }

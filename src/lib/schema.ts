@@ -205,6 +205,12 @@ export const Step = z.object({
   modelPick: z.string().nullable().optional(),      // wybór Piotra na karcie: null = auto
   escalation: z.number().int().optional(),          // o ile poziomów wyżej po oddanych krokach
   waitFor: z.string().nullable().optional(),
+  // czego brakowało przy oddaniu (paczka 22): folder na Macu (karta pokazuje „Dodaj folder”) albo coś od Piotra, czego mocniejszy model nie zastąpi
+  // (brak dostępu, narzędzia, danych; oddany już na najwyższym poziomie). Taki krok nie wraca do agenta do nowego sygnału Piotra; ważne tylko z leftAt
+  need: z.union([
+    z.object({ kind: z.literal("folder"), folder: z.enum(["code", "files", "tools"]), path: z.string().max(400) }),
+    z.object({ kind: z.literal("piotr") }),
+  ]).nullable().optional(),
   leftAt: z.string().nullable().optional(),         // agent oddał krok, bo nie dał rady (nie z czekania): kafelek „Potrzebna pomoc” do następnej zmiany stanu        // oddany, bo czeka na ten krok (dowolne zadanie); do jego zrobienia nie wraca do list_work
   lastRun: z.object({ model: z.string().nullable(), effort: z.string().nullable(), at: z.string() }).nullable().optional(),   // „ostatnio: model · wysiłek”
   cloud: z.object({ state: z.enum(["auto", "queued", "rung", "working"]), at: z.string(), msg: z.string().optional(), rungAt: z.string().optional(), takenAt: z.string().optional(), failAt: z.string().optional() }).nullable().optional(),   // „Uruchom w chmurze”: kliknięte, odpalone z Maca, wzięte przez chmurę; auto = zlecone w rozmowie, ruszy samo po krokach, na które czeka (paczka 19)

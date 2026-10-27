@@ -40,13 +40,14 @@ enum ClaudeCLI {
         return e
     }
 
-    // próba: Claude Code rusza bez zadania i bez serwerów z naszego pliku, zgłasza narzędzia, konektory i tryb uprawnień,
-    // a my kończymy go zaraz po zdarzeniu startowym (przed pierwszym zapytaniem do modelu, więc bez kosztu)
-    static func probe(_ bin: String, restricted: Bool) async -> ProcessResult {
+    // próba: Claude Code rusza bez zadania, z serwerami z folderów z narzędziami (extra, jak w biegu), zgłasza narzędzia, konektory
+    // i tryb uprawnień, a my kończymy go zaraz po zdarzeniu startowym (przed pierwszym zapytaniem do modelu, więc bez kosztu)
+    static func probe(_ bin: String, restricted: Bool, extra: [String: Any] = [:]) async -> ProcessResult {
         let f: URL
-        do { f = try Policy.writeFile(["mcpServers": [String: Any]()], name: "probe-mcp.json") } catch {
+        do { f = try Policy.writeFile(["mcpServers": extra], name: "probe-mcp.json") } catch {
             return ProcessResult(ok: false, text: error.localizedDescription)
         }
+        defer { Policy.remove([f]) }   // tokeny serwerów z folderów z narzędziami nie zostają na dysku
         var args = ["-p", "ok", "--output-format", "stream-json", "--verbose", "--max-turns", "1", "--no-session-persistence",
                     "--permission-mode", "dontAsk", "--mcp-config", f.path]
         // tak jak w biegu: bez ustawień projektu z work/ (agent mógłby tam podłożyć hak, który uruchomiłby się już przy próbie)

@@ -13,6 +13,8 @@ struct Config: Codable, Equatable {
     var autoUpdate = true   // czy aplikacja ma się sama aktualizować (wydania przez Task Hub)
     var codeFolders: [String] = []   // foldery z kodem (ścieżki bezwzględne): tylko tu Claude zmienia pliki w krokach z kodem
     var fileFolders: [String] = []   // foldery na pliki: tylko tu Claude zapisuje nowe pliki kroków „Plik na Macu”
+    var toolFolders: [String] = Config.defaultToolFolders()   // foldery z narzędziami (np. ~/world): serwery MCP z ich .mcp.json i wiedza do czytania
+    var toolSkip: [String] = []      // serwery z folderów z narzędziami wyłączone w Ustawieniach (nazwa serwera)
     var quickBar = Shortcut.quickBar // skrót szybkiego paska
 
     init() {}
@@ -29,7 +31,25 @@ struct Config: Codable, Equatable {
         autoUpdate = try c.decodeIfPresent(Bool.self, forKey: .autoUpdate) ?? true
         codeFolders = (try? c.decodeIfPresent([String].self, forKey: .codeFolders)) ?? []
         fileFolders = (try? c.decodeIfPresent([String].self, forKey: .fileFolders)) ?? []
+        // starszy plik bez klucza: domyślny ~/world, gdy jest; pusta lista zapisana przez Piotra zostaje pusta
+        toolFolders = (try? c.decodeIfPresent([String].self, forKey: .toolFolders)) ?? Config.defaultToolFolders()
+        toolSkip = (try? c.decodeIfPresent([String].self, forKey: .toolSkip)) ?? []
         quickBar = (try? c.decodeIfPresent(Shortcut.self, forKey: .quickBar)) ?? Shortcut.quickBar
+    }
+
+    // Pirxey World (paczka 22): ~/world z plikiem .mcp.json, gdy jest na tym Macu
+    static func defaultToolFolders() -> [String] {
+        let w = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("world").path
+        return FileManager.default.fileExists(atPath: w + "/.mcp.json") ? [w] : []
+    }
+
+    // odcisk ustawień, od których zależy, co agent może (foldery, narzędzia): Task Hub po jego zmianie znowu daje kroki oddane z braku dostępu
+    var accessKey: String {
+        let parts = [codeFolders.sorted().joined(separator: "|"), fileFolders.sorted().joined(separator: "|"),
+                     toolFolders.sorted().joined(separator: "|"), toolSkip.sorted().joined(separator: "|")]
+        var h: UInt64 = 1469598103934665603   // FNV-1a: krótki i stały między uruchomieniami (hashValue Swifta się zmienia)
+        for b in parts.joined(separator: "#").utf8 { h ^= UInt64(b); h = h &* 1099511628211 }
+        return String(h, radix: 16)
     }
 }
 
@@ -55,6 +75,12 @@ final class Store: ObservableObject {
     }
 
     // katalog tylko dla właściciela (0700), także gdy już istniał z innymi prawami
+    // ustawienia z dysku bez tworzenia katalogów (strażnik biegu, osobny proces): nieczytelny plik = domyślne
+    static func diskConfig() -> Config {
+        guard let d = try? Data(contentsOf: Store.file), let c = try? JSONDecoder().decode(Config.self, from: d) else { return Config() }
+        return c
+    }
+
     static func privateDir(_ u: URL) {
         let fm = FileManager.default
         try? fm.createDirectory(at: u, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

@@ -375,3 +375,12 @@ export function sameTarget(steps: Step[], stepId: string, blocks: Block[] | null
     sent: others.filter((x) => x.status === "done" && x.blocks?.some((b) => b.type === "draft" && b.status === "sent")),
   };
 }
+
+// paczka 22: krok oddany z braku folderu na Macu (leave_step z needFolder) ma na karcie „Dodaj folder”: link taskhub://add-folder otwiera
+// aplikację Task Hub, która pyta o zgodę i dodaje folder w Ustawieniach; po zmianie folderów krok wraca do pracy sam
+const FOLDER_SECTION = { code: "Foldery z kodem", files: "Foldery na pliki", tools: "Foldery z narzędziami" } as const;
+export function folderLink(s: Pick<Step, "leftAt" | "need" | "status">): { href: string; path: string; section: string } | null {
+  if (!s.leftAt || s.status === "done" || s.need?.kind !== "folder" || !s.need.path) return null;
+  // encodeURIComponent, nie URLSearchParams: spacja jako %20 (URLComponents na Macu nie zamienia „+” na spację)
+  return { href: `taskhub://add-folder?kind=${s.need.folder}&path=${encodeURIComponent(s.need.path)}`, path: s.need.path, section: FOLDER_SECTION[s.need.folder] };
+}

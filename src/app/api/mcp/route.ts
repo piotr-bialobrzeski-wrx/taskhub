@@ -1,5 +1,6 @@
 // Serwer MCP Task Hub: Claude, Claude Code, ChatGPT i własne agenty podłączają się tutaj tokenem (OAuth albo nagłówek).
 // Dostają zadania z zasadami i kontekstem, zgłaszają wyniki kroków, dopisują fakty i migawki.
+import { randomUUID } from "node:crypto";
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 import * as repo from "@/lib/repo";
@@ -22,7 +23,7 @@ import { unlazy } from "@/lib/format";
 import { AGENT_MAX_SEC, elapsedSec } from "@/lib/time";
 import { appKey, approvalSig, approvalValid, coerceAgentDrafts, draftOf, draftsOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable } from "@/lib/agent/approval";
 import { matchProjectName } from "@/lib/project-guess";
-import { normalizeLevel } from "@/lib/agent/models";
+import { MAX_ESCALATION, normalizeLevel } from "@/lib/agent/models";
 
 // poziom pracy kroku według zasady „Dobór modelu i wysiłku”: od niego mostek dobiera model i wysiłek biegu
 const WORK_LEVEL_DOC = "workLevel: poziom pracy kroku dla agenta według zasady „Dobór modelu i wysiłku”: strategy (Strategia: wymyślić, zaplanować, rozstrzygnąć), analysis (Analiza: zebrać i zrozumieć materiał, szkic do klienta), execution (Wykonanie: krok dokładnie opisany, kod według planu), mechanics (Mechanika: tylko przenieść albo wysłać); nadaj go przy rozpisaniu każdemu krokowi agenta, bez niego poziom bierze się z narzędzia.";
@@ -33,6 +34,7 @@ const externalLink = (link: string | undefined | null) => (isHttpUrl(link) ? ext
 export const maxDuration = 60;
 
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
+const PREVIEW_MAX = 1_500_000;   // znaki pliku HTML podglądu (paczka 22); limit ciała żądania funkcji Vercel to 4,5 MB
 const json = (v: unknown) => text(JSON.stringify(v, null, 1));
 // krok należy do właściciela tokenu? zwraca id zadania
 // lista id kroków; klient z nieodświeżonym opisem narzędzia przysyła ją jako napis ("[]", JSON albo id po przecinku)
@@ -487,8 +489,8 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("leave_step", {
-      title: "Oddaję krok", description: "Gdy kroku nie da się zrobić (brak narzędzia, dostępu albo danych): krok wraca do zrobienia, a Piotr widzi powód w zadaniu. Gdy krok tylko czeka (na inny krok, bieg albo projekt w chmurze), zacznij powód od „czeka na …” i podaj waitFor = id kroku, na który czeka: wtedy poziom kroku nie rośnie, a krok wraca na listę dopiero, gdy tamten jest zrobiony. Nie używaj do pytań, od tego jest ask_question, ani do kroków zbędnych, od tego jest skip_step.",
-      inputSchema: z.object({ stepId: z.string(), reason: z.string().max(600), waitFor: z.string().optional() }),
+      title: "Oddaję krok", description: "Gdy kroku nie da się zrobić (brak narzędzia, dostępu albo danych): krok wraca do zrobienia, a Piotr widzi powód w zadaniu. Gdy krok tylko czeka (na inny krok, bieg albo projekt w chmurze), zacznij powód od „czeka na …” i podaj waitFor = id kroku, na który czeka: wtedy poziom kroku nie rośnie, a krok wraca na listę dopiero, gdy tamten jest zrobiony. Nie używaj do pytań, od tego jest ask_question, ani do kroków zbędnych, od tego jest skip_step. Gdy brakuje folderu na Macu (kod, pliki, narzędzia), podaj needFolder = rodzaj z Ustawień aplikacji (code: Foldery z kodem, files: Foldery na pliki, tools: Foldery z narzędziami) i pełną ścieżkę folderu (z zasad projektu): karta kroku dostanie przycisk „Dodaj folder”. Gdy krok blokuje coś, czego mocniejszy model nie zmieni (brak dostępu, narzędzia albo danych, które musi dać Piotr), podaj blocked: true. Taki krok (i z needFolder) nie wraca do agentów, dopóki Piotr czegoś nie zmieni (wiadomość, odpowiedź na pytanie, foldery w aplikacji na Macu); inny oddany krok spróbuje jeszcze mocniejszy model.",
+      inputSchema: z.object({ stepId: z.string(), reason: z.string().max(600), waitFor: z.string().optional(), needFolder: z.object({ kind: z.enum(["code", "files", "tools"]), path: z.string().min(2).max(400) }).optional(), blocked: z.boolean().optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
       const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
@@ -510,9 +512,14 @@ function buildHandler(auth: repo.TokenAuth) {
       // oddany w biegu mostka: następna próba idzie poziom wyżej (zasada „Dobór modelu i wysiłku”); wysyłka nie ma poziomu.
       // Oddanie z czekania („czeka na …”, „do zrobienia w projekcie w chmurze”, wskazany krok) to nie nieudana próba: poziom zostaje
       const waits = !!waitFor || WAIT_RE.test(a.reason);
-      if ((scope?.kind === "work" || kind === "bridge") && !waits) await repo.bumpEscalation(st.id);
+      // brakujący folder (paczka 22): przycisk „Dodaj folder” na karcie; tylko ścieżka bezwzględna albo od ~/
+      const path = a.needFolder?.path.trim() ?? "";
+      const folder = a.needFolder && /^(\/|~\/)/.test(path) && !/[\n\r]/.test(path) ? { kind: "folder" as const, folder: a.needFolder.kind, path } : null;
+      // czeka na Piotra: folder, blokada, której mocniejszy model nie zmieni, albo oddany już na najwyższym poziomie (paczka 22: bez prób co kilka minut)
+      const need = folder ?? (a.blocked || (st.escalation ?? 0) >= MAX_ESCALATION ? { kind: "piotr" as const } : null);
+      if ((scope?.kind === "work" || kind === "bridge") && !waits && !need) await repo.bumpEscalation(st.id);
       // kafelek „Potrzebna pomoc” (paczka 18): tylko prawdziwe oddanie; czekanie to „Zaplanowane”
-      if (!waits) await repo.markLeft(st.id);
+      if (!waits) await repo.markLeft(st.id, need);
       await mark(st.id, "oddał krok");
       await markRun();
       return text("Krok oddany.");
@@ -619,6 +626,25 @@ function buildHandler(auth: repo.TokenAuth) {
       }
       if (/^text\/|json|xml|csv|markdown|javascript/.test(mime) && f.data.length <= 400_000) return text(`PLIK „${f.name ?? ""}” (${mime}):\n` + f.data.toString("utf8"));
       return text(`Plik „${f.name ?? ""}” (${mime}, ${Math.round(f.data.length / 1024)} KB) nie da się pokazać jako obraz ani tekst. Piotr może go otworzyć w Task Hub: ${appUrl()}/api/files/${f.id}`);
+    });
+
+    // paczka 22: prototyp HTML z biegu na Macu (albo z chmury) dostaje adres w Task Hub zamiast artefaktu Claude; strona otwiera się
+    // tylko po zalogowaniu i w piaskownicy (/api/preview/<id>), a link kroku daje przycisk „Otwórz prototyp” na kartce decyzji po nim
+    server.registerTool("add_preview", {
+      title: "Podgląd prototypu", description: "Zapisuje jeden samowystarczalny plik HTML (prototyp, makieta) przy kroku i zwraca jego adres w Task Hub (otwiera go tylko zalogowany Piotr). Użyj zamiast publikacji artefaktu, gdy nie masz narzędzia Artifact: najpierw zapisz plik tam, gdzie każą zasady projektu, potem przekaż tu jego pełną treść. Adres trafia do linku kroku, a krok decyzji po prototypie dostaje przycisk „Otwórz prototyp”. Strona działa bez sieci: style, skrypty, grafiki i dane wbudowane w plik (grafiki jako data: albo SVG). Kolejna wersja tego samego prototypu = ponowne wywołanie z tym samym krokiem.",
+      inputSchema: z.object({ stepId: z.string(), title: z.string().min(1).max(120), html: z.string().min(20).max(PREVIEW_MAX) }),
+    }, async (a) => {
+      const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
+      const st = await stepById(a.stepId); if (!st) return text("Nie ma takiego kroku.");
+      if (!/<(html|body|div|main|section|svg)[\s>]/i.test(a.html)) return text("To nie wygląda na stronę HTML. Przekaż pełną treść pliku .html.");
+      const name = a.title.trim().replace(/[\\/:*?"<>|\n\r]+/g, " ").slice(0, 100) + ".html";
+      const id = randomUUID();   // adres podglądu w załącznikach zadania (otwiera, a nie pobiera)
+      const att = await repo.addAttachment({ stepId: st.id, taskId }, { id, url: `/api/preview/${id}`, kind: "file", name, mime: "text/html", keep: true, caption: a.title.trim().slice(0, 120), data: Buffer.from(a.html, "utf8") });
+      const url = `${appUrl()}/api/preview/${att.id}`;
+      // link kroku: pusty albo wcześniejszy podgląd → nowy podgląd; inny link (ticket, repozytorium) zostaje, adres jest wtedy w odpowiedzi i w załącznikach
+      if (!st.link || /\/api\/preview\/[0-9a-f-]{36}$/i.test(st.link)) await repo.updateStep(st.id, { link: url });
+      await mark(st.id, "dodał podgląd prototypu");
+      return text(`Podgląd zapisany: ${url}\nNa kartce kroku podaj ten adres (np. w bloku changes jako preview albo w podsumowaniu). Piotr otwiera go po zalogowaniu.`);
     });
 
     server.registerTool("describe_attachment", {

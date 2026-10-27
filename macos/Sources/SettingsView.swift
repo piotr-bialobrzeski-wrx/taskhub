@@ -1,4 +1,4 @@
-// Ustawienia aplikacji (⌘,): połączenie z Task Hub, szybki pasek (skrót), mostek, Claude Code, foldery z kodem, start po zalogowaniu, dziennik.
+// Ustawienia aplikacji (⌘,): połączenie z Task Hub, szybki pasek (skrót), mostek, Claude Code, foldery z kodem i z narzędziami, start po zalogowaniu, dziennik.
 import AppKit
 import ServiceManagement
 import SwiftUI
@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var loginError = ""
     @State private var folderInfo = ""
     @State private var fileFolderInfo = ""
+    @State private var toolFolderInfo = ""
 
     static func loginEnabled() -> Bool {
         if #available(macOS 13.0, *) { return SMAppService.mainApp.status == .enabled }
@@ -104,6 +105,36 @@ struct SettingsView: View {
                     Text("Dokumenty, Biurko i Pobrane macOS chroni osobno: przy pierwszym biegu może zapytać, czy Task Hub ma do nich dostęp.")
                         .font(.system(size: 11.5)).foregroundColor(Theme.sub)
                 }
+            }
+            Section("Foldery z narzędziami") {
+                ForEach(store.cfg.toolFolders, id: \.self) { f in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "shippingbox").foregroundColor(Theme.sub)
+                            Text(f).lineLimit(1).truncationMode(.middle)
+                            if !SettingsView.isFolder(f) { Text("nie ma go").font(.system(size: 11.5)).foregroundColor(Theme.danger) }
+                            else if ToolFolders.servers(in: f).isEmpty { Text("bez .mcp.json: brak narzędzi").font(.system(size: 11.5)).foregroundColor(Theme.sub) }
+                            Spacer()
+                            Button("Usuń") { removeToolFolder(f) }
+                        }
+                        ForEach(ToolFolders.servers(in: f), id: \.name) { srv in
+                            Toggle(isOn: Binding(get: { !store.cfg.toolSkip.contains(srv.name) }, set: { on in setTool(srv.name, on) })) {
+                                Text(srv.name).font(.system(size: 12.5))
+                            }
+                            .toggleStyle(.checkbox)
+                            .padding(.leading, 26)
+                        }
+                    }
+                }
+                if store.cfg.toolFolders.isEmpty {
+                    Text("Brak. Claude w tle ma tylko konektory konta Claude i Claude Code na tym Macu.").font(.system(size: 12)).foregroundColor(Theme.sub)
+                }
+                HStack(spacing: 10) {
+                    Button("Dodaj folder…") { addToolFolders() }
+                    if !toolFolderInfo.isEmpty { Text(toolFolderInfo).font(.system(size: 12)).foregroundColor(Theme.danger).lineLimit(2) }
+                }
+                Text("Folder, w którym otwierasz Claude Code z narzędziami (np. ~/world z Pirxey World). Claude w tle dostaje serwery z jego .mcp.json: czyta nimi bez pytania, a zmiany przygotowuje jako szkic do Twojej zgody. Pliki folderu tylko czyta; pliki z tokenami (.mcp.json, .env) są dla niego zamknięte. Odznacz serwer, którego nie chcesz w tle (np. ciężki albo zbędny).")
+                    .font(.system(size: 11.5)).foregroundColor(Theme.sub)
             }
             Section("Foldery na pliki") {
                 ForEach(store.cfg.fileFolders, id: \.self) { f in
@@ -286,6 +317,38 @@ struct SettingsView: View {
     @MainActor private func removeFileFolder(_ path: String) {
         store.cfg.fileFolders.removeAll { $0 == path }
         fileFolderInfo = ""
+    }
+
+    // foldery z narzędziami: jak foldery z kodem, bez wymogu .git; serwery bierzemy z .mcp.json w folderze
+    @MainActor private func addToolFolders() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = false
+        p.canChooseDirectories = true
+        p.allowsMultipleSelection = true
+        p.canCreateDirectories = false
+        p.prompt = "Dodaj"
+        p.message = "Wskaż folder, w którym otwierasz Claude Code z narzędziami (ten z plikiem .mcp.json, np. world)."
+        guard p.runModal() == .OK else { return }
+        var list = store.cfg.toolFolders
+        var refused: [String] = []
+        for u in p.urls {
+            let path = Store.normalizedFolder(u)
+            if let why = Store.folderProblem(path) { refused.append("\((path as NSString).lastPathComponent): \(why)"); continue }
+            if ToolFolders.servers(in: path).isEmpty { refused.append("\((path as NSString).lastPathComponent): nie ma pliku .mcp.json z serwerami"); continue }
+            if !list.contains(path) { list.append(path) }
+        }
+        if list != store.cfg.toolFolders { store.cfg.toolFolders = list }
+        toolFolderInfo = refused.isEmpty ? "" : "Nie dodałem: " + refused.joined(separator: "; ")
+        if !refused.isEmpty { Log.write("foldery z narzędziami: odrzucone \(refused.joined(separator: "; "))") }
+    }
+
+    @MainActor private func removeToolFolder(_ path: String) {
+        store.cfg.toolFolders.removeAll { $0 == path }
+        toolFolderInfo = ""
+    }
+
+    @MainActor private func setTool(_ name: String, _ on: Bool) {
+        if on { store.cfg.toolSkip.removeAll { $0 == name } } else if !store.cfg.toolSkip.contains(name) { store.cfg.toolSkip.append(name) }
     }
 
     @MainActor private func setLogin(_ on: Bool) {

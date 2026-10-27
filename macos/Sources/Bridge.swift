@@ -150,7 +150,12 @@ final class Bridge: ObservableObject {
         if let l = lastReport, Date().timeIntervalSince(l) < reportEvery { return }
         guard let bin = ClaudeCLI.find(store.cfg.claude) else { return }
         lastReport = Date()
-        guard let servers = await ClaudeCLI.mcpList(bin) else { Log.write("rejestr połączeń: claude mcp list nie odpowiedział"); return }
+        guard var servers = await ClaudeCLI.mcpList(bin) else { Log.write("rejestr połączeń: claude mcp list nie odpowiedział"); return }
+        // serwery z folderów z narzędziami (Pirxey World): claude mcp list w work/ ich nie zna; stan z ostatniej próby
+        for t in ToolFolders.enabled(store.cfg) where !servers.contains(where: { $0.name == t.name }) {
+            let st = probe?.info.servers.first { Policy.norm($0.name) == t.name }?.status ?? "unknown"
+            servers.append(ClaudeCLI.McpServer(name: t.name, target: t.target, transport: t.transport, ok: st == "connected", status: st == "connected" ? "Connected" : st))
+        }
         let list: [[String: Any]] = servers.map { s in
             var d: [String: Any] = ["name": s.name, "transport": s.transport, "ok": s.ok, "status": s.status]
             if s.target.hasPrefix("http") { d["url"] = s.target } else { d["command"] = s.target }
@@ -274,6 +279,8 @@ final class Bridge: ObservableObject {
             URLQueryItem(name: "runner", value: "claude"),
             URLQueryItem(name: "state", value: state.rawValue),
             URLQueryItem(name: "v", value: ClaudeCLI.bridgeVersion),
+            // odcisk folderów i narzędzi z Ustawień: po zmianie Task Hub znowu daje kroki oddane z braku dostępu (paczka 22)
+            URLQueryItem(name: "access", value: store.cfg.accessKey),
         ]
         if let u = until { items.append(URLQueryItem(name: "until", value: ISO8601DateFormatter().string(from: u))) }
         var c = URLComponents()
@@ -363,15 +370,19 @@ final class Bridge: ObservableObject {
         guard v >= Policy.minVersion else {
             throw PolicyError("Zaktualizuj Claude Code: w Terminalu claude update (jest \(v), mostek potrzebuje co najmniej \(Policy.minVersion)).")
         }
-        if let p = probe, p.bin == bin, p.version == v, Date().timeIntervalSince(p.at) < probeEvery { return p }
-        var plain = await ClaudeCLI.probe(bin, restricted: false)
+        // serwery z folderów z narzędziami (Pirxey World) idą do próby tak jak do biegu, żeby ich narzędzia dostały reguły czytania i zapisu
+        let tools = ToolFolders.enabled(store.cfg)
+        let extra = ToolFolders.mcpServers(tools)
+        let toolsKey = tools.map { $0.name + "@" + $0.folder }.joined(separator: ",")
+        if let p = probe, p.bin == bin, p.version == v, p.tools == toolsKey, Date().timeIntervalSince(p.at) < probeEvery { return p }
+        var plain = await ClaudeCLI.probe(bin, restricted: false, extra: extra)
         if let first = plain.initInfo, first.servers.contains(where: { $0.status == "pending" }) {
             // konektor jeszcze się łączył (np. Figma): chwila i druga próba; zostaje ta z większą liczbą połączonych serwerów i narzędzi,
             // bo konektor widziany dopiero w biegu nie ma reguły i strażnik go blokuje
             let names = first.servers.filter { $0.status == "pending" }.map { $0.name }.joined(separator: ", ")
             Log.write("próba Claude Code: konektory jeszcze się łączą (\(names)), za chwilę druga próba")
             try? await Task.sleep(nanoseconds: 4_000_000_000)
-            let again = await ClaudeCLI.probe(bin, restricted: false)
+            let again = await ClaudeCLI.probe(bin, restricted: false, extra: extra)
             if again.ok, let second = again.initInfo, (Bridge.connected(second), second.tools.count) > (Bridge.connected(first), first.tools.count) {
                 plain = again
             }
@@ -386,7 +397,7 @@ final class Bridge: ObservableObject {
         // --restricted tylko gdy nie chowa konektorów, które Claude Code ma bez niego
         var restricted = false
         if v >= Policy.restrictedFrom {
-            let r = await ClaudeCLI.probe(bin, restricted: true)
+            let r = await ClaudeCLI.probe(bin, restricted: true, extra: extra)
             if r.ok, let ri = r.initInfo, ri.permissionMode == "dontAsk" {
                 let want = Set(info.servers.filter { $0.status == "connected" }.map { $0.name })
                 let got = Set(ri.servers.filter { $0.status == "connected" }.map { $0.name })
@@ -394,10 +405,11 @@ final class Bridge: ObservableObject {
             }
         }
         let flags = await ClaudeCLI.helpFlags(bin)
-        let p = Probe(bin: bin, version: v, info: info, restricted: restricted, at: Date(), flags: flags)
+        let p = Probe(bin: bin, version: v, info: info, restricted: restricted, at: Date(), flags: flags, tools: toolsKey)
         probe = p
         let names = info.servers.map { "\($0.name) (\($0.status))" }.joined(separator: ", ")
         let conn = Policy.connectorTools(info)
+        if !tools.isEmpty { Log.write("narzędzia z folderów: \(tools.map { $0.name }.joined(separator: ", "))") }
         Log.write("próba Claude Code \(v): \(info.tools.count) narzędzi; konektory: \(names.isEmpty ? "brak" : names); do odczytu \(conn.read.count), zablokowane \(conn.write.count); tryb ograniczony: \(restricted ? "tak" : "nie"); wysiłek: \(flags.contains("--effort") ? "tak" : "nie"), model zapasowy: \(flags.contains("--fallback-model") ? "tak" : "nie")")
         return p
     }
@@ -584,6 +596,11 @@ final class Bridge: ObservableObject {
         return outcome
     }
 
+    // serwery z folderów z narzędziami dla biegu: tylko te, z którymi szła próba (inaczej ich narzędzia nie miałyby reguł)
+    private func toolServers(_ p: Probe) -> [ToolFolders.Server] {
+        ToolFolders.enabled(store.cfg).filter { s in p.tools.split(separator: ",").contains { $0 == Substring(s.name + "@" + s.folder) } }
+    }
+
     // bieg Claude Code z zasadami z Policy; pliki biegu (token biegu, ustawienia) znikają zaraz po biegu
     private func runClaude(_ kind: Kind, id: String, j: [String: Any], probe pr: Probe, bin: String, maxMin: Int) async -> ProcessResult {
         guard let prompt = j["prompt"] as? String, !prompt.isEmpty, let mcp = j["mcp"] as? String else {
@@ -610,9 +627,9 @@ final class Bridge: ObservableObject {
         do {
             if kind == .work {
                 plan = try Policy.work(runId: id, prompt: prompt, mcp: mcp, token: token, probe: use, folders: Policy.codeFolders(store.cfg.codeFolders),
-                                       files: Policy.codeFolders(store.cfg.fileFolders, what: "folder na pliki"), model: model, bin: bin)
+                                       files: Policy.codeFolders(store.cfg.fileFolders, what: "folder na pliki"), tools: toolServers(use), model: model, bin: bin)
             } else {
-                plan = try Policy.send(runId: id, prompt: prompt, mcp: mcp, token: token, servers: servers, probe: use, model: model)
+                plan = try Policy.send(runId: id, prompt: prompt, mcp: mcp, token: token, servers: servers, probe: use, tools: toolServers(use), model: model)
             }
         } catch {
             planFailed = true

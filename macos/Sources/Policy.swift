@@ -40,6 +40,7 @@ struct Probe {
     var restricted: Bool        // --restricted nie ukrył konektorów, więc go używamy
     var at: Date
     var flags: Set<String> = [] // flagi z claude --help (--effort, --fallback-model)
+    var tools = ""              // odcisk serwerów z folderów z narzędziami, z którymi szła próba (inny w Ustawieniach = nowa próba)
 
     var prompts: Bool { version >= Policy.promptsFrom }       // --permission-prompts none
     var onFailure: Bool { version >= Policy.onFailureFrom }   // hook z onFailure: "block"
@@ -104,6 +105,7 @@ enum Policy {
         let h = home
         return [Store.file.path, h + "/.npmrc", h + "/.netrc", h + "/.git-credentials", h + "/.claude/.credentials.json", h + "/.claude.json",
                 h + "/.pgpass", h + "/.zsh_history", h + "/.bash_history", h + "/.cargo/credentials.toml", h + "/.cargo/credentials", h + "/.pypirc"]
+            + ToolFolders.secretFiles(Store.diskConfig())   // .mcp.json i .env folderów z narzędziami (tokeny serwerów Pirxey World)
     }
 
     // narzędzia w katalogu domowym, które polecenia muszą móc czytać także bez folderów z kodem (bieg w piaskownicy z denyRead na dom):
@@ -248,15 +250,17 @@ enum Policy {
     }
 
     // konektor Task Hub z tokenem biegu (nigdy tokenem mostka); plik tylko dla właściciela, token nie trafia do listy procesów
-    static func mcpFile(runId: String, url: String, token: String) throws -> URL {
+    // extra: serwery z folderów z narzędziami (ToolFolders), obok Task Hub w tym samym pliku
+    static func mcpFile(runId: String, url: String, token: String, extra: [String: Any] = [:]) throws -> URL {
         guard let u = URL(string: url), u.scheme == "https" || u.scheme == "http", u.host != nil else {
             throw PolicyError("Task Hub podał zły adres konektora: \(url)")
         }
         let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, !t.contains("\n") else { throw PolicyError("Task Hub nie podał tokenu biegu. Zaktualizuj Task Hub (serwer).") }
         let server: [String: Any] = ["type": "http", "url": url, "headers": ["Authorization": "Bearer \(t)"]]
-        let cfg: [String: Any] = ["mcpServers": [hub: server]]
-        return try writeFile(cfg, name: safeId(runId) + "-mcp.json")
+        var servers = extra
+        servers[hub] = server   // Task Hub zawsze z tokenem biegu, nawet gdy folder ma serwer o tej nazwie
+        return try writeFile(["mcpServers": servers], name: safeId(runId) + "-mcp.json")
     }
 
     // strażnik: ta sama aplikacja wywołana z --hook-guard (bez okien); ścieżka w apostrofach, bo ma spację
@@ -296,7 +300,8 @@ enum Policy {
     // Bez folderów z kodem (od 0.1.9) Bash też jest, ale w piaskownicy, która poza systemem i narzędziami czyta i pisze tylko work/ i /tmp
     // i nie ma sieci: krok, który
     // tylko uruchamia polecenia albo sprawdza narzędzie, nie potrzebuje repozytorium; krok zmieniający repozytorium nadal czeka na folder
-    static func work(runId: String, prompt: String, mcp: String, token: String, probe: Probe, folders: [String], files: [String] = [], model: ModelChoice, bin: String = "") throws -> RunPlan {
+    // tools = serwery z folderów z narzędziami (Pirxey World): w pliku MCP biegu, ich foldery do czytania (bez plików z tokenami), bez zapisu
+    static func work(runId: String, prompt: String, mcp: String, token: String, probe: Probe, folders: [String], files: [String] = [], tools: [ToolFolders.Server] = [], model: ModelChoice, bin: String = "") throws -> RunPlan {
         let work = Store.workDir.path
         guard ruleSafe(work) else { throw PolicyError("Ścieżka katalogu roboczego ma znaki, których zasady nie obsłużą: \(work)") }
         let dirs = [work] + folders
@@ -304,6 +309,8 @@ enum Policy {
         // WebFetch zostaje (research, ceny, dokumentacja); Read tylko w work/ i folderach z kodem, więc pliki z dysku nie mają czym wyjść
         var allow = ["mcp__" + hub, "Glob", "Grep", "TodoWrite", "ToolSearch", "WebSearch", "WebFetch"] + sessionTaskTools
         for d in dirs { allow.append("Read(/\(d)/**)") }
+        let toolRoots = toolFolderPaths(tools)
+        for d in toolRoots { allow.append("Read(/\(d)/**)") }   // wiedza i skille z folderu z narzędziami: tylko czytanie
         // duży wynik narzędzia Claude Code zapisuje w ~/.claude/projects/<katalog roboczy>/ i każe go przeczytać przez Read
         let results = home + "/.claude/projects/" + String(work.map { (c: Character) -> Character in c.isASCII && (c.isLetter || c.isNumber) ? c : "-" })
         if ruleSafe(results) { allow.append("Read(/\(results)/**)") }
@@ -328,22 +335,26 @@ enum Policy {
         // tylko do rejestru npm (zależności projektu)
         let scratch = folders.isEmpty
         var fs: [String: Any] = ["allowWrite": dirs + ["/tmp"] + (scratch ? [] : ["~/.npm"]), "denyRead": (scratch ? [home, "/Users", "/Volumes"] : []) + secretDirs() + secretFiles() + files, "denyWrite": locked]
-        if scratch { fs["allowRead"] = [work, "/tmp", home + "/.claude/shell-snapshots"] + toolDirs(bin: bin) }
+        if scratch { fs["allowRead"] = [work, "/tmp", home + "/.claude/shell-snapshots"] + toolDirs(bin: bin) + toolRoots }
         let net: [String: Any] = ["allowedDomains": scratch ? [] : npmDomains, "allowLocalBinding": !scratch]
         // piaskownica Basha: zapis tylko w work/, folderach z kodem i tymczasowych; sieć tylko do rejestru npm (bez folderów: żadna).
         // Gdy piaskownica nie wstanie, Claude Code kończy bieg (zamiast puszczać polecenia bez niej).
         let sandbox: [String: Any] = ["enabled": true, "autoAllowBashIfSandboxed": true, "allowUnsandboxedCommands": false,
                                       "failIfUnavailable": true, "filesystem": fs, "network": net]
         let settings: [String: Any] = ["permissions": perms, "sandbox": sandbox, "hooks": hk, "disableAllHooks": false]
-        let mcpF = try mcpFile(runId: runId, url: mcp, token: token)
+        let mcpF = try mcpFile(runId: runId, url: mcp, token: token, extra: ToolFolders.mcpServers(tools))
         let setF: URL
         do { setF = try writeFile(settings, name: safeId(runId) + "-settings.json") } catch { remove([mcpF]); throw error }
         var p = prompt + (folders.isEmpty
-            ? "\n\nNa tym Macu nie ma folderów z kodem: polecenia biegną w katalogu roboczym \(work) (poza systemem i narzędziami Bash czyta i pisze tylko w nim i w /tmp; bez sieci, bez instalowania pakietów); krok z kodem, który potrzebuje repozytorium, oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery z kodem)."
+            ? "\n\nNa tym Macu nie ma folderów z kodem: polecenia biegną w katalogu roboczym \(work) (poza systemem i narzędziami Bash czyta i pisze tylko w nim i w /tmp; bez sieci, bez instalowania pakietów); krok z kodem, który potrzebuje repozytorium, oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery z kodem) i polem needFolder (kind code, pełna ścieżka folderu z zasad projektu); folder do samego czytania kodu też tam dodaje się jako folder z kodem."
             : "\n\nFoldery z kodem na tym Macu (Bash czyta dysk poza sekretami, pisze w katalogu roboczym, w tych folderach i w /tmp; sieć tylko do rejestru npm, więc zależności tylko z npm): " + folders.joined(separator: ", "))
         p += files.isEmpty
-            ? "\n\nNa tym Macu nie ma folderów na pliki: kroki „Plik na Macu” (tool file) oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery na pliki)."
+            ? "\n\nNa tym Macu nie ma folderów na pliki: kroki „Plik na Macu” (tool file) oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery na pliki) i polem needFolder (kind files, pełna ścieżka folderu)."
             : "\n\nFoldery na pliki na tym Macu (tylko nowe pliki narzędziem Write; bez czytania i bez poleceń): " + files.joined(separator: ", ")
+        if !tools.isEmpty {
+            p += "\n\nNarzędzia z folderów na tym Macu (jak w Claude Code otwartym w " + toolRoots.joined(separator: ", ") + "): serwery " + tools.map { $0.name }.joined(separator: ", ")
+                + ". Ich narzędzia do czytania są dozwolone, zapis tylko jako szkic do zgody Piotra. Pliki tych folderów (instrukcje, wiedza, skille) możesz czytać, bez zmian."
+        }
         var args: [String] = ["-p", p, "--output-format", "stream-json", "--verbose", "--permission-mode", "dontAsk",
                               "--mcp-config", mcpF.path, "--settings", setF.path, "--allowedTools"]
         args += allow
@@ -364,6 +375,13 @@ enum Policy {
         }
         return RunPlan(args: args, env: env, files: [mcpF, setF], canary: canary, mustLack: conn.write + extra,
                        known: Set(probe.info.tools))
+    }
+
+    // foldery serwerów z folderów z narzędziami, bez powtórzeń i tylko te, które nadają się do reguł
+    static func toolFolderPaths(_ tools: [ToolFolders.Server]) -> [String] {
+        var out: [String] = []
+        for t in tools where ruleSafe(t.folder) && !out.contains(t.folder) { out.append(t.folder) }
+        return out
     }
 
     // lista dla strażnika (TASKHUB_ALLOWED_TOOLS): nazwy z reguł „allow” bez wzorców w nawiasach („Read(//x/**)” → „Read”,
@@ -390,7 +408,8 @@ enum Policy {
         Set(info.tools.compactMap { split($0)?.server }).union(info.servers.map { norm($0.name) })
     }
 
-    static func send(runId: String, prompt: String, mcp: String, token: String, servers: [String], probe: Probe, model: ModelChoice) throws -> RunPlan {
+    // tools: serwery z folderów z narzędziami; do pliku MCP wysyłki trafia tylko ten, którym idzie wysyłka
+    static func send(runId: String, prompt: String, mcp: String, token: String, servers: [String], probe: Probe, tools: [ToolFolders.Server] = [], model: ModelChoice) throws -> RunPlan {
         var names: [String] = []
         for s in servers {
             let n = norm(s)
@@ -413,7 +432,7 @@ enum Policy {
         let hk = try hooks(probe)
         let perms: [String: Any] = ["defaultMode": "dontAsk", "allow": allow, "deny": deny + [canary]]
         let settings: [String: Any] = ["permissions": perms, "hooks": hk, "disableAllHooks": false]
-        let mcpF = try mcpFile(runId: runId, url: mcp, token: token)
+        let mcpF = try mcpFile(runId: runId, url: mcp, token: token, extra: ToolFolders.mcpServers(tools.filter { names.contains($0.name) }))
         let setF: URL
         do { setF = try writeFile(settings, name: safeId(runId) + "-settings.json") } catch { remove([mcpF]); throw error }
         var args: [String] = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "dontAsk",

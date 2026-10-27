@@ -1,8 +1,8 @@
-// Bezpieczne adresy: w danych i na ekranie zostają tylko http(s) (oraz pliki Task Hub /api/files/<uuid>).
+// Bezpieczne adresy: w danych i na ekranie zostają tylko http(s) (oraz pliki Task Hub /api/files/<uuid> i podglądy /api/preview/<uuid>).
 // javascript:, data:, file:, taskhub: i inne schematy znikają przy zapisie i nie trafiają do href przy wyświetlaniu.
 import type { Block } from "./schema";
 
-const FILES = /^\/api\/files\/[0-9a-f-]{36}$/i;
+const FILES = /^\/api\/(files|preview)\/[0-9a-f-]{36}$/i;   // pliki i podglądy prototypów (paczka 22)
 
 export function isHttpUrl(u: unknown): u is string {
   if (typeof u !== "string" || u.length > 4000) return false;

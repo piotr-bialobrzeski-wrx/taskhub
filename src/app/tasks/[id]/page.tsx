@@ -24,7 +24,7 @@ import { Why } from "@/components/Prio";
 import { BlocksView } from "@/components/BlockRenderer";
 import { agentFeed, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
-import { decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
+import { decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -270,6 +270,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // każda swój); po wysyłce jego miejsce zajmuje link do wyniku
   const target = !done && !mode ? targetLink(s, s.blocks) : null;
   const proto = !mode ? prototypeLink(t.steps, s) : null;   // paczka 19, punkt 1: decyzja po prototypie otwiera jego najnowszy podgląd
+  const addFolder = !done ? folderLink(s) : null;   // paczka 22: krok oddany z braku folderu na Macu, przycisk otwiera aplikację Task Hub z pytaniem
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
   const took = whoDid(s) === "Ty" ? spentMin(s) : agentMin;
@@ -284,13 +285,15 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         {meta && !(s.status === "todo" && activity) ? <small>· {meta}</small> : null}
         {activity && runId && !mode && !done ? <><span className="sp" /><form action={stopWorkForm.bind(null, t.id, runId)}><PendingButton className="btn ico" busy="Zatrzymuję…" title="Przerywa tę pracę Claude'a; wróci do niej później albo od razu, gdy napiszesz"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form></> : null}
         {proto ? <><span className="sp" /><a className="btn ico" href={proto} target="_blank" rel="noopener" title={`Najnowszy podgląd prototypu: ${proto}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a></> : null}
-        {target && isHttpUrl(target.url) ? <>{proto ? null : <span className="sp" />}<a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
+        {addFolder ? <><span className="sp" /><a className="btn ico" href={addFolder.href} title={`Otwiera aplikację Task Hub na Macu i pyta, czy dodać ${addFolder.path} (${addFolder.section})`}>Dodaj folder</a></> : null}
+        {target && isHttpUrl(target.url) ? <>{proto || addFolder ? null : <span className="sp" />}<a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
         {done && s.filePath ? <><span className="sp" /><CopyButton text={s.filePath} label="Kopiuj ścieżkę" /></> : null}
       </div>
       {s.tool === "file" && s.status === "todo" && oldMac ? <div className="note">Ten krok zapisze plik aplikacja Task Hub na Macu od wersji 0.1.7. Zaktualizuj ją w menu aplikacji.</div> : null}
       {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} issue={issue}
         waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} /> : null}
       {cloudNote && !mode ? <div className="note">{cloudNote}</div> : null}
+      {addFolder ? <div className="note">Claude potrzebuje folderu {addFolder.path} w Ustawieniach aplikacji na Macu ({addFolder.section}). „Dodaj folder” otworzy aplikację i zapyta o zgodę; potem krok ruszy sam.</div> : null}
       {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
       {open.length && !done ? <BlocksView blocks={open} form={form} indexOf={indexOf} /> : null}
       {done && kind === "decision" && decisionText(s) ? <div className="note">{decisionText(s)}</div> : null}
