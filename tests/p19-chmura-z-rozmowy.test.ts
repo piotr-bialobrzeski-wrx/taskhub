@@ -10,7 +10,7 @@ vi.mock("@/lib/session", async (orig) => ({ ...(await orig<typeof import("@/lib/
 describe("kafelek kroku zleconego w rozmowie", () => {
   it("czekający na inne kroki to Zaplanowane, nie Agent pracuje", () => {
     const s = { tool: "manual", title: "Zleć w projekcie: x", status: "todo", blocks: null, cloud: { state: "auto", at: "2026-10-25T19:00:00Z" } } as unknown as Step;
-    expect(stepLook(s, "blocked", false).key).toBe("plan-me");
+    expect(stepLook(s, "blocked", false).key).toBe("plan-ag");   // paczka 22: ruszy samo, więc nie Twoja kolej
     expect(stepLook({ ...s, cloud: { state: "queued", at: "2026-10-25T19:00:00Z" } } as Step, "ready", false).key).toBe("live");
   });
 });

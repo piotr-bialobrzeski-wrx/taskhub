@@ -12,7 +12,7 @@ import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
 import { fileName, isHttpUrl, safeHref } from "@/lib/safeurl";
-import { bridgeHold, bridgeLabel, busyWith, noStepsWho, queueWho, type Worker } from "@/lib/auto";
+import { bridgeHold, bridgeLabel, busyWith, noStepsWho, queueWho, shortTitle, type Worker } from "@/lib/auto";
 import { BRIDGE_ALIVE_MS, connectorIssue, protocolOf } from "@/lib/bridge";
 import { draftOf, draftsOf, optionsOf } from "@/lib/agent/approval";
 import { liveActivity, liveKey } from "@/lib/live";
@@ -254,7 +254,11 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const cloud = s.status === "todo" && inProject ? s.cloud ?? null : null;
   const cloudTitle = cloud?.state === "rung" ? "Chmura rusza" : cloud ? "Czeka na chmurę" : "Do zrobienia w projekcie w chmurze";
   const head = inProject && state === "ready" && !mode ? { ...head0, title: cloudTitle } : head0;
-  const cloudNote = !cloud ? null : cloud.state === "auto" ? "Zleciłeś ten krok w rozmowie: ruszy w chmurze sam, gdy skończą się kroki, na które czeka."
+  // paczka 22: zgoda przeszła z decyzji Piotra; linia zostaje też, gdy chmura już pracuje
+  const fromIx = s.cloud?.from ? t.steps.findIndex((x) => x.id === s.cloud!.from) : -1;
+  const fromStep = fromIx >= 0 ? t.steps[fromIx] : null;
+  const consent = fromStep && !done ? `Zgoda z kroku ${String(fromIx + 1).padStart(2, "0")} „${shortTitle(fromStep.title, 50)}”${decisionText(fromStep) ? `: ${decisionText(fromStep).replace(/^Decyzj[ae]:\s*/i, "")}` : ""}.` : null;
+  const cloudNote = !cloud ? null : cloud.state === "auto" ? (fromStep ? null : "Zleciłeś ten krok w rozmowie.")
     : cloud.state === "rung" ? `Mac odpalił Claude w chmurze${cloud.rungAt ? ` o ${fmtTime(cloud.rungAt)}` : ""}; zaraz weźmie ten krok i zamknie go z wynikiem.`
     : macAlive ? "Mac zaraz odpali Claude w chmurze; to trwa kilkanaście sekund." : "Aplikacja Task Hub na Macu teraz nie działa: chmura ruszy, gdy Mac wróci. Awaryjnie skopiuj polecenie i wklej je w projekcie Claude.";
   const draft = draftOf(s);   // wybrana opcja albo pierwszy szkic: linie raportu bez powtórki jej treści
@@ -290,8 +294,9 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {s.tool === "file" && s.status === "todo" && oldMac ? <div className="note">Ten krok zapisze plik aplikacja Task Hub na Macu od wersji 0.1.7. Zaktualizuj ją w menu aplikacji.</div> : null}
       {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} issue={issue}
         waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} /> : null}
+      {consent && !mode ? <div className="note">{consent}</div> : null}
       {cloudNote && !mode ? <div className="note">{cloudNote}</div> : null}
-      {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
+      {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : cloud?.state === "auto" ? "Ruszy w chmurze sam, gdy skończą się kroki, na które czeka." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
       {open.length && !done ? <BlocksView blocks={open} form={form} indexOf={indexOf} /> : null}
       {done && kind === "decision" && decisionText(s) ? <div className="note">{decisionText(s)}</div> : null}
       {done && result.length ? <BlocksView blocks={result} form={form} indexOf={indexOf} /> : null}
