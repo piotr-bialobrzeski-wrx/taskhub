@@ -6,6 +6,7 @@ const DB = !!process.env.TEST_DATABASE_URL;
 describe.skipIf(!DB)("repo", async () => {
   const repo = await import("@/lib/repo");
   const { sql } = await import("@/lib/db");
+  const { sendServers } = await import("@/lib/bridge");
   let owner = "";
   beforeAll(async () => {
     owner = (await repo.ensureOwner()).id;
@@ -18,6 +19,31 @@ describe.skipIf(!DB)("repo", async () => {
     await sql()`delete from api_tokens where owner_id = ${owner}`;
   });
 
+  it("rejestr połączeń: serwer z folderu o tej samej nazwie co konektor z Claude nie nadpisuje jego wpisu; „unknown” nie gasi", async () => {
+    const H = "Mac-folder";
+    await repo.upsertBridgeConnections(owner, H, [{ name: "claude.ai ClickUp", ok: true }, { name: "coda", ok: true }]);
+    const ai = (await repo.listConnections(owner)).find((x) => x.host === H && x.label === "ClickUp")!;
+    expect(ai).toMatchObject({ provider: "claude", state: "active" });
+    // 0.1.17 tuż po starcie: folder dorzuca „clickup” i „coda” ze stanem unknown (jeszcze bez próby)
+    const r = await repo.upsertBridgeConnections(owner, H, [{ name: "clickup", ok: false, status: "unknown" }, { name: "claude.ai ClickUp", ok: true }, { name: "coda", ok: false, status: "unknown" }]);
+    expect(r).toEqual({ added: 1, updated: 2, off: 0 });
+    let list = (await repo.listConnections(owner)).filter((x) => x.host === H);
+    expect(list.find((x) => x.id === ai.id)).toMatchObject({ label: "ClickUp", provider: "claude", state: "active", meta: { server: "claude.ai ClickUp" } });
+    expect(list.find((x) => x.label === "clickup (Claude Code)")).toMatchObject({ provider: "claude-code", app: "clickup", meta: { server: "clickup" } });
+    expect(list.find((x) => x.label === "coda")?.state).toBe("active");
+    // wysyłka bez wskazanego połączenia bierze konektor z Claude, nie pyta o konto
+    await repo.upsertBridgeConnections(owner, H, [{ name: "clickup", ok: true }, { name: "claude.ai ClickUp", ok: true }, { name: "coda", ok: true }]);
+    list = (await repo.listConnections(owner)).filter((x) => x.host === H);
+    expect(list.filter((x) => x.app === "clickup").map((x) => x.state)).toEqual(["active", "active"]);
+    expect(sendServers(list, { app: "clickup", connectionId: null, host: H, companyId: null })).toEqual(["claude.ai ClickUp"]);
+    // wpis przejęty przez serwer z folderu (stan z 27.10) wraca do konektora z Claude
+    await sql()`update connections set meta = meta || ${sql().json({ server: "clickup" } as never)}, state = 'expired' where id = ${ai.id}`;
+    await sql()`delete from connections where host = ${H} and label = 'clickup (Claude Code)'`;
+    await repo.upsertBridgeConnections(owner, H, [{ name: "clickup", ok: true }, { name: "claude.ai ClickUp", ok: true }, { name: "coda", ok: true }]);
+    list = (await repo.listConnections(owner)).filter((x) => x.host === H);
+    expect(list.find((x) => x.id === ai.id)).toMatchObject({ label: "ClickUp", state: "active", meta: { server: "claude.ai ClickUp" } });
+    expect(list.find((x) => x.label === "clickup (Claude Code)")?.state).toBe("active");
+  });
   it("rejestr połączeń: mostek dopisuje swoje konektory, przejmuje firmę z ręcznego wpisu, gasi te, których już nie widzi; krok wskazuje połączenie", async () => {
     const c = await repo.createCompany(owner, "Firma X");
     const manual = await repo.createConnection(owner, { label: "Slack", account: "firma-x.slack.com", companyId: c.id, provider: "claude" });

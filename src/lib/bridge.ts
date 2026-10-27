@@ -193,6 +193,12 @@ export function sendServers(conns: Connection[], t: { app: string; connectionId:
   }
   // konektory tego komputera, gdy zgłosił swoją listę (inny Mac ma inne konektory)
   if (t.host && live.some((c) => c.host === t.host)) pool = pool.filter((c) => c.host === t.host);
+  // ten sam konektor dwa razy, z konta Claude („claude.ai ClickUp”) i z folderu z narzędziami („clickup”): bez wskazania w kroku
+  // wysyła konektor z Claude, jak przed folderami, zamiast pytać o konto; serwery o innych nazwach (np. „slack-druga”) to dalej osobne konta
+  if (!step && pool.length > 1) {
+    const ai = pool.filter((c) => c.provider === "claude"), base = ai[0] ? name(ai[0]).replace(/^claude\.ai\s+/i, "").toLowerCase() : "";
+    if (ai.length === 1 && pool.every((c) => c === ai[0] || name(c).toLowerCase() === base)) pool = ai;
+  }
   return [...new Set(pool.map(name))];
 }
 
