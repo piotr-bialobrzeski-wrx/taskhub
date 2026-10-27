@@ -237,6 +237,9 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
   }
   // bez zgody: zatwierdzenie kończy krok, a wybrana opcja (przy jednym szkicu on sam) zapisuje się jako wysłana.
   // Te same odmowy co przy zgodzie (opcja obok już wysłanej po przywróceniu kroku, dwie opcje o tej samej treści): krok się nie zamyka, Piotr czyta czemu
+  // paczka 22: szkic do aplikacji zewnętrznej zawsze idzie przez zgodę i wysyłkę, także gdy krok nie miał „wymaga zgody”;
+  // inaczej zatwierdzenie zamknęłoby krok jako „wysłany”, choć nic nie poleciało
+  if (!step.needsApproval && d0 && isExternalApp(d0.target.app)) { await repo.updateStep(stepId, { needsApproval: true }); step.needsApproval = true; }
   if (!step.needsApproval) {
     const why = approveRefusal(step, { option, body: edited });
     if (why) { await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(step.title, 60)}”: ${why}.`, { stepId }); refresh(taskId); return; }

@@ -235,7 +235,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     handoffAt: iso(r.handoffAt), doneAt: iso(r.doneAt), report: (r.report as string) ?? null, output: (r.output as string) ?? "",
     review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), hasPrevBlocks: r.hasPrevBlocks != null ? !!r.hasPrevBlocks : r.blocksPrev != null, logged: !!r.logged,
     pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, connectionId: (r.connectionId as string) ?? null, filePath: (r.filePath as string) ?? null,
-    approvedAt: iso(r.approvedAt), approvedSig: (r.approvedSig as string) ?? null, sendStartedAt: iso(r.sendStartedAt),
+    approvedAt: iso(r.approvedAt), approvedSig: (r.approvedSig as string) ?? null, sendStartedAt: iso(r.sendStartedAt), approval: (r.approval as Step["approval"]) ?? null,
     agentSec: Number(r.agentSec ?? 0), agentStartedAt: iso(r.agentStartedAt), doneBy: (r.doneBy as "owner" | "agent") ?? null,
     agentAt: iso(r.agentAt), openedAt: iso(r.openedAt),
     workLevel: (r.workLevel as string) ?? null, modelPick: (r.modelPick as string) ?? null, escalation: Number(r.escalation ?? 0),
@@ -257,7 +257,7 @@ function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
 const TASK_COLS = ["id", "owner_id", "project_id", "title", "title_original", "summary", "source", "level", "due", "done_at", "deleted_at", "note_text", "note_summary", "note_at", "pos", "created_at"];
 const STEP_COLS = ["id", "task_id", "position", "title", "detail", "tool", "status", "prev_status", "needs_approval", "est_min", "spent_sec", "spent_manual", "spent_at", "link", "handoff_at", "done_at",
   "report", "output", "review", "blocks", "blocks_at", "logged", "pos", "connection_id", "file_path", "approved_at", "approved_sig", "send_started_at", "agent_sec", "agent_started_at", "done_by",
-  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for", "left_at"];
+  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for", "left_at", "approval"];
 const taskCols = () => sql()(TASK_COLS);
 
 async function hydrate(rows: Row[]): Promise<Task[]> {
@@ -442,6 +442,8 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
   if (patch.connectionId !== undefined && (patch.connectionId ?? null) !== ((cur?.connectionId as string) ?? null)) keep = false;
   if (approvedSig && !keep) {
     p.approved_at = null; p.approved_sig = null; p.send_started_at = null;
+    // zapis zgody zostaje tylko przy zamknięciu kroku po wysyłce (completeStep); każde inne wygaśnięcie zgody kasuje też jej zapis
+    if (!(opts.sent && patch.status === "done")) p.approval = null;
     if (blocks) blocks = demote(blocks);
     else if (blocks === undefined && curBlocks?.some(isApproved)) { p.blocks = sql().json(demote(curBlocks) as never); p.blocks_at = new Date(); }
     // krok czekał na wysyłkę: wraca do zatwierdzenia
@@ -503,7 +505,7 @@ export async function reopenStep(ownerId: string, taskId: string, step: Step): P
   const status = step.prevStatus === "handoff" ? "todo" : step.prevStatus && step.prevStatus !== "done" ? (step.prevStatus as Step["status"]) : step.output ? "draft" : "todo";
   await sql().begin(async (tx) => {
     // ponowne otwarcie nie przywraca zgody: szkic trzeba zatwierdzić od nowa
-    await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null, done_by = null, agent_started_at = null, approved_at = null, approved_sig = null, send_started_at = null, cloud = null, left_at = null where id = ${step.id}`;
+    await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null, done_by = null, agent_started_at = null, approved_at = null, approved_sig = null, send_started_at = null, approval = null, cloud = null, left_at = null where id = ${step.id}`;
     // „Zmień odpowiedź”: pytania na kartce wracają do zadania, poprzednia odpowiedź zostaje w prev (agent widzi zmianę); cofanie kartki nie ma do czego wracać
     if (stepKind(step) === "decision") {
       const blocks = (step.blocks ?? []).map((b): Block => (b.type === "question" && b.answer ? { ...b, answer: undefined, prev: b.answer } : b));
@@ -551,9 +553,13 @@ export async function approveDraft(ownerId: string, stepId: string, opts: { body
     // dwie opcje o tej samej treści: wybór byłby niejednoznaczny (zgoda trzyma się podpisu, nie pozycji), więc bez zgody
     const sig = approvalSig({ id: step.id, blocks }, blocks[i] as Draft);
     if (blocks.some((b, k) => k !== i && b.type === "draft" && approvalSig({ id: step.id, blocks }, b) === sig)) return false;
+    // zapis zgody (paczka 22): kto, kiedy, podpis i początek zatwierdzonej treści; zostaje na karcie wysłanego kroku
+    const now = new Date(), picked = blocks[i] as Draft;
+    const excerpt = (picked.subject ? picked.subject + ": " : "") + (picked.body || (picked.rows ?? []).map((r) => r.join(" | ")).join("; "));
     const p: Row = {
-      blocks: tx.json(blocks as never), blocks_at: new Date(), status: "handoff", prev_status: "draft", handoff_at: new Date(),
-      approved_at: new Date(), approved_sig: sig, send_started_at: null,
+      blocks: tx.json(blocks as never), blocks_at: now, status: "handoff", prev_status: "draft", handoff_at: now,
+      approved_at: now, approved_sig: sig, send_started_at: null,
+      approval: tx.json({ at: now.toISOString(), by: "owner", sig, excerpt: excerpt.replace(/\s+/g, " ").trim().slice(0, 160), source: "click" } as never),
     };
     if (r.blocks && JSON.stringify(r.blocks) !== JSON.stringify(blocks)) p.blocks_prev = tx.json(r.blocks as never);
     await tx`update steps set ${tx(p)} where id = ${stepId}`;
@@ -567,7 +573,7 @@ export async function clearApproval(ownerId: string, stepId: string, opts: { not
   if (!r || r.status === "done") return false;
   const blocks = parseBlocks(r.blocks);
   if (!r.approvedAt && !r.approvedSig && !r.sendStartedAt && !blocks?.some(isApproved)) return false;
-  const p: Row = { approved_at: null, approved_sig: null, send_started_at: null };
+  const p: Row = { approved_at: null, approved_sig: null, send_started_at: null, approval: null };
   if (blocks?.some(isApproved)) { p.blocks = sql().json(demote(blocks) as never); p.blocks_at = new Date(); }
   if (r.status === "handoff") { p.status = "draft"; p.prev_status = null; p.handoff_at = null; }
   await sql()`update steps set ${sql()(p)} where id = ${stepId}`;
@@ -1258,7 +1264,7 @@ export async function restorePrevBlocks(stepId: string): Promise<boolean> {
   const g = guardBlocks(stepId, { blocks: parseBlocks(r.blocks), approvedSig }, prev, false);
   const p: Row = { blocks: sql().json((approvedSig && !g.approved ? demote(g.blocks) : g.blocks) as never), blocks_prev: r.blocks == null ? null : sql().json(r.blocks as never), blocks_at: new Date() };
   if (approvedSig && !g.approved) {
-    p.approved_at = null; p.approved_sig = null; p.send_started_at = null;
+    p.approved_at = null; p.approved_sig = null; p.send_started_at = null; p.approval = null;
     if (r.status === "handoff") { p.status = "draft"; p.prev_status = null; p.handoff_at = null; }
   }
   await sql()`update steps set ${sql()(p)} where id = ${stepId}`;

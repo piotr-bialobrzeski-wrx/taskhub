@@ -12,14 +12,15 @@ describe("wygląd kafelka kroku", () => {
     const s = step({ tool: "claude" }), t = task({ steps: [s] });
     expect(stepTile(t, s, [t], { taskId: t.id, stepId: s.id, text: "Read", detail: null, since: "2026-10-25T10:00:00Z" } as never).look.key).toBe("live");
   });
-  it("zatwierdzony szkic czeka na wysyłkę: Zaplanowane dla agenta", () => {
-    expect(look(step({ tool: "slack", status: "handoff", approvedAt: "2026-10-25T10:00:00Z" }))).toEqual({ key: "plan-ag", label: "Zaplanowane" });
+  it("zatwierdzony szkic czeka na wysyłkę: kolor agenta i godzina zgody Piotra (paczka 22)", () => {
+    expect(look(step({ tool: "slack", status: "handoff", approvedAt: "2026-10-25T10:00:00Z" }))).toEqual({ key: "plan-ag", label: "Zatwierdziłeś 11:00" });
+    expect(look(step({ tool: "slack", status: "handoff", approvedAt: "2026-10-25T10:00:00Z", approval: { at: "2026-10-25T09:42:00Z", by: "owner", source: "click" } })).label).toBe("Zatwierdziłeś 10:42");
   });
   it("krok oddany bez czekania: Potrzebna pomoc", () => {
     expect(look(step({ tool: "gmail", leftAt: "2026-10-25T10:00:00Z" }))).toEqual({ key: "help", label: "Potrzebna pomoc" });
   });
   it("Twoja kolej: szkic, decyzja albo czynność", () => {
-    expect(look(step({ tool: "slack", status: "draft" }))).toEqual({ key: "mine", label: "Zatwierdź szkic" });
+    expect(look(step({ tool: "slack", status: "draft" }))).toEqual({ key: "mine", label: "Czeka na Twoją zgodę" });
     expect(look(step({ tool: "manual", title: "Zdecyduj, które tickety wracają" })).label).toBe("Zdecyduj");
     expect(look(step({ tool: "manual", blocks: [{ type: "question", text: "A czy B?", options: [{ label: "A" }, { label: "B" }] }] as never })).label).toBe("Zdecyduj");
     expect(look(step({ tool: "manual", title: "Nagraj wideo" }))).toEqual({ key: "mine", label: "Zrób" });
@@ -40,7 +41,7 @@ describe("wygląd kafelka zadania", () => {
   const L = (t: ReturnType<typeof task>, working = false, q = 0) => taskLook(t, "active", t.steps.map((s) => stepLook(s, stepStateOf(t, s, [t]), false)), working, q);
   it("kolejność: Twoja kolej, Agent oddał, Agent pracuje, Zaplanowane", () => {
     const live = step({ tool: "claude", status: "handoff", agentStartedAt: "x" }), help = step({ tool: "gmail", leftAt: "x" }), mine = step({ tool: "slack", status: "draft" });
-    expect(L(task({ steps: [live, help, mine] }))).toEqual({ key: "mine", label: "Zatwierdź szkic" });
+    expect(L(task({ steps: [live, help, mine] }))).toEqual({ key: "mine", label: "Czeka na Twoją zgodę" });
     expect(L(task({ steps: [live, help] })).key).toBe("help");
     expect(L(task({ steps: [live] })).key).toBe("live");
     expect(L(task({ steps: [step({ tool: "claude" })] }), true).key).toBe("live");

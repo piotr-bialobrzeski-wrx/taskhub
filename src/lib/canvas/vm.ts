@@ -43,7 +43,9 @@ export function stepLook(s: Step, state: StepStateKey, now: boolean): Look {
   const sendWait = state === "handoff" && !!s.approvedAt && !s.agentStartedAt;
   if (now || (s.cloud && s.cloud.state !== "auto") || (state === "handoff" && !sendWait)) return { key: "live", label: "Agent pracuje" };
   if (s.leftAt) return { key: "help", label: "Potrzebna pomoc" };
-  if (state === "draft") return { key: "mine", label: "Zatwierdź szkic" };
+  // paczka 22: szkic bez zgody mówi wprost, że czeka (bez ptaszka, który wyglądał jak „zatwierdzone”); po zgodzie godzina kliknięcia Piotra
+  if (state === "draft") return { key: "mine", label: "Czeka na Twoją zgodę" };
+  if (sendWait) return { key: "plan-ag", label: `Zatwierdziłeś ${fmtTime(s.approval?.at ?? s.approvedAt!)}` };
   const own = isOwnerStep(s);
   if (state === "ready" && own) {
     const ask = (s.blocks ?? []).some((b) => b.type === "question") || DECIDE_RE.test(s.title);
@@ -125,7 +127,8 @@ export function stepTile(t: Task, s: Step, all: Task[], live: LiveActivity | nul
 // jedna dolna linia kafelka i wiersza listy: praca w toku → dokąd poszło albo pójdzie → kto zrobił, o której, ile to zajęło → plan
 // (po czym; krok Piotra: szacunek i jego czas, krok Claude'a: „Claude” i jego czas)
 export function tileMeta(t: Task, s: Step, state: StepStateKey): { meta: string; dest: string | null; destHref: string | null } {
-  if (state === "handoff" && s.handoffAt) return { meta: `Pracuje od ${fmtTime(s.handoffAt)}`, dest: null, destHref: null };
+  // zatwierdzony szkic czeka na bieg wysyłki: nikt jeszcze nie pracuje, dolna linia mówi, dokąd pójdzie (paczka 22)
+  if (state === "handoff" && s.handoffAt && !(s.approvedAt && !s.agentStartedAt)) return { meta: `Pracuje od ${fmtTime(s.handoffAt)}`, dest: null, destHref: null };
   const d = destOf(s);
   const dest = tileDest(d, s);
   if (dest) return { meta: dest, dest, destHref: tileDestHref(d, s) };

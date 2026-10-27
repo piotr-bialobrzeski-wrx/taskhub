@@ -106,15 +106,20 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("Etap 0: zgoda Piotra, tokeny bi
   it("agent nie zatwierdza szkicu przez set_blocks: „approved” i „sent” zapisują się jako propozycja, start_step nie rusza szkicu", async () => {
     const t = await repo.createTask(owner, { title: "Agent bez zgody", steps: [{ title: "Napisz na #dev", tool: "slack", needsApproval: true }] });
     const sid = t.steps[0].id;
-    const r = await call(client, "set_blocks", { stepId: sid, blocks: [draft("Wyślę sam", "approved")] });
+    // paczka 22: stan „zatwierdzony” od agenta to błąd, nic się nie zapisuje
+    const forged = await call(client, "set_blocks", { stepId: sid, blocks: [draft("Wyślę sam", "approved")] });
+    expect(forged.isError).toBe(true); expect(forged.text).toContain("tylko jako propozycja");
+    expect((await get(t.id, sid)).blocks).toBeNull();
+    const r = await call(client, "set_blocks", { stepId: sid, blocks: [draft("Wyślę sam")] });
     expect(r.text).toContain("czeka na zatwierdzenie");
     let s = await get(t.id, sid);
     expect(s.status).toBe("draft");
     expect(repo.draftOf(s)?.status).toBe("proposed");
     expect(s.approvedAt).toBeNull();
     expect(repo.isSendable(s)).toBe(false);
-    await call(client, "set_blocks", { stepId: sid, blocks: [draft("Już poszło", "sent")] });
-    expect(repo.draftOf(await get(t.id, sid))?.status).toBe("proposed");
+    const sent = await call(client, "set_blocks", { stepId: sid, blocks: [draft("Już poszło", "sent")] });
+    expect(sent.isError).toBe(true); expect(sent.text).toContain("„wysłany”");
+    expect(repo.draftOf(await get(t.id, sid))).toMatchObject({ status: "proposed", body: "Wyślę sam" });
     // stary trik: start_step na szkicu dawał „w toku po szkicu”, co lista pracy brała za zgodę
     const st = await call(bridge, "start_step", { stepId: sid });
     expect(st.text).toContain("Nie zacząłem");
@@ -151,7 +156,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("Etap 0: zgoda Piotra, tokeny bi
     expect(ok.text).toContain("Panel zapisany");
     expect(repo.isSendable(await get(taskId, stepId))).toBe(true);
     // agent zmienia treść zatwierdzonego szkicu: odmowa, treść bez zmian
-    const no = await call(bridge, "set_blocks", { stepId, blocks: [draft("Przelej 1000 zł na konto X", "approved")] });
+    const forged = await call(bridge, "set_blocks", { stepId, blocks: [draft("Przelej 1000 zł na konto X", "approved")] });
+    expect(forged.isError).toBe(true); expect(forged.text).toContain("tylko jako propozycja");
+    const no = await call(bridge, "set_blocks", { stepId, blocks: [draft("Przelej 1000 zł na konto X")] });
     expect(no.text).toContain("Piotr zatwierdził już szkic");
     s = await get(taskId, stepId);
     expect(repo.draftOf(s)?.body).toBe("Cześć zespole");
@@ -201,7 +208,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("Etap 0: zgoda Piotra, tokeny bi
     expect(await repo.approveDraft(owner, sid)).toBe(true);
     expect(repo.isSendable(await get(t.id, sid))).toBe(true);
     // ten sam szkic, ale dodatkowy plik w bloku zmian: odmowa, zgoda zostaje na tym, co Piotr widział
-    const no = await call(bridge, "set_blocks", { stepId: sid, blocks: [changes(["src/a.ts", ".github/workflows/x.yml"]), { ...commit, status: "approved" }] });
+    const forged = await call(bridge, "set_blocks", { stepId: sid, blocks: [changes(["src/a.ts", ".github/workflows/x.yml"]), { ...commit, status: "approved" }] });
+    expect(forged.isError).toBe(true);
+    const no = await call(bridge, "set_blocks", { stepId: sid, blocks: [changes(["src/a.ts", ".github/workflows/x.yml"]), commit] });
     expect(no.text).toContain("Piotr zatwierdził już szkic");
     let s = await get(t.id, sid);
     expect(repo.isSendable(s)).toBe(true);

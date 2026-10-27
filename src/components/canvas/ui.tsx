@@ -20,9 +20,10 @@ const LOOK_PATH: Record<LookKey, string> = {
   "plan-me": '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',
   done: '<path d="M4 8.5l2.6 2.5L12 5.5"/>',
 };
-// pasek u góry kafelka: ikona stanu (przy „Agent pracuje” obracający się spinner) i etykieta; szkic do zgody ma ptaszek zamiast ludzika
+// pasek u góry kafelka: ikona stanu (przy „Agent pracuje” obracający się spinner) i etykieta; ptaszek tylko przy „Zrobione”
+// (paczka 22: szkic czekający na zgodę ma ludzika „Twoja kolej”, bo ptaszek wyglądał jak zatwierdzone)
 export function LookBar({ look }: { look: Look }) {
-  const k = look.key === "mine" && look.label === "Zatwierdź szkic" ? "done" : look.key;
+  const k = look.key;
   return (
     <span className="lk-bar" title={look.label}>
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
