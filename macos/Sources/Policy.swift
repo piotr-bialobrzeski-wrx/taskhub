@@ -1,5 +1,5 @@
 // Zasady biegów mostka (od 0.1.7): Claude Code dostaje listę dozwolonych narzędzi zamiast pełnej swobody.
-// Bieg „work” czyta konektory, a pisze tylko w work/ i w folderach z kodem; bieg „send” wysyła jeden zatwierdzony szkic
+// Bieg „work” (od paczki 25) ma pełny Claude Code poza wysyłką na zewnątrz; bieg „send” wysyła jeden zatwierdzony szkic
 // jednym konektorem. Zasady idą w argumentach i w pliku ustawień biegu (piaskownica, strażnik). Gdy czegoś nie da się
 // zbudować albo sprawdzić, bieg nie rusza: nigdy nie wracamy do bypassPermissions.
 // Nazwy kluczy i składnię reguł sprawdziliśmy na Claude Code 2.1.304 (notatka e0-policy-tests).
@@ -76,21 +76,14 @@ enum Policy {
                                           "enable", "disable", "rename", "restore", "subscribe", "unsubscribe", "pin", "unpin", "fork", "untrash", "unlabel", "unmark"]
     // znane narzędzia czytające z czasownikiem na końcu (GitHub, ClickUp, Kalendarz Google)
     static let readAllow = ["pull_request_read", "issue_read", "filter_tasks", "suggest_time", "resolve_assignees"]
-    static let bashAllow = ["git status", "git diff", "git log", "git show", "git branch", "git switch", "git checkout", "git stash", "git restore", "git rev-parse", "git ls-files", "git add", "npm", "npx", "node", "pnpm", "yarn", "tsc", "vitest", "jest", "ls", "pwd", "mkdir", "mv", "cp", "touch", "cat", "head", "tail", "wc", "sort", "diff", "grep", "find", "sed -n", "echo", "which"]
     static let bashDeny = ["git push", "git remote", "git config", "git commit", "git commit-tree", "git update-ref", "git reset", "git rebase", "git merge",
                            "git cherry-pick", "git am", "git revert", "git replace", "curl", "wget", "ssh", "scp", "rsync", "nc", "security", "osascript", "open", "sudo", "launchctl", "defaults", "crontab"]
-    static let npmDomains = ["registry.npmjs.org", "*.npmjs.org", "registry.yarnpkg.com"]
     // kandydaci na narzędzie-próbkę (pierwsze, które próba pokazała i którego bieg i tak nie potrzebuje)
     static let canaries = ["NotebookEdit", "EnterWorktree", "ExitWorktree", "CronCreate", "CronDelete", "CronList", "Monitor", "PushNotification", "ScheduleWakeup", "RemoteTrigger", "Agent", "Task"]
     static let sendHubTools = ["get_task", "get_rules", "list_connections", "add_facts", "complete_step", "leave_step"]
     // lista zadań sesji Claude Code (nowsze wersje dają ją zamiast TodoWrite albo obok niego); nie ma nic wspólnego z zadaniami Task Hub.
     // Bieg pracy może nią planować; bieg wysyłki jej nie dostaje (paczka 20: Sonnet brał TaskGet za get_task Task Hub, strażnik go blokował i krok wracał)
     static let sessionTaskTools = ["TaskCreate", "TaskGet", "TaskList", "TaskUpdate"]
-    // w folderach z kodem piaskownica nie zapisze tego, co uruchamia programy poza nią (haki i ustawienia gita, ustawienia
-    // edytorów i Claude Code); dla work/ Claude Code chroni to sam (sprawdzone na 2.1.304: echo >> .git/config = Read-only file system)
-    static let protectedInRepo = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info", ".git/modules", ".git/worktrees",
-                                  ".git/commondir", ".gitmodules", ".claude", ".mcp.json", ".vscode", ".idea"]
-
     // ---------- sekrety: tego agent nie czyta (tokeny, ciasteczka okna aplikacji, klucze) ----------
     static var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
 
@@ -106,19 +99,6 @@ enum Policy {
         return [Store.file.path, h + "/.npmrc", h + "/.netrc", h + "/.git-credentials", h + "/.claude/.credentials.json", h + "/.claude.json",
                 h + "/.pgpass", h + "/.zsh_history", h + "/.bash_history", h + "/.cargo/credentials.toml", h + "/.cargo/credentials", h + "/.pypirc"]
             + ToolFolders.secretFiles(Store.diskConfig())   // .mcp.json i .env folderów z narzędziami (tokeny serwerów Pirxey World)
-    }
-
-    // narzędzia w katalogu domowym, które polecenia muszą móc czytać także bez folderów z kodem (bieg w piaskownicy z denyRead na dom):
-    // Claude Code (ścieżki z listy ClaudeCLI, także po dowiązaniach) i node z menedżerów wersji (npm-global, volta, nvm, bun, pnpm).
-    // Nic szerzej: całe ~/.local ma historie powłok i tokeny edytorów, ~/.npm pamięć npx (zapis = koń trojański), ~/.cargo i ~/go tokeny
-    static func toolDirs(bin: String = "") -> [String] {
-        let h = home
-        var out = [h + "/.local/bin", h + "/.local/share/claude", h + "/.claude/local", h + "/.npm-global", h + "/.volta", h + "/.nvm", h + "/.bun", h + "/Library/pnpm"]
-        for c in ClaudeCLI.candidates() + (bin.isEmpty ? [] : [bin]) {
-            let real = URL(fileURLWithPath: c).resolvingSymlinksInPath().deletingLastPathComponent().path
-            if real.hasPrefix(h + "/") && !out.contains(where: { real.hasPrefix($0) }) { out.append(real) }
-        }
-        return out
     }
 
     // reguły Read(//ścieżka): podwójny ukośnik = ścieżka bezwzględna; Read blokuje też Edit i Write
@@ -296,84 +276,62 @@ enum Policy {
     }
 
     // ---------- bieg „work” ----------
-    // files = foldery na pliki (kroki „Plik na Macu”): Claude tylko zapisuje tam nowe pliki; bez Read, bez Basha, bez --add-dir.
-    // Bez folderów z kodem (od 0.1.9) Bash też jest, ale w piaskownicy, która poza systemem i narzędziami czyta i pisze tylko work/ i /tmp
-    // i nie ma sieci: krok, który
-    // tylko uruchamia polecenia albo sprawdza narzędzie, nie potrzebuje repozytorium; krok zmieniający repozytorium nadal czeka na folder
-    // tools = serwery z folderów z narzędziami (Pirxey World): w pliku MCP biegu, ich foldery do czytania (bez plików z tokenami), bez zapisu
+    // Od paczki 25 (decyzja Piotra 2026-10-27: „Pełny Claude Code, wysyłka po zgodzie”) bieg pracy ma to, co Claude Code Piotra:
+    // czyta i zmienia pliki w katalogu domowym i /tmp, uruchamia polecenia bez piaskownicy (pakiety, build, testy), ma wszystkie
+    // wbudowane narzędzia (także podagentów), konektory do czytania, serwery i skille z folderów z narzędziami (Pirxey World).
+    // Zostaje jedna granica: nic nie wychodzi na zewnątrz bez zgody. Zapis konektorami, git commit/push, curl, ssh, osascript
+    // i harmonogramy są zablokowane (szkic do zgody, potem bieg „send” albo commit przez aplikację). Sekretów (tokeny, klucze,
+    // ciasteczka) i miejsc, z których dałoby się obejść te zasady (ustawienia Claude Code, haki gita, autostart, profile powłoki), bieg nie rusza.
+    // folders = foldery z kodem (commit po zatwierdzeniu robi w nich aplikacja); files = foldery na pliki (kroki „Plik na Macu”)
+    static let workBlocked = ["CronCreate", "CronDelete", "CronList", "ScheduleWakeup", "RemoteTrigger", "PushNotification"]
+
     static func work(runId: String, prompt: String, mcp: String, token: String, probe: Probe, folders: [String], files: [String] = [], tools: [ToolFolders.Server] = [], model: ModelChoice, bin: String = "") throws -> RunPlan {
         let work = Store.workDir.path
         guard ruleSafe(work) else { throw PolicyError("Ścieżka katalogu roboczego ma znaki, których zasady nie obsłużą: \(work)") }
-        let dirs = [work] + folders
         let conn = connectorTools(probe.info)
-        // WebFetch zostaje (research, ceny, dokumentacja); Read tylko w work/ i folderach z kodem, więc pliki z dysku nie mają czym wyjść
-        var allow = ["mcp__" + hub, "Glob", "Grep", "TodoWrite", "ToolSearch", "WebSearch", "WebFetch"] + sessionTaskTools
-        for d in dirs { allow.append("Read(/\(d)/**)") }
         let toolRoots = toolFolderPaths(tools)
-        for d in toolRoots { allow.append("Read(/\(d)/**)") }   // wiedza i skille z folderu z narzędziami: tylko czytanie
-        // duży wynik narzędzia Claude Code zapisuje w ~/.claude/projects/<katalog roboczy>/ i każe go przeczytać przez Read
-        let results = home + "/.claude/projects/" + String(work.map { (c: Character) -> Character in c.isASCII && (c.isLetter || c.isNumber) ? c : "-" })
-        if ruleSafe(results) { allow.append("Read(/\(results)/**)") }
-        for d in dirs { allow += ["Edit(/\(d)/**)", "Write(/\(d)/**)"] }
-        for d in files { allow += ["Edit(/\(d)/**)", "Write(/\(d)/**)"] }
-        allow += conn.read
-        allow += bashAllow.map { "Bash(\($0):*)" }
-        var deny = conn.write + bashDeny.map { "Bash(\($0):*)" } + secretReadRules()
-        let canary = try pickCanary(probe.info, excluded: allow + deny)
-        let builtins: [String] = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "TodoWrite", "ToolSearch", "WebSearch", "WebFetch", canary] + sessionTaskTools
-        // tryb zwykły (bez --tools): pozostałe wbudowane narzędzia z próby (Agent, NotebookEdit…) wprost zablokowane, bo reguły „allow”
-        // z ~/.claude/settings.json Piotra też obowiązują; zablokowane w argumentach, więc init nie może ich pokazać
-        let extra = probe.restricted ? [] : plainExtras(probe.info, keep: builtins, deny: deny)
-        deny += extra
+        let present = probe.info.tools.filter { !$0.hasPrefix("mcp__") }
+        // narzędzie-próbka z tych, których bieg i tak nie dostaje (harmonogramy, zdalne uruchamianie)
+        guard let canary = workBlocked.first(where: { present.contains($0) }) else {
+            throw PolicyError("Nie umiem sprawdzić, czy Claude Code przyjmie zasady mostka (brak znanego narzędzia do próby). Zaktualizuj Claude Code i aplikację Task Hub.")
+        }
+        let blocked = workBlocked.filter { present.contains($0) && $0 != canary }
+        let builtins = present.filter { !workBlocked.contains($0) } + [canary]
+        var allow = ["mcp__" + hub] + present.filter { !workBlocked.contains($0) } + conn.read
+        allow = allow.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        let deny = conn.write + bashDeny.map { "Bash(\($0):*)" } + secretReadRules() + blocked
         let hk = try hooks(probe)
-        let perms: [String: Any] = ["defaultMode": "dontAsk", "allow": allow, "deny": deny + [canary]]
-        var locked: [String] = []
-        for f in folders { locked += protectedInRepo.map { f + "/" + $0 } }
-        // bez folderów z kodem polecenia widzą tylko work/, /tmp i narzędzia (denyRead na /Users, /Volumes i katalog domowy; allowRead węższy
-        // wygrywa; zrzut powłoki ~/.claude/shell-snapshots czyta każde polecenie Basha), nie piszą w ~/.npm (pamięć npx, z której npx
-        // uruchamia kod bez piaskownicy) i nie mają sieci ani portów lokalnych; z folderami: czytanie jak dotąd (poza sekretami), sieć
-        // tylko do rejestru npm (zależności projektu)
-        let scratch = folders.isEmpty
-        var fs: [String: Any] = ["allowWrite": dirs + ["/tmp"] + (scratch ? [] : ["~/.npm"]), "denyRead": (scratch ? [home, "/Users", "/Volumes"] : []) + secretDirs() + secretFiles() + files, "denyWrite": locked]
-        if scratch { fs["allowRead"] = [work, "/tmp", home + "/.claude/shell-snapshots"] + toolDirs(bin: bin) + toolRoots }
-        let net: [String: Any] = ["allowedDomains": scratch ? [] : npmDomains, "allowLocalBinding": !scratch]
-        // piaskownica Basha: zapis tylko w work/, folderach z kodem i tymczasowych; sieć tylko do rejestru npm (bez folderów: żadna).
-        // Gdy piaskownica nie wstanie, Claude Code kończy bieg (zamiast puszczać polecenia bez niej).
-        let sandbox: [String: Any] = ["enabled": true, "autoAllowBashIfSandboxed": true, "allowUnsandboxedCommands": false,
-                                      "failIfUnavailable": true, "filesystem": fs, "network": net]
-        let settings: [String: Any] = ["permissions": perms, "sandbox": sandbox, "hooks": hk, "disableAllHooks": false]
+        let perms: [String: Any] = ["defaultMode": "dontAsk", "allow": allow, "deny": deny + [canary], "additionalDirectories": [home, "/tmp"]]
+        // polecenia bez piaskownicy (jak w Claude Code Piotra: sieć do pakietów, build, testy); pilnuje ich strażnik
+        let settings: [String: Any] = ["permissions": perms, "sandbox": ["enabled": false], "hooks": hk, "disableAllHooks": false]
         let mcpF = try mcpFile(runId: runId, url: mcp, token: token, extra: ToolFolders.mcpServers(tools))
         let setF: URL
         do { setF = try writeFile(settings, name: safeId(runId) + "-settings.json") } catch { remove([mcpF]); throw error }
-        var p = prompt + (folders.isEmpty
-            ? "\n\nNa tym Macu nie ma folderów z kodem: polecenia biegną w katalogu roboczym \(work) (poza systemem i narzędziami Bash czyta i pisze tylko w nim i w /tmp; bez sieci, bez instalowania pakietów); krok z kodem, który potrzebuje repozytorium, oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery z kodem) i polem needFolder (kind code, pełna ścieżka folderu z zasad projektu); folder do samego czytania kodu też tam dodaje się jako folder z kodem."
-            : "\n\nFoldery z kodem na tym Macu (Bash czyta dysk poza sekretami, pisze w katalogu roboczym, w tych folderach i w /tmp; sieć tylko do rejestru npm, więc zależności tylko z npm): " + folders.joined(separator: ", "))
+        var p = prompt + "\n\nMasz pełny Claude Code na Macu Piotra: czytasz i zmieniasz pliki w jego katalogu domowym i w /tmp (poza danymi logowania i ustawieniami Claude Code), uruchamiasz polecenia, instalujesz pakiety, budujesz i testujesz. Niczego nie wysyłasz na zewnątrz: zapis w aplikacjach (ClickUp, Slack, mail, Figma…), git commit i git push, curl, ssh są zablokowane; to przygotowujesz jako szkic do zgody Piotra (set_blocks), a wyśle go aplikacja po jego kliknięciu. Folderu na Macu nie musisz o nic prosić: ścieżki z zasad projektu czytasz wprost."
+        if !folders.isEmpty { p += "\n\nFoldery z kodem (zmiany w nich zatwierdza Piotr, commit robi aplikacja): " + folders.joined(separator: ", ") }
         p += files.isEmpty
-            ? "\n\nNa tym Macu nie ma folderów na pliki: kroki „Plik na Macu” (tool file) oddaj przez leave_step z prośbą o dodanie folderu w Ustawieniach aplikacji (Foldery na pliki) i polem needFolder (kind files, pełna ścieżka folderu)."
-            : "\n\nFoldery na pliki na tym Macu (tylko nowe pliki narzędziem Write; bez czytania i bez poleceń): " + files.joined(separator: ", ")
+            ? "\n\nNa tym Macu nie ma folderów na pliki: krok „Plik na Macu” (tool file) zapisz w miejscu z zasad projektu, a gdy go nie ma, oddaj przez leave_step z needFolder (kind files, pełna ścieżka)."
+            : "\n\nFoldery na pliki na tym Macu (kroki „Plik na Macu”): " + files.joined(separator: ", ")
         if !tools.isEmpty {
             p += "\n\nNarzędzia z folderów na tym Macu (jak w Claude Code otwartym w " + toolRoots.joined(separator: ", ") + "): serwery " + tools.map { $0.name }.joined(separator: ", ")
-                + ". Ich narzędzia do czytania są dozwolone, zapis tylko jako szkic do zgody Piotra. Pliki tych folderów (instrukcje, wiedza, skille) możesz czytać, bez zmian."
+                + ". Ich narzędzia do czytania są dozwolone, zapis tylko jako szkic do zgody Piotra."
         }
         var args: [String] = ["-p", p, "--output-format", "stream-json", "--verbose", "--permission-mode", "dontAsk",
                               "--mcp-config", mcpF.path, "--settings", setF.path, "--allowedTools"]
         args += allow
         args.append("--disallowedTools")
         args += deny
-        // foldery na pliki też jako katalogi robocze (inaczej Claude Code pyta o zapis poza nimi, a w dontAsk pytanie = odmowa);
-        // czytania w nich pilnuje strażnik (TASKHUB_FILE_DIRS) i denyRead piaskownicy
-        if !folders.isEmpty || !files.isEmpty { args.append("--add-dir"); args += folders + files }
+        // foldery z narzędziami, z kodem i na pliki jako katalogi robocze: Claude Code ładuje z nich skille, polecenia i podagentów,
+        // a z CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD także ich CLAUDE.md (jak w sesji otwartej w tym folderze)
+        let added = (toolRoots + folders + files).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        if !added.isEmpty { args.append("--add-dir"); args += added }
         args += common(probe, tools: builtins, model: model)
         var env = ClaudeCLI.env()
-        env["TASKHUB_ALLOWED_DIRS"] = (dirs + files).joined(separator: ":")
-        env["TASKHUB_FILE_DIRS"] = files.joined(separator: ":")
+        env["TASKHUB_ALLOWED_DIRS"] = [home, "/tmp", "/private/tmp"].joined(separator: ":")
+        env["TASKHUB_FILE_DIRS"] = ""
         env["TASKHUB_ALLOWED_TOOLS"] = guardTools(allow, builtins: builtins, canary: canary)
-        if scratch {
-            // ~/.npm i ~/.gitconfig są poza zasięgiem piaskownicy: npm dostaje pamięć w work/, git nie czyta konfiguracji użytkownika
-            env["npm_config_cache"] = work + "/.npm-cache"
-            env["GIT_CONFIG_GLOBAL"] = "/dev/null"
-        }
-        return RunPlan(args: args, env: env, files: [mcpF, setF], canary: canary, mustLack: conn.write + extra,
+        env["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] = "1"
+        return RunPlan(args: args, env: env, files: [mcpF, setF], canary: canary, mustLack: conn.write + blocked,
                        known: Set(probe.info.tools))
     }
 

@@ -243,7 +243,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const { result, material: material0 } = splitBlocks(blocks);
   const material = open.length ? material0.filter((b) => !(open as Block[]).includes(b)) : material0;   // otwarte pytania decyzji stoją w „Teraz”, nie między materiałami
   const form = s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined;
-  const folds = foldsFor(state as CardState, mode, readingResult(s, material));
+  const folds = foldsFor(state as CardState, mode, readingResult(s, material), kind === "decision");
   const cmp = hasComparison(material);   // kartka porównania (paczka 10, punkt 1): porównywane elementy u góry na całą szerokość, pod nimi karta publikacji
   // wybrana opcja już poszła, a krok wrócił do zrobienia: „Już wysłano” zamiast „Odłożony szkic” albo „Wybierz opcję” (karta nie daje zgody)
   // krok „Zleć w projekcie: …” robi wątek projektu Claude w chmurze: nagłówek mówi gdzie, a zamiast „Uruchom” jest polecenie do skopiowania
@@ -273,7 +273,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // miejsce docelowe (ticket, wątek, dokument) w nagłówku „Teraz” tylko bez karty publikacji: karta ma własny przycisk celu w nagłówku (przy opcjach
   // każda swój); po wysyłce jego miejsce zajmuje link do wyniku
   const target = !done && !mode ? targetLink(s, s.blocks) : null;
-  const proto = !mode ? prototypeLink(t.steps, s) : null;   // paczka 19, punkt 1: decyzja po prototypie otwiera jego najnowszy podgląd
+  const proto = prototypeLink(t.steps, s);   // paczka 19, punkt 1 i paczka 25: najnowszy podgląd prototypu, zawsze widoczny
   const addFolder = !done ? folderLink(s) : null;   // paczka 22: krok oddany z braku folderu na Macu, przycisk otwiera aplikację Task Hub z pytaniem
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");

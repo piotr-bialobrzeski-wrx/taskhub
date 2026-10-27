@@ -9,6 +9,7 @@ final class WebWindowController: NSWindowController, WKNavigationDelegate, WKUID
     private let store: Store
     var onConnectURL: ((URL) -> Void)? = nil
     private var loadedBase = ""
+    private var previews: [NSWindow] = []   // okna podglądu (prototyp z /api/preview), trzymane do zamknięcia
 
     init(store: Store) {
         self.store = store
@@ -102,15 +103,38 @@ final class WebWindowController: NSWindowController, WKNavigationDelegate, WKUID
         decisionHandler(.allow)
     }
 
-    // target=_blank i window.open: http(s) i mailto do przeglądarki/poczty, taskhub do nas, reszta nigdzie
+    // target=_blank i window.open: strona Task Hub (np. „Otwórz prototyp”) w osobnym oknie aplikacji, bo w przeglądarce Piotr zwykle
+    // nie jest zalogowany i podgląd odpowiada „Zaloguj się” (paczka 25); inne http(s) i mailto do przeglądarki/poczty, taskhub do nas
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = navigationAction.request.url else { return nil }
-        switch (url.scheme ?? "").lowercased() {
+        let scheme = (url.scheme ?? "").lowercased()
+        if scheme == "http" || scheme == "https", let host = url.host, let base = URL(string: store.baseURL), host == base.host {
+            return previewWindow(configuration)
+        }
+        switch scheme {
         case "taskhub": DispatchQueue.main.async { [weak self] in self?.onConnectURL?(url) }
         case "http", "https", "mailto": NSWorkspace.shared.open(url)
         default: Log.write("okno: nie otwieram nowego okna z \(url.scheme ?? "?"):")
         }
         return nil
+    }
+
+    // okno z tą samą sesją (ciasteczka logowania); WebKit sam załaduje w nim adres z kliknięcia
+    private func previewWindow(_ configuration: WKWebViewConfiguration) -> WKWebView {
+        let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 1280, height: 860), configuration: configuration)
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 860), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        w.title = "Podgląd · Task Hub"
+        w.tabbingMode = .disallowed
+        w.isReleasedWhenClosed = false
+        w.backgroundColor = Theme.bgNS
+        w.contentView = view
+        if let main = window { w.setFrame(main.frame.offsetBy(dx: 28, dy: -28), display: false) } else { w.center() }
+        previews.append(w)
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { [weak self, weak w] _ in
+            self?.previews.removeAll { $0 === w }
+        }
+        w.makeKeyAndOrderFront(nil)
+        return view
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { showError(error) }

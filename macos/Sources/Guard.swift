@@ -1,7 +1,8 @@
 // Strażnik biegów mostka: Claude Code woła go przed każdym narzędziem (hook PreToolUse z pliku ustawień biegu)
 // jako „Task Hub --hook-guard”. Czyta JSON ze stdin; odmowa = kod 2 i powód na stderr, zgoda = kod 0 bez wyjścia
 // (nigdy „allow”: o reszcie decydują zasady biegu). Bez AppKit i bez okien, żeby był szybki; nieczytelne wejście = odmowa.
-// To druga linia obrony: pierwsza to lista dozwolonych narzędzi i piaskownica Basha. Lista narzędzi biegu (TASKHUB_ALLOWED_TOOLS)
+// W biegu pracy (od paczki 25 pełny Claude Code bez piaskownicy Basha) to główna granica dla poleceń: sekrety, wysyłka (sieć poza
+// pobieraniem pakietów, git push/commit) i miejsca, z których bieg obszedłby zasady (ustawienia Claude Code, haki gita, autostart, profile powłoki). Lista narzędzi biegu (TASKHUB_ALLOWED_TOOLS)
 // łapie też konektory, które Claude Code podłączył dopiero po próbie (nie mają reguły w ustawieniach biegu).
 import Darwin
 import Foundation
@@ -17,6 +18,10 @@ enum Guard {
     static let markers = ["/.ssh", ".ssh/", "/.aws", ".aws/", ".config/gh", ".git-credentials", ".netrc", ".npmrc", ".credentials.json", ".claude.json",
                           ".taskhub-bridge", "library/keychains", "library/cookies", "library/httpstorages", "library/webkit", "../config.json", "../run/",
                           "/.pgpass", ".docker/", "/.kube", ".config/gcloud", "/.gnupg", ".supabase", "com.vercel.cli", "zsh_history", "bash_history"]
+    // miejsca, które uruchamiają kod poza biegiem albo zmieniają jego zasady: polecenie, które o nich wspomina, nie przechodzi,
+    // a Edit i Write tam nie piszą (pliki, które człowiek zmienia sam)
+    static let lockedMarkers = [".claude/settings", ".claude/hooks", "/.claude.json", "library/launchagents", "library/launchdaemons", ".zshrc", ".zshenv", ".zprofile",
+                                ".bashrc", ".bash_profile", "/.profile", ".config/fish", "library/application support/claude"]
 
     static func run() -> Int32 {
         let data = FileHandle.standardInput.readDataToEndOfFile()
@@ -85,8 +90,8 @@ enum Guard {
                 return "Strażnik Task Hub: zmiany plików tylko w katalogu roboczym, w folderach z kodem i w folderach na pliki z Ustawień aplikacji (\(p))."
             }
             let comps = c.split(separator: "/").map { String($0) }
-            if comps.contains(".git") || comps.contains(".claude") || comps.last == ".mcp.json" {
-                return "Strażnik Task Hub: pliki gita i ustawień Claude Code zmienia tylko człowiek (\(p))."
+            if comps.contains(".git") || comps.contains(".claude") || comps.last == ".mcp.json" || lockedMarker(c) != nil {
+                return "Strażnik Task Hub: pliki gita, ustawień Claude Code, autostartu i powłoki zmienia tylko człowiek (\(p))."
             }
         }
         return nil
@@ -105,6 +110,7 @@ enum Guard {
         if let m = secretMarker(cmd) { return "Strażnik Task Hub: polecenie sięga do chronionych danych (\(m))." }
         let flat = cmd.lowercased().replacingOccurrences(of: "\\", with: "")
         if let g = gitFiles.first(where: { flat.contains($0) }) { return "Strażnik Task Hub: pliki gita (\(g)) zmienia tylko człowiek." }
+        if let m = lockedMarker(cmd) { return "Strażnik Task Hub: \(m) zmienia tylko człowiek (ustawienia Claude Code, autostart, powłoka)." }
         for words in segments(cmd) {
             if let why = segmentProblem(words) { return why }
             // tekst w cudzysłowach może być osobnym poleceniem (sh -c 'git push', eval "curl …")
@@ -166,7 +172,7 @@ enum Guard {
         guard let first = words.first else { return nil }
         // za nakładką polecenie bywa dalej (env -u X curl): wtedy sprawdzamy każde słowo
         let names = wrapped ? words.map { base($0) } : [base(first)]
-        if let c = names.first(where: { netCommands.contains($0) }) { return "Strażnik Task Hub: \(c) jest zablokowany (bieg mostka nie łączy się z siecią poza npm)." }
+        if let c = names.first(where: { netCommands.contains($0) }) { return "Strażnik Task Hub: \(c) jest zablokowany (bieg mostka niczego nie wysyła; strony czytaj przez WebFetch)." }
         if let c = names.first(where: { blockedCommands.contains($0) }) { return "Strażnik Task Hub: \(c) jest zablokowany w biegach mostka." }
         let c = base(first)
         let rest = words.dropFirst().map { $0.lowercased() }
@@ -214,6 +220,11 @@ enum Guard {
         if let m = markers.first(where: { flat.contains($0) }) { return m }
         if flat.range(of: "application support/task hub(?!/work(/|\\s|$))", options: .regularExpression) != nil { return "Application Support/Task Hub" }
         return nil
+    }
+
+    static func lockedMarker(_ text: String) -> String? {
+        let flat = text.lowercased().replacingOccurrences(of: "\\", with: "").replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "'", with: "")
+        return lockedMarkers.first(where: { flat.contains($0) })
     }
 
     // ---------- ścieżki ----------

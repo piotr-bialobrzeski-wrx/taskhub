@@ -37,7 +37,9 @@ export function depCardsFor(steps: Pick<Step, "id" | "title" | "status" | "tool"
 // paczka 19, punkt 1: kartka decyzji „Zdecyduj …” / „Wybierz …” po prototypie ma przycisk „Otwórz prototyp” z adresem najnowszego podglądu.
 // Adres bierze się z wyniku zrobionego kroku z „prototyp” w tytule (np. „Zleć w projekcie: prototyp …”, „… poprawki prototypu …”), od którego
 // decyzja zależy; idzie wstecz przez inne kroki-prototypy i wcześniejsze decyzje (prototyp poprawiany po pierwszej decyzji), najnowszy po doneAt.
-// Bez adresu http (albo tylko commit na GitHubie) nie ma przycisku
+// Bez adresu http (albo tylko commit na GitHubie) nie ma przycisku.
+// Paczka 25: przycisk stoi zawsze, nie tylko na otwartej decyzji (zasada Piotra: zrobiony krok pokazuje to samo co przed zrobieniem),
+// także na samym kroku prototypu i na krokach po decyzji (np. story w ClickUpie z zatwierdzonego prototypu)
 export const PROTO_RE = /prototyp/i;
 type ProtoStep = Pick<Step, "id" | "title" | "status" | "tool" | "dependsOn" | "link" | "doneAt" | "blocks">;
 const protoUrl = (x: ProtoStep): string | null => {
@@ -45,8 +47,11 @@ const protoUrl = (x: ProtoStep): string | null => {
   if (preview) return preview;
   return x.link && isHttpUrl(x.link) && !/^https?:\/\/(www\.)?github\.com\//i.test(x.link) ? x.link : null;
 };
-export function prototypeLink(steps: ProtoStep[], s: Pick<Step, "dependsOn" | "status" | "tool" | "blocks">): string | null {
-  if (s.status === "done" || !isOwnerStep(s) || !openQuestions(s).length) return null;
+export function prototypeLink(steps: ProtoStep[], s: Pick<Step, "id" | "title" | "dependsOn" | "status" | "tool" | "link" | "doneAt" | "blocks">): string | null {
+  if (PROTO_RE.test(s.title)) {
+    const own = protoUrl(s);
+    if (own) return own;
+  }
   const byId = new Map(steps.map((x) => [x.id, x]));
   const seen = new Set<string>(), found: ProtoStep[] = [];
   const walk = (ids: string[]) => {
@@ -67,9 +72,10 @@ export function prototypeLink(steps: ProtoStep[], s: Pick<Step, "dependsOn" | "s
 
 // co jest rozwinięte: brief („Co”) i materiały („Skąd”) zwijają się po zrobieniu; przy szkicu brief ustępuje karcie publikacji;
 // zrobiony odczyt Claude'a (reading) trzyma materiały rozwinięte, bo one są jego wynikiem (treść ticketu, wątku), nie tłem
-export function foldsFor(state: CardState, mode: string | null, reading = false): { brief: boolean; material: boolean } {
+// paczka 25: zrobiona decyzja Piotra (decision) też trzyma materiały rozwinięte: link do prototypu i tabela założeń nie chowają się po odpowiedzi
+export function foldsFor(state: CardState, mode: string | null, reading = false, decision = false): { brief: boolean; material: boolean } {
   const done = state === "done";
-  return { brief: !done && !mode, material: !done || reading };
+  return { brief: !done && !mode, material: !done || reading || decision };
 }
 // główna treść a „Skąd” (paczka 15, punkty 8–9): „Skąd” to materiał z pochodzeniem (wątek, mail, komentarz, wszystko ze źródłem, także fakty
 // z przypisem), główna treść to to, co agent złożył sam (tabela, lista, notatka, treść bez źródła, odpowiedzi na pytania). Główna stoi zaraz

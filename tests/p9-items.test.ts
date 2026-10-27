@@ -18,6 +18,7 @@ describe("kartka zrobionego odczytu", () => {
   it("zrobiony odczyt Claude'a z treścią trzyma „Skąd” rozwinięte; zwykły zrobiony krok zwija obie sekcje", () => {
     expect(foldsFor("done", null)).toEqual({ brief: false, material: false });
     expect(foldsFor("done", null, true)).toEqual({ brief: false, material: true });
+    expect(foldsFor("done", null, false, true)).toEqual({ brief: false, material: true });
     expect(foldsFor("ready", null, true)).toEqual({ brief: true, material: true });
     expect(readingResult(step({ status: "done", tool: "clickup", doneBy: "agent", blocks: [free, link] }), [free, link])).toBe(true);
     expect(readingResult(step({ status: "done", tool: "clickup", doneBy: "agent", blocks: [link] }), [link])).toBe(false);          // sam link to nie treść

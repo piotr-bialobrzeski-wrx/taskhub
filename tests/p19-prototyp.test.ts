@@ -24,10 +24,22 @@ describe("Otwórz prototyp przy decyzji", () => {
     expect(prototypeLink([viaChanges, pick], { ...pick, dependsOn: ["p3"] })).toBe("https://d.vercel.app/prototyp");
     expect(prototypeLink([{ ...proto3, link: "https://github.com/x/y/commit/abc" }, pick], { ...pick, dependsOn: ["p3"] })).toBeNull();
   });
-  it("bez przycisku: decyzja zrobiona, bez otwartego pytania, krok Claude'a albo bez prototypu w zależnościach", () => {
-    expect(prototypeLink(steps, { ...pick, status: "done" })).toBeNull();
-    expect(prototypeLink(steps, { ...pick, blocks: [q("B")] })).toBeNull();
-    expect(prototypeLink(steps, { ...pick, tool: "claude" })).toBeNull();
+  it("paczka 25: przycisk zostaje po decyzji, na kroku Claude'a po niej i na samym kroku prototypu", () => {
+    expect(prototypeLink(steps, { ...pick, status: "done" })).toBe("https://c.vercel.app/prototyp/kafelki");
+    expect(prototypeLink(steps, { ...pick, blocks: [q("B")] })).toBe("https://c.vercel.app/prototyp/kafelki");
+    expect(prototypeLink(steps, { ...pick, tool: "clickup" })).toBe("https://c.vercel.app/prototyp/kafelki");
+    expect(prototypeLink(steps, proto3)).toBe("https://c.vercel.app/prototyp/kafelki");
+    const story = step("s1", "Utwórz story w ClickUpie", { status: "todo", tool: "clickup", dependsOn: ["d2"] });
+    const answered = { ...pick, status: "done" as const, blocks: [q("A")] };
+    expect(prototypeLink([proto1, fix, first, proto3, answered, story], story)).toBe("https://c.vercel.app/prototyp/kafelki");
+  });
+  it("podgląd w Task Hub (ta sama domena) też jest prototypem", () => {
+    const own = step("p9", "Przygotuj prototyp HTML sekcji zdjęć", { tool: "code", link: "https://taskhub-lac.vercel.app/api/preview/2cfa0ff2-f1f2-4756-b3d5-af819c1488f3" });
+    const ok = step("d9", "Zatwierdź prototyp sekcji zdjęć", { dependsOn: ["p9"], blocks: [q("A")] });
+    const story = step("s9", "Utwórz story sekcji zdjęć w ClickUpie", { status: "todo", tool: "clickup", dependsOn: ["d9"] });
+    for (const x of [own, ok, story]) expect(prototypeLink([own, ok, story], x)).toBe(own.link);
+  });
+  it("bez przycisku: bez prototypu w zależnościach", () => {
     expect(prototypeLink(steps, { ...pick, dependsOn: [] })).toBeNull();
     const code = step("c1", "Zleć w projekcie: ramki", { dependsOn: ["p1"], link: "https://e.vercel.app" });
     expect(prototypeLink([proto1, code, pick], { ...pick, dependsOn: ["c1"] })).toBeNull();
