@@ -440,7 +440,9 @@ enum Policy {
         args += allow
         args.append("--disallowedTools")
         args += deny
-        args += ["--max-turns", "15"]
+        // 30, nie 15: serwer Task Hub łączy się czasem kilkanaście sekund po starcie biegu, a agent w tym czasie ponawia ToolSearch;
+        // przy 15 turach bieg kończył się „Reached maximum number of turns” bez wysyłki („wysyłka nie została potwierdzona”)
+        args += ["--max-turns", "30"]
         args += common(probe, tools: builtins, model: model)
         var env = ClaudeCLI.env()
         env["TASKHUB_ALLOWED_DIRS"] = ""   // wysyłka niczego nie zmienia na dysku
