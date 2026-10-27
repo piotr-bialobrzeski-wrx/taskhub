@@ -44,14 +44,13 @@ export function stepLook(s: Step, state: StepStateKey, now: boolean): Look {
   if (now || (s.cloud && s.cloud.state !== "auto") || (state === "handoff" && !sendWait)) return { key: "live", label: "Agent pracuje" };
   if (s.leftAt) return { key: "help", label: "Potrzebna pomoc" };
   if (state === "draft") return { key: "mine", label: "Zatwierdź szkic" };
-  // zlecone do chmury, a czekające na inne kroki (zgoda z rozmowy albo z decyzji, paczka 22): ruszy samo, więc to nie Twoja kolej
-  if (s.cloud?.state === "auto") return { key: "plan-ag", label: "Zaplanowane" };
   const own = isOwnerStep(s);
   if (state === "ready" && own) {
     const ask = (s.blocks ?? []).some((b) => b.type === "question") || DECIDE_RE.test(s.title);
     return { key: "mine", label: ask ? "Zdecyduj" : "Zrób" };
   }
-  return { key: own ? "plan-me" : "plan-ag", label: "Zaplanowane" };
+  // zlecone do chmury, a czekające na inne kroki (zgoda z rozmowy albo z decyzji, paczka 22): ruszy samo, więc to nie Twoja kolej
+  return { key: own && s.cloud?.state !== "auto" ? "plan-me" : "plan-ag", label: "Zaplanowane" };
 }
 // krok „teraz” biegu: wskazany przez agenta albo, gdy bieg pracuje w zadaniu bez wskazania kroku (np. po rozpisaniu od razu zbiera fakty
 // do szkicu), pierwszy gotowy krok agenta; inaczej taki krok udawałby „Zaplanowane” z przyciskiem „Uruchom”, choć agent już nad nim siedzi
