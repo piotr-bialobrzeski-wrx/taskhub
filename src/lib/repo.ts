@@ -508,6 +508,9 @@ export async function reopenStep(ownerId: string, taskId: string, step: Step): P
     await tx`update steps set status = ${status}, prev_status = null, logged = false, done_at = null, done_by = null, agent_started_at = null, approved_at = null, approved_sig = null, send_started_at = null, approval = null, cloud = null, left_at = null where id = ${step.id}`;
     // „Zmień odpowiedź”: pytania na kartce wracają do zadania, poprzednia odpowiedź zostaje w prev (agent widzi zmianę); cofanie kartki nie ma do czego wracać
     if (stepKind(step) === "decision") {
+      // paczka 22: zgoda z tej decyzji przechodziła na kroki po niej; zlecone, a jeszcze niewzięte przez chmurę czekają znowu na nową odpowiedź
+      await tx`update steps s set cloud = s.cloud || jsonb_build_object('state', 'auto') where s.task_id = ${taskId} and s.status = 'todo' and s.cloud->>'state' in ('queued', 'rung')
+        and exists (select 1 from step_dependencies d where d.step_id = s.id and d.depends_on_id = ${step.id})`;
       const blocks = (step.blocks ?? []).map((b): Block => (b.type === "question" && b.answer ? { ...b, answer: undefined, prev: b.answer } : b));
       await tx`update steps set blocks = ${tx.json(sanitizeBlocks(blocks) as never)}, blocks_prev = null where id = ${step.id}`;
     }
@@ -796,26 +799,41 @@ export async function cancelCloud(ownerId: string, stepId: string): Promise<bool
 }
 // paczka 19, punkt 2: krok „Zleć w projekcie: …” dodany przez agenta na wyraźne polecenie Piotra w rozmowie zadania (msg = id tej wiadomości) rusza w chmurze
 // bez drugiego kliknięcia: polecenie w rozmowie jest zgodą. Najpierw „auto” (czeka na swoje kroki), promoteCloud zamienia je w zwykłe zlecenie, gdy wszystkie są zrobione
-export async function armCloud(ownerId: string, stepId: string, msgId: string): Promise<boolean> {
-  const r = await sql()`update steps s set cloud = jsonb_build_object('state', 'auto', 'at', now(), 'msg', ${msgId}::text), left_at = null from tasks t
+// from (paczka 22): krok decyzji Piotra, z którego przeszła zgoda (odpowiedź na kartce decyzji zleca kroki, które tylko wykonują wybraną opcję)
+export async function armCloud(ownerId: string, stepId: string, msgId: string, from?: string | null): Promise<boolean> {
+  const r = await sql()`update steps s set cloud = jsonb_strip_nulls(jsonb_build_object('state', 'auto', 'at', now(), 'msg', ${msgId}::text, 'from', ${from ?? null}::text)), left_at = null from tasks t
     where t.id = s.task_id and t.owner_id = ${ownerId} and t.deleted_at is null and s.id = ${stepId} and s.status = 'todo' and s.cloud is null returning s.id`;
   return r.length > 0;
 }
 // „auto” bez niezrobionych zależności → zlecenie do chmury (mostek odpali ją jak po kliknięciu); zwraca kroki, które właśnie ruszyły
-export async function promoteCloud(taskId: string): Promise<{ id: string; title: string }[]> {
-  return (await sql()`update steps s set cloud = jsonb_build_object('state', 'queued', 'at', now(), 'msg', s.cloud->>'msg')
+export async function promoteCloud(taskId: string): Promise<{ id: string; title: string; from: string | null }[]> {
+  return (await sql()`update steps s set cloud = s.cloud || jsonb_build_object('state', 'queued', 'at', now())
     where s.task_id = ${taskId} and s.status = 'todo' and s.cloud->>'state' = 'auto'
       and not exists (select 1 from step_dependencies d join steps x on x.id = d.depends_on_id where d.step_id = s.id and x.status <> 'done')
-    returning s.id, s.title`).map((r) => ({ id: r.id as string, title: r.title as string }));
+    returning s.id, s.title, s.cloud->>'from' as "from"`).map((r) => ({ id: r.id as string, title: r.title as string, from: (r.from as string | null) ?? null }));
 }
 // promoteCloud z linią w rozmowie zadania: Piotr widzi, że krok ruszył bez jego kliknięcia
 export async function startAutoCloud(taskId: string): Promise<string[]> {
   const went = await promoteCloud(taskId);
   if (went.length) {
     const [t] = await sql()`select owner_id from tasks where id = ${taskId}`;
-    for (const x of went) if (t) await addChat(t.ownerId as string, taskId, "agent", `Zlecone do chmury: „${shortTitle(x.title, 70)}”, tak jak prosiłeś w rozmowie. Claude w chmurze weźmie ten krok i zamknie go z wynikiem.`, { stepId: x.id });
+    const order = went.some((x) => x.from) ? (await sql()`select id, title from steps where task_id = ${taskId} order by position, created_at`).map((r) => ({ id: r.id as string, title: r.title as string })) : [];
+    for (const x of went) {
+      const k = x.from ? order.findIndex((o) => o.id === x.from) : -1;
+      const why = k >= 0 ? `po Twojej decyzji w kroku ${String(k + 1).padStart(2, "0")} „${shortTitle(order[k].title, 50)}”` : "tak jak prosiłeś w rozmowie";
+      if (t) await addChat(t.ownerId as string, taskId, "agent", `Zlecone do chmury: „${shortTitle(x.title, 70)}”, ${why}. Claude w chmurze weźmie ten krok i zamknie go z wynikiem.`, { stepId: x.id });
+    }
   }
   return went.map((x) => x.id);
+}
+// paczka 22: odpowiedź Piotra na kartce decyzji (wiadomość „Decyzja w kroku …” albo „Zmieniam decyzję w kroku …” przy kroku decyzji) z ostatniej doby,
+// najnowsza spośród kroków steps; jej id to zgoda dla kroków „Zleć w projekcie”, które tylko wykonują wybraną opcję
+export async function decisionMsgIn(ownerId: string, taskId: string, stepIds: string[]): Promise<{ id: string; stepId: string } | null> {
+  if (!stepIds.length) return null;
+  const [r] = await sql()`select id, actions->>'stepId' as step_id from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and role = 'user'
+    and actions->>'stepId' in ${sql()(stepIds)} and (text like 'Decyzja w kroku %' or text like 'Zmieniam decyzję w kroku %') and created_at > now() - interval '24 hours'
+    order by created_at desc limit 1`;
+  return r ? { id: r.id as string, stepId: r.stepId as string } : null;
 }
 // wiadomość Piotra w tym zadaniu z ostatniej doby: tylko taka może zlecić krok do chmury (agent nie zleca sam z siebie)
 export async function ownerChatIn(ownerId: string, taskId: string, msgId: string): Promise<boolean> {
