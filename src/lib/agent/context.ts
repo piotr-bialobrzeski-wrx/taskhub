@@ -5,7 +5,8 @@ import { type Company, type Connection, type Project, type Provenance, type Rule
 import { LEVELS, scoreOf, whyText, type Score } from "../priority";
 import { agentMinOf, calibrationText, fmtMin, remainEst, taskAgent, taskSpent, todayISO } from "../time";
 import { rulesFor } from "../repo";
-import { isPromptDraft, isSendable, optionLabel, optionsOf, type Approvable } from "./approval";
+import { draftOf, isExternalApp, isPromptDraft, isSendable, optionLabel, optionsOf, type Approvable } from "./approval";
+import { fmtDateTime } from "../clock";
 
 export type Scored = { task: Task; score: Score; project: Project | null };
 
@@ -75,6 +76,13 @@ export function connectionsText(connections: Connection[], companies: Company[],
   const line = (c: Connection) => `${c.label}${named(c) ? "" : ` (${toolLabel(c.app)})`}${c.account ? ` ${c.account}` : ""} | ${cname(c.companyId) ?? (c.sphere === "private" ? "prywatne" : "zawodowe")} | ${CONNECTION_PROVIDER_LABELS[c.provider]}${c.state !== "active" ? ` | ${CONNECTION_STATE_LABELS[c.state].toUpperCase()}` : ""}`;
   return `POŁĄCZENIA (do czego masz dostęp, na jakim koncie, przez co${sphere ? `; tylko sfera ${sphere === "private" ? "prywatna" : "zawodowa"}` : ""}; krok z polem „połączenie” rób tym połączeniem, inaczej wybierz pasujące do firmy zadania):\n${list.map((c) => "- " + line(c)).join("\n")}`;
 }
+// paczka 22: przy wysłanym szkicu do aplikacji zewnętrznej, czyja zgoda za nim stoi (zapis kliknięcia, granica z biegu wysyłki albo brak zapisu)
+const consentNote = (s: Step): string => {
+  const d = draftOf(s);
+  if (d?.status !== "sent" || !isExternalApp(d.target.app)) return "";
+  const a = s.approval;
+  return a?.source === "click" && a.at ? ` | zgoda Piotra: ${fmtDateTime(a.at)}` : a?.before ? ` | zgoda Piotra: przed ${fmtDateTime(a.before)} (bieg wysyłki)` : " | zgoda Piotra: brak zapisu";
+};
 const connLabel = (id: string | null, connections?: Connection[]) => { const c = id ? connections?.find((x) => x.id === id) : null; return c ? ` | połączenie: ${c.label}${c.account ? ` (${c.account})` : ""}` : ""; };
 
 export function notesText(tasks: Task[]): string {
@@ -129,7 +137,7 @@ OBECNE ZADANIE: priorytet ${t.level}/5 (${LEVELS[cur.score.eff]}${cur.score.why.
 Podsumowanie: ${t.summary || "-"}
 Jak wpadło: ${capText(t.source) || "-"}
 Kroki:
-${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status} | po: ${s.dependsOn.join(", ") || "-"}${isOwnerStep(s) ? ` | szacunek ${s.estMin} min` : agentMinOf(s) ? ` | czas Claude'a ${agentMinOf(s)} min` : ""}${s.status === "done" ? ` | zrobił: ${doneByOf(s) === "owner" ? "Piotr" : "Claude"}` : ""}${connLabel(s.connectionId, c.connections)}${s.workLevel && s.tool !== "manual" ? ` | poziom: ${LEVEL_LABELS[normalizeLevel(s.workLevel) ?? "analysis"]}` : ""}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + outputText(s) : ""}`).join("\n") || "(brak kroków)"}
+${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status} | po: ${s.dependsOn.join(", ") || "-"}${isOwnerStep(s) ? ` | szacunek ${s.estMin} min` : agentMinOf(s) ? ` | czas Claude'a ${agentMinOf(s)} min` : ""}${s.status === "done" ? ` | zrobił: ${doneByOf(s) === "owner" ? "Piotr" : "Claude"}${consentNote(s)}` : ""}${connLabel(s.connectionId, c.connections)}${s.workLevel && s.tool !== "manual" ? ` | poziom: ${LEVEL_LABELS[normalizeLevel(s.workLevel) ?? "analysis"]}` : ""}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + outputText(s) : ""}`).join("\n") || "(brak kroków)"}
 INNE ZADANIA NA GŁÓWNEJ KANWIE (${others.length}):
 ${others.slice(0, 40).map(brief).join("\n") || "(brak)"}${notesText(c.tasks)}`;
 }

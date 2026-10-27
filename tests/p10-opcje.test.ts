@@ -142,9 +142,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("opcje w bazie: zgoda, wysyłka 
   };
   const chatDeps = async (taskId: string) => ({ ai: null as never, ownerId: owner, taskId, tasks: [(await repo.getTask(owner, taskId))!] });
   const get = async (taskId: string, stepId: string) => (await repo.getTask(owner, taskId))!.steps.find((x) => x.id === stepId)!;
+  // krok bez zgody: szkic zostaje w Task Hub (paczka 22: szkic do aplikacji zewnętrznej zawsze idzie przez zgodę i wysyłkę)
   const twoOptions = async (needsApproval = true, blocks: Block[] = [A, B]) => {
-    const t = await repo.createTask(owner, { title: "Opcje " + Math.random().toString(36).slice(2, 8), steps: [{ title: "Odpisz na #dev", tool: "slack", needsApproval }] });
+    const t = await repo.createTask(owner, { title: "Opcje " + Math.random().toString(36).slice(2, 8), steps: [{ title: "Odpisz na #dev", tool: needsApproval ? "slack" : "claude", needsApproval }] });
     const sid = t.steps[0].id;
+    if (!needsApproval) blocks = blocks.map((b) => (b.type === "draft" ? { ...b, target: { ...b.target, app: "claude" } } : b));
     await repo.updateStep(sid, { status: "draft", blocks });
     return { taskId: t.id, sid, s: await get(t.id, sid) };
   };
@@ -315,10 +317,13 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("opcje w bazie: zgoda, wysyłka 
     const to = (body: string, url: string, title: string) => D(body, { title, target: { app: "slack", where: "#dev", action: "send", url } });
     const t = await repo.createTask(owner, { title: "Opcje sameTarget", steps: [{ title: "Odpisz w wątku", tool: "slack", needsApproval: false }, { title: "Odpisz jeszcze raz", tool: "slack", needsApproval: true }] });
     const [s1, s2] = t.steps.map((x) => x.id);
-    // krok 1 (bez zgody) wysłał do U: „Zatwierdź” zapisuje jego szkic jako wysłany
+    // krok 1 (bez „wymaga zgody”) wysłał do U: szkic do Slacka i tak idzie przez zgodę (paczka 22) i bieg wysyłki
     await repo.updateStep(s1, { status: "draft", blocks: [to("Pierwsza odpowiedź", U, "Jedyna")] });
     const fd = new FormData(); fd.set("option", "0");
     await actions.approveStep(t.id, s1, fd);
+    expect((await get(t.id, s1)).needsApproval).toBe(true);
+    expect(await repo.markSendStarted(owner, s1)).toBe(true);
+    expect(await repo.completeSend(owner, s1, { summary: "Wysłane" })).toBe(true);
     expect(draftsOf(await get(t.id, s1)).map((d) => d.status)).toEqual(["sent"]);
     const r = await call(client, "set_blocks", { stepId: s2, blocks: [to("Wariant A", V, "Opcja A"), to("Wariant B", U, "Opcja B")] });
     expect(r).toContain("Nie zapisałem"); expect(r).toContain("już wysłane"); expect(r).toContain(`[${s1}]`);

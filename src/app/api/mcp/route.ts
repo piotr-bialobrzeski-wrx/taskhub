@@ -21,7 +21,7 @@ import { securityReport } from "@/lib/security";
 import { isFilePath, isHttpUrl, sanitizeBlocks } from "@/lib/safeurl";
 import { unlazy } from "@/lib/format";
 import { AGENT_MAX_SEC, elapsedSec } from "@/lib/time";
-import { appKey, approvalSig, approvalValid, coerceAgentDrafts, draftOf, draftsOf, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable } from "@/lib/agent/approval";
+import { appKey, approvalSig, approvalValid, coerceAgentDrafts, draftOf, draftsOf, forgedDraftStatus, isExternalApp, isGitDraft, isLocalFile, isPromptDraft, isSendable } from "@/lib/agent/approval";
 import { matchProjectName } from "@/lib/project-guess";
 import { MAX_ESCALATION, normalizeLevel } from "@/lib/agent/models";
 
@@ -329,6 +329,9 @@ function buildHandler(auth: repo.TokenAuth) {
       // zrobiony krok Piotra z jego odpowiedzią na kartce to jego decyzja (KARTKA ZROBIONEGO KROKU w get_task): agent jej nie nadpisze
       if (was.status === "done" && isOwnerStep(was) && was.blocks?.some((b) => b.type === "question" && !!b.answer))
         return text("Nie zapisałem: to zrobiony krok Piotra z jego decyzją na kartce, więc kartki nie zmieniam. Zastosuj decyzję w krokach, które od niego zależą; gdy coś jest niejasne, zapytaj przez reply_chat ze stepId tego kroku.");
+      // paczka 22: szkic od agenta zawsze czeka na zgodę Piotra; stan „zatwierdzony” albo „wysłany” bez jego kliknięcia to błąd, nie cicha poprawka
+      const forged = forgedDraftStatus(was, a.blocks);
+      if (forged) return { content: [{ type: "text" as const, text: `Nie zapisałem: szkic od agenta zapisuje się tylko jako propozycja (status proposed). Stan „${forged === "approved" ? "zatwierdzony" : "wysłany"}” nadaje wyłącznie kliknięcie Piotra „Zatwierdź” i wysyłka po nim. Zapisz szkic ze statusem proposed albo bez statusu.` }], isError: true };
       // szkic od agenta sam nie jest zatwierdzony ani wysłany; ta sama treść co zapisany szkic zachowuje jego stan; odpowiedzi na pytania tylko od Piotra
       const blocks = keepOwnerAnswers(was.blocks, coerceAgentDrafts(was, a.blocks));
       // szkic tego kroku już poszedł (krok zrobiony albo przywrócony do zrobienia): wysłanego nie da się cofnąć, a propozycja obok niego nigdy nie

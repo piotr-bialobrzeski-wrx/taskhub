@@ -196,6 +196,9 @@ export const Step = z.object({
   approvedAt: z.string().nullable().optional(),     // zgoda Piotra na szkic (tylko jego kliknięcie „Zatwierdź”)
   approvedSig: z.string().nullable().optional(),    // podpis zatwierdzonej treści; inna treść = brak zgody
   sendStartedAt: z.string().nullable().optional(),  // bieg wysyłki wziął szkic (najwyżej raz)
+  // trwały zapis zgody (paczka 22): kiedy i kto kliknął „Zatwierdź”, podpis i początek treści; zostaje po wysyłce, znika z cofniętą zgodą.
+  // source send-run: zapis odtworzony z biegu wysyłki sprzed paczki 22 (zgoda była przed before, godzina kliknięcia nieznana)
+  approval: z.object({ at: z.string().nullable(), by: z.string(), sig: z.string().optional(), excerpt: z.string().optional(), before: z.string().optional(), source: z.enum(["click", "send-run"]) }).nullable().optional(),
   agentSec: z.number().int().optional(),            // czas Claude'a na ten krok (sekundy, liczony sam: od start_step albo znacznika biegu do zamknięcia)
   agentStartedAt: z.string().nullable().optional(), // start_step agenta; zamknięcie albo oddanie kroku go kasuje
   doneBy: z.enum(["owner", "agent"]).nullable().optional(),   // kto zamknął krok; null (sprzed paczki 7) = wg narzędzia

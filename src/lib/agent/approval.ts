@@ -68,10 +68,12 @@ export function approvalSig(step: { id: string; blocks?: Block[] | null }, d: Dr
 // Karta wysyła go przy zatwierdzeniu; inny podpis w bazie = szkic (miejsce, pola, wiersze, pliki) zmienił się, zanim Piotr kliknął
 export const shownSig = (step: { id: string; blocks?: Block[] | null }, d: Draft, bodyInForm: boolean): string => approvalSig(step, bodyInForm ? { ...d, body: "" } : d);
 
-export type Approvable = Pick<Step, "id" | "status" | "blocks"> & Partial<Pick<Step, "approvedAt" | "approvedSig" | "sendStartedAt">>;
-// zgoda ważna: krok czeka na wysyłkę, szkic zatwierdzony, podpis zgadza się z obecną treścią (także w trakcie wysyłki)
+export type Approvable = Pick<Step, "id" | "status" | "blocks"> & Partial<Pick<Step, "approvedAt" | "approvedSig" | "sendStartedAt" | "approval">>;
+// zgoda ważna: krok czeka na wysyłkę, szkic zatwierdzony, podpis zgadza się z obecną treścią (także w trakcie wysyłki), a krok z bazy
+// (approval wczytane) ma zapis kliknięcia Piotra z tym samym podpisem (paczka 22): bez zapisu albo z innym podpisem wysyłka nic nie robi
 export function approvalValid(s: Approvable): boolean {
   const d = draftOf(s);
+  if (s.approval !== undefined && !(s.approval?.source === "click" && s.approval.sig === s.approvedSig)) return false;
   return s.status === "handoff" && !!s.approvedAt && !!s.approvedSig && !!d && d.status === "approved" && s.approvedSig === approvalSig(s, d);
 }
 // do wysłania: ważna zgoda i żaden bieg wysyłki jeszcze go nie wziął
@@ -117,6 +119,17 @@ export function coerceAgentDrafts(step: Pick<Step, "id" | "blocks">, incoming: B
     if (!matched && old && oldSig === approvalSig({ id: step.id, blocks: incoming }, b)) { matched = true; return { ...rest, status: old.status }; }
     return { ...rest, status: "proposed" as const };
   });
+}
+// paczka 22: agent nie nadaje szkicowi stanu. Szkic przychodzący od agenta ze stanem „zatwierdzony” albo „wysłany”, którego zapisany szkic
+// o tej samej treści nie ma (coerceAgentDrafts by go obniżył), to próba podrobienia zgody: zwraca ten stan, a set_blocks kończy się błędem.
+// Przepisanie kartki z tym samym, już zatwierdzonym albo wysłanym szkicem (bez zmiany treści) przechodzi bez błędu
+export function forgedDraftStatus(step: Pick<Step, "id" | "blocks">, incoming: Block[]): "approved" | "sent" | null {
+  const kept = coerceAgentDrafts(step, incoming);
+  for (let k = 0; k < incoming.length; k++) {
+    const b = incoming[k], c = kept[k];
+    if (b.type === "draft" && b.status !== "proposed" && (c?.type !== "draft" || c.status !== b.status)) return b.status;
+  }
+  return null;
 }
 // opcje złożone przez model w aplikacji (composeStep): szkic o tej samej treści co wcześniejszy albo do innej aplikacji niż pierwszy wypada,
 // bo nie ma komu odmówić (set_blocks odmawia agentowi zamiast wyrzucać); klocki kontekstu zostają

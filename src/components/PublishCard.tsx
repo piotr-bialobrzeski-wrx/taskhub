@@ -7,6 +7,7 @@ import { normalizeTool, openLabel, toolLabel } from "@/lib/schema";
 import { ACTION, approveLabel, destHint, destOf, targetLink, type Dest } from "@/lib/stepcard";
 import { fileName } from "@/lib/safeurl";
 import { fmtTime } from "@/lib/canvas/vm";
+import { fmtDateTime } from "@/lib/clock";
 import { toolColor } from "@/components/canvas/ui";
 import { Icon } from "@/components/canvas/ui";
 import { Facts, Table } from "@/components/BlockRenderer";
@@ -19,9 +20,19 @@ import { CopyButton } from "@/components/CopyButton";
 import { isHttpUrl, isLocalPath, safeHref } from "@/lib/safeurl";
 import type { TileActivity } from "@/components/canvas/ui";
 import { approveStep, backToTodo, markDone, prepare, saveDraftBody } from "@/app/actions";
-import { optionLabel, optionsOf, shownSig, type Draft } from "@/lib/agent/approval";
+import { isExternalApp, optionLabel, optionsOf, shownSig, type Draft } from "@/lib/agent/approval";
 
 export type CardMode = "proposed" | "parked" | "sending" | "sent" | "unsent";
+
+// paczka 22: kto i kiedy zatwierdził szkic (karta wysłanego i wysyłanego kroku). Zapis odtworzony z biegu wysyłki zna tylko górną granicę;
+// wysłany szkic do aplikacji zewnętrznej bez zapisu zgody mówi to wprost (warn)
+export function approvalNote(s: Pick<Step, "approval" | "approvedAt">, external: boolean): { text: string; warn: boolean } | null {
+  const a = s.approval;
+  if (a?.source === "click" && a.at) return { text: `Zatwierdziłeś ${fmtDateTime(a.at)}`, warn: false };
+  if (a?.source === "send-run" && a.before) return { text: `Zatwierdziłeś przed ${fmtDateTime(a.before)}`, warn: false };
+  if (s.approvedAt) return { text: `Zatwierdziłeś ${fmtDateTime(s.approvedAt)}`, warn: false };
+  return external ? { text: "Brak zapisu Twojej zgody na ten szkic", warn: true } : null;
+}
 
 // tryb karty z stanu kroku: szkic do decyzji, szkic odłożony (krok wrócił do gotowych), wysyłka w toku, wysłano
 export function cardModeOf(s: Step): CardMode | null {
@@ -188,6 +199,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       ) : null}
       {pick || list ? <div className="cmp">{drafts.map((di, i) => optionCard(di, i, list))}</div> : one.preview}
       {rej}
+      {mode === "sent" || mode === "sending" ? (() => { const n = approvalNote(s, s.needsApproval && isExternalApp(app)); return n ? <p className={n.warn ? "note warn" : "pub-dest"}>{n.text}</p> : null; })() : null}
       {sentAlready && (mode === "proposed" || mode === "parked") ? (
         // wybrana już poszła: „Przygotuj od nowa” zostawiłoby wysłaną w kroku bez niczego do zatwierdzenia, „Odłóż” nie ma czego odłożyć,
         // a linia miejsca obiecywałaby wysyłkę, której nie będzie; zostaje zamknięcie kroku i ta sama rada, którą dostaje agent w set_blocks
