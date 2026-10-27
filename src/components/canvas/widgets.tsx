@@ -8,6 +8,7 @@ import { loadChat, type ChatVM } from "@/app/actions";
 import type { Queue } from "@/lib/auto";
 import { workFoot, type FeedItem, type WorkBubble } from "@/lib/feed";
 import { Activity, useMinutes } from "@/components/Activity";
+import { draftKeyOf, readDraft, sendKeepingDraft, writeDraft, type Sent } from "@/lib/chat-draft";
 import { Icon, Lvl, projColor, type ProjectVM } from "./ui";
 
 // ---------- menu wyboru przy przycisku ----------
@@ -229,25 +230,24 @@ function ImageView({ items, current, onPick, onClose, onRemove }: { items: Att[]
     </div>, document.body);
 }
 
-// szkic niewysłanej wiadomości (paczka 19, punkt 3): osobno dla każdego miejsca czatu (główna kanwa, zadanie, krok), w przeglądarce, więc przetrwa
-// przejście do innego zadania i odświeżenie strony; znika po wysłaniu
-export const draftKeyOf = (taskId: string | null, stepId: string | null) => "th-draft-" + (!taskId ? "main" : stepId ? "s-" + stepId : "t-" + taskId);
-const readDraft = (key: string) => { try { return localStorage.getItem(key) ?? ""; } catch { return ""; } };
-const writeDraft = (key: string, v: string) => { try { if (v.trim()) localStorage.setItem(key, v); else localStorage.removeItem(key); } catch { /* brak storage */ } };
-function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone, hist, onHistory, draftKey }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void; hist: boolean; onHistory: () => void; draftKey: string }) {
+function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone, onFailed, hist, onHistory, draftKey, sent }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void; onFailed: () => void; hist: boolean; onHistory: () => void; draftKey: string; sent: { current: Sent | null } }) {
   const { pending } = useFormStatus();
   const ta = useRef<HTMLTextAreaElement>(null);
   const pick = useRef<HTMLInputElement>(null);
   const grow = () => { const el = ta.current; if (!el) return; el.style.height = "34px"; el.style.height = Math.min(168, el.scrollHeight) + "px"; };
   // inne miejsce czatu: pole pokazuje jego szkic (tekst poprzedniego miejsca jest już zapisany przy każdym wpisaniu)
   useEffect(() => { if (ta.current) { ta.current.value = readDraft(draftKey); grow(); } }, [draftKey]);
-  // po wysłaniu (pending: tak → nie) pole i szkic miejsca, z którego poszła wiadomość, są puste
-  const sentFrom = useRef<string | null>(null);
+  // wysłanie: pole puste od razu (szkic znika już w sendKeepingDraft); gdy się nie uda, tekst i załączniki wracają
+  // (React po akcji sam czyści pola formularza, więc tekst wraca dopiero tutaj, po tym czyszczeniu)
+  const wasPending = useRef(false);
   useEffect(() => {
-    if (pending) { sentFrom.current = draftKey; return; }
-    if (sentFrom.current === null) return;
-    writeDraft(sentFrom.current, ""); sentFrom.current = null;
-    if (ta.current) { ta.current.value = ""; grow(); }
+    const el = ta.current;
+    if (pending) { wasPending.current = true; if (el) { el.value = ""; grow(); } return; }
+    if (!wasPending.current) return;
+    wasPending.current = false;
+    const s = sent.current; sent.current = null;
+    if (s?.failed) { if (el) { el.value = s.text; grow(); } onFailed(); return; }
+    if (el) { el.value = ""; grow(); }
     onDone();
   }, [pending]);   // eslint-disable-line react-hooks/exhaustive-deps
   const canSend = () => !!ta.current?.value.trim() || atts.length > 0;
@@ -310,17 +310,23 @@ export function Dock({ action, taskId, stepId = null, placeholder, busyText, con
   };
   const remove = (key: string) => setAtts((prev) => { prev.filter((a) => a.key === key).forEach((a) => { if (a.preview) URL.revokeObjectURL(a.preview); }); return prev.filter((a) => a.key !== key); });
   const clear = () => setAtts((prev) => { if (!prev.length) return prev; prev.forEach((a) => { if (a.preview) URL.revokeObjectURL(a.preview); }); return []; });
+  const sent = useRef<Sent | null>(null);
+  const send = async (fd: FormData) => {
+    const s = await sendKeepingDraft(action, fd, draftKeyOf(taskId, stepId));
+    sent.current = s;
+    if (s.failed) setErr("Nie udało się wysłać wiadomości. Tekst został w polu, spróbuj jeszcze raz.");
+  };
   // historia jest rodzeństwem formularza w tym samym kontekście warstw: szkło pod dokiem, dok nad nim (pole dalej działa)
   return (
     <div className={"dockwrap" + (hist ? " hist-on" : "")}>
       {hist ? <ChatHistory taskId={taskId} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(false)} queue={queue} version={version} /> : null}
-      <form ref={form} className={"dock glass" + (over ? " drop" : "")} action={action} autoComplete="off"
+      <form ref={form} className={"dock glass" + (over ? " drop" : "")} action={send} autoComplete="off"
         onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setOver(true); } }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); void addFiles([...e.dataTransfer.files]); }}>
         <input type="hidden" name="taskId" value={taskId ?? ""} /><input type="hidden" name="stepId" value={stepId ?? ""} />
         <input ref={filesIn} type="file" name="files" multiple tabIndex={-1} aria-hidden="true" />
         {context ? <div className="ctxrow">{context}</div> : null}
-        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} hist={hist} onHistory={() => setHist((h) => !h)} draftKey={draftKeyOf(taskId, stepId)} />
+        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} onFailed={() => setAtts((prev) => [...prev])} hist={hist} onHistory={() => setHist((h) => !h)} draftKey={draftKeyOf(taskId, stepId)} sent={sent} />
       </form>
     </div>
   );
