@@ -1150,7 +1150,7 @@ async function userSettingsDb(ownerId: string): Promise<Record<string, unknown>>
   const [r] = await sql()`select settings from users where id = ${ownerId}`;
   return (r?.settings as Record<string, unknown>) ?? {};
 }
-export const userSettings = memoized("userSettings", ["users"], userSettingsDb);
+export const userSettings = userSettingsDb;
 // limit modelu do podanej chwili (z komunikatu Claude Code); jednym zapisem, żeby dwa biegi nie nadpisały sobie limitów
 export async function recordModelLimit(ownerId: string, model: string, until: string): Promise<void> {
   await sql()`update users set settings = jsonb_set(settings, '{modelLimits}', coalesce(settings->'modelLimits', '{}'::jsonb) || jsonb_build_object(${model}::text, ${until}::text)) where id = ${ownerId}`;
@@ -1342,7 +1342,7 @@ async function listQuestionsDb(ownerId: string, where: { taskId?: string; open?:
     order by asked_at`;
   return rows.map(rowToQuestion);
 }
-export const listQuestions = memoized("listQuestions", ["questions"], listQuestionsDb);
+export const listQuestions = listQuestionsDb;
 export async function askQuestion(ownerId: string, q: { taskId: string; stepId?: string | null; text: string; options?: Question["options"]; recommended?: number | null }): Promise<Question> {
   const [r] = await sql()`insert into questions (owner_id, task_id, step_id, text, options, recommended)
     values (${ownerId}, ${q.taskId}, ${q.stepId ?? null}, ${q.text.slice(0, 2000)}, ${sql().json((q.options ?? []).slice(0, 6) as never)}, ${q.recommended ?? null}) returning *`;
