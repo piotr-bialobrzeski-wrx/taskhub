@@ -74,11 +74,10 @@ export async function ownerForToken(token: string): Promise<string | null> {
 
 // ---------- firmy ----------
 const rowToCompany = (r: Row): Company => ({ id: r.id as string, name: r.name as string, sphere: (r.sphere as Company["sphere"]) ?? "work", note: (r.note as string) ?? null, endedAt: iso(r.endedAt) });
-async function listCompaniesDb(ownerId: string): Promise<Company[]> {
+export async function listCompanies(ownerId: string): Promise<Company[]> {
   const rows = await sql()`select * from companies where owner_id = ${ownerId} order by created_at`;
   return rows.map(rowToCompany);
 }
-export const listCompanies = memoized("listCompanies", ["companies"], listCompaniesDb);
 export async function createCompany(ownerId: string, name: string, sphere: Company["sphere"] = "work", note: string | null = null): Promise<Company> {
   const [r] = await sql()`insert into companies (owner_id, name, sphere, note) values (${ownerId}, ${name.trim().slice(0, 60)}, ${sphere}, ${note}) returning *`;
   return rowToCompany(r);
@@ -101,11 +100,10 @@ export async function findCompanyByName(ownerId: string, name: string): Promise<
 
 // ---------- projekty ----------
 const rowToProject = (r: Row): Project => ({ id: r.id as string, name: r.name as string, color: Number(r.color), weight: Number(r.weight), language: r.language as string, companyId: (r.companyId as string) ?? null });
-async function listProjectsDb(ownerId: string): Promise<Project[]> {
+export async function listProjects(ownerId: string): Promise<Project[]> {
   const rows = await sql()`select * from projects where owner_id = ${ownerId} and archived_at is null order by created_at`;
   return rows.map(rowToProject);
 }
-export const listProjects = memoized("listProjects", ["projects"], listProjectsDb);
 export async function createProject(ownerId: string, name: string, weight = 3, companyId: string | null = null): Promise<Project> {
   const [{ n }] = await sql()`select count(*)::int as n from projects where owner_id = ${ownerId}`;
   const [r] = await sql()`insert into projects (owner_id, name, color, weight, company_id) values (${ownerId}, ${name.slice(0, 60)}, ${Number(n) % 8}, ${weight}, ${companyId}) returning *`;
@@ -143,11 +141,10 @@ const rowToConnection = (r: Row): Connection => ({
   state: (r.state as Connection["state"]) ?? "active", source: (r.source as Connection["source"]) ?? "manual", host: (r.host as string) ?? null, url: (r.url as string) ?? null,
   meta: (r.meta as Record<string, unknown>) ?? {}, seenAt: iso(r.seenAt),
 });
-async function listConnectionsDb(ownerId: string): Promise<Connection[]> {
+export async function listConnections(ownerId: string): Promise<Connection[]> {
   const rows = await sql()`select * from connections where owner_id = ${ownerId} order by (state = 'active') desc, app, label`;
   return rows.map(rowToConnection);
 }
-export const listConnections = memoized("listConnections", ["connections"], listConnectionsDb);
 export type ConnectionInput = { app?: string; label: string; account?: string | null; companyId?: string | null; sphere?: Connection["sphere"]; provider?: Connection["provider"]; kind?: Connection["kind"]; state?: Connection["state"]; url?: string | null; meta?: Record<string, unknown> };
 export async function createConnection(ownerId: string, input: ConnectionInput): Promise<Connection> {
   const label = input.label.trim().slice(0, 80);
@@ -293,30 +290,6 @@ async function hydrate(rows: Row[]): Promise<Task[]> {
   stepRows.forEach((s) => { const st = rowToStep(s, sdep.get(s.id as string) ?? []); byTask.set(st.taskId, [...(byTask.get(st.taskId) ?? []), st]); });
   return rows.map((r) => rowToTask(r, byTask.get(r.id as string) ?? [], tdep.get(r.id as string) ?? []));
 }
-// Pamięć odczytów w instancji serwera (transfer z Supabase): wynik czytania trzymamy w pamięci razem z odciskiem tabel, z których
-// pochodzi (liczba wierszy i najwyższy xmin, czyli numer ostatniej zmiany; liczy go baza, do nas wraca kilkadziesiąt bajtów).
-// Póki odcisk ten sam, nic więcej z bazy nie idzie. Zmiana w trakcie czytania daje najwyżej jedno czytanie więcej, nigdy stary wynik.
-// MEMO_MS to bezpiecznik: po tym czasie czytamy i tak. Wołający dostaje kopie.
-const MEMO_MS = 10 * 60_000, MEMO_MAX = 5000;
-const memoStore = new Map<string, { v: string; at: number; val: unknown }>();
-export async function tablesVersion(tables: string[]): Promise<string> {
-  const parts = tables.map((t) => sql()`select count(*)::text || ':' || coalesce(max(xmin::text::bigint), 0)::text from ${sql()(t)}`);
-  const [r] = await sql()`select concat_ws('|', ${parts.reduce((a, q, i) => (i ? sql()`${a}, (${q})` : sql()`(${q})`), sql()``)}) as v`;
-  return (r?.v as string) ?? "";
-}
-async function memo<T>(tables: string[], key: string, fn: () => Promise<T>): Promise<T> {
-  const v = await tablesVersion(tables);
-  const hit = memoStore.get(key);
-  if (hit && hit.v === v && Date.now() - hit.at < MEMO_MS) return structuredClone(hit.val as T);
-  const val = await fn();
-  if (memoStore.size >= MEMO_MAX) memoStore.clear();
-  memoStore.set(key, { v, at: Date.now(), val });
-  return structuredClone(val);
-}
-function memoized<A extends unknown[], R>(name: string, tables: string[], fn: (...a: A) => Promise<R>): (...a: A) => Promise<R> {
-  return (...a: A) => memo(tables, `${name}|${JSON.stringify(a)}`, () => fn(...a));
-}
-
 // Pamięć zadań w instancji serwera (transfer z Supabase): pełne zadania z krokami trzymamy tu, a z bazy przy każdym czytaniu bierzemy
 // tylko odcisk każdego zadania (xmin wiersza zadania, jego kroków i strzałek; zmienia się przy każdej zmianie wiersza). Pełną treść
 // pobieramy wyłącznie dla zadań, których odcisk się zmienił. Wołający dostaje kopie, więc nie zepsuje pamięci, zmieniając wynik.
@@ -328,14 +301,7 @@ const TASK_FP = (ownerId: string, id: string | null) => sql()`select t.id, t.del
     (select string_agg(td.depends_on_id::text, ',' order by td.depends_on_id) from task_dependencies td where td.task_id = t.id))) as fp
   from tasks t where t.owner_id = ${ownerId} ${id ? sql()`and t.id = ${id}` : sql()``} order by t.created_at, t.id`;
 
-const TASK_TABLES = ["tasks", "steps", "step_dependencies", "task_dependencies"];
-const taskList = new Map<string, { v: string; at: number; order: { id: string; deletedAt: string | null }[] }>();
 async function memTasks(ownerId: string, id: string | null = null): Promise<{ task: Task; deletedAt: string | null }[]> {
-  // cała lista: gdy tabele zadań się nie zmieniły od ostatniego czytania, nie pytamy nawet o odciski
-  const v = id ? "" : await tablesVersion(TASK_TABLES);
-  const list = id ? null : taskList.get(ownerId), mem0 = taskMem.get(ownerId);
-  if (list && mem0 && list.v === v && Date.now() - list.at < MEMO_MS && list.order.every((x) => mem0.has(x.id)))
-    return list.order.map((x) => ({ task: structuredClone(mem0.get(x.id)!.task), deletedAt: x.deletedAt }));
   const fps = await TASK_FP(ownerId, id);
   let mem = taskMem.get(ownerId);
   if (!mem) { mem = new Map(); taskMem.set(ownerId, mem); }
@@ -345,10 +311,7 @@ async function memTasks(ownerId: string, id: string | null = null): Promise<{ ta
     const fresh = await hydrate(await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} and id in ${sql()([...fpOf.keys()])}`);
     for (const t of fresh) mem.set(t.id, { fp: fpOf.get(t.id)!, task: t });
   }
-  if (!id) {
-    const live = new Set(fps.map((r) => r.id as string)); for (const k of [...mem.keys()]) if (!live.has(k)) mem.delete(k);
-    taskList.set(ownerId, { v, at: Date.now(), order: fps.map((r) => ({ id: r.id as string, deletedAt: iso(r.deletedAt) })) });
-  }
+  if (!id) { const live = new Set(fps.map((r) => r.id as string)); for (const k of [...mem.keys()]) if (!live.has(k)) mem.delete(k); }
   return fps.flatMap((r) => { const m = mem!.get(r.id as string); return m ? [{ task: structuredClone(m.task), deletedAt: iso(r.deletedAt) }] : []; });
 }
 export async function listTasks(ownerId: string, opts: { trash?: boolean; all?: boolean } = {}): Promise<Task[]> {
@@ -691,13 +654,12 @@ const rowToFact = (r: Row): Fact => ({
   id: r.id as string, label: r.label as string, value: r.value as string, pinned: !!r.pinned, hidden: !!r.hidden,
   source: r.sourceApp ? { app: r.sourceApp as string, ref: (r.sourceRef as string) ?? undefined, url: (r.sourceUrl as string) ?? undefined, fetchedAt: iso(r.fetchedAt) ?? undefined } : undefined,
 });
-async function listFactsDb(where: { stepId?: string; taskId?: string }): Promise<Fact[]> {
+export async function listFacts(where: { stepId?: string; taskId?: string }): Promise<Fact[]> {
   const rows = where.stepId
     ? await sql()`select * from facts where step_id = ${where.stepId} order by position, created_at`
     : await sql()`select * from facts where task_id = ${where.taskId!} and step_id is null order by position, created_at`;
   return rows.map(rowToFact);
 }
-export const listFacts = memoized("listFacts", ["facts"], listFactsDb);
 // agent podaje nowy zestaw faktów; przypięcia i ukrycia Piotra zostają (po etykiecie)
 export async function replaceFacts(where: { stepId?: string; taskId?: string }, facts: Fact[]): Promise<void> {
   const old = await listFacts(where);
@@ -719,7 +681,7 @@ export async function setFactPreference(id: string, pref: { pinned?: boolean; hi
   if (Object.keys(p).length) await sql()`update facts set ${sql()(p)} where id = ${id}`;
 }
 // preferencje per aplikacja: czego Piotr nie chce widzieć, co zawsze chce (tekst dla agenta)
-async function factPreferencesTextDb(ownerId: string): Promise<string> {
+export async function factPreferencesText(ownerId: string): Promise<string> {
   const rows = await sql()`
     select f.source_app, f.label, bool_or(f.pinned) as pinned, bool_or(f.hidden) as hidden
     from facts f left join steps s on s.id = f.step_id left join tasks t on t.id = coalesce(f.task_id, s.task_id)
@@ -729,7 +691,6 @@ async function factPreferencesTextDb(ownerId: string): Promise<string> {
   rows.forEach((r) => { const k = (r.sourceApp as string) ?? "ogólnie"; const e = by.get(k) ?? { pin: [], hide: [] }; if (r.pinned) e.pin.push(r.label as string); if (r.hidden) e.hide.push(r.label as string); by.set(k, e); });
   return "PREFERENCJE PÓL: " + [...by.entries()].map(([app, e]) => `${app}: ${e.pin.length ? "zawsze pokazuj " + e.pin.join(", ") : ""}${e.pin.length && e.hide.length ? "; " : ""}${e.hide.length ? "nie pokazuj " + e.hide.join(", ") : ""}`).join(" | ");
 }
-export const factPreferencesText = memoized("factPreferencesText", ["facts", "steps", "tasks"], factPreferencesTextDb);
 
 // ---------- migawki ----------
 export async function addSnapshot(where: { stepId?: string; taskId?: string }, app: string, raw: unknown, meta: { sourceId?: string; url?: string } = {}): Promise<string> {
@@ -747,13 +708,12 @@ export async function latestSnapshots(where: { stepId?: string; taskId?: string 
 export type Attachment = { id: string; kind: "image" | "file" | "link"; name: string | null; url: string | null; caption: string | null; analysis: string | null; keep: boolean; expiresAt: string | null; mime: string | null };
 const rowToAttachment = (r: Row): Attachment => ({ id: r.id as string, kind: r.kind as Attachment["kind"], name: (r.name as string) ?? null, url: (r.url as string) ?? null, caption: (r.caption as string) ?? null, analysis: (r.analysis as string) ?? null, keep: !!r.keep, expiresAt: iso(r.expiresAt), mime: (r.mime as string) ?? null });
 const ATT_COLS = ["id", "task_id", "step_id", "kind", "name", "url", "storage_path", "mime", "bytes", "caption", "analysis", "keep", "added_at", "expires_at"];   // bez `data`: listy nie ciągną plików
-async function listAttachmentsDb(where: { stepId?: string; taskId?: string }): Promise<Attachment[]> {
+export async function listAttachments(where: { stepId?: string; taskId?: string }): Promise<Attachment[]> {
   const rows = where.stepId
     ? await sql()`select ${sql()(ATT_COLS)} from attachments where step_id = ${where.stepId} order by added_at`
     : await sql()`select ${sql()(ATT_COLS)} from attachments where task_id = ${where.taskId!} order by added_at`;
   return rows.map(rowToAttachment);
 }
-export const listAttachments = memoized("listAttachments", ["attachments"], listAttachmentsDb);
 // plik wklejony w doku ląduje w bazie (data); adres /api/files/<id> działa po zalogowaniu, agent czyta go przez MCP get_attachment
 export async function addAttachment(where: { stepId?: string; taskId?: string }, a: { id?: string; kind: Attachment["kind"]; name?: string; url?: string; storagePath?: string; mime?: string; bytes?: number; caption?: string; analysis?: string; keep?: boolean; expiresAt?: string | null; data?: Buffer }): Promise<Attachment> {
   const id = a.id ?? randomUUID();
@@ -781,11 +741,10 @@ export async function countAttachments(taskIds: string[]): Promise<Record<string
 
 // ---------- zasady ----------
 const rowToRule = (r: Row): Rule => ({ id: r.id as string, kind: ((r.kind as Rule["kind"]) ?? "rule"), scope: r.scope as Rule["scope"], companyId: (r.companyId as string) ?? null, projectId: (r.projectId as string) ?? null, tool: (r.tool as string) ?? null, originCompanyId: (r.originCompanyId as string) ?? null, title: r.title as string, body: r.body as string, trigger: (r.trigger as string) ?? null, summary: (r.summary as string) ?? null, visibility: r.visibility as Rule["visibility"] });
-async function listRulesDb(ownerId: string): Promise<Rule[]> {
+export async function listRules(ownerId: string): Promise<Rule[]> {
   const rows = await sql()`select * from rules where owner_id = ${ownerId} order by scope, position, created_at`;
   return rows.map(rowToRule);
 }
-export const listRules = memoized("listRules", ["rules"], listRulesDb);
 // zasady pasujące do zadania: ogólne + firmy projektu + projektu + narzędzi użytych w krokach; projekt prywatny nie widzi niczego firmowego
 export function rulesFor(rules: Rule[], projectId: string | null, tools: string[], companyId: string | null = null): Rule[] {
   return rules.filter((r) => r.scope === "global" || (r.scope === "company" && !!companyId && r.companyId === companyId) || (r.scope === "project" && r.projectId === projectId) || (r.scope === "tool" && r.tool && tools.includes(r.tool)));
@@ -823,20 +782,18 @@ async function snapshotRule(ownerId: string, r: Row, change: RuleChange): Promis
     values (${r.id as string}, ${ownerId}, ${change}, ${(r.kind as string) ?? "rule"}, ${r.scope as string}, ${(r.companyId as string) ?? null}, ${(r.projectId as string) ?? null}, ${(r.tool as string) ?? null}, ${(r.originCompanyId as string) ?? null}, ${r.title as string}, ${r.body as string}, ${(r.trigger as string) ?? null}, ${(r.summary as string) ?? null})`;
 }
 // historia: najnowsza migawka pierwsza; bez ruleId = wszystkie zasady właściciela (strona zasad pokazuje je przy kartach)
-async function listRuleVersionsDb(ownerId: string, ruleId?: string, limit = 500): Promise<RuleVersion[]> {
+export async function listRuleVersions(ownerId: string, ruleId?: string, limit = 500): Promise<RuleVersion[]> {
   const rows = ruleId
     ? await sql()`select * from rule_versions where owner_id = ${ownerId} and rule_id = ${ruleId} order by changed_at desc limit ${limit}`
     : await sql()`select * from rule_versions where owner_id = ${ownerId} order by changed_at desc limit ${limit}`;
   return rows.map((r) => ({ id: r.id as string, ruleId: r.ruleId as string, change: r.change as RuleChange, kind: r.kind as Rule["kind"], scope: r.scope as Rule["scope"], title: r.title as string, body: r.body as string, trigger: (r.trigger as string) ?? null, summary: (r.summary as string) ?? null, changedAt: iso(r.changedAt) as string }));
 }
-export const listRuleVersions = memoized("listRuleVersions", ["rule_versions"], listRuleVersionsDb);
 
 // ---------- czasy ----------
-async function listSamplesDb(ownerId: string): Promise<TimeSample[]> {
+export async function listSamples(ownerId: string): Promise<TimeSample[]> {
   const rows = await sql()`select tool, project_id, est_min, spent_min, who from time_samples where owner_id = ${ownerId} order by at desc limit 300`;
   return rows.map((r) => ({ tool: r.tool as string, projectId: (r.projectId as string) ?? null, estMin: Number(r.estMin), spentMin: Number(r.spentMin), who: r.who === "agent" ? "agent" as const : "owner" as const }));
 }
-export const listSamples = memoized("listSamples", ["time_samples"], listSamplesDb);
 // czas Claude'a: start_step stawia znacznik; zamknięcie albo oddanie kroku dolicza sekundy i go kasuje
 export async function markAgentStart(stepId: string): Promise<void> { await sql()`update steps set agent_started_at = now(), left_at = null where id = ${stepId}`; }
 // agent oddał krok, bo nie dał rady (leave_step bez czekania): kafelek „Potrzebna pomoc”
@@ -963,14 +920,13 @@ export async function takeCloudStep(ownerId: string, stepId: string): Promise<bo
 export type ChatMessage = { id: string; role: "user" | "agent"; text: string; actions: unknown; createdAt: string; seenAt: string | null; answeredAt: string | null };
 const rowToChat = (r: Row): ChatMessage => ({ id: r.id as string, role: r.role as "user" | "agent", text: r.text as string, actions: r.actions, createdAt: iso(r.createdAt) as string, seenAt: iso(r.seenAt), answeredAt: iso(r.answeredAt) });
 // before: kursor (created_at) do wczytywania starszych wpisów w historii rozmowy
-async function listChatDb(ownerId: string, taskId: string | null, limit = 20, before: string | null = null): Promise<ChatMessage[]> {
+export async function listChat(ownerId: string, taskId: string | null, limit = 20, before: string | null = null): Promise<ChatMessage[]> {
   const cut = before ?? "9999-12-31T00:00:00Z";
   const rows = taskId
     ? await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and created_at < ${cut} order by created_at desc limit ${limit}`
     : await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id is null and created_at < ${cut} order by created_at desc limit ${limit}`;
   return rows.reverse().map(rowToChat);
 }
-export const listChat = memoized("listChat", ["chat_messages"], listChatDb);
 // seen: wiadomość Piotra już załatwiona (agent w aplikacji odpowiedział od razu); bez tego czeka na mostek albo automat jako praca
 export async function addChat(ownerId: string, taskId: string | null, role: "user" | "agent", text: string, actions?: unknown, opts: { seen?: boolean } = {}): Promise<string> {
   const seen = role === "agent" || opts.seen ? new Date() : null;
@@ -988,18 +944,16 @@ export async function listUnseenChat(ownerId: string, limit = 30, staleMin = CHA
   return rows.map((r) => ({ ...rowToChat(r), taskId: r.taskId as string, taskTitle: r.taskTitle as string }));
 }
 // wiadomości Piotra bez odpowiedzi w jednym zadaniu (linia stanu pod dymkiem, karta nad dokiem, pasek nad kanwą, blokada samozamknięcia)
-async function listPendingChatDb(ownerId: string, taskId: string): Promise<ChatMessage[]> {
+export async function listPendingChat(ownerId: string, taskId: string): Promise<ChatMessage[]> {
   const rows = await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and role = 'user' and answered_at is null order by created_at`;
   return rows.map(rowToChat);
 }
-export const listPendingChat = memoized("listPendingChat", ["chat_messages"], listPendingChatDb);
 // ile wiadomości bez odpowiedzi ma każde zadanie (chip „2 wiadomości” na kafelku); taskId zawęża do jednego zadania
-async function countPendingChatDb(ownerId: string, taskId: string | null = null): Promise<Map<string, number>> {
+export async function countPendingChat(ownerId: string, taskId: string | null = null): Promise<Map<string, number>> {
   const rows = await sql()`select task_id, count(*)::int as n from chat_messages where owner_id = ${ownerId} and role = 'user' and answered_at is null and task_id is not null
     ${taskId ? sql()`and task_id = ${taskId}` : sql()``} group by task_id`;
   return new Map(rows.map((r) => [r.taskId as string, Number(r.n)]));
 }
-export const countPendingChat = memoized("countPendingChat", ["chat_messages"], countPendingChatDb);
 // agent wziął wiadomości do opracowania (list_work): od teraz „w pracy”, aż reply_chat je załatwi albo bieg skończy się bez odpowiedzi
 export async function markChatSeen(ownerId: string, where: { ids?: string[]; taskId?: string }): Promise<void> {
   if (where.ids) { if (where.ids.length) await sql()`update chat_messages set seen_at = now() where owner_id = ${ownerId} and id in ${sql()(where.ids)} and answered_at is null`; }
@@ -1080,13 +1034,12 @@ export async function setLayoutMemory(ownerId: string, app: string, blocks: Bloc
 
 // ---------- grupy na kanwie ----------
 export type Group = { id: string; taskId: string | null; name: string; color: number; x: number; y: number; w: number; h: number; members: string[]; auto: boolean };
-async function listGroupsDb(ownerId: string, taskId: string | null): Promise<Group[]> {
+export async function listGroups(ownerId: string, taskId: string | null): Promise<Group[]> {
   const rows = taskId
     ? await sql()`select * from canvas_groups where owner_id = ${ownerId} and task_id = ${taskId} order by created_at`
     : await sql()`select * from canvas_groups where owner_id = ${ownerId} and task_id is null order by created_at`;
   return rows.map((r) => ({ id: r.id as string, taskId: (r.taskId as string) ?? null, name: r.name as string, color: Number(r.color), x: Number(r.x), y: Number(r.y), w: Number(r.w), h: Number(r.h), members: (r.members as string[]) ?? [], auto: !!r.auto }));
 }
-export const listGroups = memoized("listGroups", ["canvas_groups"], listGroupsDb);
 export async function createGroup(ownerId: string, taskId: string | null, name: string, members: string[], rect?: { x: number; y: number; w: number; h: number }): Promise<Group> {
   const [{ n }] = await sql()`select count(*)::int as n from canvas_groups where owner_id = ${ownerId}`;
   // kolumny prostokąta są całkowite, a kanwa liczy w ułamkach (powiększenie, środek widoku): ułamek wywracał zapis grupy
@@ -1146,11 +1099,10 @@ export async function deleteApiToken(ownerId: string, id: string): Promise<void>
 export async function setUserSettings(ownerId: string, patch: Record<string, unknown>): Promise<void> {
   await sql()`update users set settings = settings || ${sql().json(patch as never)} where id = ${ownerId}`;
 }
-async function userSettingsDb(ownerId: string): Promise<Record<string, unknown>> {
+export async function userSettings(ownerId: string): Promise<Record<string, unknown>> {
   const [r] = await sql()`select settings from users where id = ${ownerId}`;
   return (r?.settings as Record<string, unknown>) ?? {};
 }
-export const userSettings = memoized("userSettings", ["users"], userSettingsDb);
 // limit modelu do podanej chwili (z komunikatu Claude Code); jednym zapisem, żeby dwa biegi nie nadpisały sobie limitów
 export async function recordModelLimit(ownerId: string, model: string, until: string): Promise<void> {
   await sql()`update users set settings = jsonb_set(settings, '{modelLimits}', coalesce(settings->'modelLimits', '{}'::jsonb) || jsonb_build_object(${model}::text, ${until}::text)) where id = ${ownerId}`;
@@ -1334,7 +1286,7 @@ const rowToQuestion = (r: Row): Question => ({
   options: (r.options as Question["options"]) ?? [], recommended: r.recommended == null ? null : Number(r.recommended), answer: (r.answer as string) ?? null,
   askedAt: iso(r.askedAt) as string, answeredAt: iso(r.answeredAt), seenAt: iso(r.seenAt),
 });
-async function listQuestionsDb(ownerId: string, where: { taskId?: string; open?: boolean; answeredUnseen?: boolean } = {}): Promise<Question[]> {
+export async function listQuestions(ownerId: string, where: { taskId?: string; open?: boolean; answeredUnseen?: boolean } = {}): Promise<Question[]> {
   const rows = await sql()`select * from questions where owner_id = ${ownerId}
     ${where.taskId ? sql()`and task_id = ${where.taskId}` : sql()``}
     ${where.open ? sql()`and answered_at is null` : sql()``}
@@ -1342,7 +1294,6 @@ async function listQuestionsDb(ownerId: string, where: { taskId?: string; open?:
     order by asked_at`;
   return rows.map(rowToQuestion);
 }
-export const listQuestions = memoized("listQuestions", ["questions"], listQuestionsDb);
 export async function askQuestion(ownerId: string, q: { taskId: string; stepId?: string | null; text: string; options?: Question["options"]; recommended?: number | null }): Promise<Question> {
   const [r] = await sql()`insert into questions (owner_id, task_id, step_id, text, options, recommended)
     values (${ownerId}, ${q.taskId}, ${q.stepId ?? null}, ${q.text.slice(0, 2000)}, ${sql().json((q.options ?? []).slice(0, 6) as never)}, ${q.recommended ?? null}) returning *`;
@@ -1371,14 +1322,13 @@ export async function answerBlockQuestion(stepId: string, index: number, answer:
   return b.text;
 }
 // poprzednie wersje kartek (paczka 19): zlecenie na karcie zrobionego kroku, gdy wynik zastąpił klocki sprzed zamknięcia; tylko dla podanych kroków
-async function prevBlocksOfDb(stepIds: string[]): Promise<Map<string, Block[]>> {
+export async function prevBlocksOf(stepIds: string[]): Promise<Map<string, Block[]>> {
   const out = new Map<string, Block[]>();
   if (!stepIds.length) return out;
   const rows = await sql()`select id, blocks_prev from steps where id in ${sql()(stepIds)} and blocks_prev is not null`;
   for (const r of rows) { const b = parseBlocks(r.blocksPrev); if (b) out.set(r.id as string, b); }
   return out;
 }
-export const prevBlocksOf = memoized("prevBlocksOf", ["steps"], prevBlocksOfDb);
 // cofnięcie ostatniej zmiany kartki: poprzednia i obecna wersja zamieniają się miejscami (drugie cofnięcie przywraca zmianę).
 // Cofnięcie nie wskrzesza zgody ani wysyłki: przywrócony szkic przechodzi przez tę samą kontrolę co każdy zapis.
 export async function restorePrevBlocks(stepId: string): Promise<boolean> {
