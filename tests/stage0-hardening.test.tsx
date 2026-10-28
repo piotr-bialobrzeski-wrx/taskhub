@@ -75,7 +75,7 @@ describe("render: adresy z danych nie trafiają do href", () => {
     for (const h of hs) noBad(h);
     expect(hs[2]).toContain('href="https://a.pl"');
     expect(hs[2]).toContain("Plik");
-    expect(hs[3]).toContain(`src="/api/files/${ID}"`);
+    expect(hs[3]).toContain(`src="/api/files/${ID}?w=s"`);   // paczka 27: na kartce miniatura
     expect(hs[4]).toContain("Ustawienia");
   });
   it("SVG z Task Hub nie jest obrazkiem w miejscu, tylko plikiem", () => {

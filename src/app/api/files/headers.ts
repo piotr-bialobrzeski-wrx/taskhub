@@ -13,6 +13,7 @@ export function fileHeaders(mime: string | null, name: string | null): Record<st
     "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${fname}`,
     "content-security-policy": FILE_CSP,
     "x-content-type-options": "nosniff",
-    "cache-control": "private, max-age=86400",
+    // treść pliku pod danym adresem się nie zmienia (nowa wersja = nowy załącznik), więc przeglądarka trzyma go rok i nie pyta ponownie
+    "cache-control": "private, max-age=31536000, immutable",
   };
 }

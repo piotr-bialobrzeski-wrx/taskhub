@@ -7,7 +7,7 @@ import { hasMarkdown } from "@/lib/format";
 import { Icon, plural } from "@/components/canvas/ui";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { CopyButton } from "@/components/CopyButton";
-import { isHttpUrl, isLocalPath, isMediaUrl, safeHref } from "@/lib/safeurl";
+import { isHttpUrl, isLocalPath, isMediaUrl, safeHref, thumbSrc } from "@/lib/safeurl";
 import { groupBlocks } from "@/lib/stepcard";
 
 // gdzie blok pytania ma zapisać odpowiedź (panel kroku); bez tego pytanie jest tylko do odczytu
@@ -163,7 +163,7 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
               const chip = <span>{m.kind === "file" ? "📎" : "🔗"} {m.name ?? m.url}</span>;
               return (
               <div key={i}>
-                {img ? <a href={href} target="_blank" rel="noopener"><img src={m.url.trim()} alt={m.caption ?? m.name ?? ""} /></a> : href ? <a className="chip" href={href} target="_blank" rel="noopener" title={m.name ?? m.url}>{chip}</a> : <span className="chip" title={m.name ?? m.url}>{chip}</span>}
+                {img ? <a href={href} target="_blank" rel="noopener"><img src={thumbSrc(m.url)} loading="lazy" alt={m.caption ?? m.name ?? ""} /></a> : href ? <a className="chip" href={href} target="_blank" rel="noopener" title={m.name ?? m.url}>{chip}</a> : <span className="chip" title={m.name ?? m.url}>{chip}</span>}
                 {m.caption ? <div className="cap">{m.caption}</div> : null}
                 {m.analysis ? <details><summary className="sub">Analiza agenta</summary><p className="sub" style={{ whiteSpace: "pre-wrap" }}>{m.analysis}</p></details> : null}
               </div>

@@ -43,7 +43,8 @@ export async function reviewReport(ai: Ai, task: Task, step: Step): Promise<void
 export const Draft = z.object({ fields: z.array(Fact).max(6), output: z.string(), link: z.string().optional() });
 export async function draftStep(ai: Ai, task: Task, step: Step, rules: Rule[], projectName?: string | null, companyId: string | null = null): Promise<void> {
   const prev = task.steps.filter((s) => step.dependsOn.includes(s.id)).map((d) => `- ${d.title}: ${(d.output || "(brak)").slice(0, 1500)}`).join("\n");
-  const attachments = await repo.listAttachments({ taskId: task.id });
+  const all = await repo.listAttachments({ taskId: task.id });
+  const attachments = repo.stepAttachments(step, all) ?? all;   // tylko grafiki kroku (paczka 27); krok sprzed przypisywania: wszystkie
   const r = await ai.json({
     system: `Jesteś agentem wykonującym jeden krok zadania w aplikacji Task Hub. Przygotuj gotowy szkic tego, co agent zrobiłby lub wysłał. Odpowiadasz JSON: fields (2-5 najważniejszych informacji dla tego narzędzia, każda z source.app; gdy czegoś nie wiesz, rozsądne założenie z dopiskiem "(założenie)"), output (gotowa treść: wiadomość, mail, dokument w punktach albo lista zadań; konkretnie, maks. 220 słów), link (gdy w danych jest adres tego miejsca).
 ${rulesText(rules, task.projectId, [step.tool], { text: `${step.title} ${step.detail}`, companyId })}`,

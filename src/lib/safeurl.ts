@@ -15,6 +15,9 @@ export function isHttpUrl(u: unknown): u is string {
 // plik załącznika z Task Hub (adres względny) albo http(s)
 export const isMediaUrl = (u: unknown): u is string => (typeof u === "string" && FILES.test(u.trim())) || isHttpUrl(u);
 
+// obrazek na kartce i w galerii: plik Task Hub jako miniatura (paczka 27, mniej transferu); pełny plik zostaje pod linkiem
+export const thumbSrc = (u: string): string => { const t = u.trim(); return /\/api\/files\/[0-9a-f-]{36}$/i.test(t) ? t + "?w=s" : t; };
+
 // adres do href: http(s), pliki Task Hub i kotwice na tej samej stronie; wszystko inne → undefined (pokazujemy sam tekst)
 export function safeHref(u: string | null | undefined): string | undefined {
   if (!u) return undefined;

@@ -172,7 +172,9 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
     if (waitingTask.has(s.task.id)) continue;
     for (const st of s.task.steps) {
       const c = forStep(st, s.task.id);
-      const line = `- krok [${st.id}] „${st.title}” (${st.tool}) w zadaniu [${s.task.id}] „${s.task.title}”${st.detail ? ": " + st.detail.slice(0, 200) : ""}`;
+      // grafiki kroku (paczka 27): agent ogląda tylko je; [] = krok bez grafik, brak listy = krok sprzed przypisywania
+      const pics = st.attachmentIds ? (st.attachmentIds.length ? ` | grafiki kroku: ${st.attachmentIds.map((id) => `[${id}]`).join(", ")} (get_attachment tylko te)` : " | bez grafik") : "";
+      const line = `- krok [${st.id}] „${st.title}” (${st.tool}) w zadaniu [${s.task.id}] „${s.task.title}”${st.detail ? ": " + st.detail.slice(0, 200) : ""}${pics}`;
       const n = s.task.steps.indexOf(st) + 1;
       // zatwierdzone szkice do wysłania nie są pracą agenta (wysyła je osobny bieg), więc nie wchodzą do kolejki
       const add = (list: string[], l: string) => {
@@ -219,7 +221,7 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
     going.length ? "KROKI W TOKU (zaczęte przez Piotra albo poprzedni przebieg; zrób je teraz i zgłoś complete_step, a gdy nie możesz: leave_step z powodem):\n" + going.join("\n") : "",
     approved.length ? "ZATWIERDZONE SZKICE DO WYSŁANIA (wyślij dokładnie treść z sekcji „SZKIC KROKU <id>” w get_task, bez zmian, w formacie z linii „formatowanie” tej sekcji, potem complete_step z linkiem):\n" + approved.join("\n") : "",
     held.length ? "ZATWIERDZONE, ALE CZEKAJĄ NA KROKI PRZED NIMI (nie wysyłaj ich teraz; wyślesz, gdy tamte kroki będą zrobione albo zamknięte jako zbędne):\n" + held.join("\n") : "",
-    noSteps.length ? "ZADANIA BEZ KROKÓW (get_task, get_rules z topic „rozpisanie”, gdy tytuł jest długi albo jest całą wiadomością Piotra: update_task z krótkim title (" + TITLE_RULE + "), potem add_steps (" + STEP_TITLE_RULE + ") bez pytań, gdy da się przyjąć rozsądne założenia; w razie potrzeby ask_question. " + PROJECT_RULE + " " + ITEMS_RULE + " " + DECISION_RULE + " " + DEST_RULE + " " + DONE_RULE + " " + EST_RULE + "):\n" + noSteps.map((s) => brief(s) + (attN[s.task.id] ? ` | załączniki: ${attN[s.task.id]} (get_task, potem get_attachment)` : "")).join("\n") : "",
+    noSteps.length ? "ZADANIA BEZ KROKÓW (get_task, get_rules z topic „rozpisanie”, gdy tytuł jest długi albo jest całą wiadomością Piotra: update_task z krótkim title (" + TITLE_RULE + "), potem add_steps (" + STEP_TITLE_RULE + ") bez pytań, gdy da się przyjąć rozsądne założenia; w razie potrzeby ask_question. " + PROJECT_RULE + " " + ITEMS_RULE + " " + DECISION_RULE + " " + DEST_RULE + " " + DONE_RULE + " " + EST_RULE + "):\n" + noSteps.map((s) => brief(s) + (attN[s.task.id] ? ` | załączniki: ${attN[s.task.id]} (get_task, potem get_attachment każdego, opis przez describe_attachment; w add_steps każdemu krokowi attachments tylko z potrzebnymi)` : "")).join("\n") : "",
     answered.length ? "ODPOWIEDZI PIOTRA (kontynuuj pracę w tych zadaniach):\n" + answered.map((q) => `- zadanie [${q.taskId}]${q.stepId ? ` krok [${q.stepId}]` : ""}: pytanie „${q.text}” → odpowiedź: ${q.answer}`).join("\n") : "",
     // bez starego mostka: konektor i bieg pracy tylko czytają; zmiana w aplikacji zewnętrznej to zawsze szkic (krok bez zgody mógł dodać agent)
     ready.length ? (sends ? "KROKI DO ZROBIENIA BEZ ZGODY (start_step, zrób swoimi konektorami, complete_step z linkiem; fakty przez add_facts):\n"
