@@ -250,7 +250,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     estMin: Number(r.estMin), spentSec: Number(r.spentSec), spentManual: !!r.spentManual, link: (r.link as string) ?? null,
     handoffAt: iso(r.handoffAt), doneAt: iso(r.doneAt), report: (r.report as string) ?? null, output: (r.output as string) ?? "",
     review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), hasPrevBlocks: r.hasPrevBlocks != null ? !!r.hasPrevBlocks : r.blocksPrev != null, logged: !!r.logged,
-    pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, connectionId: (r.connectionId as string) ?? null, filePath: (r.filePath as string) ?? null,
+    pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, attachmentIds: (r.attachmentIds as string[]) ?? null, connectionId: (r.connectionId as string) ?? null, filePath: (r.filePath as string) ?? null,
     approvedAt: iso(r.approvedAt), approvedSig: (r.approvedSig as string) ?? null, sendStartedAt: iso(r.sendStartedAt), approval: (r.approval as Step["approval"]) ?? null,
     agentSec: Number(r.agentSec ?? 0), agentStartedAt: iso(r.agentStartedAt), doneBy: (r.doneBy as "owner" | "agent") ?? null,
     agentAt: iso(r.agentAt), openedAt: iso(r.openedAt),
@@ -273,7 +273,7 @@ function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
 const TASK_COLS = ["id", "owner_id", "project_id", "title", "title_original", "summary", "source", "level", "due", "done_at", "deleted_at", "note_text", "note_summary", "note_at", "pos", "created_at"];
 const STEP_COLS = ["id", "task_id", "position", "title", "detail", "tool", "status", "prev_status", "needs_approval", "est_min", "spent_sec", "spent_manual", "spent_at", "link", "handoff_at", "done_at",
   "report", "output", "review", "blocks", "blocks_at", "logged", "pos", "connection_id", "file_path", "approved_at", "approved_sig", "send_started_at", "agent_sec", "agent_started_at", "done_by",
-  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for", "left_at", "approval", "need"];
+  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for", "left_at", "approval", "need", "attachment_ids"];
 const taskCols = () => sql()(TASK_COLS);
 
 async function hydrate(rows: Row[]): Promise<Task[]> {
@@ -324,7 +324,7 @@ export async function getTask(ownerId: string, id: string): Promise<Task | null>
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   return (await memTasks(ownerId, id))[0]?.task ?? null;
 }
-export type NewStep = { title: string; detail?: string; tool?: string; needsApproval?: boolean; estMin?: number; link?: string; dependsOn?: string[] /* indeksy lub id */; connectionId?: string | null; workLevel?: string | null };
+export type NewStep = { title: string; detail?: string; tool?: string; needsApproval?: boolean; estMin?: number; link?: string; dependsOn?: string[] /* indeksy lub id */; connectionId?: string | null; workLevel?: string | null; attachmentIds?: string[] | null };
 export type NewTask = { title: string; summary?: string; source?: string; level?: number; due?: string | null; projectId?: string | null; steps?: NewStep[]; dependsOn?: string[] };
 
 export async function createTask(ownerId: string, input: NewTask): Promise<Task> {
@@ -347,8 +347,8 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
   let pos = bef ? Number(bef.position) : Number(n);
   const created: { id: string }[] = [];
   for (const s of steps) {
-    const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id, work_level)
-      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval && normalizeTool(s.tool) !== "file"}, ${roundQ(s.estMin ?? Q)}, ${isHttpUrl(s.link) ? s.link.trim() : null}, ${s.connectionId ?? null}, ${normalizeLevel(s.workLevel)}) returning id`;
+    const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id, work_level, attachment_ids)
+      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval && normalizeTool(s.tool) !== "file"}, ${roundQ(s.estMin ?? Q)}, ${isHttpUrl(s.link) ? s.link.trim() : null}, ${s.connectionId ?? null}, ${normalizeLevel(s.workLevel)}, ${s.attachmentIds ?? null}) returning id`;
     created.push({ id: r.id as string });
   }
   // zależności: "n2" / indeks w tej paczce albo id istniejącego kroku
@@ -420,7 +420,7 @@ export async function purgeTask(ownerId: string, id: string): Promise<void> {
   await sql()`delete from tasks where id = ${id} and owner_id = ${ownerId}`;
 }
 
-export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null; filePath: string | null; agentSec: number; agentStartedAt: string | null; doneBy: "owner" | "agent" | null; workLevel: string | null; modelPick: string | null }>;
+export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null; filePath: string | null; agentSec: number; agentStartedAt: string | null; doneBy: "owner" | "agent" | null; workLevel: string | null; modelPick: string | null; attachmentIds: string[] | null }>;
 const parseBlocks = (v: unknown): Block[] | null => { if (!v) return null; const p = Blocks.safeParse(v); return p.success ? p.data : null; };
 const isApproved = (b: Block) => b.type === "draft" && b.status === "approved";
 const demote = (blocks: Block[]) => blocks.map((b): Block => (b.type === "draft" && b.status === "approved" ? { ...b, status: "proposed" } : b));
@@ -496,6 +496,7 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
   if (patch.position !== undefined) p.position = patch.position;
   if (patch.logged !== undefined) p.logged = patch.logged;
   if (patch.connectionId !== undefined) p.connection_id = patch.connectionId;
+  if (patch.attachmentIds !== undefined) p.attachment_ids = patch.attachmentIds;
   if (patch.filePath !== undefined) p.file_path = patch.filePath?.trim().slice(0, 500) || null;
   if (patch.workLevel !== undefined) p.work_level = normalizeLevel(patch.workLevel);
   if (patch.modelPick !== undefined) p.model_pick = isModelName(patch.modelPick) ? patch.modelPick.trim() : null;
@@ -707,9 +708,16 @@ export async function latestSnapshots(where: { stepId?: string; taskId?: string 
 }
 
 // ---------- załączniki ----------
-export type Attachment = { id: string; kind: "image" | "file" | "link"; name: string | null; url: string | null; caption: string | null; analysis: string | null; keep: boolean; expiresAt: string | null; mime: string | null };
-const rowToAttachment = (r: Row): Attachment => ({ id: r.id as string, kind: r.kind as Attachment["kind"], name: (r.name as string) ?? null, url: (r.url as string) ?? null, caption: (r.caption as string) ?? null, analysis: (r.analysis as string) ?? null, keep: !!r.keep, expiresAt: iso(r.expiresAt), mime: (r.mime as string) ?? null });
+export type Attachment = { id: string; stepId?: string | null; kind: "image" | "file" | "link"; name: string | null; url: string | null; caption: string | null; analysis: string | null; keep: boolean; expiresAt: string | null; mime: string | null };
+const rowToAttachment = (r: Row): Attachment => ({ id: r.id as string, stepId: (r.stepId as string) ?? null, kind: r.kind as Attachment["kind"], name: (r.name as string) ?? null, url: (r.url as string) ?? null, caption: (r.caption as string) ?? null, analysis: (r.analysis as string) ?? null, keep: !!r.keep, expiresAt: iso(r.expiresAt), mime: (r.mime as string) ?? null });
 const ATT_COLS = ["id", "task_id", "step_id", "kind", "name", "url", "storage_path", "mime", "bytes", "caption", "analysis", "keep", "added_at", "expires_at"];   // bez `data`: listy nie ciągną plików
+// załączniki kroku (paczka 27): przypisane przy rozpisaniu (attachmentIds) i zapisane wprost przy kroku (np. podgląd prototypu).
+// null = krok nieprzypisany (sprzed paczki 27): wołający decyduje, czy to „wszystkie” (agent), czy „żadne” (kartka)
+export function stepAttachments<A extends Attachment>(step: { id: string; attachmentIds?: string[] | null }, all: A[]): A[] | null {
+  if (!step.attachmentIds) return null;
+  const ids = new Set(step.attachmentIds);
+  return all.filter((a) => ids.has(a.id) || a.stepId === step.id);
+}
 export async function listAttachments(where: { stepId?: string; taskId?: string }): Promise<Attachment[]> {
   const rows = where.stepId
     ? await sql()`select ${sql()(ATT_COLS)} from attachments where step_id = ${where.stepId} order by added_at`
@@ -734,6 +742,20 @@ export async function getAttachmentFile(ownerId: string, id: string): Promise<At
   const [r] = await sql()`select a.id, a.name, a.mime, a.bytes, a.data from attachments a
     where a.id = ${id} and a.data is not null and ${ownerId} = coalesce((select owner_id from tasks where id = a.task_id), (select t.owner_id from steps s join tasks t on t.id = s.task_id where s.id = a.step_id))`;
   return r ? { id: r.id as string, name: (r.name as string) ?? null, mime: (r.mime as string) ?? null, bytes: r.bytes == null ? null : Number(r.bytes), data: Buffer.from(r.data as Uint8Array) } : null;
+}
+// miniatura grafiki do „Skąd” i galerii: z bazy idzie tylko ona (kilkadziesiąt KB zamiast pełnego pliku, transfer Supabase).
+// Pierwszy podgląd robi ją z pełnego pliku i zapisuje; null = to nie grafika rastrowa albo nie dało się jej zmniejszyć (wołający oddaje plik)
+export async function getAttachmentThumb(ownerId: string, id: string, make: (data: Buffer) => Promise<Buffer | null>): Promise<Buffer | null> {
+  const own = sql()`${ownerId} = coalesce((select owner_id from tasks where id = a.task_id), (select t.owner_id from steps s join tasks t on t.id = s.task_id where s.id = a.step_id))`;
+  const [r] = await sql()`select a.thumb, a.mime from attachments a where a.id = ${id} and a.data is not null and ${own}`;
+  if (!r) return null;
+  if (r.thumb) return Buffer.from(r.thumb as Uint8Array);
+  if (!/^image\/(png|jpeg|webp|gif)$/.test((r.mime as string) ?? "")) return null;
+  const f = await getAttachmentFile(ownerId, id);
+  const t = f ? await make(f.data).catch(() => null) : null;
+  if (!t) return null;
+  await sql()`update attachments set thumb = ${t} where id = ${id}`;
+  return t;
 }
 export async function countAttachments(taskIds: string[]): Promise<Record<string, number>> {
   if (!taskIds.length) return {};

@@ -48,9 +48,10 @@ export type ComposeDeps = { ai: Ai; rules: Rule[]; factPrefs: string; projectNam
 
 // pełna wersja: agent wybiera fakty z migawek i układa bloki; pamięta układ per źródło
 export async function composeStep(ownerId: string, task: Task, step: Step, deps: ComposeDeps): Promise<{ blocks: Block[]; usedAi: boolean }> {
-  const [facts, snapshots, attachments, memory] = await Promise.all([
+  const [facts, snapshots, all, memory] = await Promise.all([
     repo.listFacts({ stepId: step.id }), repo.latestSnapshots({ stepId: step.id }), repo.listAttachments({ taskId: task.id }), repo.getLayoutMemory(ownerId, step.tool),
   ]);
+  const attachments = repo.stepAttachments(step, all) ?? all;   // krok sprzed przypisywania grafik (paczka 27): wszystkie, agent sam wybiera
   const needsAi = deps.ai.enabled && (snapshots.length > 0 || (step.needsApproval && !step.output && !EXTERNAL_TOOLS.has(step.tool) && step.tool !== "manual"));
   if (!needsAi) {
     const blocks = composeStatic(step, facts, attachments);

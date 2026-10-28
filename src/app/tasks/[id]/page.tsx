@@ -11,7 +11,7 @@ import { agentMinOf, calEst, calibrationFor, estOf, fmtMin, remainEst, spentMin,
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
-import { fileName, isHttpUrl, safeHref } from "@/lib/safeurl";
+import { fileName, isHttpUrl, safeHref, thumbSrc } from "@/lib/safeurl";
 import { bridgeHold, bridgeLabel, busyWith, noStepsWho, queueWho, shortTitle, type Worker } from "@/lib/auto";
 import { BRIDGE_ALIVE_MS, connectorIssue, protocolOf } from "@/lib/bridge";
 import { draftOf, draftsOf, optionsOf } from "@/lib/agent/approval";
@@ -148,7 +148,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
             const href = safeHref(a.url), img = a.kind === "image" && !!href && !/svg/i.test(a.mime ?? "") && !/\.svg$/i.test(a.name ?? "");
             return (
             <div key={a.id} className="gal-item">
-              {img ? <a href={href} target="_blank" rel="noopener"><img src={href} alt={a.caption ?? a.name ?? ""} /></a> : <div className="ph">{a.kind === "link" ? "Link" : "Plik"}</div>}
+              {img ? <a href={href} target="_blank" rel="noopener"><img src={thumbSrc(href)} loading="lazy" alt={a.caption ?? a.name ?? ""} /></a> : <div className="ph">{a.kind === "link" ? "Link" : "Plik"}</div>}
               <div><b>{a.caption ?? a.name ?? "Załącznik"}</b>{href && !img ? <a className="chip" href={href} target="_blank" rel="noopener">{a.name ?? a.url}</a> : null}{a.analysis ? <details><summary>Analiza agenta</summary><div className="an">{a.analysis}</div></details> : null}</div>
             </div>
             );
@@ -220,8 +220,11 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null; runId: string | null; oldMac: boolean; macAlive: boolean; issue: string | null;
   model: (StepModelInfo & { now: string }) | null; project: string | null; prev: Block[] | null;
 }) {
+  // grafiki kroku (paczka 27): tylko przypisane przy rozpisaniu; krok sprzed przypisywania pokazuje tylko swoje (podgląd prototypu),
+  // a wszystkie grafiki zadania są w opisie zadania
+  const mine = repo.stepAttachments(s, attachments);
   // szczegóły są już w sekcji „Co”, więc blok tekstu z tą samą treścią odpada
-  const blocks = (s.blocks?.length ? s.blocks : composeStatic(s.status === "done" ? { ...s, output: "" } : s, facts, attachments)).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
+  const blocks = (s.blocks?.length ? s.blocks : composeStatic(s.status === "done" ? { ...s, output: "" } : s, facts, mine ?? attachments.filter((a) => a.stepId === s.id))).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
   // kalibracja tylko dla kroków Piotra (jego szacunki); czas Claude'a liczy się sam
   const own = isOwnerStep(s), agentMin = agentMinOf(s);
   const cal = own ? calibrationFor(samples, s.tool, "owner") : null;
@@ -233,7 +236,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const open = kind === "decision" ? openQuestions(s) : [];
   const indexOf = (b: Block) => s.blocks?.indexOf(b) ?? -1;
   const link = externalLink(s.link, origin);
-  const prompt = s.status === "handoff" ? handoffPrompt(t, s, rules, { appUrl: origin, companyId, attachments: attachments.filter((a) => a.analysis) }) : null;
+  const prompt = s.status === "handoff" ? handoffPrompt(t, s, rules, { appUrl: origin, companyId, attachments: (mine ?? attachments).filter((a) => a.analysis) }) : null;
   const review = s.review as { summary?: string; links?: string[]; fits?: boolean; warning?: string; pending?: boolean } | null;
   // karta publikacji zastępuje blok szkicu i rząd akcji: decyzja stoi przy miejscu docelowym i podglądzie
   const mode = cardModeOf(s);

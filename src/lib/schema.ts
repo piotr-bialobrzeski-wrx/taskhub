@@ -191,6 +191,8 @@ export const Step = z.object({
   logged: z.boolean(),
   pos: z.object({ x: z.number(), y: z.number() }).nullable(),
   dependsOn: z.array(z.string()),
+  // załączniki zadania potrzebne w tym kroku (paczka 27); null = krok sprzed przypisywania (agent widzi wszystkie, „Skąd” żadnych)
+  attachmentIds: z.array(z.string()).nullable().optional(),
   connectionId: z.string().nullable(),   // przez które połączenie (konto, firma) zrobić ten krok; null = agent wybiera
   filePath: z.string().nullable().optional(),   // krok „Plik na Macu”: ścieżka zapisanego pliku (tekst do skopiowania, nigdy link)
   approvedAt: z.string().nullable().optional(),     // zgoda Piotra na szkic (tylko jego kliknięcie „Zatwierdź”)
