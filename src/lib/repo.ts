@@ -314,7 +314,7 @@ async function memo<T>(tables: string[], key: string, fn: () => Promise<T>): Pro
   return structuredClone(val);
 }
 function memoized<A extends unknown[], R>(name: string, tables: string[], fn: (...a: A) => Promise<R>): (...a: A) => Promise<R> {
-  return (...a: A) => memo(tables, `${name}|${JSON.stringify(a)}`, () => fn(...a));
+  return fn;   // próba: pamięć odczytów wyłączona (szukam, co zawiesza list_work)
 }
 
 // Pamięć zadań w instancji serwera (transfer z Supabase): pełne zadania z krokami trzymamy tu, a z bazy przy każdym czytaniu bierzemy
