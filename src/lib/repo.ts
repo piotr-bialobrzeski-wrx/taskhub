@@ -250,7 +250,7 @@ function rowToStep(r: Row, deps: string[]): Step {
     estMin: Number(r.estMin), spentSec: Number(r.spentSec), spentManual: !!r.spentManual, link: (r.link as string) ?? null,
     handoffAt: iso(r.handoffAt), doneAt: iso(r.doneAt), report: (r.report as string) ?? null, output: (r.output as string) ?? "",
     review: (r.review as Record<string, unknown>) ?? null, blocks: blocks && blocks.success ? blocks.data : null, blocksAt: iso(r.blocksAt), hasPrevBlocks: r.hasPrevBlocks != null ? !!r.hasPrevBlocks : r.blocksPrev != null, logged: !!r.logged,
-    pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, attachmentIds: (r.attachmentIds as string[]) ?? null, connectionId: (r.connectionId as string) ?? null, filePath: (r.filePath as string) ?? null,
+    pos: (r.pos as { x: number; y: number }) ?? null, dependsOn: deps, attachmentIds: r.attachmentIds == null ? null : uuidArray(r.attachmentIds), connectionId: (r.connectionId as string) ?? null, filePath: (r.filePath as string) ?? null,
     approvedAt: iso(r.approvedAt), approvedSig: (r.approvedSig as string) ?? null, sendStartedAt: iso(r.sendStartedAt), approval: (r.approval as Step["approval"]) ?? null,
     agentSec: Number(r.agentSec ?? 0), agentStartedAt: iso(r.agentStartedAt), doneBy: (r.doneBy as "owner" | "agent") ?? null,
     agentAt: iso(r.agentAt), openedAt: iso(r.openedAt),
@@ -348,7 +348,7 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
   const created: { id: string }[] = [];
   for (const s of steps) {
     const [r] = await sql()`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id, work_level, attachment_ids)
-      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval && normalizeTool(s.tool) !== "file"}, ${roundQ(s.estMin ?? Q)}, ${isHttpUrl(s.link) ? s.link.trim() : null}, ${s.connectionId ?? null}, ${normalizeLevel(s.workLevel)}, ${s.attachmentIds ?? null}) returning id`;
+      values (${taskId}, ${pos++}, ${s.title.slice(0, 200)}, ${s.detail ?? ""}, ${normalizeTool(s.tool)}, ${!!s.needsApproval && normalizeTool(s.tool) !== "file"}, ${roundQ(s.estMin ?? Q)}, ${isHttpUrl(s.link) ? s.link.trim() : null}, ${s.connectionId ?? null}, ${normalizeLevel(s.workLevel)}, ${s.attachmentIds ? pgArr(s.attachmentIds) : null}::uuid[]) returning id`;
     created.push({ id: r.id as string });
   }
   // zależności: "n2" / indeks w tej paczce albo id istniejącego kroku
@@ -496,7 +496,7 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
   if (patch.position !== undefined) p.position = patch.position;
   if (patch.logged !== undefined) p.logged = patch.logged;
   if (patch.connectionId !== undefined) p.connection_id = patch.connectionId;
-  if (patch.attachmentIds !== undefined) p.attachment_ids = patch.attachmentIds;
+  if (patch.attachmentIds !== undefined) p.attachment_ids = patch.attachmentIds ? pgArr(patch.attachmentIds) : null;   // literał tablicy (db.ts, fetch_types: false)
   if (patch.filePath !== undefined) p.file_path = patch.filePath?.trim().slice(0, 500) || null;
   if (patch.workLevel !== undefined) p.work_level = normalizeLevel(patch.workLevel);
   if (patch.modelPick !== undefined) p.model_pick = isModelName(patch.modelPick) ? patch.modelPick.trim() : null;
