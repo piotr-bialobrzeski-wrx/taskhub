@@ -312,14 +312,15 @@ export const whyOf = (m: { actions?: unknown }): string | null => {
 
 const steps = (n: number) => (n === 1 ? "1 krok" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? `${n} kroki` : `${n} kroków`);
 // nagłówek sekcji „Teraz”: stan słowami i kolor bloku; po wysyłce słowo z celu („Utworzono”, „Wysłano”), strona dokłada godzinę;
-// options = liczba szkiców w kroku: przy kilku Piotr wybiera opcję (każda karta pod nagłówkiem ma własne „Do zatwierdzenia”);
-// sentAlready = wybrana opcja już poszła, a krok wrócił do zrobienia: nic nie czeka na zgodę, więc „Już wysłano” zamiast „Odłożony szkic” albo „Wybierz opcję”
-export function nowHeading(state: CardState, mode: string | null, deps: number, waits: boolean, dest?: Dest | null, options = 1, sentAlready = false): { title: string; cls: string } {
+// options = liczba szkiców w kroku: przy kilku Piotr wybiera opcję (każda karta pod nagłówkiem ma własną nazwę opcji);
+// sentAlready = wybrana opcja już poszła, a krok wrócił do zrobienia: nic nie czeka na zgodę, więc „Już wysłano” zamiast „Odłożony szkic” albo „Wybierz opcję”;
+// paczka 30: stan i rodzaj klocka w jednym nagłówku („Szkic do zatwierdzenia”), karta publikacji pod nim nie powtarza ani stanu, ani słowa „Szkic”
+export function nowHeading(state: CardState, mode: string | null, deps: number, waits: boolean, dest?: Dest | null, options = 1, sentAlready = false, stale = false): { title: string; cls: string } {
   if (mode === "sent" && dest) return { title: sentWord(dest), cls: "done" };
   if (sentAlready && (mode === "proposed" || mode === "parked")) return { title: "Już wysłano", cls: "done" };
-  if (mode === "proposed") return { title: options > 1 ? "Wybierz opcję" : "Do zatwierdzenia", cls: "draft" };
+  if (mode === "proposed") return { title: options > 1 ? "Wybierz opcję" : "Szkic do zatwierdzenia", cls: "draft" };
   if (mode === "sending") return { title: "W toku", cls: "handoff" };
-  if (mode === "parked") return { title: "Odłożony szkic", cls: "draft" };
+  if (mode === "parked") return { title: stale ? "Nieaktualny szkic" : "Odłożony szkic", cls: "draft" };
   if (mode === "unsent") return { title: "Zamknięty bez wysyłki", cls: "blocked" };
   if (state === "done") return { title: "Zrobione", cls: "done" };
   if (state === "handoff") return { title: "W pracy", cls: "handoff" };

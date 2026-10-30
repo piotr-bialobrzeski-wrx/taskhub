@@ -351,8 +351,20 @@ export function Canvas(p: CanvasProps) {
     document.addEventListener("pointerdown", close); document.addEventListener("keydown", key);
     return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", key); };
   }, [zOpen]);
-  const layoutBtn = p.onUndoLayout ? <button className="icobtn txt undo" type="button" onClick={p.onUndoLayout} title="Przywróć układ sprzed ułożenia"><Icon k="undo" size={12} sw={2} />Cofnij</button>
-    : <button className="icobtn txt" type="button" onClick={p.onAutoLayout} title="Ułóż kafelki automatycznie">Ułóż</button>;
+  // paczka 30: w pigułce tylko −, procent i +; klik w procent rozwija pod pigułką menu jej szerokości z „Dopasuj” i „Ułóż”
+  // (po „Ułóż” przez kilka sekund obok + stoi jeszcze „Cofnij”, żeby cofnięcie nie chowało się w menu)
+  const [fOpen, setFOpen] = useState(false);
+  const zPill = useRef<HTMLDivElement>(null);
+  const [fPos, setFPos] = useState({ left: 0, top: 0, width: 0 });
+  useEffect(() => {
+    if (!fOpen) return;
+    const r = zPill.current!.getBoundingClientRect();
+    setFPos({ left: r.left, top: r.bottom + 6, width: r.width });
+    const close = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".zfmenu, .zoom input")) setFOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setFOpen(false); };
+    document.addEventListener("pointerdown", close); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", key); };
+  }, [fOpen]);
 
   // ---------- strzałki ----------
   const edges: ReactNode[] = [];
@@ -417,19 +429,26 @@ export function Canvas(p: CanvasProps) {
       </div>
       {p.empty}
       {zslot ? createPortal(
-        // w górnym pasku (miejsce na dole zajmują odpowiedzi agenta); gdy pasek jest za wąski, zostaje sam procent, a reszta rozwija się pod nim
-        <div className="zoom glass gpill">
+        // w górnym pasku (miejsce na dole zajmują odpowiedzi agenta); na telefonie sama ikona, a reszta rozwija się pod nią
+        <div ref={zPill} className="zoom glass gpill">
           <div className="zfull">
             <button className="icobtn" type="button" onClick={() => zoomBy(-0.1)} aria-label="Oddal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10" /></svg></button>
-            <input value={zEdit ?? fmtPct(zoom)} inputMode="numeric" aria-label="Powiększenie w procentach (35–160)" title="Wpisz powiększenie w procentach (35–160)"
-          onFocus={(e) => { zFocus.current = Date.now(); e.currentTarget.select(); }} onMouseUp={(e) => { if (Date.now() - zFocus.current < 400) e.preventDefault(); }}   /* klik zaznacza całość; mouseup nie cofa zaznaczenia */
+            <input value={zEdit ?? fmtPct(zoom)} inputMode="numeric" aria-label="Powiększenie w procentach (35–160)" title="Wpisz powiększenie w procentach (35–160) albo wybierz Dopasuj lub Ułóż"
+          aria-haspopup="menu" aria-expanded={fOpen}
+          onFocus={(e) => { zFocus.current = Date.now(); e.currentTarget.select(); setFOpen(true); }} onMouseUp={(e) => { if (Date.now() - zFocus.current < 400) e.preventDefault(); }}   /* klik zaznacza całość i rozwija menu; mouseup nie cofa zaznaczenia */
+          onClick={() => setFOpen(true)}
           onChange={(e) => setZEdit(e.currentTarget.value.replace(/\D/g, "").slice(0, 3))}
           onBlur={(e) => { if (zCancel.current) { zCancel.current = false; setZEdit(null); return; } commitZoom(e.currentTarget.value); }}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } else if (e.key === "Escape") { e.preventDefault(); zCancel.current = true; e.currentTarget.blur(); } }} />
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setFOpen(false); e.currentTarget.blur(); } else if (e.key === "Escape") { e.preventDefault(); zCancel.current = true; setFOpen(false); e.currentTarget.blur(); } }} />
             <button className="icobtn" type="button" onClick={() => zoomBy(0.1)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
-            <button className="icobtn txt" type="button" onClick={fit}>Dopasuj</button>
-            {layoutBtn}
+            {p.onUndoLayout ? <button className="icobtn txt undo" type="button" onClick={p.onUndoLayout} title="Przywróć układ sprzed ułożenia"><Icon k="undo" size={12} sw={2} />Cofnij</button> : null}
           </div>
+          {fOpen && fPos.width ? createPortal(
+            <div className="zmenu zfmenu glass" role="menu" style={{ position: "fixed", left: fPos.left, top: fPos.top, width: fPos.width }} onPointerDown={(e) => e.stopPropagation()}>
+              <button className="mi" role="menuitem" type="button" onClick={() => { setFOpen(false); fit(); }} title="Dopasuj powiększenie, żeby było widać wszystkie kafelki">Dopasuj</button>
+              {p.onUndoLayout ? <button className="mi" role="menuitem" type="button" onClick={() => { setFOpen(false); p.onUndoLayout!(); }} title="Przywróć układ sprzed ułożenia">Cofnij ułożenie</button>
+                : <button className="mi" role="menuitem" type="button" onClick={() => { setFOpen(false); p.onAutoLayout(); }} title="Ułóż kafelki automatycznie">Ułóż</button>}
+            </div>, document.body) : null}
           <button ref={zBtn} className="icobtn txt zbtn" type="button" aria-haspopup="menu" aria-expanded={zOpen} title="Powiększenie i układ" onClick={() => setZOpen((o) => !o)}><span className="zt">{fmtPct(zoom)}<Icon k="chev" size={10} sw={2.2} /></span><span className="zi"><Icon k="zoom" size={16} sw={1.7} /></span></button>
           {zOpen ? createPortal(
             <div className="zmenu glass" role="menu" style={{ position: "fixed", left: zPos.left, top: zPos.top }} onPointerDown={(e) => e.stopPropagation()}>

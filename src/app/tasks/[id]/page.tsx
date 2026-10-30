@@ -252,7 +252,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // krok „Zleć w projekcie: …” robi wątek projektu Claude w chmurze: nagłówek mówi gdzie, a zamiast „Uruchom” jest polecenie do skopiowania
   // krok z kodem w projekcie Task Hub (paczka 14, punkt 1) też: mostek go nie zrobi, więc zamiast „Przygotuj” / „Uruchom” jest „Uruchom w chmurze”
   const inProject = (kind === "offline" || kind === "agent") && isProjectStep(s, project);
-  const head0 = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined, draftsOf(s).length, optionsOf(s).chosen?.status === "sent");
+  const head0 = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined, draftsOf(s).length, optionsOf(s).chosen?.status === "sent", draftsOf(s).some((x) => !!x.stale));
   // „Uruchom w chmurze” (paczka 13, punkt 3): kliknięte czeka, aż mostek na Macu odpali chmurę (queued), potem aż chmura weźmie krok (rung)
   const cloud = s.status === "todo" && inProject ? s.cloud ?? null : null;
   const cloudTitle = cloud?.state === "rung" ? "Chmura rusza" : cloud ? "Czeka na chmurę" : "Do zrobienia w projekcie w chmurze";

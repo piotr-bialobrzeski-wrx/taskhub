@@ -267,12 +267,14 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .mkpill { position: fixed; z-index: 9; right: max(16px, env(safe-area-inset-right, 0px)); bottom: var(--mk-b); }
 .namer { position: fixed; z-index: 12; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(var(--mk-b) + 52px); display: flex; gap: 6px; align-items: center; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5); border-radius: 999px; width: min(420px, calc(100% - 32px)); }
 .namer input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; padding: 6px 0; }
-/* powiększenie, Dopasuj i Ułóż: pigułka w górnym pasku (dół należy do odpowiedzi agenta); za wąsko → sam procent z menu */
+/* powiększenie: pigułka „− procent +” w górnym pasku (dół należy do odpowiedzi agenta); klik w procent rozwija pod nią „Dopasuj” i „Ułóż” (paczka 30);
+   telefon → sama ikona z menu */
 .zslot { display: flex; pointer-events: none; flex: none; }
 .zoom { position: relative; display: flex; align-items: center; gap: 2px; padding: var(--s-2); border-radius: 999px; }
 .zoom .zfull { display: flex; align-items: center; gap: 2px; }
 .zoom .zbtn { display: none; gap: 4px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-@media (max-width: 1499px) { .zoom .zfull { display: none; } .zoom .zbtn { display: inline-flex; } }
+@media (max-width: 860px) { .zoom .zfull { display: none; } .zoom .zbtn { display: inline-flex; } }
+.zoom input { cursor: pointer; }
 .zmenu { z-index: 30; width: 200px; border-radius: var(--r-lg); padding: var(--s-2); display: flex; flex-direction: column; gap: 2px; }
 .zmenu .mi { border: 0; background: transparent; text-align: left; border-radius: 12px; padding: 9px 12px; color: var(--text); font: inherit; cursor: pointer; }
 .zmenu .mi:hover { background: var(--accent-soft); }
@@ -806,6 +808,15 @@ table.tb tr.new td { background: var(--accent-soft); }
 .answer.withpanel { left: max(16px, env(safe-area-inset-left, 0px)); transform: none; width: min(720px, calc(100% - var(--dw, 600px) - 64px)); }
 .ans-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 .app.cramped .answer.withpanel, .app.cramped .runbar.withpanel { display: none; }   /* szeroki panel na małym oknie: nic nie wciska się obok niego */
+/* paczka 30: otwarta karta od góry do dołu ekranu; zakrywa menu górnego paska, a pigułka wstecz z nazwą zadania kończy się przed jej lewą krawędzią.
+   Pole czatu zostaje nad kartą (dół kartki ma na nie miejsce). Panel prawie na całą szerokość (cramped) zostaje pod paskiem, żeby nie zakryć wstecz. */
+@media (min-width: 861px) {
+  .app.haspanel:not(.cramped) .detail { z-index: 11; top: calc(14px + env(safe-area-inset-top, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+  .app.haspanel:not(.cramped) .dockwrap { z-index: 12; }
+  .app.haspanel:not(.cramped) .d-body { padding-bottom: calc(var(--dock-h, 46px) + 40px); }
+  .app.haspanel:not(.cramped) .pillbar > .pl { max-width: none; }
+  .app.haspanel:not(.cramped) .pillbar > .pl > .gpill:has(.crumb) { max-width: calc(100vw - var(--dw, 600px) - 44px); }   /* 16 + 16 marginesy ekranu + 12 odstępu */
+}
 @media (max-width: 860px) { .answer.withpanel { left: 50%; transform: translateX(-50%); width: min(720px, calc(100% - 2 * var(--side))); } }
 
 /* ---------- karta kroku „Teraz · Co · Skąd” (paczka 2, punkt 8): jeden wyróżniony blok stanu, brief i materiały zwijają się po zrobieniu ---------- */

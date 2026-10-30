@@ -49,7 +49,7 @@ describe("karta kroku", () => {
     expect(nowHeading("blocked", null, 12, false).title).toBe("Czeka na 12 kroków");
     expect(nowHeading("blocked", null, 1, true).title).toBe("Czeka na inne zadanie");
     expect(nowHeading("handoff", null, 0, false)).toEqual({ title: "W pracy", cls: "handoff" });
-    expect(nowHeading("draft", "proposed", 0, false)).toEqual({ title: "Do zatwierdzenia", cls: "draft" });
+    expect(nowHeading("draft", "proposed", 0, false)).toEqual({ title: "Szkic do zatwierdzenia", cls: "draft" });
     expect(nowHeading("done", "sent", 0, false)).toEqual({ title: "Zrobione", cls: "done" });
   });
 });

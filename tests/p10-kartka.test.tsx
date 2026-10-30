@@ -253,8 +253,9 @@ describe("opcje na karcie publikacji (punkt 3b/4)", () => {
 
   it("nagłówek „Teraz”: przy 2+ szkicach „Wybierz opcję”, przy jednym i w innych stanach jak dotąd", () => {
     expect(nowHeading("draft", "proposed", 0, false, undefined, 2)).toEqual({ title: "Wybierz opcję", cls: "draft" });
-    expect(nowHeading("draft", "proposed", 0, false, undefined, 1)).toEqual({ title: "Do zatwierdzenia", cls: "draft" });
-    expect(nowHeading("draft", "proposed", 0, false)).toEqual({ title: "Do zatwierdzenia", cls: "draft" });
+    expect(nowHeading("draft", "proposed", 0, false, undefined, 1)).toEqual({ title: "Szkic do zatwierdzenia", cls: "draft" });
+    expect(nowHeading("draft", "proposed", 0, false)).toEqual({ title: "Szkic do zatwierdzenia", cls: "draft" });
+    expect(nowHeading("ready", "parked", 0, false, undefined, 1, false, true)).toEqual({ title: "Nieaktualny szkic", cls: "draft" });
     expect(nowHeading("ready", "parked", 0, false, undefined, 2)).toEqual({ title: "Odłożony szkic", cls: "draft" });
     // wybrana opcja już poszła, a krok wrócił do zrobienia: „Już wysłano”; bez flagi jak dotąd; po wysyłce i w toku flaga nic nie zmienia
     expect(nowHeading("ready", "parked", 0, false, undefined, 2, true)).toEqual({ title: "Już wysłano", cls: "done" });
@@ -270,8 +271,10 @@ describe("opcje na karcie publikacji (punkt 3b/4)", () => {
     const h = card(s, "proposed");
     expect(count(h, /class="cmp"/g)).toBe(1);
     expect(count(h, /class="block pub opt"/g)).toBe(2);
-    expect(h).toContain("<b>Do zatwierdzenia</b> · Opcja A");
-    expect(h).toContain("<b>Do zatwierdzenia</b> · Opcja B");
+    // paczka 30: stan mówi nagłówek „Teraz” („Wybierz opcję”), karta opcji niesie samą nazwę
+    expect(h).toContain("<b>Opcja A</b>");
+    expect(h).toContain("<b>Opcja B</b>");
+    expect(h).not.toContain("Do zatwierdzenia");
     expect(h).toContain("Zatwierdź: Opcja A");
     expect(h).toContain("Zatwierdź: Opcja B");
     expect(h).not.toContain("Zatwierdź i ");
@@ -303,11 +306,12 @@ describe("opcje na karcie publikacji (punkt 3b/4)", () => {
     const head = h.slice(h.indexOf('class="pub-h"'), h.indexOf("pub-edit"));
     expect(head).toContain('<a class="btn ico" href="https://app.clickup.com/t/869aaaaa1" target="_blank" rel="noopener" title="Tu trafi wynik kroku: https://app.clickup.com/t/869aaaaa1">Otwórz w ClickUpie<svg');
   });
-  it("odłożone opcje: „Odłożony szkic · Opcja X” na każdej karcie i „Zamknij bez wysyłki” pod siatką", () => {
+  it("odłożone opcje: sama nazwa opcji na każdej karcie (stan w nagłówku „Teraz”) i „Zamknij bez wysyłki” pod siatką", () => {
     const s = step({ status: "todo", tool: "clickup", needsApproval: true, blocks: [A, B] });
     const h = card(s, "parked");
-    expect(h).toContain("<b>Odłożony szkic</b> · Opcja A");
-    expect(h).toContain("<b>Odłożony szkic</b> · Opcja B");
+    expect(h).toContain("<b>Opcja A</b>");
+    expect(h).toContain("<b>Opcja B</b>");
+    expect(h).not.toContain("Odłożony szkic");
     expect(count(h, /Zatwierdź: Opcja/g)).toBe(2);
     expect(h).toContain("Zamknij bez wysyłki");
   });
@@ -333,7 +337,8 @@ describe("opcje na karcie publikacji (punkt 3b/4)", () => {
     const s = step({ status: "done", tool: "clickup", needsApproval: true, blocks: [A, B] });
     expect(cardModeOf(s)).toBe("unsent");
     const h = card(s, "unsent");
-    expect(h).toContain("<b>Nie wysłano</b>");
+    expect(h).not.toContain("Nie wysłano");   // paczka 30: stan „Zamknięty bez wysyłki” stoi w nagłówku „Teraz”
+    expect(h).toContain("<b>ClickUp</b>");
     expect(count(h, /class="block pub opt"/g)).toBe(2);
     expect(h).toContain("<b>Opcja A</b>");
     expect(h).toContain("<b>Opcja B</b>");

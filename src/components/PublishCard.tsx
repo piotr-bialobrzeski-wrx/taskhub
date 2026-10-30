@@ -83,13 +83,12 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   const dest = destOf(s) ?? (body0?.trim() ? destOf({ ...s, blocks: [...(s.blocks ?? []), { type: "draft", target: { app: s.tool, action: "send" }, body: body0, status: "proposed" }] }) : null);
   const label = (x: Draft) => optionLabel(x, drafts.indexOf(x));
   const opt = multi && chosen ? ` · ${label(chosen)}` : "";   // nazwa wybranej opcji w nagłówku po decyzji
-  // nagłówek: po wysyłce samo miejsce (słowo i godzina stoją w nagłówku „Teraz”); przed decyzją sama aplikacja (miejsce jest pod przyciskiem)
-  const head = mode === "unsent" ? <><b>Nie wysłano</b> · zamknięty bez zatwierdzenia</>
-    : mode === "sent" ? (dest?.kind === "file" ? <><b>Plik na Macu</b>{s.filePath ? ` · ${fileName(s.filePath)}` : where ? ` · ${where}` : ""}</> : <><b>{dest?.name ?? name}</b>{opt}{where ? ` · ${where}` : ""}</>)
-    : mode === "sending" ? <><b>{isPrompt || isCommit0 ? "Claude pracuje" : "Claude wysyła"}</b> · {name}{opt}{where ? ` · ${where}` : ""}</>
-    : sentAlready ? <><b>{dest?.name ?? name}</b>{opt}{where ? ` · ${where}` : ""}</>
-    : stays ? <><b>Szkic</b> · zostaje w zadaniu</>
-    : mode === "parked" ? <><b>{stale ? "Nieaktualny szkic" : "Odłożony szkic"}</b> · {name}{where ? ` · ${where}` : ""}</>
+  // nagłówek: stan kroku i słowo „Szkic” stoją w nagłówku „Teraz” (paczka 30: jedna linia „Szkic do zatwierdzenia”), więc tu tylko dokąd:
+  // po wysyłce i w toku aplikacja z miejscem; przed decyzją sama aplikacja (miejsce jest pod przyciskiem); odłożony z miejscem, bo przycisku zgody nie ma na wierzchu
+  const head = mode === "sent" && dest?.kind === "file" ? <><b>Plik na Macu</b>{s.filePath ? ` · ${fileName(s.filePath)}` : where ? ` · ${where}` : ""}</>
+    : mode === "sent" || mode === "sending" || mode === "unsent" || sentAlready ? <><b>{dest?.name ?? name}</b>{opt}{where ? ` · ${where}` : ""}</>
+    : stays ? <b>Zostaje w zadaniu</b>
+    : mode === "parked" ? <><b>{name}</b>{where ? ` · ${where}` : ""}</>
     : <b>{dest?.name ?? name}</b>;
 
   // podgląd i formularz zgody jednego szkicu (przy opcjach każdej z osobna); formularz „pub-<krok>” przy jednym szkicu, „pub-<krok>-<i>” przy opcjach;
@@ -122,9 +121,9 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       <div className="thread"><div className="msg mine"><div className="who">{who}</div>{di?.subject ? <h4>{di.subject}</h4> : null}<pre className="code">{body || "Brak treści."}</pre></div></div>
     ) : editable ? (
       // przed decyzją: samo pole z formatowaniem, bez ramki wiadomości (dokąd poleci mówi nagłówek karty), żeby nie zagnieżdżać trzech tła w sobie
-      // paczka 15, punkt 13: nad polem „Szkic”, nie tytuł ticketu; temat maila i tytuł nowego zadania zostają jako krótka linia, bo polecą razem z treścią
+      // paczka 15, punkt 13: bez tytułu ticketu nad polem; paczka 30: bez osobnej etykiety „Szkic” (słowo stoi w nagłówku „Teraz”);
+      // temat maila i tytuł nowego zadania zostają jako krótka linia, bo polecą razem z treścią
       <div className="pub-edit">
-        <div className="lbl">Szkic</div>
         {di?.subject && (MAIL_APPS.has(app) || action === "create") ? <p className="sub">{MAIL_APPS.has(app) ? "Temat" : "Tytuł"}: {di.subject}</p> : null}
         <RichField key={s.id + sfx} value={body ?? ""} form={formId} onSave={saveDraftBody.bind(null, t.id, s.id, i)} />
         {di?.fields?.length ? <Facts facts={di.fields} /> : null}
@@ -159,7 +158,8 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
     return (
       <div key={i} className="block pub opt">
         <div className="pub-h">
-          <span className="pub-t">{ro ? <b>{optionLabel(di, i)}</b> : <><b>{mode === "parked" ? (di.stale ? "Nieaktualny szkic" : "Odłożony szkic") : "Do zatwierdzenia"}</b> · {optionLabel(di, i)}</>}</span>
+          {/* paczka 30: stan („Wybierz opcję”, „Odłożony szkic”) mówi nagłówek „Teraz”, karta opcji niesie samą nazwę */}
+          <span className="pub-t"><b>{optionLabel(di, i)}</b>{!ro && di.stale ? " · nieaktualna" : ""}</span>
           <span className="sp" />
           {ro ? null : openBtn(targetLink(s, s.blocks, di))}
         </div>
