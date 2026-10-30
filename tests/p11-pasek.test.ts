@@ -42,8 +42,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("szybki pasek: /api/bridge/task"
     fd.append("files", new File(["abc"], "notatka.txt", { type: "text/plain" }));
     const j = await (await post(fd)).json();
     expect((await repo.getTask(owner, j.id))?.title).toBe("Załącznik: notatka.txt");
+    // paczka 29: sam tekst nie zakłada zadania od razu, czeka na Claude jako wiadomość z kanwy (polecenie albo nowa praca)
     const k = await (await post(JSON.stringify({ text: "Stara wersja aplikacji" }), { "content-type": "application/json" })).json();
-    expect((await repo.getTask(owner, k.id))?.title).toBe("Stara wersja aplikacji");
+    expect(k.id).toBeNull();
+    expect((await repo.listPendingChat(owner, null)).map((m) => m.text)).toContain("Stara wersja aplikacji");
     expect((await post(JSON.stringify({ text: "  " }), { "content-type": "application/json" })).status).toBe(400);
   });
 

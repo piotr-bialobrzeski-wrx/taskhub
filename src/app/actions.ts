@@ -318,7 +318,7 @@ export async function stopWork(taskId: string, runId: string): Promise<string> {
 export async function stopWorkForm(taskId: string, runId: string): Promise<void> { await stopWork(taskId, runId); }
 // ---------- kolejka agenta (paczka 18) ----------
 // zapisana kolejność wygrywa z tą, w jakiej agent sam bierze pracę (lista pracy daje te pozycje na początek); klucze pozycji, których już nie ma, odpadają przy zapisie
-const QUEUE_KEY = /^(chat|task|title|answer|step):[0-9a-f-]{36}$/i;
+const QUEUE_KEY = /^((chat|task|title|answer|step):[0-9a-f-]{36}|chat:canvas)$/i;   // chat:canvas = wiadomości z głównej kanwy (paczka 29)
 async function saveQueue(ownerId: string, keys: string[]): Promise<void> {
   const live = new Set(((await workSummary(ownerId, { peek: true, audience: "work" })).items ?? []).map((x) => x.key));
   const clean = [...new Set(keys.filter((k) => typeof k === "string" && QUEUE_KEY.test(k) && live.has(k)))].slice(0, 200);
@@ -342,7 +342,8 @@ export async function queueNext(key: string, taskId?: string | null): Promise<st
   return "Przesunięte na pierwsze miejsce. Bieżąca praca nie jest przerywana.";
 }
 // „Wycofaj”: wiadomości Piotra w zadaniu wychodzą z kolejki, zanim agent je weźmie
-export async function withdrawMessages(taskId: string): Promise<string> {
+// taskId null = wiadomości z głównej kanwy
+export async function withdrawMessages(taskId: string | null): Promise<string> {
   const o = await requireOwner();
   const n = await repo.withdrawChat(o.id, taskId);
   refresh(taskId);

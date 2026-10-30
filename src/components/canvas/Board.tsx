@@ -8,14 +8,14 @@ import { GHEAD, GPAD, TASK_SIZE } from "@/lib/canvas/layout";
 import { Icon, LookBar, Lvl, ToolIcon, TS_LABEL, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
 import { AgentFeed, Dock, Namer, PrioPicker, ProjectPicker, TileMenu, Toast, useToast } from "./widgets";
 import { msgCount } from "@/lib/auto";
-import type { FeedItem } from "@/lib/feed";
+import type { FeedItem, WorkBubble } from "@/lib/feed";
 import type { AgentQueue } from "@/lib/agent/work";
 import { QueuePanel } from "./Queue";
 import { AddButton, AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import { Projects, type ProjectPatch } from "./Projects";
 import { matches, norm, tokens, type Screen, type SearchItem } from "@/lib/search-core";
-import { autoLayout, batchTasks, chat, createCompanyAction, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeCompany, removeProject, reopenLast, restoreLayout, restoreTask, saveTaskPositions, updateCompanyAction, updateGroupAction, updateProjectAction } from "@/app/actions";
+import { autoLayout, batchTasks, chat, createCompanyAction, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeCompany, removeProject, reopenLast, restoreLayout, restoreTask, queueNext, saveTaskPositions, withdrawMessages, updateCompanyAction, updateGroupAction, updateProjectAction } from "@/app/actions";
 import { Activity } from "@/components/Activity";
 
 export type ArchRow = { id: string; title: string; when: string; summary: string | null; base: number; eff: number; project: string | null };
@@ -24,6 +24,7 @@ export type BoardInitial = { view?: string; p?: string; t?: string; focus?: stri
 export type BoardProps = {
   tasks: TaskTile[]; groups: GroupVM[]; projects: ProjectRow[]; companies: CompanyRow[]; projTasks: ProjTask[]; index: SearchItem[]; initial: BoardInitial;
   aiOn: boolean; agent: string; feed: FeedItem[];
+  work?: WorkBubble | null;   // dymek pracy: wiadomość z kanwy czeka na Claude albo Claude ją robi (paczka 29)
   agentQueue: AgentQueue;   // kolejka agenta w lewym dolnym rogu (paczka 18)
   archive: { done: ArchRow[]; trash: ArchRow[]; trashDays: number };
 };
@@ -336,7 +337,7 @@ export function Board(p: BoardProps) {
         </div>
       ) : null}
 
-      {off ? null : <AgentFeed items={p.feed} queue={<QueuePanel queue={p.agentQueue} onToast={show} />} />}
+      {off ? null : <AgentFeed items={p.feed} work={p.work ?? null} onWithdraw={() => withdrawMessages(null).then(show)} onQueueNext={(key) => queueNext(key, null).then(show)} queue={<QueuePanel queue={p.agentQueue} onToast={show} />} />}
 
       {off ? null : <Dock action={chat} taskId={null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"} placeholder="Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" />}
       <Toast text={toast} />
