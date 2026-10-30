@@ -41,6 +41,7 @@ export function sql() {
     globalThis.__taskhubSql = postgres(url, {
       max: 5,
       idle_timeout: 20,
+      fetch_types: false,         // bez pytania o typy tablic przy każdym połączeniu (transfer z Supabase); tablice z bazy czytamy jako JSON
       prepare: false,            // pooler Supabase (PgBouncer, tryb transaction) nie lubi prepared statements
       transform: postgres.camel, // kolumny snake_case -> camelCase w wynikach
       onnotice: () => {},

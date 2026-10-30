@@ -534,6 +534,7 @@ export async function completeStep(ownerId: string, task: Task, step: Step, opts
   const sm = own ? spentMin({ spentSec }) : agentMinOf({ agentSec });
   if (sm > 0 && !step.logged) {
     await sql()`insert into time_samples (owner_id, step_id, tool, project_id, est_min, spent_min, who) values (${ownerId}, ${step.id}, ${step.tool}, ${task.projectId}, ${step.estMin}, ${sm}, ${own ? "owner" : "agent"})`;
+    samplesMem.delete(ownerId);
     patch.logged = true;
   }
   await writeStep(step.id, patch, { sent: true });
@@ -556,6 +557,7 @@ export async function reopenStep(ownerId: string, taskId: string, step: Step): P
     await tx`delete from time_samples where step_id = ${step.id}`;
     await tx`update tasks set done_at = null where id = ${taskId} and owner_id = ${ownerId}`;
   });
+  samplesMem.delete(ownerId);
 }
 
 // ---------- zgoda na szkic i wysyłka ----------
@@ -757,7 +759,7 @@ export async function getAttachmentThumb(ownerId: string, id: string, make: (dat
 }
 export async function countAttachments(taskIds: string[]): Promise<Record<string, number>> {
   if (!taskIds.length) return {};
-  const rows = await sql()`select task_id, count(*)::int as n from attachments where task_id = any(${taskIds}) group by task_id`;
+  const rows = await sql()`select task_id, count(*)::int as n from attachments where task_id = any(${pgArr(taskIds)}::uuid[]) group by task_id`;
   return Object.fromEntries(rows.map((r) => [r.taskId as string, Number(r.n)]));
 }
 
@@ -812,7 +814,18 @@ export async function listRuleVersions(ownerId: string, ruleId?: string, limit =
 }
 
 // ---------- czasy ----------
+// próbki czasu służą tylko do kalibracji szacunków, a czytała je prawie każda strona i lista pracy (300 wierszy za każdym razem):
+// trzymamy je w pamięci instancji przez SAMPLES_MS; nowa próbka z tej instancji (addSample) czyści pamięć od razu
+const SAMPLES_MS = 5 * 60_000;
+const samplesMem = new Map<string, { at: number; rows: TimeSample[] }>();
 export async function listSamples(ownerId: string): Promise<TimeSample[]> {
+  const hit = samplesMem.get(ownerId);
+  if (hit && Date.now() - hit.at < SAMPLES_MS) return hit.rows.map((x) => ({ ...x }));
+  const rows = await listSamplesDb(ownerId);
+  samplesMem.set(ownerId, { at: Date.now(), rows });
+  return rows.map((x) => ({ ...x }));
+}
+async function listSamplesDb(ownerId: string): Promise<TimeSample[]> {
   const rows = await sql()`select tool, project_id, est_min, spent_min, who from time_samples where owner_id = ${ownerId} order by at desc limit 300`;
   return rows.map((r) => ({ tool: r.tool as string, projectId: (r.projectId as string) ?? null, estMin: Number(r.estMin), spentMin: Number(r.spentMin), who: r.who === "agent" ? "agent" as const : "owner" as const }));
 }
@@ -1055,18 +1068,22 @@ export async function setLayoutMemory(ownerId: string, app: string, blocks: Bloc
 }
 
 // ---------- grupy na kanwie ----------
+// tablica jako parametr: bez typów z bazy (db.ts, fetch_types: false) podajemy ją jako literał tekstowy „{"a","b"}” z rzutowaniem w zapytaniu
+export const pgArr = (xs: readonly string[]): string => `{${xs.map((x) => `"${String(x).replace(/["\\]/g, "\\$&")}"`).join(",")}}`;
+// uuid[] z bazy: bez pobierania typów przy połączeniu (db.ts, fetch_types: false) sterownik oddaje tablicę jako tekst „{a,b}”
+const uuidArray = (v: unknown): string[] => Array.isArray(v) ? (v as string[]) : typeof v === "string" ? v.replace(/^\{|\}$/g, "").split(",").filter(Boolean) : [];
 export type Group = { id: string; taskId: string | null; name: string; color: number; x: number; y: number; w: number; h: number; members: string[]; auto: boolean };
 export async function listGroups(ownerId: string, taskId: string | null): Promise<Group[]> {
   const rows = taskId
     ? await sql()`select * from canvas_groups where owner_id = ${ownerId} and task_id = ${taskId} order by created_at`
     : await sql()`select * from canvas_groups where owner_id = ${ownerId} and task_id is null order by created_at`;
-  return rows.map((r) => ({ id: r.id as string, taskId: (r.taskId as string) ?? null, name: r.name as string, color: Number(r.color), x: Number(r.x), y: Number(r.y), w: Number(r.w), h: Number(r.h), members: (r.members as string[]) ?? [], auto: !!r.auto }));
+  return rows.map((r) => ({ id: r.id as string, taskId: (r.taskId as string) ?? null, name: r.name as string, color: Number(r.color), x: Number(r.x), y: Number(r.y), w: Number(r.w), h: Number(r.h), members: uuidArray(r.members), auto: !!r.auto }));
 }
 export async function createGroup(ownerId: string, taskId: string | null, name: string, members: string[], rect?: { x: number; y: number; w: number; h: number }): Promise<Group> {
   const [{ n }] = await sql()`select count(*)::int as n from canvas_groups where owner_id = ${ownerId}`;
   // kolumny prostokąta są całkowite, a kanwa liczy w ułamkach (powiększenie, środek widoku): ułamek wywracał zapis grupy
   const r0 = rect ? roundRect(rect) : { x: 0, y: 0, w: 0, h: 0 };
-  const [r] = await sql()`insert into canvas_groups (owner_id, task_id, name, color, x, y, w, h, members, auto) values (${ownerId}, ${taskId}, ${name.slice(0, 60)}, ${Number(n) % 8}, ${r0.x}, ${r0.y}, ${r0.w}, ${r0.h}, ${members}, ${!rect}) returning id`;
+  const [r] = await sql()`insert into canvas_groups (owner_id, task_id, name, color, x, y, w, h, members, auto) values (${ownerId}, ${taskId}, ${name.slice(0, 60)}, ${Number(n) % 8}, ${r0.x}, ${r0.y}, ${r0.w}, ${r0.h}, ${pgArr(members)}::uuid[], ${!rect}) returning id`;
   await releaseMembers(ownerId, taskId, r.id as string, members);
   return (await listGroups(ownerId, taskId)).find((g) => g.id === r.id)!;
 }
@@ -1077,14 +1094,14 @@ function roundRect(r: { x: number; y: number; w: number; h: number }) {
 // kafelek należy do jednej grupy na kanwie: wchodząc do nowej, wypada z poprzedniej (inaczej znikał z nowej, bo rysujemy go tylko w pierwszej)
 async function releaseMembers(ownerId: string, taskId: string | null, keepId: string, members: string[]): Promise<void> {
   if (!members.length) return;
-  await sql()`update canvas_groups set members = array(select m from unnest(members) as m where m <> all(${members}::uuid[]))
-    where owner_id = ${ownerId} and task_id is not distinct from ${taskId} and id <> ${keepId} and members && ${members}::uuid[]`;
+  await sql()`update canvas_groups set members = array(select m from unnest(members) as m where m <> all(${pgArr(members)}::uuid[]))
+    where owner_id = ${ownerId} and task_id is not distinct from ${taskId} and id <> ${keepId} and members && ${pgArr(members)}::uuid[]`;
 }
 export async function updateGroup(ownerId: string, id: string, patch: Partial<Omit<Group, "id" | "taskId">>): Promise<void> {
   const p: Row = {};
   if (patch.name !== undefined) p.name = patch.name.slice(0, 60);
   for (const k of ["x", "y", "w", "h", "color"] as const) if (patch[k] !== undefined) p[k] = Math.round(Number(patch[k]) || 0);
-  if (patch.members !== undefined) p.members = patch.members;
+  if (patch.members !== undefined) p.members = sql()`${pgArr(patch.members)}::uuid[]`;
   if (patch.auto !== undefined) p.auto = patch.auto;
   if (!Object.keys(p).length) return;
   const [g] = await sql()`update canvas_groups set ${sql()(p)} where id = ${id} and owner_id = ${ownerId} returning task_id`;
@@ -1243,7 +1260,7 @@ export async function runTouch(ownerId: string, runId: string, o: { stepId?: str
   const s = sql();
   const at = new Date().toISOString();
   const wanted = (o.touched ?? []).map((x) => x.id);
-  const owned = wanted.length ? new Set((await s`select s.id from steps s join tasks t on t.id = s.task_id where s.id = any(${wanted}) and t.owner_id = ${ownerId}`).map((r) => r.id as string)) : new Set<string>();
+  const owned = wanted.length ? new Set((await s`select s.id from steps s join tasks t on t.id = s.task_id where s.id = any(${pgArr(wanted)}::uuid[]) and t.owner_id = ${ownerId}`).map((r) => r.id as string)) : new Set<string>();
   const touched = (o.touched ?? []).filter((x) => owned.has(x.id));
   const ids = touched.map((x) => x.id), whats = touched.map((x) => x.what.slice(0, 60));
   const now = o.stepId ? s`, step_id = ${o.stepId}, task_id = ${o.taskId ?? null}`
@@ -1251,7 +1268,7 @@ export async function runTouch(ownerId: string, runId: string, o: { stepId?: str
     : o.taskId ? s`, task_id = ${o.taskId}, step_id = case when b.step_id is not null and exists(select 1 from steps x where x.id = b.step_id and x.task_id = ${o.taskId}) then b.step_id else null end`
     : s``;
   const rows = await s`update bridge_runs b set touched_at = now(),
-    steps = b.steps || coalesce((select jsonb_object_agg(x.k, jsonb_build_object('first', coalesce(b.steps->x.k->>'first', ${at}::text), 'at', ${at}::text, 'what', x.w)) from unnest(${ids}::text[], ${whats}::text[]) as x(k, w)), '{}'::jsonb)${now}
+    steps = b.steps || coalesce((select jsonb_object_agg(x.k, jsonb_build_object('first', coalesce(b.steps->x.k->>'first', ${at}::text), 'at', ${at}::text, 'what', x.w)) from unnest(${pgArr(ids)}::text[], ${pgArr(whats)}::text[]) as x(k, w)), '{}'::jsonb)${now}
     where b.id = ${runId} and b.owner_id = ${ownerId} and b.ended_at is null and b.stop_at is null returning b.id`;
   return rows.length > 0;
 }
@@ -1260,7 +1277,7 @@ export async function runSteps(ownerId: string, runId: string): Promise<Record<s
   return (r?.steps as Record<string, RunStep>) ?? {};
 }
 // agent zmienił krok (kartka, szkic, zamknięcie, fakty): kropka na kafelku, póki Piotr go nie otworzy
-export async function markAgentSteps(ids: string[]): Promise<void> { if (ids.length) await sql()`update steps set agent_at = now() where id = any(${ids})`; }
+export async function markAgentSteps(ids: string[]): Promise<void> { if (ids.length) await sql()`update steps set agent_at = now() where id = any(${pgArr(ids)}::uuid[])`; }
 export async function stepOpened(ownerId: string, taskId: string, stepId: string): Promise<void> {
   await sql()`update steps s set opened_at = now() from tasks t where t.id = s.task_id and s.id = ${stepId} and t.id = ${taskId} and t.owner_id = ${ownerId} and s.agent_at > coalesce(s.opened_at, '-infinity'::timestamptz)`;
 }
@@ -1325,7 +1342,7 @@ export async function answerQuestion(ownerId: string, id: string, answer: string
   await sql()`update questions set answer = ${answer.slice(0, 4000)}, answered_at = now(), seen_at = null where id = ${id} and owner_id = ${ownerId}`;
 }
 export async function markQuestionsSeen(ownerId: string, ids: string[]): Promise<void> {
-  if (ids.length) await sql()`update questions set seen_at = now() where owner_id = ${ownerId} and id = any(${ids})`;
+  if (ids.length) await sql()`update questions set seen_at = now() where owner_id = ${ownerId} and id = any(${pgArr(ids)}::uuid[])`;
 }
 export async function deleteQuestion(ownerId: string, id: string): Promise<void> { await sql()`delete from questions where id = ${id} and owner_id = ${ownerId}`; }
 
