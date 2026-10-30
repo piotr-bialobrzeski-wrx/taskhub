@@ -959,18 +959,21 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 /* ---------- odpowiedzi agenta: lewy dolny róg, najnowsza na dole, starsze wyżej ---------- */
 .feed { position: fixed; z-index: 10; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   width: var(--fw); max-height: calc(100% - 160px); display: flex; flex-direction: column; justify-content: flex-end; gap: var(--s-3); pointer-events: none; }
+/* paczka 30: wszystko nad czatem (odpowiedzi, dymek pracy, panel i pigułka kolejki) ma jedną szerokość kolumny i wspólne krawędzie */
+.feed > * { width: 100%; box-sizing: border-box; }
 .feed .fb { pointer-events: auto; position: relative; display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-4) 44px var(--s-4) var(--s-5);
   border-radius: var(--r-md) var(--r-md) var(--r-md) 6px; min-height: 0; }
 .feed .fb .ans-text { padding-right: 0; max-height: 30vh; overflow: auto; }
 .feed .fb .ans-x { top: 6px; transform: none; }
 /* dymek pracy (paczka 7, punkt 3): ostatni dymek nad polem czatu. „Claude pracuje” ma światełko po obwódce jak krok „teraz” i nie ma X;
-   „wysłane” ma kropkę, cytat wiadomości i X jak odpowiedź. Szkło zostaje na .fb.glass, bez szkła w szkle */
+   „wysłane” ma kropkę, cytat wiadomości i X jak odpowiedź. Szkło zostaje na .fb.glass, bez szkła w szkle.
+   Paczka 30: światełko biegnie po samej krawędzi dymka (inset 0), nie 3 px na zewnątrz, więc krawędzie zgadzają się z resztą kolumny */
 .feed .fb.work.on { padding-right: var(--s-5); }
-.feed .fb.work.on::after { content: ""; position: absolute; inset: -3px; border-radius: calc(var(--r-md) + 3px) calc(var(--r-md) + 3px) calc(var(--r-md) + 3px) 9px; padding: 3px; pointer-events: none;
+.feed .fb.work.on::after { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 2px; pointer-events: none;
   background: conic-gradient(from var(--a), transparent 0 70%, color-mix(in srgb, var(--t-claude) 30%, white) 88%, var(--t-claude) 100%);
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; animation: run-light 1.6s linear infinite; }
 .wk-h { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--t-claude); font-size: 12.5px; font-weight: 600; line-height: 1.3; }
-.wk-h .wk-t { flex: none; }
+.wk-h .wk-t { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }   /* paczka 30: w węższej kolumnie „Zatrzymaj” zostaje w dymku */
 .wk-h .act-m { flex: none; font-weight: 500; color: var(--sub); font-variant-numeric: tabular-nums; }
 .wk-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .wk-line { font-size: 12.5px; color: var(--sub); }
@@ -993,8 +996,8 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .q-ind-n { flex: none; color: var(--sub); }
 .q-ind svg { flex: none; transition: transform .15s; transform: rotate(180deg); }
 .q-ind.on svg { transform: none; }
-/* panel nad dymkami (order: -1), szerszy niż dymki, żeby tytuły i przyciski mieściły się w wierszu */
-.q-panel { order: -1; width: max(100%, min(400px, calc(100vw - 32px))); border-radius: var(--r-lg); padding: var(--s-4); box-shadow: 0 10px 34px var(--shadow); max-height: 56vh; overflow: auto; display: flex; flex-direction: column; gap: var(--s-2); min-height: 0; flex: 0 1 auto; }
+/* panel nad dymkami (order: -1), tej samej szerokości co dymki (paczka 30); długie tytuły łamią się w dwie linie */
+.q-panel { order: -1; border-radius: var(--r-lg); padding: var(--s-4); box-shadow: 0 10px 34px var(--shadow); max-height: 56vh; overflow: auto; display: flex; flex-direction: column; gap: var(--s-2); min-height: 0; flex: 0 1 auto; }
 .feed .fb.work.wait { padding-right: var(--s-5); }
 .feed .fb.work.wait .wk-h { color: var(--sub); }
 .wk-line a { color: inherit; }
