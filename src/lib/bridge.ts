@@ -65,6 +65,8 @@ const B_NOSTEPS_V2 = B_NOSTEPS_V1
   // z doborem modelu kroki po rozpisaniu robi następny bieg na modelu dobranym do ich poziomu (list_work biegu to mówi)
   .replace("Potem w tym samym przebiegu bierz się za kroki tego zadania, które są gotowe.", "Potem w tym samym przebiegu bierz się za kroki tego zadania, które są gotowe, chyba że list_work mówi, że pozostałe pozycje zrobi osobny bieg.");
 // v2: odpowiedź Piotra na kartce jego kroku-decyzji nie jest prośbą o poprawkę kartki: krok już się zamknął, decyzję stosuje się w krokach po nim
+// paczka 29: wiadomość z głównej kanwy albo paska to najpierw pytanie, czy Piotr chce coś zrobić od razu, czy nową pracę
+const B_CANVAS = `   - WIADOMOŚCI Z GŁÓWNEJ KANWY: polecenie (pogrupuj, znajdź, otwórz, przenieś, zmień) robisz od razu narzędziami Task Hub i odpowiadasz reply_canvas; nowe zadanie (create_task) tylko, gdy Piotr opisuje nową pracę. Rozróżnienie: zasada z get_rules (topic „polecenia”).`;
 const B_MSGS_V2 = B_MSGS.replace("gdy nic nie zmienia, reply_chat, czemu.", "gdy nic nie zmienia, reply_chat, czemu. " + DECISION_MSG);
 const B_READY_V1 = `   - KROKI DO ZROBIENIA BEZ ZGODY (analiza, research, czytanie maili, wątków, ticketów, kalendarza, przygotowanie materiałów): start_step → zrób pracę swoimi konektorami → add_facts (istotne informacje z pochodzeniem) → complete_step z podsumowaniem i linkiem.`;
 const B_APPROVAL_V1 = `   - KROKI WYMAGAJĄCE ZGODY: przygotuj kompletny szkic (treść gotowa do wysłania, w języku z zasad) i zapisz go przez set_blocks: najpierw klocki kontekstu, na których szkic się opiera (thread z wątkiem Slacka jako dymki, mail z wątkiem maili, comment, facts, table, media ze zrzutami; każdy z source {app, ref, url}), potem blok draft ze status "proposed" (target.app, target.where, action, body, ewentualnie subject; wiersze arkusza jako columns + rows). Piotr musi widzieć, na podstawie czego powstał szkic. Niczego nie wysyłaj i nie wywołuj complete_step dla tego kroku; krok sam przejdzie do zatwierdzenia u Piotra.`;
@@ -99,7 +101,7 @@ export function bridgeWorkPrompt(): string {
   return [
     INTRO_V2,
     STEP1,
-    [STEP2, B_CONN_V2, B_MSGS_V2, B_GOING, B_NOSTEPS_V2, B_READY_V2, B_APPROVAL_V2, B_LEAVE_V2, B_CODE_V2, B_LIVE_V2, B_SHORT].join("\n"),
+    [STEP2, B_CONN_V2, B_CANVAS, B_MSGS_V2, B_GOING, B_NOSTEPS_V2, B_READY_V2, B_APPROVAL_V2, B_LEAVE_V2, B_CODE_V2, B_LIVE_V2, B_SHORT].join("\n"),
     RULES_V2,
     END,
   ].join("\n\n");

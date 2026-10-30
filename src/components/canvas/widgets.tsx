@@ -487,6 +487,7 @@ export function AgentFeed({ items, work = null, onStop, stepLabel, onStep, queue
             {/* jeden rząd na dole: przyciski z lewej, godzina z prawej */}
             <div className="ans-row">
               {step && onStep ? <button className="btn" type="button" onClick={() => onStep(m.stepId!)}>Otwórz krok {step}</button> : null}
+              {m.open ? <a className="btn" href={m.open.href}>{m.open.label}</a> : null}
               {more.map((x) => <button key={x.id} className="btn sm" type="button" title={`Otwórz krok ${x.label}`} onClick={() => onStep!(x.id)}>{x.label}</button>)}
               <span className="ans-t">Claude · {m.at}</span>
             </div>
@@ -533,7 +534,7 @@ function WorkCard({ b, onStop, onStep, onQueueNext, onWithdraw, onClose }: { b: 
     <div className="fb glass work on">
       {/* paczka 15: bez stopki z urządzeniem i godziną (zostaje w podpowiedzi); „Zatrzymaj” w rzędzie nagłówka, po prawej */}
       <div className="wk-h" title={workFoot(b)}>
-        <span className="dots" aria-hidden="true"><i /><i /><i /></span><span className="wk-t">Claude pracuje w tym zadaniu</span>{min !== null && min >= 1 ? <span className="act-m">{min} min</span> : null}
+        <span className="dots" aria-hidden="true"><i /><i /><i /></span><span className="wk-t">{b.head ?? "Claude pracuje w tym zadaniu"}</span>{min !== null && min >= 1 ? <span className="act-m">{min} min</span> : null}
         {b.stoppable && onStop ? (
           <button className="btn sm ico" type="button" disabled={busy} title="Przerywa bieżącą pracę Claude na Macu. Wróci za 10 minut albo od razu, gdy napiszesz."
             onClick={async () => { setBusy(true); try { await onStop(b.runId); } finally { setBusy(false); } }}><Icon k="stop" size={12} sw={1.6} />{busy ? "Zatrzymuję…" : "Zatrzymaj"}</button>

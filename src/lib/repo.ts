@@ -970,6 +970,13 @@ export async function addChat(ownerId: string, taskId: string | null, role: "use
 }
 // wiadomość wzięta do opracowania dawniej niż tyle minut temu i wciąż bez odpowiedzi liczy się jako nowa (bieg mostka padł bez sygnału, automat co godzinę ją weźmie)
 export const CHAT_STALE_MIN = 90;
+// wiadomości Piotra z głównej kanwy i szybkiego paska (bez zadania), czekające na agenta: polecenie do zrobienia od razu albo nowa praca (paczka 29)
+export async function listUnseenCanvasChat(ownerId: string, limit = 30, staleMin = CHAT_STALE_MIN): Promise<ChatMessage[]> {
+  const rows = await sql()`select * from chat_messages where owner_id = ${ownerId} and role = 'user' and answered_at is null and task_id is null
+      and (seen_at is null or seen_at < now() - make_interval(mins => ${staleMin}))
+    order by created_at limit ${limit}`;
+  return rows.map(rowToChat);
+}
 // wiadomości Piotra w zadaniach czekające na agenta (praca dla mostka: odpowiedzieć, dopisać kroki, poprawić szkic); zadanie z taką wiadomością nigdy nie wypada z listy pracy
 export async function listUnseenChat(ownerId: string, limit = 30, staleMin = CHAT_STALE_MIN): Promise<(ChatMessage & { taskId: string; taskTitle: string })[]> {
   const rows = await sql()`select c.*, t.title as task_title from chat_messages c join tasks t on t.id = c.task_id
@@ -979,8 +986,9 @@ export async function listUnseenChat(ownerId: string, limit = 30, staleMin = CHA
   return rows.map((r) => ({ ...rowToChat(r), taskId: r.taskId as string, taskTitle: r.taskTitle as string }));
 }
 // wiadomości Piotra bez odpowiedzi w jednym zadaniu (linia stanu pod dymkiem, karta nad dokiem, pasek nad kanwą, blokada samozamknięcia)
-export async function listPendingChat(ownerId: string, taskId: string): Promise<ChatMessage[]> {
-  const rows = await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and role = 'user' and answered_at is null order by created_at`;
+// taskId null = główna kanwa
+export async function listPendingChat(ownerId: string, taskId: string | null): Promise<ChatMessage[]> {
+  const rows = await sql()`select * from chat_messages where owner_id = ${ownerId} and ${taskId ? sql()`task_id = ${taskId}` : sql()`task_id is null`} and role = 'user' and answered_at is null order by created_at`;
   return rows.map(rowToChat);
 }
 // ile wiadomości bez odpowiedzi ma każde zadanie (chip „2 wiadomości” na kafelku); taskId zawęża do jednego zadania
@@ -995,16 +1003,16 @@ export async function markChatSeen(ownerId: string, where: { ids?: string[]; tas
   else if (where.taskId) await sql()`update chat_messages set seen_at = now() where owner_id = ${ownerId} and task_id = ${where.taskId} and role = 'user' and answered_at is null`;
 }
 // reply_chat: załatwione wiadomości (wskazane albo wszystkie dotychczasowe w zadaniu); zwraca ich id, żeby odpowiedź w historii wiązała się z prośbami
-export async function markChatAnswered(ownerId: string, taskId: string, ids?: string[]): Promise<string[]> {
+export async function markChatAnswered(ownerId: string, taskId: string | null, ids?: string[]): Promise<string[]> {
   if (ids && !ids.length) return [];
   const rows = await sql()`update chat_messages set answered_at = now(), seen_at = coalesce(seen_at, now())
-    where owner_id = ${ownerId} and task_id = ${taskId} and role = 'user' and answered_at is null ${ids ? sql()`and id in ${sql()(ids)}` : sql()``} returning id`;
+    where owner_id = ${ownerId} and ${taskId ? sql()`task_id = ${taskId}` : sql()`task_id is null`} and role = 'user' and answered_at is null ${ids ? sql()`and id in ${sql()(ids)}` : sql()``} returning id`;
   return rows.map((r) => r.id as string);
 }
 // „Wycofaj” w dymku kolejki (paczka 18): Piotr zabiera swoje wiadomości bez odpowiedzi z kolejki agenta; zostają w historii rozmowy z oznaczeniem withdrawn
-export async function withdrawChat(ownerId: string, taskId: string): Promise<number> {
+export async function withdrawChat(ownerId: string, taskId: string | null): Promise<number> {
   const rows = await sql()`update chat_messages set answered_at = now(), seen_at = coalesce(seen_at, now()), actions = coalesce(actions, '{}'::jsonb) || '{"withdrawn": true}'::jsonb
-    where owner_id = ${ownerId} and task_id = ${taskId} and role = 'user' and answered_at is null returning id`;
+    where owner_id = ${ownerId} and ${taskId ? sql()`task_id = ${taskId}` : sql()`task_id is null`} and role = 'user' and answered_at is null returning id`;
   return rows.length;
 }
 // wiadomości wzięte w biegu, który właśnie się skończył, a bez odpowiedzi: wracają do kolejki (następny bieg widzi je jako NOWE); nic nie ginie po cichu

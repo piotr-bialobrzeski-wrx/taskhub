@@ -3,7 +3,7 @@
 import * as repo from "./repo";
 import { aiFor } from "./services";
 import { runChat } from "./agent/chat";
-import { bridgeHold, busyWith, newTaskText, noStepsWho, type Worker } from "./auto";
+import { bridgeHold, busyWith, commandWho, newTaskText, noStepsWho, type Worker } from "./auto";
 import { liveActivity } from "./live";
 import { BRIDGE_ALIVE_MS } from "./bridge";
 
@@ -30,12 +30,21 @@ export async function intake(ownerId: string, m: { typed: string; files: File[];
   const text = typed || (files.length === 1 ? `Załącznik: ${files[0].name}` : `Załączniki: ${files.map((f) => f.name).join(", ")}`);
   const ai = await aiFor(ownerId);
   if (!ai.enabled) {
-    // bez klucza modelu: na kanwie tekst staje się zadaniem, w zadaniu zostaje jako notatka rozmowy; pliki trafiają do zadania
-    await repo.addChat(ownerId, taskId, "user", text + (typed && files.length ? ` (załączniki: ${files.map((f) => f.name).join(", ")})` : ""), stepId ? { stepId } : undefined);
+    // bez klucza modelu: w zadaniu wiadomość czeka na agenta; na kanwie sam tekst czeka na agenta jako polecenie (paczka 29),
+    // a tekst z plikami staje się zadaniem od razu (wpis w rozmowie kanwy jest wtedy tylko historią, załatwiony)
+    const toTask = !taskId && files.length > 0;
+    await repo.addChat(ownerId, taskId, "user", text + (typed && files.length ? ` (załączniki: ${files.map((f) => f.name).join(", ")})` : ""), stepId ? { stepId } : undefined, { seen: toTask });
     // komunikaty mówią, co z tego ma Piotr, nie jak działa mechanizm
     // w zadaniu wiadomość czeka w kolejce: jej stan (kto ją weźmie i kiedy, w pracy, odpowiedziano) liczy się na bieżąco pod dymkiem i na karcie nad dokiem,
     // bez dopisywania do rozmowy zapowiedzi „przeczyta za chwilę” przy każdej wiadomości
     if (taskId) { await attachFiles(taskId, files); return { goTo: null, note: null }; }
+    // paczka 29: tekst z kanwy (albo paska) bez plików nie staje się od razu zadaniem. Czeka na agenta jako polecenie: „pogrupuj kafelki”,
+    // „znajdź…”, „otwórz krok…” agent robi od razu i odpowiada w dymku; nowe zadanie zakłada tylko, gdy Piotr opisuje nową pracę
+    // (rozróżnienie w zasadzie z bazy). Pliki potrzebują zadania, więc wiadomość z plikami dalej zakłada je od razu
+    if (!toTask) {
+      const st = await repo.bridgeStatus(ownerId, BRIDGE_ALIVE_MS);
+      return { goTo: null, note: commandWho({ alive: st.alive, name: st.name, run: liveActivity(st.run), hold: bridgeHold(st.meta, st.pause) }) };
+    }
     // nowe zadanie z kanwy: kto je rozpisze i kiedy (mostek teraz / po bieżącej pracy / w ciągu minuty, albo automat o pełnej godzinie)
     const t = await repo.createTask(ownerId, { title: text.slice(0, 120), source: typed }); await attachFiles(t.id, files);
     const [st, tasks] = await Promise.all([repo.bridgeStatus(ownerId, BRIDGE_ALIVE_MS), repo.listTasks(ownerId)]);

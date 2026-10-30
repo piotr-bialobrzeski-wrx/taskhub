@@ -190,7 +190,7 @@ function buildHandler(auth: repo.TokenAuth) {
       const qs = await repo.listQuestions(ownerId, { taskId });
       const qx = qs.length ? "PYTANIA DO PIOTRA (zadane w aplikacji):\n" + qs.map((q) => `- [${q.id}]${q.stepId ? ` krok ${q.stepId}` : ""} ${q.text} → ${q.answer ? `ODPOWIEDŹ: ${q.answer}` : "(czeka na odpowiedź)"}`).join("\n") : "";
       const att = await repo.listAttachments({ taskId });
-      // paczka 27: przy każdym załączniku numery kroków, które go potrzebują; przy pracy nad krokiem oglądasz tylko jego grafiki
+      // paczka 29: przy każdym załączniku numery kroków, które go potrzebują; przy pracy nad krokiem oglądasz tylko jego grafiki
       const usedBy = (id: string) => t.steps.map((st, i) => (repo.stepAttachments(st, att)?.some((x) => x.id === id) ? String(i + 1).padStart(2, "0") : "")).filter(Boolean);
       const ax = att.length ? "ZAŁĄCZNIKI ZADANIA (grafikę albo plik tekstowy pokaże get_attachment; opis zapisz przez describe_attachment; „kroki” = kroki, którym są przypisane: przy pracy nad krokiem oglądaj tylko jego załączniki, a krok bez przypisanych (stary) wszystkie potrzebne):\n" + att.map((a) => { const u = usedBy(a.id); return `- [${a.id}] ${a.kind} „${a.name ?? a.url ?? ""}”${a.mime ? ` (${a.mime})` : ""}${a.caption ? ` · ${a.caption}` : ""}${u.length ? ` · kroki: ${u.join(", ")}` : ""}${a.analysis ? `: ${a.analysis.slice(0, 400)}` : ""}`; }).join("\n") : "";
       // rozmowa w zadaniu: Piotr dopisuje tu wymagania i pytania; NOWE = jeszcze bez odpowiedzi agenta
@@ -249,7 +249,7 @@ function buildHandler(auth: repo.TokenAuth) {
       }
       // zlecenie z rozmowy (paczka 19, punkt 2): tylko prawdziwa wiadomość Piotra w tym zadaniu z ostatniej doby; agent nie zleca chmury sam z siebie
       if (a.cloudFrom && !(await repo.ownerChatIn(ownerId, t.id, a.cloudFrom.trim()))) return text("Nie dodałem kroków: cloudFrom to nie wiadomość Piotra z rozmowy tego zadania z ostatniej doby. Podaj id jego wiadomości (NOWE [id] w get_task) albo dodaj kroki bez cloudFrom.");
-      // grafiki kroku (paczka 27): tylko załączniki tego zadania; krok bez attachments zostaje nieprzypisany (agent widzi wszystkie)
+      // grafiki kroku (paczka 29): tylko załączniki tego zadania; krok bez attachments zostaje nieprzypisany (agent widzi wszystkie)
       const att = await repo.listAttachments({ taskId: t.id });
       const attIds = new Set(att.map((x) => x.id));
       const badAtt = [...new Set(a.steps.flatMap((s) => s.attachments ?? []).filter((id) => !attIds.has(id)))];
@@ -635,6 +635,38 @@ function buildHandler(auth: repo.TokenAuth) {
       const left = (await repo.listPendingChat(ownerId, t.id)).length;
       await markRun();
       return text(`Odpowiedź zapisana${answers.length ? ` (załatwione wiadomości: ${answers.length})` : ""}.${left ? ` Bez odpowiedzi zostało: ${left}.` : ""}${closed ? " Zadanie ukończone." : ""}`);
+    });
+
+    // paczka 29: wiadomości z głównej kanwy i paska (sekcja WIADOMOŚCI Z GŁÓWNEJ KANWY w list_work): odpowiedź w dymku na głównej kanwie
+    server.registerTool("reply_canvas", {
+      title: "Odpowiedz na głównej kanwie", description: "Odpowiada Piotrowi na wiadomość z głównej kanwy albo szybkiego paska (dymek na głównej kanwie; długość i język według zasad z get_rules). messageIds: id wiadomości, które ta odpowiedź załatwia (z list_work); bez nich załatwia wszystkie czekające. taskId (i stepId): zadanie albo krok, do którego prowadzi odpowiedź (znalezione, założone, zmienione): dymek dostaje przycisk „Otwórz zadanie” albo „Otwórz krok NN”.",
+      inputSchema: z.object({ text: z.string().min(1).max(1200), messageIds: z.array(z.string()).max(50).optional(), taskId: z.string().optional(), stepId: z.string().optional() }),
+    }, async (a) => {
+      const t = a.taskId ? await repo.getTask(ownerId, a.taskId) : null;
+      if (a.taskId && !t) return text("Nie ma takiego zadania; odpowiedź nie zapisana. Popraw taskId albo pomiń go.");
+      const si = t && a.stepId ? t.steps.findIndex((s) => s.id === a.stepId) : -1;
+      const answers = await repo.markChatAnswered(ownerId, null, a.messageIds);
+      const open = t ? { taskId: t.id, ...(si >= 0 ? { stepId: t.steps[si].id, label: String(si + 1).padStart(2, "0") } : {}) } : {};
+      await repo.addChat(ownerId, null, "agent", a.text.trim(), { answers, ...open });
+      const left = (await repo.listPendingChat(ownerId, null)).length;
+      await markRun();
+      return text(`Odpowiedź zapisana na głównej kanwie${answers.length ? ` (załatwione wiadomości: ${answers.length})` : ""}.${left ? ` Bez odpowiedzi zostało: ${left}.` : ""}`);
+    });
+
+    server.registerTool("create_group", {
+      title: "Grupa na głównej kanwie", description: "Układa kafelki zadań w nazwaną grupę na głównej kanwie (np. jedna grupa na projekt). taskIds: id zadań z list_tasks; kafelek jest w jednej grupie naraz, więc przechodzi z poprzedniej. Grupa o tej samej nazwie już istnieje: dostaje dokładnie te kafelki (nie powstaje druga). Grup ani zadań nie usuwasz.",
+      inputSchema: z.object({ name: z.string().min(1).max(60), taskIds: z.array(z.string()).min(1).max(200) }),
+    }, async (a) => {
+      const tasks = await repo.listTasks(ownerId);
+      const ids = [...new Set(a.taskIds)].filter((id) => tasks.some((t) => t.id === id));
+      if (!ids.length) return text("Żadne z podanych id nie jest otwartym zadaniem; grupa nie powstała.");
+      const same = (await repo.listGroups(ownerId, null)).find((g) => g.name.trim().toLowerCase() === a.name.trim().toLowerCase());
+      // istniejąca grupa: nowy skład i auto, żeby kanwa ułożyła ją od nowa wokół jej kafelków
+      if (same) await repo.updateGroup(ownerId, same.id, { members: ids, auto: true });
+      else await repo.createGroup(ownerId, null, a.name.trim(), ids);
+      await markRun();
+      const skipped = a.taskIds.length - ids.length;
+      return text(`Grupa „${a.name.trim()}”: ${ids.length} kafelków${same ? " (zmieniona)" : ""}.${skipped ? ` Pominięte id (nie ma takich otwartych zadań): ${skipped}.` : ""}`);
     });
 
     server.registerTool("get_attachment", {

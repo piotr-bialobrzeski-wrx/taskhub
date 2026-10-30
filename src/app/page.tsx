@@ -1,5 +1,6 @@
 // Główna kanwa: zadania jako kafelki, kolejność z priorytetu efektywnego, grupy, archiwum (ukończone + kosz), dok czatu.
-import { agentFeed } from "@/lib/feed";
+import { agentFeed, workBubble } from "@/lib/feed";
+import { bridgeHold, busyWith, type Worker } from "@/lib/auto";
 import { requireOwner } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { bundle } from "@/lib/services";
@@ -23,9 +24,12 @@ const DAY = 864e5;
 export default async function Home({ searchParams }: { searchParams: Promise<BoardInitial> }) {
   const initial = await searchParams;
   const o = await requireOwner();
-  const [b, chatLog, groups, questions, bridge, stamp, pending] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 8), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null), repo.countPendingChat(o.id)]);
+  const [b, chatLog, groups, questions, bridge, stamp, pending, canvasPending] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 8), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null), repo.countPendingChat(o.id), repo.listPendingChat(o.id, null)]);
   const run = liveActivity(bridge.run);
   const aq = await agentQueue(o.id, run ? { taskId: run.taskId, stepId: run.stepId, since: run.since, kind: run.kind } : null, b.tasks);
+  // wiadomość z kanwy czeka na Claude albo Claude właśnie ją robi (paczka 29): ten sam dymek pracy co w zadaniu
+  const w: Worker = { alive: bridge.alive, name: bridge.name, run, hold: bridgeHold(bridge.meta, bridge.pause) };
+  const work = workBubble({ task: { id: "", steps: [] }, w, pending: canvasPending, busy: busyWith(run, b.tasks), queue: aq });
   const now = Date.now();
   const live = sortByPriority(b.scored.filter((s) => !s.task.deletedAt));
   // ukończone zostają na kanwie do końca dnia, potem idą do archiwum (ta sama reguła co w indeksie szukajki)
@@ -45,7 +49,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
 
   return (
     <>
-    <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run || pending.size > 0} refreshAt={archiveAt} />
+    <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run || pending.size > 0 || canvasPending.length > 0} refreshAt={archiveAt} />
     <Board
       tasks={onBoard.map((s) => taskTile(s, all, qCount.get(s.task.id) ?? 0, run, pending.get(s.task.id) ?? 0))}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
@@ -56,6 +60,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
       aiOn={providers.length > 0}
       agent={agentLabel(providers)}
       feed={agentFeed(chatLog)}
+      work={work}
       agentQueue={aq}
       archive={{
         done: doneArch.map((s) => row(s, `ukończone ${fmtDate(s.task.doneAt!)}`)),

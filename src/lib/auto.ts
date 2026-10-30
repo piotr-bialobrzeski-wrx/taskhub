@@ -62,6 +62,14 @@ export function chatWho(w: Worker, taskId: string, busy: string | null = null, n
   const n = nextAutoAt(now);
   return `Mostek na komputerze nie działa, więc nikt nie czyta tego teraz. Claude zajrzy tu ${n.text} (automat ${AUTO_EVERY}), odpowie i w razie potrzeby dopisze kroki.`;
 }
+// wiadomość z głównej kanwy albo paska (paczka 29): kto ją przeczyta i kiedy; agent zrobi polecenie albo założy zadanie
+export function commandWho(w: Worker, now = new Date()): string {
+  const b = bridgeLabel(w);
+  if (w.run) return `${b} kończy inną pracę, potem zrobi to, o co prosisz.`;
+  if (w.alive && w.hold) return `${b} stoi: ${holdText(w.hold)}. Potem zrobi to, o co prosisz.`;
+  if (w.alive) return "Przekazałem Claude. Zrobi to w ciągu minuty.";
+  return `Mostek na komputerze nie działa. Claude zrobi to ${nextAutoAt(now).text}.`;
+}
 // komunikat po dodaniu zadania z doku: to samo zdanie, co pasek nad kanwą zadania
 export const newTaskText = (title: string, who: Who) => `Dodałem zadanie „${shortTitle(title)}”. ${who.text}`;
 

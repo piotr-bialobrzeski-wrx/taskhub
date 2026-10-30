@@ -4,6 +4,7 @@ import { isAppCodeStep, type Step, type Task } from "@/lib/schema";
 import { brief, scoreAll } from "./context";
 import { approvalValid, draftOf, isPromptDraft, isSendable, type Draft } from "./approval";
 import { choiceOf, modelConfig, runLabel, stepChoice, type Choice } from "./models";
+import { CANVAS_KEY } from "@/lib/feed";
 // list_work pokazuje początek wiadomości; całość (do 50 tys. znaków) jest w get_task
 const preview = (x: string, n = 600) => (x.length > n ? x.slice(0, n) + "… (całość w get_task)" : x);
 
@@ -23,6 +24,8 @@ export const PROJECT_RULE = "Projekt: zadanie „bez projektu”, którego treś
 // lista elementów, o którą prosi Piotr (tickety, wątki, maile jako kroki), to jego otwarte kroki z treścią na kartce, nie zrobione odczyty Claude'a
 export const DECISION_RULE = "Decyzja Piotra: krok Piotra, w którym ma coś wybrać, zdecydować albo zatwierdzić wariant (Wybierz…, Zdecyduj…, Ustal…), ma na kartce przez set_blocks to, z czego wybiera (table, free), i klocek question z opcjami (options z label i note, recommended = indeks zalecanej); jego odpowiedź zamyka krok, wraca do Ciebie w rozmowie, a kartka zrobionego kroku zostaje w get_task (KARTKA ZROBIONEGO KROKU). Bez pytania na kartce Piotr musi wpisać wybór ręcznie przy „Zrobione” (pole „Co wybrałeś?”): trafia tylko do pola wynik, bez opcji i tabeli, więc zawsze daj pytanie na kartce.";
 export const ITEMS_RULE = "Lista elementów: gdy Piotr prosi o elementy jako kroki (tickety, wątki, maile, dokumenty: „każdy X jako osobny krok”, „pokaż ich treść w krokach”), każdy element to jego otwarty krok (tool manual, est 5), title = tytuł elementu w jego języku (bez przerabiania na czasownik), a na kartce przez set_blocks klocek free z treścią elementu 1:1 (Markdown) i klocek link do źródła; takich kroków nie oznaczaj jako zrobione. Jako zrobiony odczyt (add_steps.done) wchodzi tylko praca przygotowawcza (wybór, filtr, analiza), jednym krokiem.";
+// wiadomość z głównej kanwy albo paska (paczka 29): polecenie zrób od razu, nowe zadanie tylko dla nowej pracy; które jest które, mówi zasada w bazie
+export const COMMANDS_HEAD = "WIADOMOŚCI Z GŁÓWNEJ KANWY (Piotr pisał na głównej kanwie albo w szybkim pasku, poza zadaniem; najpierw to). Najpierw get_rules z topic „polecenia”: zasada mówi, kiedy to polecenie do zrobienia od razu, a kiedy nowa praca. Polecenie (pogrupuj kafelki, znajdź zadania, otwórz krok, przenieś do projektu, zmień termin, pytanie o stan) zrób od razu narzędziami Task Hub (list_tasks, get_task, update_task, create_group…), bez nowego zadania. Nowa praca: create_task z krótkim tytułem i projektem z listy, bez kroków (rozpisze je osobny bieg, jak każde zadanie bez kroków). Niejasne: odpowiedz jednym pytaniem, nic nie zakładaj. Każdą wiadomość kończysz reply_canvas z messageIds = jej id: co zrobiłeś albo odpowiedź; gdy prowadzi do zadania albo kroku, podaj taskId (i stepId), Piotr dostanie przycisk „Otwórz”. Polecenie, którego Task Hub nie umie (usuwanie, zmiana układu poza grupami), opisz w reply_canvas i zapytaj, czy zrobić z tego zadanie:";
 export const isLongTitle = (t: string) => t.trim().split(/\s+/).length > 6 || /[.!?]\s+\S/.test(t.trim());
 // choices: grupy pracy (model i wysiłek) w kolejności listy, bez powtórzeń; puste, gdy w ustawieniach nie ma doboru modeli
 // sig: grupy wszystkich pozycji po kolei (krok oddany i podniesiony poziom zmienia sig, choć tekst listy jest ten sam)
@@ -125,6 +128,7 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
   if (audience === "send") return sendSummary(ownerId, opts.stepId);
   const sends = audience === "bridge-v1";   // tylko stary mostek wysyła z listy pracy; reszta nie widzi zatwierdzonych szkiców
   const [tasks, projects, samples, allAnswered, allChat, settings] = await Promise.all([opts.tasks ?? repo.listTasks(ownerId), repo.listProjects(ownerId), repo.listSamples(ownerId), repo.listQuestions(ownerId, { answeredUnseen: true }), repo.listUnseenChat(ownerId), repo.userSettings(ownerId)]);
+  const canvasChat = audience === "bridge-v1" ? [] : await repo.listUnseenCanvasChat(ownerId);
   // dobór modelu: każda pozycja listy dostaje grupę (model i wysiłek z poziomu kroku); bez konfiguracji wszystko w jednej, pustej grupie
   const cfg = modelConfig(settings);
   const weightOf = new Map(tasks.map((t) => [t.id, projects.find((p) => p.id === t.projectId)?.weight ?? null]));
@@ -147,6 +151,8 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
   const forTaskMsg = (taskId: string, stepId?: string | null) => { const st = stepId ? stepOf.get(stepId) : undefined; return cfg ? (st ? forStep(st, taskId) : choiceOf(cfg, "analysis")) : null; };
   const chatStep = (m: (typeof allChat)[number]) => (m.actions as { stepId?: string } | null)?.stepId ?? null;
   const chat = allChat.filter((m) => take(forTaskMsg(m.taskId, chatStep(m)), 0, { key: `chat:${m.taskId}`, kind: "chat", taskId: m.taskId, taskTitle: m.taskTitle, stepId: chatStep(m), label: `Twoja wiadomość: „${m.text.replace(/\s+/g, " ").slice(0, 80)}”`, line: `wiadomość w zadaniu [${m.taskId}] „${m.taskTitle}” (sekcja WIADOMOŚCI PIOTRA)` }));
+  // wiadomości z głównej kanwy i paska (paczka 29): jedna pozycja kolejki na całą kanwę, na Analizie
+  const commands = canvasChat.filter(() => take(cfg ? choiceOf(cfg, "analysis") : null, 0, { key: CANVAS_KEY, kind: "chat", taskId: "", taskTitle: "Główna kanwa", stepId: null, label: `Twoja wiadomość: „${canvasChat[0].text.replace(/\s+/g, " ").slice(0, 80)}”`, line: "wiadomość z głównej kanwy (sekcja WIADOMOŚCI Z GŁÓWNEJ KANWY)" }));
   const open = scoreAll(tasks, projects, samples).filter((s) => !s.task.doneAt && !s.task.deletedAt);
   const unfinished = new Set(tasks.filter((t) => !t.doneAt && !t.deletedAt).map((t) => t.id));
   const free = open.filter((s) => !s.task.dependsOn.some((d) => unfinished.has(d)));   // zadania, które nie czekają na inne zadania
@@ -172,7 +178,7 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
     if (waitingTask.has(s.task.id)) continue;
     for (const st of s.task.steps) {
       const c = forStep(st, s.task.id);
-      // grafiki kroku (paczka 27): agent ogląda tylko je; [] = krok bez grafik, brak listy = krok sprzed przypisywania
+      // grafiki kroku (paczka 29): agent ogląda tylko je; [] = krok bez grafik, brak listy = krok sprzed przypisywania
       const pics = st.attachmentIds ? (st.attachmentIds.length ? ` | grafiki kroku: ${st.attachmentIds.map((id) => `[${id}]`).join(", ")} (get_attachment tylko te)` : " | bez grafik") : "";
       const line = `- krok [${st.id}] „${st.title}” (${st.tool}) w zadaniu [${s.task.id}] „${s.task.title}”${st.detail ? ": " + st.detail.slice(0, 200) : ""}${pics}`;
       const n = s.task.steps.indexOf(st) + 1;
@@ -213,10 +219,11 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
       if (st.needsApproval) { if (!st.blocks?.some((b) => b.type === "draft" && !b.stale)) add(approval, line); } else add(ready, line);
     }
   }
-  if (!opts.peek) await Promise.all([repo.markQuestionsSeen(ownerId, answered.map((q) => q.id)), repo.markChatSeen(ownerId, { ids: chat.map((m) => m.id) })]);
-  const counts: WorkCounts = { chat: chat.length, going: going.length, approved: approved.length, noSteps: noSteps.length, answered: answered.length, ready: ready.length + files.length, approval: approval.length, titles: longTitles.length };
+  if (!opts.peek) await Promise.all([repo.markQuestionsSeen(ownerId, answered.map((q) => q.id)), repo.markChatSeen(ownerId, { ids: [...commands, ...chat].map((m) => m.id) })]);
+  const counts: WorkCounts = { chat: chat.length + commands.length, going: going.length, approved: approved.length, noSteps: noSteps.length, answered: answered.length, ready: ready.length + files.length, approval: approval.length, titles: longTitles.length };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const out = [
+    commands.length ? COMMANDS_HEAD + "\n" + commands.map((m) => `- wiadomość [${m.id}] (${m.createdAt.slice(0, 16).replace("T", " ")} UTC): ${preview(m.text.replace(/\s+/g, " "))}`).join("\n") : "",
     chat.length ? "WIADOMOŚCI PIOTRA W ZADANIACH (najpierw to: get_task, potem zrób, o co prosi: gdy zmienia zakres pracy, dodaj kroki przez add_steps z polem before = id kroku publikacji albo wysyłki, przed którym mają wejść; gdy prosi o poprawkę szkicu, popraw go przez set_blocks; gdy pyta, odpowiedz. Wiadomość przy kroku (także odpowiedź na pytanie z kartki) dotyczy kartki tego kroku, dopóki nie jest zrobiony, także kroku Piotra (Ty): gdy zmienia jej treść, zapisz kartkę od nowa przez set_blocks pełnym zestawem klocków (KARTKA KROKU w get_task; pytania z odpowiedziami zostają; bez klocków-notek o zmianie, kartka pokazuje tylko stan) i reply_chat z stepId tego kroku: co zmieniłeś na kartce; gdy nic nie zmienia, reply_chat, czemu. " + DECISION_MSG + " Odpowiedź pokazuje się Piotrowi jako dymek czatu nad polem wpisywania. Po każdej załatwionej prośbie reply_chat w tym zadaniu z messageIds = id tej wiadomości: co dopisałeś (numery i tytuły kroków) albo odpowiedź; Piotr widzi wtedy, która prośba jest załatwiona, a która jeszcze w pracy. Nigdy „wezmę pod uwagę” bez kroku):\n" + chat.map((m) => `- zadanie [${m.taskId}] „${m.taskTitle}”${(m.actions as { stepId?: string } | null)?.stepId ? `, przy kroku [${(m.actions as { stepId: string }).stepId}]` : ""}, wiadomość [${m.id}] (${m.createdAt.slice(0, 16).replace("T", " ")} UTC): ${preview(m.text.replace(/\s+/g, " "))}`).join("\n") : "",
     going.length ? "KROKI W TOKU (zaczęte przez Piotra albo poprzedni przebieg; zrób je teraz i zgłoś complete_step, a gdy nie możesz: leave_step z powodem):\n" + going.join("\n") : "",
     approved.length ? "ZATWIERDZONE SZKICE DO WYSŁANIA (wyślij dokładnie treść z sekcji „SZKIC KROKU <id>” w get_task, bez zmian, w formacie z linii „formatowanie” tej sekcji, potem complete_step z linkiem):\n" + approved.join("\n") : "",

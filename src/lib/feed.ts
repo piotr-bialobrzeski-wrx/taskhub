@@ -7,16 +7,21 @@ import type { ChatMessage } from "./repo";
 import type { Task } from "./schema";
 import type { AgentQueue } from "./agent/work";
 
+// kolejka agenta: wszystkie wiadomości z głównej kanwy i paska to jedna pozycja (paczka 29)
+export const CANVAS_KEY = "chat:canvas";
+
 // steps: inne kroki, których agent dotknął w tym biegu (małe przyciski „04”, „05” obok „Otwórz krok 03”)
-export type FeedItem = { id: string; text: string; at: string; stepId: string | null; link: string | null; steps: string[] };
+// open: odpowiedź z głównej kanwy prowadzi do zadania albo kroku (reply_canvas, paczka 29): przycisk „Otwórz zadanie” / „Otwórz krok 02”
+export type FeedItem = { id: string; text: string; at: string; stepId: string | null; link: string | null; steps: string[]; open?: { href: string; label: string } | null };
 export const FEED_MAX = 3;
 const FRESH_MS = 12 * 3600_000;
 
 export function agentFeed(log: ChatMessage[], now = Date.now()): FeedItem[] {
   return log.filter((m) => m.role === "agent" && now - new Date(m.createdAt).getTime() < FRESH_MS).slice(-FEED_MAX).map((m) => {
-    const a = (m.actions ?? null) as { stepId?: string; link?: string; steps?: unknown } | null;
+    const a = (m.actions ?? null) as { stepId?: string; link?: string; steps?: unknown; taskId?: string; label?: string } | null;
     const steps = Array.isArray(a?.steps) ? a.steps.filter((x): x is string => typeof x === "string") : [];
-    return { id: m.id, text: m.text, at: fmtTime(m.createdAt), stepId: a?.stepId ?? null, link: a?.link ?? null, steps };
+    const open = typeof a?.taskId === "string" ? { href: `/tasks/${a.taskId}${a.stepId ? `?step=${a.stepId}` : ""}`, label: a.stepId && a.label ? `Otwórz krok ${a.label}` : "Otwórz zadanie" } : null;
+    return { id: m.id, text: m.text, at: fmtTime(m.createdAt), stepId: open ? null : a?.stepId ?? null, link: a?.link ?? null, steps, open };
   });
 }
 
@@ -25,7 +30,7 @@ export function agentFeed(log: ChatMessage[], now = Date.now()): FeedItem[] {
 // sent: wiadomość Piotra czeka: kto ją weźmie i kiedy (jedna linia tytułu, czasem druga), z cytatem i podpisem „Ty · 19:41”.
 export type WorkChip = { id: string; label: string; now: boolean };
 export type WorkBubble =
-  | { kind: "working"; runId: string; quote: string | null; now: string; detail: string | null; chips: WorkChip[]; more: number; where: string; since: string; at: string; later: number; stoppable: boolean }
+  | { kind: "working"; head?: string; runId: string; quote: string | null; now: string; detail: string | null; chips: WorkChip[]; more: number; where: string; since: string; at: string; later: number; stoppable: boolean }
   | { kind: "sent"; id: string; title: string; line: string | null; quote: string; at: string; queue?: SentQueue };
 // paczka 18: wiadomość czeka w kolejce agenta: pozycja (1 = następna), z ilu, kto teraz pracuje (link do zadania), klucz do „Następne”
 export type SentQueue = { pos: number; of: number; key: string; nowTask: { id: string; title: string } | null };
@@ -36,21 +41,23 @@ export function workBubble({ task, w, pending, busy, queue = null, now = new Dat
   const run = w.run, newest = pending.at(-1) ?? null;
   const taken = pending.filter((m) => m.seenAt && run && m.seenAt >= run.since);
   if (run && run.kind !== "send" && (run.taskId === task.id || taken.length)) {
-    const here = run.taskId === task.id;
-    const idx = run.stepId ? task.steps.findIndex((s) => s.id === run.stepId) + 1 : 0;
-    const nowLine = !here ? "kończy inne zadanie" : !task.steps.length ? "rozpisuje kroki" : nowText(run, idx || null);
+    // główna kanwa (task.id pusty, paczka 29): bieg wziął wiadomość z kanwy
+    const canvas = !task.id;
+    const here = !canvas && run.taskId === task.id;
+    const idx = here && run.stepId ? task.steps.findIndex((s) => s.id === run.stepId) + 1 : 0;
+    const nowLine = canvas ? "robi to, o co prosisz" : !here ? "kończy inne zadanie" : !task.steps.length ? "rozpisuje kroki" : nowText(run, idx || null);
     // kroki tej pracy: krok „teraz” pierwszy, potem dotknięte w kolejności kroków; nad chipami się nie zawija, reszta jako „+N”
     const touched = task.steps.filter((s) => s.id !== run.stepId && run.steps?.[s.id]);
     const all = [...(idx ? [task.steps[idx - 1]] : []), ...touched].map((s) => ({ id: s.id, label: pad(task.steps.indexOf(s) + 1), now: s.id === run.stepId }));
     return {
-      kind: "working", runId: run.runId ?? "", quote: taken.at(-1)?.text ?? null, now: nowLine, detail: here ? run.detail : busy, chips: all.slice(0, CHIPS_MAX), more: Math.max(0, all.length - CHIPS_MAX),
+      kind: "working", ...(canvas ? { head: "Claude czyta Twoją wiadomość" } : {}), runId: run.runId ?? "", quote: taken.at(-1)?.text ?? null, now: nowLine, detail: here ? run.detail : busy, chips: all.slice(0, CHIPS_MAX), more: Math.max(0, all.length - CHIPS_MAX),
       where: run.bridge, since: run.since, at: fmtTime(run.since), later: pending.filter((m) => !m.seenAt).length, stoppable: !!run.stoppable,
     };
   }
   if (!newest) return null;
   const base = { kind: "sent" as const, id: newest.id, quote: newest.text, at: fmtTime(newest.createdAt), line: null };
   // kolejka agenta: wiadomość tego zadania ma swoje miejsce w kolejce, a Claude pracuje gdzie indziej albo przed nią jest inna praca
-  const key = `chat:${task.id}`, at = queue ? queue.items.findIndex((x) => x.key === key) : -1;
+  const key = task.id ? `chat:${task.id}` : CANVAS_KEY, at = queue ? queue.items.findIndex((x) => x.key === key) : -1;
   if (queue && at >= 0 && (run || at > 0) && !(run && run.kind === "send")) {
     const nowTask = queue.now?.taskId ? { id: queue.now.taskId, title: queue.now.taskTitle } : null;
     return { ...base, title: `W kolejce: ${at + 1}. z ${queue.items.length}`, line: nowTask ? `Claude kończy zadanie „${nowTask.title}”` : null, queue: { pos: at + 1, of: queue.items.length, key, nowTask } };
