@@ -334,8 +334,14 @@ export function Dock({ action, taskId, stepId = null, placeholder, busyText, con
 
 // ---------- pole nazwy nowego kafelka / grupy ----------
 export function Namer({ label, placeholder, onSubmit, onClose }: { label: string; placeholder: string; onSubmit: (name: string) => void; onClose: () => void }) {
+  // pole nazwy rozwija się pod pigułką Kafelek/Grupa w górnym pasku; na telefonie (pigułki nie ma, jest „+”) zostaje na dole
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const r = document.querySelector(".mkpill")?.getBoundingClientRect();
+    if (r && r.width) setAt({ left: Math.max(16, Math.min(r.left, window.innerWidth - 16 - Math.min(420, window.innerWidth - 32))), top: r.bottom + 8 });
+  }, []);
   return (
-    <form className="namer glass" autoComplete="off" onPointerDown={(e) => e.stopPropagation()}
+    <form className={"namer glass" + (at ? " top" : "")} style={at ?? undefined} autoComplete="off" onPointerDown={(e) => e.stopPropagation()}
       onSubmit={(e) => { e.preventDefault(); const v = (new FormData(e.currentTarget).get("name") as string).trim(); if (v) onSubmit(v); }}>
       <input name="name" type="text" aria-label={label} placeholder={placeholder} autoFocus onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} />
       <button className="btn primary" type="submit">Dodaj</button>

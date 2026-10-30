@@ -183,6 +183,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
         <div className="pl">
           <BackPill onBack={() => router.push("/")}><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="ct">{t.title}</span></BackPill>
           {view === "canvas" ? <div className="zslot" /> : null}
+          {view === "canvas" ? <MakePill tileTitle={after ? "Nowy krok po zaznaczonym" : "Nowy krok"} groupTitle={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onTile={() => setNamer(namer === "tile" ? null : "tile")} onGroup={() => setNamer(namer === "group" ? null : "group")} /> : null}
         </div>
         <ViewPill view={view} onView={onView} />
         <span className="sp" />
@@ -190,7 +191,6 @@ export function TaskCanvas(p: TaskCanvasProps) {
         <SearchPill index={p.index} screen="task" here={t.id} onPick={onPick} />
         <AgentPill agent={p.agent} aiOn={p.aiOn} />
       </div>
-      {view === "canvas" ? <MakePill tileTitle={after ? "Nowy krok po zaznaczonym" : "Nowy krok"} groupTitle={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onTile={() => setNamer(namer === "tile" ? null : "tile")} onGroup={() => setNamer(namer === "group" ? null : "group")} /> : null}
 
       {p.runbar ? <div className={"runbar glass" + (panel ? " withpanel" : "")}>{p.runbar}{p.runAction ? <button className="btn" type="button" onClick={() => runAct(p.runAction!.anchor)}>{p.runAction.label}</button> : null}</div> : null}
 

@@ -48,7 +48,7 @@ export function BackPill({ title, onBack, children }: { title?: string; onBack?:
   );
 }
 
-// Kafelek i Grupa: narzędzia kanwy w prawym dolnym rogu (lewy należy do odpowiedzi agenta), nie część górnego paska
+// Kafelek i Grupa: narzędzia kanwy w górnym pasku, zaraz za pigułką powiększenia (paczka 30: róg zakryłaby karta na całą wysokość)
 export function MakePill({ tileTitle, groupTitle, onTile, onGroup }: { tileTitle: string; groupTitle: string; onTile: () => void; onGroup: () => void }) {
   return (
     <div className="gpill glass mkpill" role="toolbar" aria-label="Nowe na kanwie">
