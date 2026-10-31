@@ -223,23 +223,28 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
 }
 
 // Przyciski opcji pytania (paczka 31): zalecana opcja ma przy swoim przycisku oznaczenie „Polecam” i jedno zdanie uzasadnienia,
-// więc rekomendacji nie trzeba szukać w notatce pod pytaniem. Z zaleceniem opcje stoją jedna pod drugą (zdanie mieści się obok
-// przycisku); bez zalecenia zostaje jeden rząd. Pozostałe opcje dalej da się wybrać.
+// więc rekomendacji nie trzeba szukać w notatce pod pytaniem. Krótsza kartka decyzji (paczka 31, wariant A): opis opcji (note, jedno zdanie)
+// stoi przy jej przycisku, nie tylko w dymku; przy zalecanej opcji zdanie uzasadnienia, a bez niego jej opis. Gdy jest zalecenie albo
+// opis którejkolwiek opcji, opcje stoją jedna pod drugą (zdanie mieści się obok przycisku); bez nich zostaje jeden rząd.
 export function OptionButtons({ options, recommended, why, className = "opts" }: { options: { label: string; note?: string }[]; recommended?: number | null; why?: string | null; className?: string }) {
   const rec = recommended != null && recommended >= 0 && recommended < options.length ? recommended : null;
   const btn = (o: { label: string; note?: string }, i: number) => (
     <button key={i} type="submit" name="option" value={o.label} className={"btn" + (rec === i ? " primary" : "")} title={o.note}>{o.label}</button>
   );
-  if (rec == null) return <div className={className}>{options.map(btn)}</div>;
+  const notes = options.some((o) => o.note?.trim());
+  if (rec == null && !notes) return <div className={className}>{options.map(btn)}</div>;
   return (
     <div className={className + " has-rec"}>
-      {options.map((o, i) => i === rec ? (
-        <div key={i} className="opt-rec">
-          {btn(o, i)}
-          <span className="rec-tag">Polecam</span>
-          {why ? <span className="rec-why">{why}</span> : null}
-        </div>
-      ) : <div key={i} className="opt">{btn(o, i)}</div>)}
+      {options.map((o, i) => {
+        const line = (i === rec ? why?.trim() || o.note?.trim() : o.note?.trim()) || null;
+        return i === rec ? (
+          <div key={i} className="opt-rec">
+            {btn(o, i)}
+            <span className="rec-tag">Polecam</span>
+            {line ? <span className="rec-why">{line}</span> : null}
+          </div>
+        ) : <div key={i} className="opt">{btn(o, i)}{line ? <span className="opt-note">{line}</span> : null}</div>;
+      })}
     </div>
   );
 }

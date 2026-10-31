@@ -477,6 +477,14 @@ a.n-dest:hover { text-decoration: underline; }
 .rec-tag { flex: none; font-size: 11px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; color: var(--accent); background: var(--surface); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .chip .rec-tag { margin-left: 6px; padding: 0 6px; font-size: 10px; }
 .rec-why { flex: 1 1 220px; min-width: 0; font-size: 13px; line-height: 1.4; color: var(--text); }
+/* paczka 31, krótsza kartka decyzji: opis każdej opcji jednym zdaniem przy jej przycisku; „Skąd to wiemy” zwija tło pod pytaniem */
+.opt-note { flex: 1 1 220px; min-width: 0; font-size: 13px; line-height: 1.4; color: var(--sub); }
+.has-rec .opt { padding: 0 10px; margin: 0 -10px; }
+.proto-row { display: flex; align-items: center; gap: var(--s-3); margin-top: var(--s-3); padding: 10px 12px; border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); min-width: 0; }
+.proto-row .t { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proto-row .t b { font-weight: 650; }
+details.fold.why-fold > summary .k { font-weight: 650; }
+.undo-row { display: flex; justify-content: flex-end; }
 
 /* ---------- formularze i strony pomocnicze (Ustawienia, Zasady, logowanie) ---------- */
 .card { background: var(--surface); border-radius: var(--r-md); box-shadow: 0 2px 10px var(--shadow), 0 0 0 1px var(--line); padding: var(--s-5); }
