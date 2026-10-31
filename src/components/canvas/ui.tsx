@@ -106,7 +106,6 @@ const PATHS: Record<string, string> = {
   chev: '<path d="m4 6 4 4 4-4"/>',
   chevL: '<path d="m10 4-4 4 4 4"/>',
   chevR: '<path d="m6 4 4 4-4 4"/>',
-  widen: '<path d="M2 8h12M2 8l3-3M2 8l3 3M14 8l-3-3M14 8l-3 3"/>',
   check: '<path d="M4 8.5l2.6 2.5L12 5.5"/>',
   clip: '<path d="M10.6 5.4 6.4 9.6a1.4 1.4 0 0 0 2 2l4.6-4.6a2.9 2.9 0 0 0-4.1-4.1L4.3 7.5a4.4 4.4 0 0 0 6.2 6.2l3.3-3.3"/>',
   question: '<circle cx="8" cy="8" r="5.5"/><path d="M6.2 6.3a1.8 1.8 0 1 1 2.6 1.6c-.5.3-.8.6-.8 1.1v.3M8 11.3h.01"/>',

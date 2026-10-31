@@ -37,7 +37,6 @@ export type TaskCanvasProps = {
 };
 
 const pad = (n: number) => String(n).padStart(2, "0");
-const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 export function TaskCanvas(p: TaskCanvasProps) {
   const router = useRouter();
@@ -53,21 +52,8 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const [tmenu, setTmenu] = useState<{ id: string | null; x: number; y: number } | null>(null);   // menu kafelka (prawy klik); null = kafelek zadania
   const [namer, setNamer] = useState<"tile" | "group" | null>(null);
   // kontekst pola czatu: domyślnie to, co jest otwarte (krok w panelu, inaczej zadanie); X zawęża o poziom wyżej (krok → zadanie → wszystkie zadania)
-  // szerokość panelu: dwa tryby (wąski do 600 px, szeroki do 1200 px) zapamiętane jako wybór, a uchwyt nadpisuje je dokładną szerokością
-  const [wide, setWide] = useState(false);
-  const [gripW, setGripW] = useState<number | null>(null);
-  const [ww, setWw] = useState(1280);
-  const [gripOn, setGripOn] = useState(false);
-  const grip = useRef<{ x: number; w: number } | null>(null);
-  const maxW = Math.max(360, ww - 32);
-  const dw = clamp(gripW ?? (wide ? Math.min(1200, ww - 64) : Math.min(600, ww - 32)), 360, maxW);
-  const cramped = ww - dw < 420;   // szeroki panel zostawia za mało miejsca: pasek stanu i karta odpowiedzi chowają się do czasu zwężenia
-
-  useEffect(() => {
-    try { setWide(localStorage.getItem("th-wide") === "1"); const w = Number(localStorage.getItem("th-dw")); if (w) setGripW(w); } catch { /* brak storage */ }
-    const size = () => setWw(window.innerWidth); size();
-    window.addEventListener("resize", size); return () => window.removeEventListener("resize", size);
-  }, []);
+  // paczka 31 (wariant A „Jedna oś, szersze wstawki”): otwarta karta zawsze zakrywa cały ekran, bez przełącznika szerokości i bez uchwytu;
+  // szerokości treści (680 tekst, 1040 porównania i tabele) ustala CSS (.detail, .d-body)
   // przycisk w pasku („Rozpisz teraz”): panel zadania i rozwinięta sekcja, do której prowadzi
   const runAct = (anchor: string) => { setSel(new Set()); setPanel("__task"); setTimeout(() => { const el = document.getElementById(anchor); if (el instanceof HTMLDetailsElement) el.open = true; el?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, 80); };
   useEffect(() => {
@@ -109,15 +95,11 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {p.project ? <span className="d-proj" title={`Projekt: ${p.project.name}`}><i className="d" style={{ ["--c" as string]: p.project.color }} /><span>{p.project.name}</span></span> : null}
       <span className="sp" /></>
   );
-  const onGrip = (e: React.PointerEvent) => { e.preventDefault(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); grip.current = { x: e.clientX, w: dw }; setGripOn(true); };
-  const onGripMove = (e: React.PointerEvent) => { const g = grip.current; if (!g) return; setGripW(clamp(g.w + (g.x - e.clientX), 360, window.innerWidth - 32)); };
-  const endGrip = () => { if (!grip.current) return; grip.current = null; setGripOn(false); try { localStorage.setItem("th-dw", String(dw)); } catch { /* brak storage */ } };
   const [pull, setPull] = useState(0);
   const pullRef = useRef<number | null>(null);
   const onPullDown = (e: React.PointerEvent) => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); pullRef.current = e.clientY; };
   const onPullMove = (e: React.PointerEvent) => { if (pullRef.current != null) setPull(Math.max(0, e.clientY - pullRef.current)); };
   const endPull = () => { if (pullRef.current == null) return; pullRef.current = null; if (pull > 110) { setPanel(null); setSel(new Set()); } setPull(0); };
-  const widen = () => { const w = !wide; setWide(w); setGripW(null); try { localStorage.setItem("th-wide", w ? "1" : "0"); localStorage.removeItem("th-dw"); } catch { /* brak storage */ } };
   const cur = panel && panel !== "__task" ? byId.get(panel) ?? null : null;
   // zegar czasu Piotra na otwartym kroku jego własnym (narzędzie „Piotr sam”), póki nie jest zrobiony; jeden hak obsługuje panel i szufladę na telefonie
   const asideRef = useRef<HTMLElement>(null);
@@ -133,7 +115,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const layoutNow = () => { undoL.remember(layoutSnapshot(api.current, p.steps.map((s) => s.id), p.groups)); run(() => autoLayout(t.id), "Ułożono"); };
 
   return (
-    <div className={"app" + (panel ? " haspanel" : "") + (panel && cramped ? " cramped" : "")} style={panel ? { ["--dw" as string]: dw + "px" } : undefined}>
+    <div className={"app" + (panel ? " haspanel" : "")}>
       {view === "canvas" ? (
         <Canvas zoomKey={"task"} apiRef={api} items={items} size={STEP_SIZE} groups={groups} render={(id) => { const s = byId.get(id)!; return (
             <>
@@ -192,7 +174,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
         <AgentPill agent={p.agent} aiOn={p.aiOn} />
       </div>
 
-      {p.runbar ? <div className={"runbar glass" + (panel ? " withpanel" : "")}>{p.runbar}{p.runAction ? <button className="btn" type="button" onClick={() => runAct(p.runAction!.anchor)}>{p.runAction.label}</button> : null}</div> : null}
+      {p.runbar ? <div className="runbar glass">{p.runbar}{p.runAction ? <button className="btn" type="button" onClick={() => runAct(p.runAction!.anchor)}>{p.runAction.label}</button> : null}</div> : null}
 
       {namer === "tile" ? <Namer label="Nazwa nowego kroku" placeholder={after ? "Nazwa kroku (po zaznaczonym)" : "Nazwa kroku"} onClose={() => setNamer(null)} onSubmit={(name) => { setNamer(null); run(() => addStepQuick(t.id, name, after), "Dodano krok"); }} /> : null}
       {namer === "group" ? <Namer label="Nazwa grupy" placeholder={n ? `Nazwa grupy dla ${n} ${word}` : "Nazwa grupy"} onClose={() => setNamer(null)} onSubmit={(name) => { const members = ids; const rect = groupRect(members); setNamer(null); setSel(new Set()); setPanel(null); run(async () => { await freeze(members); const id = await createGroupAction(t.id, name, members, rect); setSelGroup(id); }); }} /> : null}
@@ -226,23 +208,22 @@ export function TaskCanvas(p: TaskCanvasProps) {
       ) : null}
 
       {panel ? (
-        <aside ref={asideRef} className="detail glass" style={{ ["--dw" as string]: dw + "px", ...(pull ? { transform: `translateY(${pull}px)`, transition: "none" } : {}) }} aria-live="polite" onPointerDown={(e) => e.stopPropagation()}>
+        <aside ref={asideRef} className="detail" style={pull ? { transform: `translateY(${pull}px)`, transition: "none" } : undefined} aria-live="polite" onPointerDown={(e) => e.stopPropagation()}>
           {/* telefon: szuflada od dołu; uchwyt pociągnięty w dół zamyka krok */}
           <div className="dhandle" aria-hidden="true" onPointerDown={onPullDown} onPointerMove={onPullMove} onPointerUp={endPull} onPointerCancel={() => { pullRef.current = null; setPull(0); }} />
-          <div className={"grip" + (gripOn ? " on" : "")} title="Przeciągnij, aby zmienić szerokość" onPointerDown={onGrip} onPointerMove={onGripMove} onPointerUp={endGrip} onPointerCancel={endGrip} />
+          {/* lewy górny róg: strzałka wstecz zamyka kartę (jak Esc), obok nazwa zadania albo kroku */}
           <div className="d-bar">
+            <button className="icobtn d-back" type="button" aria-label="Wróć" title="Wróć (Esc)" onClick={() => { setPanel(null); setSel(new Set()); }}><Icon k="back" size={16} sw={1.9} /></button>
             {panel === "__task" ? p.taskBar : cur ? stepBar(cur) : null}
             {cur ? <MoreMenu label="Więcej" items={[{ label: "Usuń krok", danger: true, confirm: "Usunąć ten krok? Tego nie da się cofnąć.", yes: "Tak, usuń", onPick: () => { const id = cur.id; setPanel(null); setSel(new Set()); run(() => removeStep(t.id, id), "Usunięto krok"); } }]} /> : null}
-            <button className={"icobtn d-widen" + (wide && gripW == null ? " on" : "")} type="button" aria-label={wide ? "Węziej" : "Szerzej"} title={wide ? "Węziej" : "Szerzej (kartka obok siebie)"} aria-pressed={wide} onClick={widen}><Icon k="widen" size={14} sw={1.6} /></button>
-            <button className="icobtn" type="button" aria-label="Zamknij" onClick={() => { setPanel(null); setSel(new Set()); }}><Icon k="x" size={12} sw={2} /></button>
           </div>
           <div className="d-body" key={panel}>{panel === "__task" ? p.taskBody : p.panels[panel]}</div>
         </aside>
       ) : null}
 
-      {p.questions && !n && !group ? <div className={"answer glass" + (panel ? " withpanel" : "")} aria-live="polite">{p.questions}</div> : null}
+      {p.questions && !n && !group ? <div className="answer glass" aria-live="polite">{p.questions}</div> : null}
       {/* odpowiedzi agenta (to, co jest w historii rozmowy) w lewym dolnym rogu ekranu */}
-      <AgentFeed items={p.feed} work={p.work} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} className={panel ? "withpanel" : ""} style={{ ["--dw" as string]: dw + "px" }}
+      <AgentFeed items={p.feed} work={p.work} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} className={panel ? "withpanel" : ""}
         stepLabel={(id) => (byId.has(id) ? pad(byId.get(id)!.idx) : null)} onStep={openStep}
         queue={<QueuePanel queue={p.agentQueue} taskId={t.id} onToast={show} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} />}
         onQueueNext={(key) => run(async () => show(await queueNext(key, t.id)))} onWithdraw={() => run(async () => show(await withdrawMessages(t.id)))} />

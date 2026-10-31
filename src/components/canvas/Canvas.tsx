@@ -328,8 +328,7 @@ export function Canvas(p: CanvasProps) {
     Object.values(P).forEach((q) => { mx = Math.max(mx, q.x + p.size.w); my = Math.max(my, q.y + p.size.h); });
     lg.forEach((g) => { mx = Math.max(mx, g.x + g.w); my = Math.max(my, g.y + g.h); });
     if (!mx) return;
-    const panel = document.querySelector<HTMLElement>(".detail:not([hidden])");
-    const avail = c.clientWidth - (panel ? panel.offsetWidth + 40 : 40);
+    const avail = c.clientWidth - 40;   // paczka 31: otwarta karta zakrywa cały ekran, więc nie odejmuje szerokości
     const z = clamp(Math.min(avail / (mx - bb.x0 + 20), (c.clientHeight - 100) / (my - bb.y0 + 20), 1.2), 0.35, 1.6);
     setZoomState(z); c.scrollTo(padRef.current.x, padRef.current.y);   // lewy górny róg świata (x0, y0) przy krawędzi widoku
   };

@@ -301,7 +301,6 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 /* ---------- pasek stanu, pasek zaznaczenia, toast ---------- */
 .runbar { position: absolute; z-index: 5; left: 50%; transform: translateX(-50%); top: calc(70px + env(safe-area-inset-top, 0px));
   display: flex; align-items: center; gap: 10px; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5); border-radius: 999px; white-space: nowrap; max-width: calc(100% - 32px); }
-.runbar.withpanel { left: max(16px, env(safe-area-inset-left, 0px)); transform: none; max-width: calc(100% - var(--dw, 600px) - 64px); }
 .rb-t { font-size: 12.5px; color: var(--sub); overflow: hidden; text-overflow: ellipsis; }
 .rb-t b { color: var(--text); }
 .selbar { position: absolute; z-index: 11; left: 50%; transform: translateX(-50%); bottom: calc(30px + var(--mk-h) + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px));
@@ -315,14 +314,11 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .empty p { margin: 0; color: var(--sub); }
 
 /* ---------- panel szczegółów ---------- */
-.detail { position: absolute; z-index: 8; top: calc(70px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(84px + env(safe-area-inset-bottom, 0px));
-  width: var(--dw, 600px); max-width: calc(100% - 32px); border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
+/* paczka 31 (wariant A „Jedna oś, szersze wstawki”): otwarta karta zawsze na cały ekran, bez ramek i bez przełącznika szerokości; kanwa pod nią nie prześwituje */
+.detail { position: absolute; z-index: 11; inset: 0; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
 /* wąski panel: tytuł dostaje całą szerokość, priorytet to same kreski (etykieta i strzałka wracają w szerokim panelu) */
 .d-bar .pp.head .lvl-t, .d-bar .pp.head > svg { display: none; }
 @container (min-width: 900px) { .d-bar .pp.head .lvl-t { display: inline-flex; } .d-bar .pp.head > svg { display: block; } }
-.grip { position: absolute; left: 0; top: 0; bottom: 0; width: 10px; cursor: ew-resize; touch-action: none; z-index: 2; }
-.grip::after { content: ""; position: absolute; left: 3px; top: 50%; width: 4px; height: 44px; margin-top: -22px; border-radius: 99px; background: var(--line); }
-.grip:hover::after, .grip.on::after { background: var(--accent); }
 .d-bar { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4) var(--s-4) var(--s-4) var(--s-6); border-bottom: 1px solid var(--line); flex: none; }
 .d-bar .sp, .ans-head .sp { flex: 1; }
 .d-body { flex: 1; min-height: 0; overflow: auto; padding: var(--s-6); display: flex; flex-direction: column; gap: 14px; }
@@ -812,25 +808,29 @@ table.tb tr.new td { background: var(--accent-soft); }
 .md img { max-width: 100%; border-radius: var(--r-sm); display: block; margin-top: var(--s-2); }
 .md code { font: 12px var(--font-mono); background: var(--surface); padding: 1px 5px; border-radius: 6px; }
 .md pre.code { margin: 0; }
-/* panel i pole czatu nie nachodzą na siebie: dół panelu śledzi wysokość doku; karta odpowiedzi agenta przy otwartym panelu idzie w lewo jak pasek stanu */
-.detail { bottom: calc(32px + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); }
-.answer.withpanel { left: max(16px, env(safe-area-inset-left, 0px)); transform: none; width: min(720px, calc(100% - var(--dw, 600px) - 64px)); }
 .ans-acts { display: flex; flex-wrap: wrap; gap: 8px; }
-.app.cramped .answer.withpanel, .app.cramped .runbar.withpanel { display: none; }   /* szeroki panel na małym oknie: nic nie wciska się obok niego */
-/* paczka 30: otwarta karta od góry do dołu ekranu; zakrywa menu górnego paska, a lewa część paska (wstecz z nazwą zadania, powiększenie, Kafelek/Grupa)
-   kończy się przed środkową pigułką i przed lewą krawędzią karty, nazwa zadania skraca się pierwsza. Panel prawie na całą szerokość (cramped) zostaje pod paskiem, żeby nie zakryć wstecz.
-   Pole czatu stoi na dole karty, na jej szerokości, z równymi marginesami 16 px od lewej, prawej i dolnej krawędzi; karta nie bywa węższa niż 360 px
-   (TaskCanvas), więc pole ma co najmniej 328 px i nigdy nie wystaje poza kartę. */
+/* paczka 31, wariant A: karta na cały ekran. W lewym górnym rogu pływa sama strzałka wstecz z nazwą (i rzadkie akcje pod „⋮”); górny pasek kanwy,
+   pasek stanu i Kafelek/Grupa chowają się pod kartą, a pole czatu, dymki i kolejka zostają tam, gdzie na kanwie (nad kartą).
+   Jedna środkowa oś: tekst, pola i kroki do 680 px (--tw), porównania, tabele i opcje obok siebie do 1040 px (--ww), symetrycznie na boki.
+   Wstawka szeroka siedząca w węższym pudełku (np. tabela w ramce „Teraz”): pudełko rośnie do 1040, a jego wnętrze zostaje na osi 680
+   dzięki wewnętrznemu marginesowi; sama wstawka wychodzi na boki ujemnym marginesem do szerokości --wi. */
+.app.haspanel :is(.dockwrap, .feed, .answer) { z-index: 12; }   /* pole czatu i dymki nad kartą (na telefonie nad szufladą) */
 @media (min-width: 861px) {
-  .app.haspanel .detail { bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
-  .app.haspanel:not(.cramped) .detail { z-index: 11; top: calc(14px + env(safe-area-inset-top, 0px)); }
-  .app.haspanel .dockwrap { z-index: 12; left: auto; right: calc(max(16px, env(safe-area-inset-right, 0px)) + 16px); bottom: calc(30px + env(safe-area-inset-bottom, 0px));
-    width: calc(min(var(--dw, 600px), 100% - 32px) - 32px); padding: 0; }
-  .app.haspanel .dockwrap > .dock { width: 100%; }
-  .app.haspanel .d-body { padding-bottom: calc(var(--dock-h, 46px) + 32px); }
-  .app.haspanel:not(.cramped) .pillbar > .pl { max-width: min(calc(50% - 110px), calc(100vw - var(--dw, 600px) - 44px)); }   /* przed środkową pigułką i przed kartą (16 + 16 marginesy ekranu + 12 odstępu) */
+  .app.haspanel :is(.pillbar, .mkpill, .namer, .runbar, .selbar, .zmenu) { display: none; }
+  .d-bar { position: absolute; z-index: 3; top: calc(18px + env(safe-area-inset-top, 0px)); left: calc(20px + env(safe-area-inset-left, 0px)); max-width: min(760px, calc(100% - 40px));
+    min-height: 44px; padding: 4px 14px 4px 4px; gap: var(--s-2); border-bottom: 0; border-radius: 22px;
+    background: var(--glass); backdrop-filter: blur(22px) saturate(160%); box-shadow: 0 8px 28px var(--shadow), inset 0 0 0 1px var(--glass-edge), 0 0 0 1px var(--line); }
+  .d-bar .n-num { margin-left: 2px; }
+  .detail > .d-body { --tw: min(680px, 100cqw); --ww: min(1040px, 100cqw); padding: calc(84px + env(safe-area-inset-top, 0px)) 32px calc(var(--dock-h, 46px) + 72px); }
+  .detail > .d-body > * { width: 100%; max-width: var(--tw); margin-inline: auto; flex: none; }
+  .detail > .d-body > .zones.two { max-width: var(--ww); }
+  .detail > .d-body > :not(.zones.two):has(.cmp, .tbwrap:not(.msg *)) { --wi: var(--ww); max-width: var(--ww); padding-inline: calc((var(--ww) - var(--tw)) / 2); }
+  .detail > .d-body > .now:has(.cmp, .tbwrap:not(.msg *)) { --wi: calc(var(--ww) - 2 * var(--s-5)); padding-inline: calc((var(--ww) - var(--tw)) / 2 + var(--s-5)); }
+  .detail > .d-body :is(.cmp, .block:has(.tbwrap)):not(.cmp *, .zones.two *, .msg *) { margin-inline: calc((100% - var(--wi)) / 2); }
+  /* lepki pasek formatowania pod pływającym nagłówkiem (84 px wcięcia treści, nagłówek kończy się na 62 px) */
+  .detail > .d-body .rf-bar { top: -18px; }
+  .detail > .d-body .rf-link { top: 23px; }
 }
-@media (max-width: 860px) { .answer.withpanel { left: 50%; transform: translateX(-50%); width: min(720px, calc(100% - 2 * var(--side))); } }
 
 /* ---------- karta kroku „Teraz · Co · Skąd” (paczka 2, punkt 8): jeden wyróżniony blok stanu, brief i materiały zwijają się po zrobieniu ---------- */
 .now { border-radius: var(--r-md); padding: var(--s-4) var(--s-5); display: flex; flex-direction: column; gap: var(--s-3); background: var(--accent-soft); min-width: 0; }
@@ -897,11 +897,9 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .answer.qonly .ans-q { margin-bottom: 0; }
 /* odpowiedź agenta nad dokiem = ostatni dymek czatu (pełna rozmowa w historii): przy lewej krawędzi doku, szerokość treści, rogi dymka */
 .answer.bubble { width: fit-content; border-radius: var(--r-md) var(--r-md) var(--r-md) 6px; }
-.answer.bubble:not(.withpanel) { max-width: min(612px, 100% - 2 * var(--side)); left: max(var(--side), calc(50% - 360px)); transform: none; }
-.answer.bubble.withpanel { max-width: min(612px, calc(100% - var(--dw, 600px) - 64px)); }
+.answer.bubble { max-width: min(612px, 100% - 2 * var(--side)); left: max(var(--side), calc(50% - 360px)); transform: none; }
 .answer.bubble .ans-x { top: 6px; transform: none; }
 .ans-t { font-size: 11px; color: var(--sub); margin-top: calc(-1 * var(--s-2)); }   /* jak podpis dymka w historii rozmowy */
-@media (max-width: 860px) { .answer.bubble.withpanel { max-width: min(612px, 100% - 2 * var(--side)); left: max(var(--side), calc(50% - 360px)); transform: none; } }
 .node.origin .act { color: #fff; }
 .node.origin .act .act-d, .node.origin .act .act-m { color: rgba(255,255,255,.85); }
 
@@ -1045,7 +1043,6 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
    a dok (i wszystko, co liczy się od --side) zwęża się symetrycznie, żeby na nie nie wchodzić */
 .app { --fw: clamp(260px, calc((100vw - 720px) / 2 - 48px), 380px); }
 @media (min-width: 861px) { .app:has(.feed .fb), .app:has(.feed .q-ind) { --side: calc(var(--fw) + 32px); } }
-.app.cramped .feed.withpanel { display: none; }
 @media (max-width: 860px) {
   .feed { left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: auto; bottom: calc(28px + var(--mk-h) + var(--dock-h, 46px) + env(safe-area-inset-bottom, 0px)); max-height: 45%; }
   .feed.withpanel { display: none; }   /* telefon: panel kroku zajmuje dół ekranu */
@@ -1062,11 +1059,10 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
   .dhandle { display: block; position: absolute; z-index: 3; left: 0; right: 0; top: 0; height: 18px; touch-action: none; cursor: grab; }
   .dhandle::after { content: ""; position: absolute; left: 50%; top: 7px; width: 40px; height: 4px; margin-left: -20px; border-radius: 99px; background: var(--line); }
   .d-bar { padding: var(--s-6) var(--s-4) var(--s-3) var(--s-5); }
-  .d-widen { display: none; }
   .d-body { padding: var(--s-4) var(--s-4) calc(var(--dock-h, 46px) + 40px + env(safe-area-inset-bottom, 0px)); }
   .now { padding: var(--s-3) var(--s-4); }
   .pub .msg { padding: var(--s-3) var(--s-4); }
-  .detail.glass { background: var(--bg); }   /* szuflada pełna, kanwa nie prześwituje */
+  .detail { box-shadow: 0 -8px 28px var(--shadow), 0 0 0 1px var(--line); }   /* szuflada pełna (tło z .detail), kanwa nie prześwituje */
   .pillbar .sp { flex: 0 0 0; }
   .srch > svg { flex: none; }
   .app.haspanel :is(.pillbar, .mkpill, .namer, .runbar, .feed, .answer, .selbar, .zmenu) { display: none; }
