@@ -21,7 +21,7 @@ import { Activity } from "@/components/Activity";
 import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
-import { BlocksView } from "@/components/BlockRenderer";
+import { BlocksView, OptionButtons } from "@/components/BlockRenderer";
 import { agentFeed, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
 import { decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
@@ -88,7 +88,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   // Pasek: tylko to, czego dymek nie mówi (stan kroków widać po kolorach kafelków): czeka na inne zadanie, trwa wysyłka z tego zadania, zadanie bez kroków
   const who = bp ? noStepsWho(w, t.id, busy) : null;
   const queue = pending.length ? queueWho(w, t.id, pending.length, busy) : null;
-  const aq = await agentQueue(o.id, w.run ? { taskId: w.run.taskId, stepId: w.run.stepId, since: w.run.since, kind: w.run.kind } : null, b.tasks);
+  const aq = await agentQueue(o.id, w.run, b.tasks);
   const bubble = workBubble({ task: t, w, pending, busy, queue: aq });
   const sending = w.run && w.run.kind === "send" && w.run.taskId === t.id ? w.run : null;
   // pasek ma zawsze jedną krótką linię; pełne zdanie i szczegóły (ścieżki, polecenia) są w podpowiedzi po najechaniu
@@ -111,7 +111,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       <form className="stack" action={answerQuestionForm}>
         <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="questionId" value={q.id} />
         <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
-        {q.options.length ? <div className="actions">{q.options.map((op, i) => <button key={i} type="submit" name="option" value={op.label} className={"btn" + (q.recommended === i ? " primary" : "")} title={op.note}>{op.label}</button>)}</div> : null}
+        {q.options.length ? <OptionButtons className="actions" options={q.options} recommended={q.recommended} why={q.why} /> : null}
         <div className="row"><input className="in" name="answer" placeholder={q.options.length ? "Albo odpowiedz własnymi słowami…" : "Twoja odpowiedź…"} /><PendingButton className="btn primary">Odpowiedz</PendingButton></div>
       </form>
     </>

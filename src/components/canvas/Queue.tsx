@@ -1,7 +1,8 @@
 "use client";
 // Kolejka agenta (paczka 18, wariant A „Panel w rogu”): wskaźnik w lewym dolnym rogu, pod dymkami, rozwija nad sobą panel
-// z pracą „Teraz” i pozycjami w kolejności, w jakiej Claude je weźmie. Przeciąganie i „Następne” zapisują kolejność, którą lista pracy agenta daje na początek.
-import { useEffect, useState } from "react";
+// z pozycjami w kolejności, w jakiej Claude je weźmie. Paczka 31 (wariant A „Jedna pigułka”): bieżącą pracę pokazuje tylko pigułka
+// (gdzie, co robi, od ilu minut, „Zatrzymaj”, liczba w kolejce); panel nie ma już sekcji „Teraz”, a dymek pracy w zadaniu zniknął. Przeciąganie i „Następne” zapisują kolejność, którą lista pracy agenta daje na początek.
+import { useEffect, useState, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { queueNext, reorderQueue } from "@/app/actions";
 import type { AgentQueue, QueueEntry } from "@/lib/agent/work";
@@ -11,12 +12,13 @@ import { Icon } from "./ui";
 const OPEN_KEY = "th-queue-open";
 const hrefOf = (x: { taskId: string | null; stepId?: string | null }) => (x.taskId ? `/tasks/${x.taskId}${x.stepId ? `?step=${x.stepId}` : ""}` : null);
 
-export function QueuePanel({ queue, taskId = null, onToast }: { queue: AgentQueue; taskId?: string | null; onToast: (msg: string) => void }) {
+export function QueuePanel({ queue, taskId = null, onToast, onStop }: { queue: AgentQueue; taskId?: string | null; onToast: (msg: string) => void; onStop?: (runId: string) => Promise<unknown> | void }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<QueueEntry[]>(queue.items);
   const [drag, setDrag] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const min = useMinutes(queue.now?.since ?? "");
   // nowe dane z serwera (odświeżenie po zmianie) zastępują lokalną kolejność
   const sig = queue.items.map((x) => x.key).join(",");
@@ -37,19 +39,16 @@ export function QueuePanel({ queue, taskId = null, onToast }: { queue: AgentQueu
   const go = (x: { taskId: string | null; stepId?: string | null }) => { const h = hrefOf(x); if (h) router.push(h); };
 
   const now = queue.now;
+  const here = !!now && !!taskId && now.taskId === taskId;
+  const stop = async (e: MouseEvent) => {
+    e.stopPropagation();
+    if (!now?.runId || !onStop) return;
+    setStopping(true); try { await onStop(now.runId); } finally { setStopping(false); }
+  };
   return (
     <>
       {open ? (
         <div className="q-panel glass" role="region" aria-label="Kolejka Claude" onPointerDown={(e) => e.stopPropagation()}>
-          {now ? (
-            <div className="q-now">
-              <div className="q-lbl"><span className="dots" aria-hidden="true"><i /><i /><i /></span>Teraz{min !== null && min >= 1 ? ` · od ${min} min` : ""}</div>
-              <button type="button" className="q-row now" onClick={() => go(now)} disabled={!now.taskId}>
-                <span className="q-t">{now.taskTitle}{now.taskId === taskId ? <span className="q-here">to zadanie</span> : null}</span>
-                {now.label ? <span className="q-s">{now.label}</span> : null}
-              </button>
-            </div>
-          ) : null}
           <div className="q-lbl">{items.length ? `W kolejce (${items.length})` : "Kolejka jest pusta"}</div>
           {items.length ? (
             <ol className="q-ol">
@@ -71,12 +70,23 @@ export function QueuePanel({ queue, taskId = null, onToast }: { queue: AgentQueu
           {items.length > 1 ? <p className="q-foot">Kolejność ustawiona tutaj wygrywa z kolejnością, w jakiej Claude sam bierze pracę.</p> : null}
         </div>
       ) : null}
-      <button type="button" className={"q-ind glass" + (open ? " on" : "")} aria-expanded={open} title={open ? "Zwiń kolejkę Claude" : "Pokaż kolejkę Claude"} onClick={toggle} onPointerDown={(e) => e.stopPropagation()}>
-        <span className={"dots" + (now ? "" : " still")} aria-hidden="true"><i /><i /><i /></span>
-        <span className="q-ind-t">{now ? <><b>Claude:</b> {now.taskTitle}</> : <b>Kolejka Claude</b>}</span>
-        <span className="q-ind-n">{now ? (items.length ? `w kolejce jeszcze ${items.length}` : "kolejka pusta") : `w kolejce ${items.length}`}</span>
+      {/* pigułka: jedyne miejsce z bieżącą pracą; klik rozwija kolejkę, nazwa innego zadania prowadzi do niego */}
+      <div role="button" tabIndex={0} className={"q-ind glass" + (open ? " on" : "") + (now ? " live" : "")} aria-expanded={open} title={open ? "Zwiń kolejkę Claude" : "Pokaż kolejkę Claude"}
+        onClick={toggle} onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }} onPointerDown={(e) => e.stopPropagation()}>
+        {now ? <>
+          <span className="dots" aria-hidden="true"><i /><i /><i /></span>
+          <span className="q-ind-two">
+            {here || !now.taskId ? <b>{here ? "W tym zadaniu" : now.taskTitle}</b>
+              : <a className="q-ind-a" href={hrefOf(now) ?? undefined} title={`Otwórz zadanie „${now.taskTitle}”`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); go(now); }}>{now.taskTitle}</a>}
+            <span className="q-ind-sub"><span className="q-ind-w">Claude {now.what}</span>{min !== null && min >= 1 ? <span className="q-ind-m">· {min} min</span> : null}</span>
+          </span>
+          {now.stoppable && now.runId && onStop ? (
+            <button type="button" className="btn ico q-stop" disabled={stopping} aria-label="Zatrzymaj" title="Przerywa bieżącą pracę Claude na Macu. Wróci za 10 minut albo od razu, gdy napiszesz." onClick={stop}><Icon k="stop" size={12} sw={1.6} /></button>
+          ) : null}
+        </> : <span className="q-ind-t"><b>Kolejka Claude</b></span>}
+        <span className="q-badge" title="W kolejce">{items.length}</span>
         <Icon k="chev" size={12} sw={2} />
-      </button>
+      </div>
     </>
   );
 }

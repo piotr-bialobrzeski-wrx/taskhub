@@ -21,7 +21,7 @@ describe("dymek wiadomości w kolejce", () => {
   const task = { id: "t1", steps: [] };
   const pending = [{ id: "m1", role: "user" as const, text: "dodaj krok z testem grup", createdAt: "2026-10-25T17:00:00Z", seenAt: null, answeredAt: null, actions: null, taskId: "t1" }];
   const run = { text: "czyta zadanie", detail: null, since: "2026-10-25T16:50:00Z", stepId: "s9", taskId: "t9", bridge: "Mac", runId: "r1", kind: "work" as const };
-  const queue = { now: { taskId: "t9", taskTitle: "Dobór modelu", label: "Krok 07: Sprawdź limity", since: run.since }, items: [
+  const queue = { now: { taskId: "t9", taskTitle: "Dobór modelu", label: "Krok 07: Sprawdź limity", since: run.since, what: "czyta zadanie", runId: "r1", stoppable: true }, items: [
     { key: "step:x", kind: "krok do zrobienia", taskId: "t2", taskTitle: "Duplikaty", stepId: "x", label: "Krok 03" },
     { key: "chat:t1", kind: "odpowiedź na Twoją wiadomość", taskId: "t1", taskTitle: "Grupy", stepId: null, label: "Twoja wiadomość" },
   ] };
@@ -86,5 +86,15 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("kolejka w liście pracy", async
     const q = await agentQueue(owner, { taskId: a.id, stepId: a.steps[0].id, since: new Date().toISOString(), kind: "work" });
     expect(q.now).toMatchObject({ taskId: a.id, taskTitle: "Pierwsze zadanie", label: "Krok 01: Sprawdź duplikaty" });
     expect(q.items.some((x) => x.stepId === a.steps[0].id)).toBe(false);
+  });
+  it("paczka 31: pigułka wie, co Claude robi i jaki bieg zatrzymać; rozpisywane zadanie nie wraca jako pozycja kolejki", async () => {
+    const a = (await repo.listTasks(owner)).find((x) => x.title === "Pierwsze zadanie")!;
+    const q = await agentQueue(owner, { taskId: a.id, stepId: a.steps[0].id, since: new Date().toISOString(), kind: "work", text: "układa kartkę kroku", runId: "r1", stoppable: true });
+    expect(q.now).toMatchObject({ what: "układa kartkę kroku 01", runId: "r1", stoppable: true });
+    const b = await repo.createTask(owner, { title: "Zadanie bez kroków" });
+    expect((await agentQueue(owner, null)).items.some((x) => x.key === `task:${b.id}`)).toBe(true);
+    const r = await agentQueue(owner, { taskId: b.id, stepId: null, since: new Date().toISOString(), kind: "work", text: "czyta zadanie" });
+    expect(r.now).toMatchObject({ taskTitle: "Zadanie bez kroków", what: "rozpisuje kroki", stoppable: false });
+    expect(r.items.some((x) => x.taskId === b.id && x.key === `task:${b.id}`)).toBe(false);
   });
 });

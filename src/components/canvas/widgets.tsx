@@ -479,7 +479,8 @@ export function AgentFeed({ items, work = null, onStop, stepLabel, onStep, queue
   });
   const shown = off ? items.filter((m) => !off.has(m.id)) : [];
   // dymek „wysłane” zamyka się jak odpowiedź (klucz po wiadomości); dymek „Claude pracuje” nie ma X, znika z końcem pracy
-  const card = work && off && !(work.kind === "sent" && off.has("w:" + work.id)) ? work : null;
+  // paczka 31 (wariant A „Jedna pigułka”): dymek „Claude pracuje” nie powtarza pigułki kolejki, zostaje tylko dymek wysłanej wiadomości
+  const card = work && work.kind === "sent" && off && !off.has("w:" + work.id) ? work : null;
   if (!shown.length && !card && !queue) return null;
   return (
     <div className={"feed " + className} style={style} role="log" aria-live="polite" aria-label="Odpowiedzi Claude">

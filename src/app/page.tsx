@@ -26,7 +26,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
   const o = await requireOwner();
   const [b, chatLog, groups, questions, bridge, stamp, pending, canvasPending] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 8), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null), repo.countPendingChat(o.id), repo.listPendingChat(o.id, null)]);
   const run = liveActivity(bridge.run);
-  const aq = await agentQueue(o.id, run ? { taskId: run.taskId, stepId: run.stepId, since: run.since, kind: run.kind } : null, b.tasks);
+  const aq = await agentQueue(o.id, run, b.tasks);
   // wiadomość z kanwy czeka na Claude albo Claude właśnie ją robi (paczka 29): ten sam dymek pracy co w zadaniu
   const w: Worker = { alive: bridge.alive, name: bridge.name, run, hold: bridgeHold(bridge.meta, bridge.pause) };
   const work = workBubble({ task: { id: "", steps: [] }, w, pending: canvasPending, busy: busyWith(run, b.tasks), queue: aq });

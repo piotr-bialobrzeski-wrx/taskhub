@@ -201,7 +201,7 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
       if (b.answer || !form) {
         return (
           <div className="block q"><p>{b.text}</p>
-            <div className="opts">{b.options.map((o, i) => <span key={i} className={"chip" + (b.answer === o.label ? " on" : "")} title={o.note}>{o.label}{b.answer === o.label ? " ✓" : ""}</span>)}</div>
+            <div className="opts">{b.options.map((o, i) => <span key={i} className={"chip" + (b.answer === o.label ? " on" : "")} title={o.note}>{o.label}{b.answer === o.label ? " ✓" : ""}{b.recommended === i ? <span className="rec-tag">Polecam</span> : null}</span>)}</div>
             {b.answer && !b.options.some((o) => o.label === b.answer) ? <p className="sub" style={{ marginTop: 6 }}>Odpowiedź: {b.answer}</p> : null}
           </div>
         );
@@ -212,7 +212,7 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
           <input type="hidden" name="taskId" value={form.taskId} /><input type="hidden" name="stepId" value={form.stepId} /><input type="hidden" name="index" value={index ?? 0} /><input type="hidden" name="q" value={b.text} />
           <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
           <p>{b.text}</p>
-          <div className="opts">{b.options.map((o, i) => <button key={i} type="submit" name="option" value={o.label} className={"btn" + (b.recommended === i ? " primary" : "")} title={o.note}>{o.label}</button>)}</div>
+          <OptionButtons options={b.options} recommended={b.recommended} why={b.why} />
           <div className="row q-own" style={{ marginTop: 8 }}>
             <GrowTextarea name="answer" minRows={1} placeholder="Albo odpowiedz własnymi słowami…" submitOnModEnter />
             <button className="btn" type="submit">Odpowiedz</button>
@@ -220,6 +220,28 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
         </form>
       );
   }
+}
+
+// Przyciski opcji pytania (paczka 31): zalecana opcja ma przy swoim przycisku oznaczenie „Polecam” i jedno zdanie uzasadnienia,
+// więc rekomendacji nie trzeba szukać w notatce pod pytaniem. Z zaleceniem opcje stoją jedna pod drugą (zdanie mieści się obok
+// przycisku); bez zalecenia zostaje jeden rząd. Pozostałe opcje dalej da się wybrać.
+export function OptionButtons({ options, recommended, why, className = "opts" }: { options: { label: string; note?: string }[]; recommended?: number | null; why?: string | null; className?: string }) {
+  const rec = recommended != null && recommended >= 0 && recommended < options.length ? recommended : null;
+  const btn = (o: { label: string; note?: string }, i: number) => (
+    <button key={i} type="submit" name="option" value={o.label} className={"btn" + (rec === i ? " primary" : "")} title={o.note}>{o.label}</button>
+  );
+  if (rec == null) return <div className={className}>{options.map(btn)}</div>;
+  return (
+    <div className={className + " has-rec"}>
+      {options.map((o, i) => i === rec ? (
+        <div key={i} className="opt-rec">
+          {btn(o, i)}
+          <span className="rec-tag">Polecam</span>
+          {why ? <span className="rec-why">{why}</span> : null}
+        </div>
+      ) : <div key={i} className="opt">{btn(o, i)}</div>)}
+    </div>
+  );
 }
 
 // indexOf: pozycja klocka na całej kartce (formularz pytania zapisuje odpowiedź pod tym indeksem), gdy blocks to tylko jej część.

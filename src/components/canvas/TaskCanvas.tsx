@@ -244,7 +244,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {/* odpowiedzi agenta (to, co jest w historii rozmowy) w lewym dolnym rogu ekranu */}
       <AgentFeed items={p.feed} work={p.work} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} className={panel ? "withpanel" : ""} style={{ ["--dw" as string]: dw + "px" }}
         stepLabel={(id) => (byId.has(id) ? pad(byId.get(id)!.idx) : null)} onStep={openStep}
-        queue={<QueuePanel queue={p.agentQueue} taskId={t.id} onToast={show} />}
+        queue={<QueuePanel queue={p.agentQueue} taskId={t.id} onToast={show} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} />}
         onQueueNext={(key) => run(async () => show(await queueNext(key, t.id)))} onWithdraw={() => run(async () => show(await withdrawMessages(t.id)))} />
 
       <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}

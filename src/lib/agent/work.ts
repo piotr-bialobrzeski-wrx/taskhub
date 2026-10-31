@@ -5,6 +5,7 @@ import { brief, scoreAll } from "./context";
 import { approvalValid, draftOf, isPromptDraft, isSendable, type Draft } from "./approval";
 import { choiceOf, modelConfig, runLabel, stepChoice, type Choice } from "./models";
 import { CANVAS_KEY } from "@/lib/feed";
+import { nowText } from "@/lib/live";
 // list_work pokazuje początek wiadomości; całość (do 50 tys. znaków) jest w get_task
 const preview = (x: string, n = 600) => (x.length > n ? x.slice(0, n) + "… (całość w get_task)" : x);
 
@@ -22,7 +23,7 @@ export const DEST_RULE = "Krok, którego wynik ma trafić do aplikacji (ticket, 
 // projekt z treści: zadanie bez projektu, którego treść wskazuje projekt z listy, dostaje go przy rozpisaniu; agent nie zakłada nowych projektów
 export const PROJECT_RULE = "Projekt: zadanie „bez projektu”, którego treść wskazuje projekt z list_projects (nazwa, także odmieniona, np. „z projektu Shiftwow”, „w Task Hubie”, albo nazwa firmy projektu), dostaje go przy rozpisaniu przez update_task(project = dokładna nazwa z listy); nie twórz nowych projektów i nie zgaduj, gdy treść żadnego nie wskazuje (zostaw bez projektu).";
 // lista elementów, o którą prosi Piotr (tickety, wątki, maile jako kroki), to jego otwarte kroki z treścią na kartce, nie zrobione odczyty Claude'a
-export const DECISION_RULE = "Decyzja Piotra: krok Piotra, w którym ma coś wybrać, zdecydować albo zatwierdzić wariant (Wybierz…, Zdecyduj…, Ustal…), ma na kartce przez set_blocks to, z czego wybiera (table, free), i klocek question z opcjami (options z label i note, recommended = indeks zalecanej); jego odpowiedź zamyka krok, wraca do Ciebie w rozmowie, a kartka zrobionego kroku zostaje w get_task (KARTKA ZROBIONEGO KROKU). Bez pytania na kartce Piotr musi wpisać wybór ręcznie przy „Zrobione” (pole „Co wybrałeś?”): trafia tylko do pola wynik, bez opcji i tabeli, więc zawsze daj pytanie na kartce.";
+export const DECISION_RULE = "Decyzja Piotra: krok Piotra, w którym ma coś wybrać, zdecydować albo zatwierdzić wariant (Wybierz…, Zdecyduj…, Ustal…), ma na kartce przez set_blocks to, z czego wybiera (table, free), i klocek question z opcjami (options z label i note, recommended = indeks zalecanej, why = jedno zdanie uzasadnienia przy jej przycisku); jego odpowiedź zamyka krok, wraca do Ciebie w rozmowie, a kartka zrobionego kroku zostaje w get_task (KARTKA ZROBIONEGO KROKU). Bez pytania na kartce Piotr musi wpisać wybór ręcznie przy „Zrobione” (pole „Co wybrałeś?”): trafia tylko do pola wynik, bez opcji i tabeli, więc zawsze daj pytanie na kartce.";
 export const ITEMS_RULE = "Lista elementów: gdy Piotr prosi o elementy jako kroki (tickety, wątki, maile, dokumenty: „każdy X jako osobny krok”, „pokaż ich treść w krokach”), każdy element to jego otwarty krok (tool manual, est 5), title = tytuł elementu w jego języku (bez przerabiania na czasownik), a na kartce przez set_blocks klocek free z treścią elementu 1:1 (Markdown) i klocek link do źródła; takich kroków nie oznaczaj jako zrobione. Jako zrobiony odczyt (add_steps.done) wchodzi tylko praca przygotowawcza (wybór, filtr, analiza), jednym krokiem.";
 // wiadomość z głównej kanwy albo paska (paczka 29): polecenie zrób od razu, nowe zadanie tylko dla nowej pracy; które jest które, mówi zasada w bazie
 export const COMMANDS_HEAD = "WIADOMOŚCI Z GŁÓWNEJ KANWY (Piotr pisał na głównej kanwie albo w szybkim pasku, poza zadaniem; najpierw to). Najpierw get_rules z topic „polecenia”: zasada mówi, kiedy to polecenie do zrobienia od razu, a kiedy nowa praca. Polecenie (pogrupuj kafelki, znajdź zadania, otwórz krok, przenieś do projektu, zmień termin, pytanie o stan) zrób od razu narzędziami Task Hub (list_tasks, get_task, update_task, create_group…), bez nowego zadania. Nowa praca: create_task z krótkim tytułem i projektem z listy, bez kroków (rozpisze je osobny bieg, jak każde zadanie bez kroków). Niejasne: odpowiedz jednym pytaniem, nic nie zakładaj. Każdą wiadomość kończysz reply_canvas z messageIds = jej id: co zrobiłeś albo odpowiedź; gdy prowadzi do zadania albo kroku, podaj taskId (i stepId), Piotr dostanie przycisk „Otwórz”. Polecenie, którego Task Hub nie umie (usuwanie, zmiana układu poza grupami), opisz w reply_canvas i zapytaj, czy zrobić z tego zadanie:";
@@ -258,18 +259,26 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
 export const PLAIN_LANG = "JAK PISAĆ DO PIOTRA (kartka kroku, summary, powód oddania, reply_chat): długość, słownictwo i język mówią zasady z get_rules; trzymaj się ich, tu nie ma osobnych reguł stylu.";
 
 // ---------- kolejka agenta w lewym dolnym rogu (paczka 18) ----------
-// now: to, nad czym Claude pracuje teraz (bieg mostka); items: reszta kolejki w kolejności, w jakiej ją weźmie (bez pozycji bieżącego kroku)
+// now: to, nad czym Claude pracuje teraz (bieg mostka); items: reszta kolejki w kolejności, w jakiej ją weźmie (bez pozycji bieżącej pracy)
+// paczka 31 (wariant A „Jedna pigułka”): bieżącą pracę pokazuje tylko pigułka na dole, więc now niesie też to, co Claude robi (what),
+// i bieg do „Zatrzymaj” (runId, stoppable); kolejka nie powtarza bieżącej pozycji (krok biegu, a bez kroku rozpisanie i tytuł jego zadania)
 export type QueueEntry = { key: string; kind: string; taskId: string; taskTitle: string; stepId: string | null; label: string };
-export type QueueNow = { taskId: string | null; taskTitle: string; label: string | null; since: string };
+export type QueueNow = { taskId: string | null; taskTitle: string; label: string | null; since: string; what: string; runId: string | null; stoppable: boolean };
 export type AgentQueue = { now: QueueNow | null; items: QueueEntry[] };
+export type QueueRun = { taskId: string | null; stepId: string | null; since: string; kind?: string; text?: string; runId?: string; stoppable?: boolean };
+// czy pozycja kolejki to praca, którą bieg właśnie robi
+export const isRunItem = (x: { key: string; stepId: string | null }, run: QueueRun | null) =>
+  !!run && (run.stepId ? x.stepId === run.stepId && x.key === `step:${run.stepId}` : !!run.taskId && (x.key === `task:${run.taskId}` || x.key === `title:${run.taskId}`));
 // preloaded: zadania strony (bundle, także kosz); bez nich kolejka czyta bazę sama
-export async function agentQueue(ownerId: string, run: { taskId: string | null; stepId: string | null; since: string; kind?: string } | null, preloaded?: Task[]): Promise<AgentQueue> {
+export async function agentQueue(ownerId: string, run: QueueRun | null, preloaded?: Task[]): Promise<AgentQueue> {
   const live = preloaded?.filter((t) => !t.deletedAt);
   const [w, tasks] = await Promise.all([workSummary(ownerId, { peek: true, audience: "work", tasks: live }), live ? Promise.resolve(live) : run?.taskId ? repo.listTasks(ownerId) : Promise.resolve([])]);
   const t = run?.taskId ? tasks.find((x) => x.id === run.taskId) : null;
   const sIdx = t && run?.stepId ? t.steps.findIndex((s) => s.id === run.stepId) : -1;
-  const now: QueueNow | null = run ? { taskId: run.taskId, taskTitle: t?.title ?? (run.kind === "send" ? "Wysyłka" : "Praca w tle"), label: sIdx >= 0 ? `Krok ${String(sIdx + 1).padStart(2, "0")}: ${t!.steps[sIdx].title}` : null, since: run.since } : null;
-  const items = (w.items ?? []).filter((x) => !(run?.stepId && x.stepId === run.stepId && x.key === `step:${run.stepId}`))
+  const what = !run ? "" : run.kind === "send" ? "wysyła" : t && !t.steps.length ? "rozpisuje kroki" : nowText({ text: run.text ?? "pracuje" }, sIdx >= 0 ? sIdx + 1 : null);
+  const now: QueueNow | null = run ? { taskId: run.taskId, taskTitle: t?.title ?? (run.kind === "send" ? "Wysyłka" : "Praca w tle"), label: sIdx >= 0 ? `Krok ${String(sIdx + 1).padStart(2, "0")}: ${t!.steps[sIdx].title}` : null, since: run.since,
+    what, runId: run.runId ?? null, stoppable: !!run.stoppable && run.kind !== "send" } : null;
+  const items = (w.items ?? []).filter((x) => !isRunItem(x, run))
     .map((x) => ({ key: x.key, kind: QUEUE_KINDS[x.kind], taskId: x.taskId, taskTitle: x.taskTitle, stepId: x.stepId, label: x.label }));
   return { now, items };
 }

@@ -1330,7 +1330,7 @@ export async function clearStepPositions(ownerId: string, taskId: string): Promi
 // ---------- pytania agenta zadawane w aplikacji ----------
 const rowToQuestion = (r: Row): Question => ({
   id: r.id as string, taskId: r.taskId as string, stepId: (r.stepId as string) ?? null, text: r.text as string,
-  options: (r.options as Question["options"]) ?? [], recommended: r.recommended == null ? null : Number(r.recommended), answer: (r.answer as string) ?? null,
+  options: (r.options as Question["options"]) ?? [], recommended: r.recommended == null ? null : Number(r.recommended), why: (r.recommendedWhy as string) ?? null, answer: (r.answer as string) ?? null,
   askedAt: iso(r.askedAt) as string, answeredAt: iso(r.answeredAt), seenAt: iso(r.seenAt),
 });
 export async function listQuestions(ownerId: string, where: { taskId?: string; open?: boolean; answeredUnseen?: boolean } = {}): Promise<Question[]> {
@@ -1341,9 +1341,9 @@ export async function listQuestions(ownerId: string, where: { taskId?: string; o
     order by asked_at`;
   return rows.map(rowToQuestion);
 }
-export async function askQuestion(ownerId: string, q: { taskId: string; stepId?: string | null; text: string; options?: Question["options"]; recommended?: number | null }): Promise<Question> {
-  const [r] = await sql()`insert into questions (owner_id, task_id, step_id, text, options, recommended)
-    values (${ownerId}, ${q.taskId}, ${q.stepId ?? null}, ${q.text.slice(0, 2000)}, ${sql().json((q.options ?? []).slice(0, 6) as never)}, ${q.recommended ?? null}) returning *`;
+export async function askQuestion(ownerId: string, q: { taskId: string; stepId?: string | null; text: string; options?: Question["options"]; recommended?: number | null; why?: string | null }): Promise<Question> {
+  const [r] = await sql()`insert into questions (owner_id, task_id, step_id, text, options, recommended, recommended_why)
+    values (${ownerId}, ${q.taskId}, ${q.stepId ?? null}, ${q.text.slice(0, 2000)}, ${sql().json((q.options ?? []).slice(0, 6) as never)}, ${q.recommended ?? null}, ${q.recommended != null && q.why ? q.why.slice(0, 300) : null}) returning *`;
   return rowToQuestion(r);
 }
 export async function answerQuestion(ownerId: string, id: string, answer: string): Promise<void> {

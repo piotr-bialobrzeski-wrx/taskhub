@@ -15,7 +15,7 @@ import { AddButton, AgentPill, BackPill, BrandButton, MakePill, ViewPill, useVie
 import { SearchPill } from "./SearchPill";
 import { Projects, type ProjectPatch } from "./Projects";
 import { matches, norm, tokens, type Screen, type SearchItem } from "@/lib/search-core";
-import { autoLayout, batchTasks, chat, createCompanyAction, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeCompany, removeProject, reopenLast, restoreLayout, restoreTask, queueNext, saveTaskPositions, withdrawMessages, updateCompanyAction, updateGroupAction, updateProjectAction } from "@/app/actions";
+import { autoLayout, batchTasks, chat, createCompanyAction, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeCompany, removeProject, reopenLast, restoreLayout, restoreTask, queueNext, stopWork, saveTaskPositions, withdrawMessages, updateCompanyAction, updateGroupAction, updateProjectAction } from "@/app/actions";
 import { Activity } from "@/components/Activity";
 
 export type ArchRow = { id: string; title: string; when: string; summary: string | null; base: number; eff: number; project: string | null };
@@ -337,7 +337,7 @@ export function Board(p: BoardProps) {
         </div>
       ) : null}
 
-      {off ? null : <AgentFeed items={p.feed} work={p.work ?? null} onWithdraw={() => withdrawMessages(null).then(show)} onQueueNext={(key) => queueNext(key, null).then(show)} queue={<QueuePanel queue={p.agentQueue} onToast={show} />} />}
+      {off ? null : <AgentFeed items={p.feed} work={p.work ?? null} onWithdraw={() => withdrawMessages(null).then(show)} onQueueNext={(key) => queueNext(key, null).then(show)} queue={<QueuePanel queue={p.agentQueue} onToast={show} onStop={(id) => stopWork(p.agentQueue.now?.taskId ?? "", id).then(show)} />} />}
 
       {off ? null : <Dock action={chat} taskId={null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"} placeholder="Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" />}
       <Toast text={toast} />

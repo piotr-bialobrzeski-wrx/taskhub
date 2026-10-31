@@ -151,6 +151,7 @@ export const QuestionBlock = z.object({
   text: z.string(),
   options: z.array(z.object({ label: z.string(), note: z.string().optional() })).min(2).max(6),
   recommended: z.number().int().min(0).optional(),
+  why: z.string().max(300).optional(),   // paczka 31: jedno zdanie, czemu zalecana opcja; stoi przy jej przycisku z „Polecam”
   answer: z.string().optional(),
   prev: z.string().optional(),   // poprzednia odpowiedź po „Zmień odpowiedź”: agent widzi, co się zmieniło
 });
@@ -230,6 +231,7 @@ export const Question = z.object({
   text: z.string(),
   options: z.array(z.object({ label: z.string(), note: z.string().optional() })),
   recommended: z.number().int().nullable(),
+  why: z.string().nullable().optional(),
   answer: z.string().nullable(),
   askedAt: z.string(),
   answeredAt: z.string().nullable(),
