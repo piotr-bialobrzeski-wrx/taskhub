@@ -1,5 +1,5 @@
 // Główna kanwa: zadania jako kafelki, kolejność z priorytetu efektywnego, grupy, archiwum (ukończone + kosz), dok czatu.
-import { agentFeed, workBubble } from "@/lib/feed";
+import { agentFeed, stepWaits, workBubble } from "@/lib/feed";
 import { bridgeHold, busyWith, type Worker } from "@/lib/auto";
 import { requireOwner } from "@/lib/session";
 import * as repo from "@/lib/repo";
@@ -59,7 +59,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
       index={indexFrom(b, now)} initial={{ view: initial.view, p: initial.p, t: initial.t, focus: initial.focus }}
       aiOn={providers.length > 0}
       agent={agentLabel(providers)}
-      feed={agentFeed(chatLog)}
+      feed={agentFeed(chatLog, now, (id) => stepWaits(b.tasks.flatMap((t) => t.steps).find((s) => s.id === id)))}
       work={work}
       agentQueue={aq}
       archive={{

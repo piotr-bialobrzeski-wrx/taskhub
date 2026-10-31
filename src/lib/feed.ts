@@ -1,4 +1,4 @@
-// Dymki agenta w prawym dolnym rogu: ostatnie odpowiedzi z historii rozmowy (najnowsza na dole), tylko świeże, żeby rano nie wracały wczorajsze;
+// Zdarzenia agenta (paczka 31, wariant C dymków: lista „Co się stało” w panelu kolejki, bez stosu dymków): ostatnie odpowiedzi z historii rozmowy (najnowsza na dole), tylko świeże, żeby rano nie wracały wczorajsze;
 // i dymek pracy (paczka 7, punkt 3): co Claude robi teraz nad tym zadaniem albo co się dzieje z wysłaną wiadomością, zanim ktoś ją weźmie.
 import { fmtTime, nextAutoAt } from "./clock";
 import { holdText, msgCount, type Worker } from "./auto";
@@ -12,16 +12,19 @@ export const CANVAS_KEY = "chat:canvas";
 
 // steps: inne kroki, których agent dotknął w tym biegu (małe przyciski „04”, „05” obok „Otwórz krok 03”)
 // open: odpowiedź z głównej kanwy prowadzi do zadania albo kroku (reply_canvas, paczka 29): przycisk „Otwórz zadanie” / „Otwórz krok 02”
-export type FeedItem = { id: string; text: string; at: string; stepId: string | null; link: string | null; steps: string[]; open?: { href: string; label: string } | null };
-export const FEED_MAX = 3;
+// need (paczka 31, wariant C dymków): zdarzenie dotyczy kroku, który czeka na Piotra (jego otwarty krok albo szkic do zgody); na liście
+// „Co się stało” stoi na górze, barwi licznik w pigułce i nie znika po „Wyczyść”, tylko gdy krok przestanie czekać
+export type FeedItem = { id: string; text: string; at: string; stepId: string | null; link: string | null; steps: string[]; open?: { href: string; label: string } | null; need?: boolean };
+export const FEED_MAX = 8;
 const FRESH_MS = 12 * 3600_000;
 
-export function agentFeed(log: ChatMessage[], now = Date.now()): FeedItem[] {
+export function agentFeed(log: ChatMessage[], now = Date.now(), waiting?: (stepId: string) => boolean): FeedItem[] {
   return log.filter((m) => m.role === "agent" && now - new Date(m.createdAt).getTime() < FRESH_MS).slice(-FEED_MAX).map((m) => {
     const a = (m.actions ?? null) as { stepId?: string; link?: string; steps?: unknown; taskId?: string; label?: string } | null;
     const steps = Array.isArray(a?.steps) ? a.steps.filter((x): x is string => typeof x === "string") : [];
     const open = typeof a?.taskId === "string" ? { href: `/tasks/${a.taskId}${a.stepId ? `?step=${a.stepId}` : ""}`, label: a.stepId && a.label ? `Otwórz krok ${a.label}` : "Otwórz zadanie" } : null;
-    return { id: m.id, text: m.text, at: fmtTime(m.createdAt), stepId: open ? null : a?.stepId ?? null, link: a?.link ?? null, steps, open };
+    const need = !!(waiting && typeof a?.stepId === "string" && waiting(a.stepId));
+    return { id: m.id, text: m.text, at: fmtTime(m.createdAt), stepId: open ? null : a?.stepId ?? null, link: a?.link ?? null, steps, open, need };
   });
 }
 
@@ -71,3 +74,7 @@ export function workBubble({ task, w, pending, busy, queue = null, now = new Dat
 }
 // stopka dymka w toku: „MacBook Piotra · od 19:41 · potem 1 wiadomość”
 export const workFoot = (b: Extract<WorkBubble, { kind: "working" }>) => [b.where, `od ${b.at}`, b.later ? `potem ${msgCount(b.later)}` : null].filter(Boolean).join(" · ");
+
+// krok czeka na Piotra: jego otwarty krok (nie w pracy agenta) albo szkic do zgody
+export const stepWaits = (s: Pick<Task["steps"][number], "status" | "tool"> | undefined | null): boolean =>
+  !!s && s.status !== "done" && s.status !== "handoff" && (s.status === "draft" || s.tool === "manual");

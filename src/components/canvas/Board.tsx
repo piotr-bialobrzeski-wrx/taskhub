@@ -337,7 +337,7 @@ export function Board(p: BoardProps) {
         </div>
       ) : null}
 
-      {off ? null : <AgentFeed items={p.feed} work={p.work ?? null} onWithdraw={() => withdrawMessages(null).then(show)} onQueueNext={(key) => queueNext(key, null).then(show)} queue={<QueuePanel queue={p.agentQueue} onToast={show} onStop={(id) => stopWork(p.agentQueue.now?.taskId ?? "", id).then(show)} />} />}
+      {off ? null : <AgentFeed items={p.feed} work={p.work ?? null} onWithdraw={() => withdrawMessages(null).then(show)} onQueueNext={(key) => queueNext(key, null).then(show)} queue={<QueuePanel queue={p.agentQueue} onToast={show} onStop={(id) => stopWork(p.agentQueue.now?.taskId ?? "", id).then(show)} events={p.feed} />} />}
 
       {off ? null : <Dock action={chat} taskId={null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"} placeholder="Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" />}
       <Toast text={toast} />

@@ -1,5 +1,6 @@
 "use client";
 // Drobne kontrolki kanwy: wybór priorytetu/projektu w menu, termin, dok czatu, pole nazwy, toast.
+import { useFeedOff } from "./Queue";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { dayKey, fmtDateLong, fmtTime } from "@/lib/clock";
 import { createPortal, useFormStatus } from "react-dom";
@@ -462,47 +463,20 @@ export function InlineName({ name, label, onRename }: { name: string; label: str
   );
 }
 
-// Dymki agenta w lewym dolnym rogu: najnowszy na samym dole, starsze wyżej; każdy zamyka się X (zapamiętane w tej przeglądarce)
-// work: dymek pracy (ostatni, nad polem czatu): Claude pracuje nad tym zadaniem albo wysłana wiadomość czeka; onStop: „Zatrzymaj” bieg pracy v2
-// queue: wskaźnik kolejki agenta pod dymkami (paczka 18); onQueueNext / onWithdraw: „Następne” i „Wycofaj” w dymku wiadomości czekającej w kolejce
-export function AgentFeed({ items, work = null, onStop, stepLabel, onStep, queue = null, onQueueNext, onWithdraw, className = "", style }: {
-  items: FeedItem[]; work?: WorkBubble | null; onStop?: (runId: string) => Promise<unknown> | void; stepLabel?: (stepId: string) => string | null; onStep?: (stepId: string) => void;
+// Lewy dolny róg: dymek wysłanej wiadomości (czeka na Claude, z „Następne” i „Wycofaj”) nad pigułką kolejki (paczka 18).
+// Paczka 31 (wariant C dymków): odpowiedzi agenta nie stoją już stosem dymków z X; są na liście „Co się stało” w panelu kolejki
+// (QueuePanel, events), a pigułka pokazuje ich licznik. items zostaje dla zgodności, ale nic tu nie rysuje.
+export function AgentFeed({ work = null, onStop, onStep, queue = null, onQueueNext, onWithdraw, className = "", style }: {
+  items?: FeedItem[]; work?: WorkBubble | null; onStop?: (runId: string) => Promise<unknown> | void; stepLabel?: (stepId: string) => string | null; onStep?: (stepId: string) => void;
   queue?: ReactNode; onQueueNext?: (key: string) => Promise<unknown> | void; onWithdraw?: () => Promise<unknown> | void; className?: string; style?: React.CSSProperties;
 }) {
-  const KEY = "th-feed-off";
-  const [off, setOff] = useState<Set<string> | null>(null);   // null do montażu: serwer nie zna zamkniętych, więc nic nie miga
-  useEffect(() => { try { setOff(new Set(JSON.parse(localStorage.getItem(KEY) ?? "[]") as string[])); } catch { setOff(new Set()); } }, []);
-  const close = (id: string) => setOff((s) => {
-    const n = new Set(s); n.add(id);
-    try { localStorage.setItem(KEY, JSON.stringify([...n].slice(-100))); } catch { /* brak storage */ }
-    return n;
-  });
-  const shown = off ? items.filter((m) => !off.has(m.id)) : [];
-  // dymek „wysłane” zamyka się jak odpowiedź (klucz po wiadomości); dymek „Claude pracuje” nie ma X, znika z końcem pracy
-  // paczka 31 (wariant A „Jedna pigułka”): dymek „Claude pracuje” nie powtarza pigułki kolejki, zostaje tylko dymek wysłanej wiadomości
+  const { off, hide } = useFeedOff();
+  // dymek „wysłane” zamyka się X (klucz po wiadomości); dymek „Claude pracuje” nie powtarza pigułki kolejki (paczka 31, wariant A)
   const card = work && work.kind === "sent" && off && !off.has("w:" + work.id) ? work : null;
-  if (!shown.length && !card && !queue) return null;
+  if (!card && !queue) return null;
   return (
-    <div className={"feed " + className} style={style} role="log" aria-live="polite" aria-label="Odpowiedzi Claude">
-      {shown.map((m) => {
-        const step = m.stepId && stepLabel ? stepLabel(m.stepId) : null;
-        // paczka 15: bez „Otwórz wynik” (wynik jest na karcie kroku); inne kroki dotknięte w tym biegu jako małe przyciski z numerem
-        const more = stepLabel && onStep ? m.steps.map((id) => ({ id, label: stepLabel(id) })).filter((x): x is { id: string; label: string } => !!x.label) : [];
-        return (
-          <div key={m.id} className="fb glass">
-            <div className="ans-text">{m.text}</div>
-            {/* jeden rząd na dole: przyciski z lewej, godzina z prawej */}
-            <div className="ans-row">
-              {step && onStep ? <button className="btn" type="button" onClick={() => onStep(m.stepId!)}>Otwórz krok {step}</button> : null}
-              {m.open ? <a className="btn" href={m.open.href}>{m.open.label}</a> : null}
-              {more.map((x) => <button key={x.id} className="btn sm" type="button" title={`Otwórz krok ${x.label}`} onClick={() => onStep!(x.id)}>{x.label}</button>)}
-              <span className="ans-t">Claude · {m.at}</span>
-            </div>
-            <button className="icobtn ans-x" type="button" aria-label="Zamknij odpowiedź" title="Zamknij" onClick={() => close(m.id)}><Icon k="x" size={12} sw={2} /></button>
-          </div>
-        );
-      })}
-      {card ? <WorkCard b={card} onStop={onStop} onStep={onStep} onQueueNext={onQueueNext} onWithdraw={onWithdraw} onClose={() => { if (card.kind === "sent") close("w:" + card.id); }} /> : null}
+    <div className={"feed " + className} style={style} role="log" aria-live="polite" aria-label="Claude: wiadomość i kolejka">
+      {card ? <WorkCard b={card} onStop={onStop} onStep={onStep} onQueueNext={onQueueNext} onWithdraw={onWithdraw} onClose={() => { if (card.kind === "sent") hide(["w:" + card.id]); }} /> : null}
       {queue}
     </div>
   );

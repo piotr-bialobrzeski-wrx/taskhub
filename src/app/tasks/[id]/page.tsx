@@ -22,7 +22,7 @@ import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView, OptionButtons } from "@/components/BlockRenderer";
-import { agentFeed, workBubble } from "@/lib/feed";
+import { agentFeed, stepWaits, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
 import { decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
@@ -73,7 +73,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       now: runLabel(cur2.model, cur2.effort),
     };
   };
-  const feed = agentFeed(chatLog);
+  const feed = agentFeed(chatLog, Date.now(), (id) => stepWaits(t.steps.find((s) => s.id === id)));
   const origin = appUrl();
   // kto pracuje teraz (mostek na komputerze z bieżącym biegiem albo automat o pełnej godzinie) i nad czym
   const w: Worker = { alive: bridge.alive, name: bridge.name, run: liveActivity(bridge.run), hold: bridgeHold(bridge.meta, bridge.pause) };
