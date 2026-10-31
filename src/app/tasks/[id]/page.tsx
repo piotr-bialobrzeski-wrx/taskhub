@@ -282,6 +282,9 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // paczka 31, krok 13: na kartce decyzji prototyp stoi w okienku pod pytaniem (z własnym „Otwórz prototyp”), więc przycisk w nagłówku znika
   const pframe = proto0 && kind === "decision" ? <ProtoFrame url={proto0} mode={embedMode(proto0, appUrl())} own={isOwnPreview(proto0, appUrl())} /> : null;
   const proto = pframe ? null : proto0;
+  // paczka 31, krótsza kartka decyzji (wariant A „Pytanie na górze, reszta zwinięta”): otwarta decyzja ma na wierzchu tylko pytanie z opcjami
+  // (opis każdej przy jej przycisku) i prototyp pod pytaniem; notatki, tabele, listy i materiał ze źródłem zwijają się pod „Skąd to wiemy”
+  const shortDecision = kind === "decision" && open.length > 0 && !done && !mode;
   const addFolder = !done ? folderLink(s) : null;   // paczka 22: krok oddany z braku folderu na Macu, przycisk otwiera aplikację Task Hub z pytaniem
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
@@ -296,9 +299,9 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
         {meta && !(s.status === "todo" && activity) ? <small>· {meta}</small> : null}
         {activity && runId && !mode && !done ? <><span className="sp" /><form action={stopWorkForm.bind(null, t.id, runId)}><PendingButton className="btn ico" busy="Zatrzymuję…" title="Przerywa tę pracę Claude'a; wróci do niej później albo od razu, gdy napiszesz"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form></> : null}
-        {proto ? <><span className="sp" /><a className="btn ico" href={proto} target="_blank" rel="noopener" title={`Najnowszy podgląd prototypu: ${proto}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a></> : null}
+        {proto && !shortDecision ? <><span className="sp" /><a className="btn ico" href={proto} target="_blank" rel="noopener" title={`Najnowszy podgląd prototypu: ${proto}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a></> : null}
         {addFolder ? <><span className="sp" /><a className="btn ico" href={addFolder.href} title={`Otwiera aplikację Task Hub na Macu i pyta, czy dodać ${addFolder.path} (${addFolder.section})`}>Dodaj folder</a></> : null}
-        {target && isHttpUrl(target.url) ? <>{proto || addFolder ? null : <span className="sp" />}<a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
+        {target && isHttpUrl(target.url) ? <>{(proto && !shortDecision) || addFolder ? null : <span className="sp" />}<a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
         {done && s.filePath ? <><span className="sp" /><CopyButton text={s.filePath} label="Kopiuj ścieżkę" /></> : null}
       </div>
       {s.tool === "file" && s.status === "todo" && oldMac ? <div className="note">Ten krok zapisze plik aplikacja Task Hub na Macu od wersji 0.1.7. Zaktualizuj ją w menu aplikacji.</div> : null}
@@ -309,6 +312,10 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {addFolder ? <div className="note">Claude potrzebuje folderu {addFolder.path} w Ustawieniach aplikacji na Macu ({addFolder.section}). „Dodaj folder” otworzy aplikację i zapyta o zgodę; potem krok ruszy sam.</div> : null}
       {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : cloud?.state === "auto" ? "Ruszy w chmurze sam, gdy skończą się kroki, na które czeka." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
       {open.length && !done ? <BlocksView blocks={open} form={form} indexOf={indexOf} /> : null}
+      {proto && shortDecision ? (
+        <div className="proto-row"><span className="t"><b>Prototyp</b> · {proto.replace(/^https?:\/\//, "")}</span>
+          <a className="btn ico" href={proto} target="_blank" rel="noopener" title={`Najnowszy podgląd prototypu: ${proto}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a></div>
+      ) : null}
       {done && kind === "decision" && decisionText(s) ? <div className="note">{decisionText(s)}</div> : null}
       {pframe}
       {done && result.length ? <BlocksView blocks={result} form={form} indexOf={indexOf} /> : null}
@@ -383,11 +390,24 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   ));
   // krok bez żadnej treści od agenta: opis zostaje na wierzchu, inaczej karta byłaby pusta
   const bare = !material.length && !result.length && !mode && !order.length;
+  // krótsza kartka decyzji: całe tło (główna treść, „Skąd”, materiał z kroków przed decyzją) w jednym zwiniętym „Skąd to wiemy”
+  const why = shortDecision && (material.length || fromDeps.length) ? (
+    <>
+      {undo ? <div className="undo-row">{undo}</div> : null}
+      <details className="fold why-fold"><summary><span className="k">Skąd to wiemy</span><span className="t">{kindsOf([...split.main, ...split.sources])}</span><Icon k="chev" size={10} sw={2.2} /></summary>
+        <div className="stack">
+          {split.main.length ? <BlocksView blocks={split.main} form={form} indexOf={indexOf} /> : null}
+          {split.sources.length ? <BlocksView blocks={split.sources} form={form} indexOf={indexOf} /> : null}
+          {fromDeps}
+        </div>
+      </details>
+    </>
+  ) : null;
   return (
     <>
-      {mode && skad && srcOpen ? (cmp ? <>{skad}{now}</> : <div className="zones two">{now}{skad}</div>) : <>{now}{main}{skad}</>}
+      {why ? <>{now}{why}</> : mode && skad && srcOpen ? (cmp ? <>{skad}{now}</> : <div className="zones two">{now}{skad}</div>) : <>{now}{main}{skad}</>}
       {bare ? <div className="zone">{brief}</div> : null}
-      {fromDeps}
+      {why ? null : fromDeps}
       <details className="edit tech">
         <summary><span className="k">Szczegóły techniczne</span> · {tech}</summary>
         <div className="stack">
