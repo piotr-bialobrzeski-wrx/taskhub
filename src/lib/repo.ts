@@ -264,13 +264,13 @@ function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
     id: r.id as string, ownerId: r.ownerId as string, projectId: (r.projectId as string) ?? null, title: r.title as string, titleOriginal: (r.titleOriginal as string) ?? null, summary: (r.summary as string) ?? "",
     source: (r.source as string) ?? "", level: Number(r.level), due: dateStr(r.due), doneAt: iso(r.doneAt), deletedAt: iso(r.deletedAt),
     noteText: (r.noteText as string) ?? null, noteSummary: (r.noteSummary as string) ?? null, noteAt: iso(r.noteAt),
-    pos: (r.pos as { x: number; y: number }) ?? null, createdAt: iso(r.createdAt) as string, dependsOn: deps, steps,
+    pos: (r.pos as { x: number; y: number }) ?? null, lane: (r.lane as string) ?? null, createdAt: iso(r.createdAt) as string, dependsOn: deps, steps,
   };
 }
 // kolumny do odczytu zadań i kroków: bez `search` (tsvector, sam tekst drugi raz) i bez `blocks_prev` (cała poprzednia kartka, tylko do „Cofnij”),
 // bo listy zadań czyta się bardzo często (mostek, puls strony, konektor), a każdy bajt z bazy liczy się do transferu Supabase.
 // Nowa kolumna potrzebna w rowToTask / rowToStep musi trafić też tutaj.
-const TASK_COLS = ["id", "owner_id", "project_id", "title", "title_original", "summary", "source", "level", "due", "done_at", "deleted_at", "note_text", "note_summary", "note_at", "pos", "created_at"];
+const TASK_COLS = ["id", "owner_id", "project_id", "title", "title_original", "summary", "source", "level", "due", "done_at", "deleted_at", "note_text", "note_summary", "note_at", "pos", "lane", "created_at"];
 const STEP_COLS = ["id", "task_id", "position", "title", "detail", "tool", "status", "prev_status", "needs_approval", "est_min", "spent_sec", "spent_manual", "spent_at", "link", "handoff_at", "done_at",
   "report", "output", "review", "blocks", "blocks_at", "logged", "pos", "connection_id", "file_path", "approved_at", "approved_sig", "send_started_at", "agent_sec", "agent_started_at", "done_by",
   "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for", "left_at", "approval", "need", "attachment_ids"];
@@ -379,7 +379,7 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
   const deps = await sql()`select * from step_dependencies where step_id in ${sql()(created.map((c) => c.id))}`;
   return rows.map((r) => rowToStep(r, deps.filter((d) => d.stepId === r.id).map((d) => d.dependsOnId as string)));
 }
-export type TaskPatch = Partial<{ title: string; titleOriginal: string | null; summary: string; source: string; level: number; due: string | null; projectId: string | null; pos: { x: number; y: number } | null; deletedAt: string | null; noteText: string | null; noteSummary: string | null }>;
+export type TaskPatch = Partial<{ title: string; titleOriginal: string | null; summary: string; source: string; level: number; due: string | null; projectId: string | null; pos: { x: number; y: number } | null; lane: string | null; deletedAt: string | null; noteText: string | null; noteSummary: string | null }>;
 // firma zadania (przez projekt): od niej zależy konto wysyłki kroku bez wskazanego połączenia
 const taskCompany = async (ownerId: string, id: string): Promise<string | null> =>
   ((await sql()`select p.company_id from tasks t left join projects p on p.id = t.project_id where t.id = ${id} and t.owner_id = ${ownerId}`)[0]?.companyId as string) ?? null;
@@ -400,6 +400,7 @@ export async function updateTask(ownerId: string, id: string, patch: TaskPatch):
   if (patch.due !== undefined) p.due = patch.due;
   if (patch.projectId !== undefined) p.project_id = patch.projectId;
   if (patch.pos !== undefined) p.pos = patch.pos === null ? null : sql().json(patch.pos);
+  if (patch.lane !== undefined) p.lane = patch.lane;
   if (patch.deletedAt !== undefined) p.deleted_at = patch.deletedAt;
   if (patch.noteText !== undefined) { p.note_text = patch.noteText; p.note_at = new Date(); }
   if (patch.noteSummary !== undefined) p.note_summary = patch.noteSummary;
@@ -1080,18 +1081,19 @@ export async function setLayoutMemory(ownerId: string, app: string, blocks: Bloc
 export const pgArr = (xs: readonly string[]): string => `{${xs.map((x) => `"${String(x).replace(/["\\]/g, "\\$&")}"`).join(",")}}`;
 // uuid[] z bazy: bez pobierania typów przy połączeniu (db.ts, fetch_types: false) sterownik oddaje tablicę jako tekst „{a,b}”
 const uuidArray = (v: unknown): string[] => Array.isArray(v) ? (v as string[]) : typeof v === "string" ? v.replace(/^\{|\}$/g, "").split(",").filter(Boolean) : [];
-export type Group = { id: string; taskId: string | null; name: string; color: number; x: number; y: number; w: number; h: number; members: string[]; auto: boolean };
+export type Group = { id: string; taskId: string | null; name: string; color: number; x: number; y: number; w: number; h: number; members: string[]; auto: boolean; lane: string | null };
 export async function listGroups(ownerId: string, taskId: string | null): Promise<Group[]> {
   const rows = taskId
     ? await sql()`select * from canvas_groups where owner_id = ${ownerId} and task_id = ${taskId} order by created_at`
     : await sql()`select * from canvas_groups where owner_id = ${ownerId} and task_id is null order by created_at`;
-  return rows.map((r) => ({ id: r.id as string, taskId: (r.taskId as string) ?? null, name: r.name as string, color: Number(r.color), x: Number(r.x), y: Number(r.y), w: Number(r.w), h: Number(r.h), members: uuidArray(r.members), auto: !!r.auto }));
+  return rows.map((r) => ({ id: r.id as string, taskId: (r.taskId as string) ?? null, name: r.name as string, color: Number(r.color), x: Number(r.x), y: Number(r.y), w: Number(r.w), h: Number(r.h), members: uuidArray(r.members), auto: !!r.auto, lane: (r.lane as string) ?? null }));
 }
-export async function createGroup(ownerId: string, taskId: string | null, name: string, members: string[], rect?: { x: number; y: number; w: number; h: number }): Promise<Group> {
+export async function createGroup(ownerId: string, taskId: string | null, name: string, members: string[], rect?: { x: number; y: number; w: number; h: number }, opts?: { lane?: string; color?: number }): Promise<Group> {
   const [{ n }] = await sql()`select count(*)::int as n from canvas_groups where owner_id = ${ownerId}`;
   // kolumny prostokąta są całkowite, a kanwa liczy w ułamkach (powiększenie, środek widoku): ułamek wywracał zapis grupy
   const r0 = rect ? roundRect(rect) : { x: 0, y: 0, w: 0, h: 0 };
-  const [r] = await sql()`insert into canvas_groups (owner_id, task_id, name, color, x, y, w, h, members, auto) values (${ownerId}, ${taskId}, ${name.slice(0, 60)}, ${Number(n) % 8}, ${r0.x}, ${r0.y}, ${r0.w}, ${r0.h}, ${pgArr(members)}::uuid[], ${!rect}) returning id`;
+  const [r] = await sql()`insert into canvas_groups (owner_id, task_id, name, color, x, y, w, h, members, auto) values (${ownerId}, ${taskId}, ${name.slice(0, 60)}, ${opts?.color ?? Number(n) % 8}, ${r0.x}, ${r0.y}, ${r0.w}, ${r0.h}, ${pgArr(members)}::uuid[], ${!rect}) returning id`;
+  if (opts?.lane) await sql()`update canvas_groups set lane = ${opts.lane} where id = ${r.id as string}`;
   await releaseMembers(ownerId, taskId, r.id as string, members);
   return (await listGroups(ownerId, taskId)).find((g) => g.id === r.id)!;
 }

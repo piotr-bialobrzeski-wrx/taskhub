@@ -4,7 +4,9 @@ import * as repo from "./repo";
 import { composeStep } from "./agent/compose";
 import { closingNote, draftStep, reviewReport } from "./agent/notes";
 import { scoreAll, type Scored } from "./agent/context";
-import { calibrationFor } from "./time";
+import { calibrationFor, remainEst } from "./time";
+import { assignLanes, LANES } from "./canvas/lanes";
+import { isComplete } from "./priority";
 import { type Step, type Task } from "./schema";
 import { bridgeHold, busyWith, queueWho, type Queue, type Worker } from "./auto";
 import { BRIDGE_ALIVE_MS } from "./bridge";
@@ -14,6 +16,24 @@ export async function aiFor(ownerId: string): Promise<Ai> {
   const [u] = await (await import("./db")).sql()`select settings from users where id = ${ownerId}`;
   const pref = (u?.settings as { aiProvider?: string } | undefined)?.aiProvider ?? null;
   return new Ai(pref);
+}
+
+// „Ułóż” na głównej kanwie (paczka 31, wariant C „Pilne i szybkie”): każde otwarte zadanie trafia do jednego z czterech pól (grup z lane),
+// pola układają się w macierz 2×2 (src/lib/canvas/layout.ts). Grupy, które przez to zostały puste, znikają; „Cofnij” je odtwarza.
+export async function layoutLanes(ownerId: string): Promise<void> {
+  const b = await bundle(ownerId);
+  const open = b.scored.filter((s) => !s.task.deletedAt && !isComplete(s.task))
+    .map((s) => ({ id: s.task.id, lane: s.task.lane ?? null, eff: s.score.eff, remainMin: remainEst(s.task), hasSteps: s.task.steps.length > 0, due: s.task.due }));
+  const lanes = assignLanes(open);
+  await repo.clearTaskPositions(ownerId);
+  let groups = await repo.listGroups(ownerId, null);
+  for (const l of LANES) {
+    const g = groups.find((x) => x.lane === l.key);
+    if (g) await repo.updateGroup(ownerId, g.id, { name: l.name, members: lanes[l.key], auto: true });
+    else await repo.createGroup(ownerId, null, l.name, lanes[l.key], undefined, { lane: l.key, color: l.color });
+  }
+  groups = await repo.listGroups(ownerId, null);
+  for (const g of groups) if (g.lane) continue; else if (!g.members.length) await repo.deleteGroup(ownerId, g.id); else await repo.updateGroup(ownerId, g.id, { auto: true });
 }
 
 export type Bundle = { tasks: Task[]; scored: Scored[]; projects: Awaited<ReturnType<typeof repo.listProjects>>; companies: Awaited<ReturnType<typeof repo.listCompanies>>; connections: Awaited<ReturnType<typeof repo.listConnections>>; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>> };

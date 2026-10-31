@@ -316,6 +316,7 @@ export const Task = z.object({
   noteSummary: z.string().nullable(),
   noteAt: z.string().nullable(),
   pos: z.object({ x: z.number(), y: z.number() }).nullable(),
+  lane: z.string().nullable().optional(),   // pole na kanwie „Pilne i szybkie” ustalone przez asystenta (src/lib/canvas/lanes.ts); null = liczone
   createdAt: z.string(),
   dependsOn: z.array(z.string()),
   steps: z.array(Step),

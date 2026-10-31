@@ -1,5 +1,6 @@
 // Serwer MCP Task Hub: Claude, Claude Code, ChatGPT i własne agenty podłączają się tutaj tokenem (OAuth albo nagłówek).
 // Dostają zadania z zasadami i kontekstem, zgłaszają wyniki kroków, dopisują fakty i migawki.
+import { LANE_KEYS } from "@/lib/canvas/lanes";
 import { randomUUID } from "node:crypto";
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
@@ -221,14 +222,14 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("update_task", {
-      title: "Zmień zadanie", description: "Zmienia tytuł, cel, priorytet, termin albo projekt zadania. Tytuł: 2–6 słów, samo sedno; pierwotny tytuł zostaje zapisany sam. project: dokładna nazwa istniejącego projektu z list_projects (null = bez projektu); nowy projekt tylko przez create_project.",
-      inputSchema: z.object({ taskId: z.string(), title: z.string().optional(), summary: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().nullable().optional(), project: z.string().nullable().optional() }),
+      title: "Zmień zadanie", description: "Zmienia tytuł, cel, priorytet, termin, projekt albo pole na kanwie zadania. Tytuł: 2–6 słów, samo sedno; pierwotny tytuł zostaje zapisany sam. project: dokładna nazwa istniejącego projektu z list_projects (null = bez projektu); nowy projekt tylko przez create_project. lane: pole zadania w układzie „Pilne i szybkie” na głównej kanwie, według zasady w get_rules (pilne-szybkie, pilne-dluzsze, szybkie-poczekaja, przy-okazji; null = pole liczone z priorytetu i pozostałej pracy); kafelek przechodzi do pola przy następnym „Ułóż”.",
+      inputSchema: z.object({ taskId: z.string(), title: z.string().optional(), summary: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().nullable().optional(), project: z.string().nullable().optional(), lane: z.enum(LANE_KEYS).nullable().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
       const projectId = a.project === undefined ? undefined : a.project ? await projectByName(a.project) : null;
       // agent poprawił tytuł: pierwotne brzmienie zostaje w zadaniu („Jak wpadło”), Piotr widzi, że to przeredagowane
       const renamed = !!a.title?.trim() && a.title.trim() !== t.title;
-      await repo.updateTask(ownerId, a.taskId, { title: a.title, summary: a.summary, level: a.level, due: a.due, projectId, ...(renamed && !t.titleOriginal ? { titleOriginal: t.title } : {}) });
+      await repo.updateTask(ownerId, a.taskId, { title: a.title, summary: a.summary, level: a.level, due: a.due, projectId, lane: a.lane, ...(renamed && !t.titleOriginal ? { titleOriginal: t.title } : {}) });
       return text("Zmieniono.");
     });
 

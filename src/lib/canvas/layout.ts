@@ -1,8 +1,10 @@
 // Układ kanwy (port z prototypu): elementy bez zależności w kolumnie 0, zależne w kolejnych; równoległe jeden pod drugim.
 // Kafelek z zapisanym położeniem zostaje, nowy nigdy nie ląduje na innym ani w cudzej grupie.
+import { LANES } from "./lanes";
+
 export type Pos = { x: number; y: number };
 export type LItem = { id: string; dependsOn: string[]; pos: Pos | null };
-export type LGroup = { id: string; x: number; y: number; w: number; h: number; members: string[]; auto: boolean };
+export type LGroup = { id: string; x: number; y: number; w: number; h: number; members: string[]; auto: boolean; lane?: string | null };
 export type Size = { w: number; h: number };
 
 export const TASK_SIZE: Size = { w: 260, h: 172 };
@@ -42,6 +44,18 @@ export function computePositions(list: LItem[], groupsIn: LGroup[], size: Size, 
   const P: Record<string, Pos> = {};
   const origin = shift ? { x: OX, y: OY } : null;
   let bottom = shift ? OY + H : OY - GGAP;
+  // pola „Pilne i szybkie” po „Ułóż” (paczka 31, wariant C): macierz 2×2 w lewym górnym rogu; wolne kafelki i reszta grup pod nią
+  const lanes = shift ? [] : groups.filter((g) => g.lane && g.auto && laneIndex(g.lane) >= 0);
+  if (lanes.length) {
+    const cells: string[][] = [[], [], [], []];
+    lanes.forEach((g) => { cells[laneIndex(g.lane!)] = g.members; });
+    const box = laneMatrix(cells, size);
+    lanes.forEach((g) => { const i = laneIndex(g.lane!); Object.assign(g, box.cells[i]); for (const [id, q] of Object.entries(box.P[i])) P[id] = q; });
+    bottom = OY + box.h;
+    const per = Math.max(1, Math.floor((box.w + GX) / (Wn + GX)));
+    free.forEach((x, i) => { fg[x.id] = { c: i % per, r: Math.floor(i / per) }; });
+  }
+  const fy = lanes.length ? bottom + GGAP : OY;
   const hasPos = (x: LItem) => !!x.pos && Number.isFinite(x.pos.x);
   const occ = list.filter(hasPos).map((x) => ({ x: x.pos!.x, y: x.pos!.y, w: Wn, h: H }));
   groups.forEach((g) => { if (!g.auto) occ.push({ x: g.x, y: g.y, w: g.w, h: g.h }); });
@@ -55,8 +69,9 @@ export function computePositions(list: LItem[], groupsIn: LGroup[], size: Size, 
     }
     bottom = Math.max(bottom, P[x.id].y + H);
   };
-  free.forEach((x) => place(x, fg[x.id], OX, OY, true));
+  free.forEach((x) => place(x, fg[x.id], OX, fy, true));
   groups.forEach((g) => {
+    if (lanes.includes(g)) return;
     const mem = list.filter((x) => memberOf[x.id] === g);
     if (mem.length) {
       // grupa automatyczna: blok pod wolnymi kafelkami; narysowana ręcznie: nowe kafelki wewnątrz jej prostokąta
@@ -74,6 +89,31 @@ export function computePositions(list: LItem[], groupsIn: LGroup[], size: Size, 
     bottom = Math.max(bottom + GPAD, g.y + g.h);
   });
   return { P, origin, groups };
+}
+
+// Macierz pól (wariant C): kolejność pól od lewej do prawej, od góry do dołu (0 1 / 2 3). Liczba kolumn kafelków w polu dobrana tak,
+// żeby całość miała proporcje szerokiego ekranu (ok. 1,9 : 1) i mieściła się w jak największym powiększeniu. Puste pole zostaje na swoim miejscu.
+export const LANE_ASPECT = 1.9, LANE_GAP = 36, LANE_GX = 28;
+const laneIndex = (k: string) => LANES.findIndex((l) => l.key === k);
+export function laneMatrix(cells: string[][], size: Size) {
+  const Wn = size.w, H = size.h, n = (i: number) => cells[i]?.length ?? 0;
+  const make = (q: number) => {
+    const cw = [Math.max(1, Math.min(q, Math.max(n(0), n(2)))), Math.max(1, Math.min(q, Math.max(n(1), n(3))))];
+    const colW = cw.map((c) => c * Wn + (c - 1) * LANE_GX + 2 * GPAD);
+    const rows = (i: number) => Math.max(1, Math.ceil(n(i) / cw[i % 2]));
+    const rowH = [Math.max(rows(0), rows(1)), Math.max(rows(2), rows(3))].map((r) => GHEAD + GPAD + r * H + (r - 1) * GY + GPAD);
+    const w = colW[0] + LANE_GAP + colW[1], h = rowH[0] + LANE_GAP + rowH[1];
+    return { cw, colW, rowH, w, h, fit: Math.min(LANE_ASPECT / w, 1 / h) };
+  };
+  let m = make(1);
+  for (let q = 2; q <= 5; q++) { const c = make(q); if (c.fit > m.fit + 1e-9) m = c; }
+  const out: { cells: { x: number; y: number; w: number; h: number }[]; P: Record<string, Pos>[]; w: number; h: number } = { cells: [], P: [], w: m.w, h: m.h };
+  for (let i = 0; i < 4; i++) {
+    const col = i % 2, row = Math.floor(i / 2), x = OX + (col ? m.colW[0] + LANE_GAP : 0), y = OY + (row ? m.rowH[0] + LANE_GAP : 0);
+    out.cells.push({ x, y, w: m.colW[col], h: m.rowH[row] });
+    out.P.push(Object.fromEntries((cells[i] ?? []).map((id, j) => [id, { x: x + GPAD + (j % m.cw[col]) * (Wn + LANE_GX), y: y + GHEAD + GPAD + Math.floor(j / m.cw[col]) * (H + GY) }])));
+  }
+  return out;
 }
 
 export const inRect = (g: { x: number; y: number; w: number; h: number }, p: Pos) => p.x >= g.x && p.x <= g.x + g.w && p.y >= g.y && p.y <= g.y + g.h;

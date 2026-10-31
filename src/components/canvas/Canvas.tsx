@@ -330,7 +330,11 @@ export function Canvas(p: CanvasProps) {
     if (!mx) return;
     const avail = c.clientWidth - 40;   // paczka 31: otwarta karta zakrywa cały ekran, więc nie odejmuje szerokości
     const z = clamp(Math.min(avail / (mx - bb.x0 + 20), (c.clientHeight - 100) / (my - bb.y0 + 20), 1.2), 0.35, 1.6);
-    setZoomState(z); c.scrollTo(padRef.current.x, padRef.current.y);   // lewy górny róg świata (x0, y0) przy krawędzi widoku
+    // lewy górny róg świata (x0, y0) przy krawędzi widoku; przewijamy po przerysowaniu w nowym powiększeniu (wcześniej przeglądarka
+    // ucinała przewinięcie do starego rozmiaru świata i treść lądowała przesunięta, przy szerokim układzie poza prawą krawędzią)
+    if (Math.abs(z - zoom) < 1e-6) { c.scrollTo(padRef.current.x, padRef.current.y); return; }
+    anchor.current = { wx: org.current.x, wy: org.current.y, px: 0, py: 0 };
+    setZoomState(z);
   };
 
   // pigułka powiększenia siedzi w górnym pasku ekranu (.zslot), a jej rozwijane menu w portalu (pasek ma backdrop-filter)

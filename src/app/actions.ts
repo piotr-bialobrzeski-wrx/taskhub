@@ -8,7 +8,7 @@ import { SESSION_COOKIE, checkPassword, sessionValue } from "@/lib/auth";
 import { requireOwner } from "@/lib/session";
 import { client, hhmm, mayTry, record } from "@/lib/guard";
 import * as repo from "@/lib/repo";
-import { composeFlow, finishStep, prepareStep, taskQueue } from "@/lib/services";
+import { composeFlow, finishStep, layoutLanes, prepareStep, taskQueue } from "@/lib/services";
 import { Q, roundQ } from "@/lib/time";
 import { intake, uploads } from "@/lib/intake";
 import { shortTitle, type Queue } from "@/lib/auto";
@@ -521,15 +521,25 @@ export async function saveStepPositions(taskId: string, items: { id: string; x: 
 }
 export async function autoLayout(taskId: string | null) {
   const o = await requireOwner();
-  if (taskId) await repo.clearStepPositions(o.id, taskId); else await repo.clearTaskPositions(o.id);
-  for (const g of await repo.listGroups(o.id, taskId)) await repo.updateGroup(o.id, g.id, { auto: true });
+  if (taskId) {
+    await repo.clearStepPositions(o.id, taskId);
+    for (const g of await repo.listGroups(o.id, taskId)) await repo.updateGroup(o.id, g.id, { auto: true });
+  } else await layoutLanes(o.id);
   refresh(taskId);
 }
-// „Cofnij” po „Ułóż”: przywraca zapamiętane położenia kafelków i prostokąty grup (łącznie z tym, czy grupa była automatyczna)
-export async function restoreLayout(taskId: string | null, items: { id: string; x: number; y: number }[], groups: { id: string; x: number; y: number; w: number; h: number; auto: boolean }[]) {
+// „Cofnij” po „Ułóż”: przywraca zapamiętane położenia kafelków i grupy (prostokąt, czy była automatyczna, skład). Grupa, którą „Ułóż”
+// usunęło, bo została pusta, wraca; pola „Pilne i szybkie”, których przed ułożeniem nie było, znikają.
+type SnapGroup = { id: string; x: number; y: number; w: number; h: number; auto: boolean; name?: string; color?: number; members?: string[]; lane?: string | null };
+export async function restoreLayout(taskId: string | null, items: { id: string; x: number; y: number }[], groups: SnapGroup[]) {
   const o = await requireOwner();
   if (taskId) await repo.setStepPositions(o.id, taskId, items.slice(0, 200)); else await repo.setTaskPositions(o.id, items.slice(0, 500));
-  for (const g of groups.slice(0, 100)) await repo.updateGroup(o.id, g.id, { x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), auto: g.auto });
+  const now = await repo.listGroups(o.id, taskId), snap = groups.slice(0, 100);
+  for (const g of snap) {
+    const rect = { x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h) };
+    if (now.some((x) => x.id === g.id)) await repo.updateGroup(o.id, g.id, { ...rect, auto: g.auto, ...(g.members ? { members: g.members } : {}) });
+    else if (g.name) { const c = await repo.createGroup(o.id, taskId, g.name, g.members ?? [], rect, { color: g.color, lane: g.lane ?? undefined }); if (g.auto) await repo.updateGroup(o.id, c.id, { auto: true }); }
+  }
+  if (!taskId) for (const g of now) if (g.lane && !snap.some((x) => x.id === g.id)) await repo.deleteGroup(o.id, g.id);
   refresh(taskId);
 }
 export async function createGroupAction(taskId: string | null, name: string, members: string[], rect: { x: number; y: number; w: number; h: number }) {

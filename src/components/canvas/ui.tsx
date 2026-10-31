@@ -60,7 +60,7 @@ export type StepTile = {
   activity: TileActivity | null;
   look: Look;                // ramka i pasek z etykietą (paczka 18)
 };
-export type GroupVM = { id: string; name: string; color: number; x: number; y: number; w: number; h: number; members: string[]; auto: boolean };
+export type GroupVM = { id: string; name: string; color: number; x: number; y: number; w: number; h: number; members: string[]; auto: boolean; lane?: string | null };
 export type ProjectVM = { id: string; name: string; color: number };
 export type ProjectRow = ProjectVM & { weight: number; language: string; companyId: string | null };
 export type CompanyRow = { id: string; name: string; sphere: "work" | "private"; note: string | null; ended: boolean };

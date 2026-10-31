@@ -52,7 +52,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
     <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run || pending.size > 0 || canvasPending.length > 0} refreshAt={archiveAt} />
     <Board
       tasks={onBoard.map((s) => taskTile(s, all, qCount.get(s.task.id) ?? 0, run, pending.get(s.task.id) ?? 0))}
-      groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
+      groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto, lane: g.lane }))}
       projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color, weight: p.weight, language: p.language, companyId: p.companyId }))}
       companies={b.companies.map((c) => ({ id: c.id, name: c.name, sphere: c.sphere, note: c.note, ended: !!c.endedAt }))}
       projTasks={projTasks}

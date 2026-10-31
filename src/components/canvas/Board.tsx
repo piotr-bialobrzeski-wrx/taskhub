@@ -28,7 +28,7 @@ export type BoardProps = {
   agentQueue: AgentQueue;   // kolejka agenta w lewym dolnym rogu (paczka 18)
   archive: { done: ArchRow[]; trash: ArchRow[]; trashDays: number };
 };
-type LayoutSnap = { items: { id: string; x: number; y: number }[]; groups: { id: string; x: number; y: number; w: number; h: number; auto: boolean }[] };
+type LayoutSnap = { items: { id: string; x: number; y: number }[]; groups: { id: string; x: number; y: number; w: number; h: number; auto: boolean; name: string; color: number; members: string[]; lane: string | null }[] };
 const UNDO_MS = 8000;   // tyle „Cofnij” zostaje po „Ułóż”
 
 export function TaskTileView({ t }: { t: TaskTile }) {
@@ -95,7 +95,7 @@ export function layoutSnapshot(api: CanvasApi | null, ids: string[], groups: Gro
   const P = api?.positions() ?? {}, R = api?.groupRects() ?? {};
   return {
     items: ids.filter((k) => P[k]).map((k) => ({ id: k, x: Math.round(P[k].x), y: Math.round(P[k].y) })),
-    groups: groups.filter((g) => R[g.id]).map((g) => ({ id: g.id, x: Math.round(R[g.id].x), y: Math.round(R[g.id].y), w: Math.round(R[g.id].w), h: Math.round(R[g.id].h), auto: g.auto })),
+    groups: groups.filter((g) => R[g.id]).map((g) => ({ id: g.id, x: Math.round(R[g.id].x), y: Math.round(R[g.id].y), w: Math.round(R[g.id].w), h: Math.round(R[g.id].h), auto: g.auto, name: g.name, color: g.color, members: g.members, lane: g.lane ?? null })),
   };
 }
 
