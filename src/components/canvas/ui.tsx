@@ -97,6 +97,7 @@ const PATHS: Record<string, string> = {
   logo: '<path d="M3 8h4M9 4h4M9 12h4M7 8l2-4M7 8l2 4"/>',
   x: '<path d="M4 4l8 8M12 4l-8 8"/>',
   undo: '<path d="M5.5 3 2.5 6l3 3"/><path d="M2.5 6h7a4 4 0 0 1 0 8H7"/>',
+  full: '<path d="M9.5 2.5h4v4M13.5 2.5 9.5 6.5M6.5 13.5h-4v-4M2.5 13.5l4-4"/>',
   ext: '<path d="M6.5 3.5H4a1.5 1.5 0 0 0-1.5 1.5v7A1.5 1.5 0 0 0 4 13.5h7a1.5 1.5 0 0 0 1.5-1.5V9.5"/><path d="M9.5 2.5h4v4M13.5 2.5 7.5 8.5"/>',
   tile: '<rect x="2" y="3.5" width="12" height="9" rx="2"/><path d="M8 6v4M6 8h4"/>',
   group: '<rect x="1.5" y="2.5" width="13" height="11" rx="2.5" stroke-dasharray="2.2 1.8"/>',

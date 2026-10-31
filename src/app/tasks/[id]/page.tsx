@@ -22,6 +22,8 @@ import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView, OptionButtons } from "@/components/BlockRenderer";
+import { ProtoFrame } from "@/components/ProtoFrame";
+import { embedMode, isOwnPreview } from "@/lib/embed";
 import { agentFeed, stepWaits, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
 import { decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
@@ -276,7 +278,10 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // miejsce docelowe (ticket, wątek, dokument) w nagłówku „Teraz” tylko bez karty publikacji: karta ma własny przycisk celu w nagłówku (przy opcjach
   // każda swój); po wysyłce jego miejsce zajmuje link do wyniku
   const target = !done && !mode ? targetLink(s, s.blocks) : null;
-  const proto = prototypeLink(t.steps, s);   // paczka 19, punkt 1 i paczka 25: najnowszy podgląd prototypu, zawsze widoczny
+  const proto0 = prototypeLink(t.steps, s);   // paczka 19, punkt 1 i paczka 25: najnowszy podgląd prototypu, zawsze widoczny
+  // paczka 31, krok 13: na kartce decyzji prototyp stoi w okienku pod pytaniem (z własnym „Otwórz prototyp”), więc przycisk w nagłówku znika
+  const pframe = proto0 && kind === "decision" ? <ProtoFrame url={proto0} mode={embedMode(proto0, appUrl())} own={isOwnPreview(proto0, appUrl())} /> : null;
+  const proto = pframe ? null : proto0;
   const addFolder = !done ? folderLink(s) : null;   // paczka 22: krok oddany z braku folderu na Macu, przycisk otwiera aplikację Task Hub z pytaniem
   const deps = s.dependsOn.length;
   const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
@@ -305,6 +310,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : cloud?.state === "auto" ? "Ruszy w chmurze sam, gdy skończą się kroki, na które czeka." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
       {open.length && !done ? <BlocksView blocks={open} form={form} indexOf={indexOf} /> : null}
       {done && kind === "decision" && decisionText(s) ? <div className="note">{decisionText(s)}</div> : null}
+      {pframe}
       {done && result.length ? <BlocksView blocks={result} form={form} indexOf={indexOf} /> : null}
       {done && lines.length ? <div className="stack">{lines.map((l, i) => l.confirm
         ? <div key={i} className="confirm"><b>Do potwierdzenia:</b><span>{l.text.replace(/^do potwierdzenia:\s*/i, "")}</span></div>
