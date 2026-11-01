@@ -209,7 +209,7 @@ describe("krok „Zleć w projekcie” (paczka 12, punkt 3)", async () => {
     expect(p.split("\n\n")).toEqual([
       "Zrób krok z Task Hub: dobór modelu w biegu.",
       "Poziom kroku w bazie i --model w mostku.",
-      "Zadanie „Dobór modelu” (https://th.example/tasks/t1), krok 02. Pełną treść, wcześniejsze kroki i decyzje przeczytaj przez get_task. Po skończeniu zamknij ten krok (complete_step) z wynikiem: co zmieniłeś i gdzie to jest.",
+      "Zadanie „Dobór modelu” (https://th.example/tasks/t1), krok 02. Pełną treść, wcześniejsze kroki i decyzje przeczytaj przez get_task. Gdy decyzja Piotra w kroku, na który ten krok czekał, wyklucza tę pracę, zamknij krok przez skip_step z powodem jednym zdaniem. Po skończeniu zamknij ten krok (complete_step) z wynikiem: co zmieniłeś i gdzie to jest.",
     ]);
   });
 });

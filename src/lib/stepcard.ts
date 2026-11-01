@@ -249,6 +249,19 @@ export const DEPLOY_RE = /^wdróż na produkcj[ęe](?=[\s,:;.]|$)/i;
 export const isProjectStep = (s: Pick<Step, "tool" | "title">, project?: string | null) =>
   (isOwnerStep(s) && (PROJECT_RE.test(s.title.trim()) || DEPLOY_RE.test(s.title.trim()))) || isAppCodeStep(s, project);
 export const isDeployStep = (s: Pick<Step, "tool" | "title">) => isOwnerStep(s) && DEPLOY_RE.test(s.title.trim());
+// paczka 32: decyzja Piotra to zgoda na kroki „Zleć w projekcie”, które ją wykonują, także zaplanowane przed decyzją. Bierze kroki do zrobienia,
+// które czekają na decyzję wprost albo przez inne takie kroki (ciąg wdrożeń po jednej decyzji); „Wdróż na produkcję” zawsze czeka na kliknięcie Piotra
+export function stepsAfterDecision(steps: Pick<Step, "id" | "tool" | "title" | "status" | "dependsOn">[], decisionId: string, project?: string | null): string[] {
+  const out: string[] = [], seen = new Set([decisionId]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const s of steps) {
+      if (seen.has(s.id) || s.status !== "todo" || !isProjectStep(s, project) || isDeployStep(s) || !s.dependsOn.some((d) => seen.has(d))) continue;
+      seen.add(s.id); out.push(s.id); grew = true;
+    }
+  }
+  return out;
+}
 // polecenie dla wątku projektu: co zrobić, brief kroku i skąd wziąć resztę (wątek ma konektor Task Hub, więc czyta zadanie sam i zamyka krok)
 export function projectPrompt(t: Pick<Task, "id" | "title" | "steps">, s: Pick<Step, "id" | "title" | "detail">, appUrl: string): string {
   if (DEPLOY_RE.test(s.title.trim())) {
@@ -264,7 +277,7 @@ export function projectPrompt(t: Pick<Task, "id" | "title" | "steps">, s: Pick<S
   return [
     `Zrób krok z Task Hub: ${what}.`,
     s.detail.trim(),
-    `Zadanie „${t.title}” (${appUrl}/tasks/${t.id}), krok ${n}. Pełną treść, wcześniejsze kroki i decyzje przeczytaj przez get_task. Po skończeniu zamknij ten krok (complete_step) z wynikiem: co zmieniłeś i gdzie to jest.`,
+    `Zadanie „${t.title}” (${appUrl}/tasks/${t.id}), krok ${n}. Pełną treść, wcześniejsze kroki i decyzje przeczytaj przez get_task. Gdy decyzja Piotra w kroku, na który ten krok czekał, wyklucza tę pracę, zamknij krok przez skip_step z powodem jednym zdaniem. Po skończeniu zamknij ten krok (complete_step) z wynikiem: co zmieniłeś i gdzie to jest.`,
   ].filter(Boolean).join("\n\n");
 }
 export const openQuestions = (s: Pick<Step, "blocks">): QuestionB[] => (s.blocks ?? []).filter((b): b is QuestionB => b.type === "question" && !b.answer);

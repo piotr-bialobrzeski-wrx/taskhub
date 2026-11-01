@@ -6,6 +6,7 @@ import { closingNote, draftStep, reviewReport } from "./agent/notes";
 import { scoreAll, type Scored } from "./agent/context";
 import { calibrationFor, remainEst } from "./time";
 import { assignLanes, LANES } from "./canvas/lanes";
+import { taskWaits } from "./canvas/vm";
 import { isComplete } from "./priority";
 import { type Step, type Task } from "./schema";
 import { bridgeHold, busyWith, queueWho, type Queue, type Worker } from "./auto";
@@ -23,7 +24,7 @@ export async function aiFor(ownerId: string): Promise<Ai> {
 export async function layoutLanes(ownerId: string): Promise<void> {
   const b = await bundle(ownerId);
   const open = b.scored.filter((s) => !s.task.deletedAt && !isComplete(s.task))
-    .map((s) => ({ id: s.task.id, lane: s.task.lane ?? null, eff: s.score.eff, remainMin: remainEst(s.task), hasSteps: s.task.steps.length > 0, due: s.task.due }));
+    .map((s) => ({ id: s.task.id, lane: s.task.lane ?? null, eff: s.score.eff, remainMin: remainEst(s.task), hasSteps: s.task.steps.length > 0, due: s.task.due, waiting: taskWaits(s.task, b.tasks).length > 0 }));
   const lanes = assignLanes(open);
   await repo.clearTaskPositions(ownerId);
   let groups = await repo.listGroups(ownerId, null);

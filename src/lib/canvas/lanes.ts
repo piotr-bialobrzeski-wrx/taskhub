@@ -15,8 +15,10 @@ export const laneName = (k: string | null | undefined) => LANES.find((l) => l.ke
 export const URGENT_EFF = 4;   // priorytet efektywny (z terminem i ważnością projektu) od 4 = pilne
 export const QUICK_MIN = 30;   // Piotrowi zostało do 30 minut pracy = szybkie
 
-export type LaneInput = { lane?: string | null; eff: number; remainMin: number; hasSteps: boolean };
+// waiting (paczka 32): zadanie czeka na niezrobione wcześniejsze zadanie z łańcucha, więc nie jest pilne, choćby miało termin albo pole od asystenta
+export type LaneInput = { lane?: string | null; eff: number; remainMin: number; hasSteps: boolean; waiting?: boolean };
 export function laneOf(t: LaneInput): LaneKey {
+  if (t.waiting) return "przy-okazji";
   if (isLane(t.lane)) return t.lane;
   const urgent = t.eff >= URGENT_EFF, quick = t.hasSteps && t.remainMin <= QUICK_MIN;   // nierozpisane zadanie: nie wiadomo, ile pracy, więc „dłuższe”
   return urgent ? (quick ? "pilne-szybkie" : "pilne-dluzsze") : quick ? "szybkie-poczekaja" : "przy-okazji";

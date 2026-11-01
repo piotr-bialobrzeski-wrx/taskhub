@@ -1,6 +1,7 @@
 // Serwer MCP Task Hub: Claude, Claude Code, ChatGPT i własne agenty podłączają się tutaj tokenem (OAuth albo nagłówek).
 // Dostają zadania z zasadami i kontekstem, zgłaszają wyniki kroków, dopisują fakty i migawki.
 import { LANE_KEYS } from "@/lib/canvas/lanes";
+import { chainLoops } from "@/lib/canvas/vm";
 import { randomUUID } from "node:crypto";
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
@@ -27,6 +28,8 @@ import { matchProjectName } from "@/lib/project-guess";
 import { MAX_ESCALATION, normalizeLevel } from "@/lib/agent/models";
 
 // poziom pracy kroku według zasady „Dobór modelu i wysiłku”: od niego mostek dobiera model i wysiłek biegu
+// paczka 32: łańcuch zadań. Zadanie, które powstaje po decyzji Piotra w innym zadaniu albo zaczyna się później, czeka na wcześniejsze (strzałka na głównej kanwie)
+const AFTER_DOC = "after: id zadań, na które to zadanie czeka (łańcuch zadań według zasady „Jak wygląda zadanie i jego kroki”): dopóki tamte nie są zrobione, to zadanie stoi, agent go nie bierze i nie jest pilne; na głównej kanwie łączy je strzałka.";
 const WORK_LEVEL_DOC = "workLevel: poziom pracy kroku dla agenta według zasady „Dobór modelu i wysiłku”: strategy (Strategia: wymyślić, zaplanować, rozstrzygnąć), analysis (Analiza: zebrać i zrozumieć materiał, szkic do klienta), execution (Wykonanie: krok dokładnie opisany, kod według planu), mechanics (Mechanika: tylko przenieść albo wysłać); nadaj go przy rozpisaniu każdemu krokowi agenta, bez niego poziom bierze się z narzędzia.";
 
 // link kroku to adres elementu w zewnętrznej aplikacji (tylko http/https); adres samego Task Hub nie jest linkiem kroku
@@ -82,6 +85,15 @@ function buildHandler(auth: repo.TokenAuth) {
     const g = matchProjectName(name, projects);
     if (g) return g.id;
     throw new Error(`Nie ma projektu „${name}”. Projekty: ${projects.map((p) => p.name).join(", ") || "(brak)"}. Podaj dokładną nazwę z list_projects albo utwórz projekt przez create_project.`);
+  };
+  // after z create_task / update_task: tylko zadania Piotra, bez samego siebie i bez koła (A czeka na B, B na A); napis = odmowa dla agenta
+  const chainOf = async (ids: string[], self: string | null): Promise<string[] | string> => {
+    const tasks = await repo.listTasks(ownerId, { all: true });
+    const want = [...new Set(ids.map((x) => x.trim()).filter(Boolean))];
+    const bad = want.filter((id) => !tasks.some((t) => t.id === id && !t.deletedAt));
+    if (bad.length) return `Nie zapisałem łańcucha: nie ma zadań ${bad.join(", ")}. Podaj id z list_tasks.`;
+    if (self && chainLoops(tasks, self, want)) return "Nie zapisałem łańcucha: zadania czekałyby na siebie nawzajem.";
+    return want.filter((id) => id !== self);
   };
   // szkic, którego nic nie wyśle (plik na Macu to nie wysyłka): odmowa z instrukcją dla tego, kto pyta; nil = szkice mogą się zapisać.
   // Przy opcjach każdy nowy szkic z osobna (pierwsza odmowa wygrywa); zatwierdzony, wysłany i nieaktualny nie podlegają sprawdzeniu
@@ -210,22 +222,27 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("create_task", {
-      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. title: 2–6 słów, samo sedno (nie cała wiadomość); title kroku od czasownika, 2–6 słów, bez identyfikatorów. due: termin YYYY-MM-DD, czyli najpóźniejsza data wykonania; ustaw tylko, gdy w treści jest termin, inaczej pomiń (zadanie bez terminu, nigdy dzisiejsza data z automatu). project: dokładna nazwa istniejącego projektu z list_projects (nowy tylko przez create_project); bez project projekt bierze się z treści, gdy ją wymienia. Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, mural, whatsapp, sheets, docs, file (Plik na Macu: zapis pliku na Macu Piotra, bez zgody, robi go tylko mostek), est: ile minut zajmie Piotrowi (wielokrotność 5), tylko dla kroków manual; czas kroków Claude'a mierzy się sam, needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), tylko gdy krok potrzebuje wyniku wskazanego kroku; kroki niezależne bez dependsOn, żeby agent brał je od razu, link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony. " + WORK_LEVEL_DOC,
+      title: "Nowe zadanie", description: "Tworzy zadanie z krokami. title: 2–6 słów, samo sedno (nie cała wiadomość); title kroku od czasownika, 2–6 słów, bez identyfikatorów. due: termin YYYY-MM-DD, czyli najpóźniejsza data wykonania; ustaw tylko, gdy w treści jest termin, inaczej pomiń (zadanie bez terminu, nigdy dzisiejsza data z automatu). project: dokładna nazwa istniejącego projektu z list_projects (nowy tylko przez create_project); bez project projekt bierze się z treści, gdy ją wymienia. Kroki: tool: klucz narzędzia, zawsze klucz, nie etykieta: code (Claude Code), manual (Piotr sam), slack, gmail, clickup, calendar, claude (dokument pisany przez Claude), claudeapp, browser, github, figma, mural, whatsapp, sheets, docs, file (Plik na Macu: zapis pliku na Macu Piotra, bez zgody, robi go tylko mostek), est: ile minut zajmie Piotrowi (wielokrotność 5), tylko dla kroków manual; czas kroków Claude'a mierzy się sam, needsApproval gdy krok wysyła coś na zewnątrz, dependsOn jako n1, n2 (numery kroków w tej paczce), tylko gdy krok potrzebuje wyniku wskazanego kroku; kroki niezależne bez dependsOn, żeby agent brał je od razu, link tylko do elementu w zewnętrznej aplikacji (ticket, wydarzenie, mail), nigdy adres Task Hub, connection: nazwa połączenia z list_connections, gdy ma znaczenie, którym kontem (firma, prywatne) krok ma być zrobiony. " + AFTER_DOC + " " + WORK_LEVEL_DOC,
       inputSchema: z.object({
-        title: z.string(), summary: z.string().optional(), source: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().optional(), project: z.string().optional(),
+        title: z.string(), after: z.array(z.string()).optional(), summary: z.string().optional(), source: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().optional(), project: z.string().optional(),
         steps: z.array(z.object({ title: z.string(), tool: z.string().optional(), detail: z.string().optional(), needsApproval: z.boolean().optional(), est: z.number().int().optional(), link: z.string().optional(), dependsOn: z.array(z.string()).optional(), connection: z.string().optional(), workLevel: z.string().optional() })).optional(),
       }),
     }, async (a) => {
       const projectId = a.project ? await projectByName(a.project) : null;   // bez project: projekt z treści, gdy ją wymienia (repo.createTask)
-      const t = await repo.createTask(ownerId, { title: a.title, summary: a.summary, source: a.source, level: a.level, due: a.due ?? null, projectId, steps: await Promise.all((a.steps ?? []).map(async (s) => ({ ...s, link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection) }))) });
+      const after = a.after?.length ? await chainOf(a.after, null) : [];
+      if (typeof after === "string") return text(after);
+      const t = await repo.createTask(ownerId, { title: a.title, summary: a.summary, source: a.source, level: a.level, due: a.due ?? null, projectId, dependsOn: after, steps: await Promise.all((a.steps ?? []).map(async (s) => ({ ...s, link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection) }))) });
       return json({ taskId: t.id, steps: t.steps.map((s) => ({ id: s.id, title: s.title })) });
     });
 
     server.registerTool("update_task", {
-      title: "Zmień zadanie", description: "Zmienia tytuł, cel, priorytet, termin, projekt albo pole na kanwie zadania. Tytuł: 2–6 słów, samo sedno; pierwotny tytuł zostaje zapisany sam. project: dokładna nazwa istniejącego projektu z list_projects (null = bez projektu); nowy projekt tylko przez create_project. lane: pole zadania w układzie „Pilne i szybkie” na głównej kanwie, według zasady w get_rules (pilne-szybkie, pilne-dluzsze, szybkie-poczekaja, przy-okazji; null = pole liczone z priorytetu i pozostałej pracy); kafelek przechodzi do pola przy następnym „Ułóż”.",
-      inputSchema: z.object({ taskId: z.string(), title: z.string().optional(), summary: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().nullable().optional(), project: z.string().nullable().optional(), lane: z.enum(LANE_KEYS).nullable().optional() }),
+      title: "Zmień zadanie", description: "Zmienia tytuł, cel, priorytet, termin, projekt albo pole na kanwie zadania. Tytuł: 2–6 słów, samo sedno; pierwotny tytuł zostaje zapisany sam. project: dokładna nazwa istniejącego projektu z list_projects (null = bez projektu); nowy projekt tylko przez create_project. lane: pole zadania w układzie „Pilne i szybkie” na głównej kanwie, według zasady w get_rules (pilne-szybkie, pilne-dluzsze, szybkie-poczekaja, przy-okazji; null = pole liczone z priorytetu i pozostałej pracy); kafelek przechodzi do pola przy następnym „Ułóż”. after: pełna nowa lista id zadań, na które to zadanie czeka ([] = nie czeka na żadne); " + AFTER_DOC,
+      inputSchema: z.object({ taskId: z.string(), title: z.string().optional(), summary: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().nullable().optional(), project: z.string().nullable().optional(), lane: z.enum(LANE_KEYS).nullable().optional(), after: z.array(z.string()).optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
+      const after = a.after ? await chainOf(a.after, t.id) : undefined;
+      if (typeof after === "string") return text(after);
+      if (after) await repo.setTaskDependencies(t.id, after);
       const projectId = a.project === undefined ? undefined : a.project ? await projectByName(a.project) : null;
       // agent poprawił tytuł: pierwotne brzmienie zostaje w zadaniu („Jak wpadło”), Piotr widzi, że to przeredagowane
       const renamed = !!a.title?.trim() && a.title.trim() !== t.title;
