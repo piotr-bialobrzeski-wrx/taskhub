@@ -6,7 +6,7 @@ import * as repo from "@/lib/repo";
 import { bundle } from "@/lib/services";
 import { sortByPriority } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
-import { dueOf, fmtDate, taskStateOf, taskTile } from "@/lib/canvas/vm";
+import { dueOf, fmtDate, stepAsked, taskStateOf, taskTile } from "@/lib/canvas/vm";
 import { remainEst, taskSpent } from "@/lib/time";
 import type { ProjTask } from "@/components/canvas/ui";
 import { Board, type ArchRow, type BoardInitial } from "@/components/canvas/Board";
@@ -24,7 +24,8 @@ const DAY = 864e5;
 export default async function Home({ searchParams }: { searchParams: Promise<BoardInitial> }) {
   const initial = await searchParams;
   const o = await requireOwner();
-  const [b, chatLog, groups, questions, bridge, stamp, pending, canvasPending] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 8), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null), repo.countPendingChat(o.id), repo.listPendingChat(o.id, null)]);
+  const [b, chatLog, groups, questions, bridge, stamp, pending, canvasPending, stepChat] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 8), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null), repo.countPendingChat(o.id), repo.listPendingChat(o.id, null), repo.listPendingStepChat(o.id)]);
+  const asked = stepAsked(stepChat);
   const run = liveActivity(bridge.run);
   const aq = await agentQueue(o.id, run, b.tasks);
   // wiadomość z kanwy czeka na Claude albo Claude właśnie ją robi (paczka 29): ten sam dymek pracy co w zadaniu
@@ -51,7 +52,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
     <>
     <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run || pending.size > 0 || canvasPending.length > 0} refreshAt={archiveAt} />
     <Board
-      tasks={onBoard.map((s) => taskTile(s, all, qCount.get(s.task.id) ?? 0, run, pending.get(s.task.id) ?? 0))}
+      tasks={onBoard.map((s) => taskTile(s, all, qCount.get(s.task.id) ?? 0, run, pending.get(s.task.id) ?? 0, asked))}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto, lane: g.lane }))}
       projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color, weight: p.weight, language: p.language, companyId: p.companyId }))}
       companies={b.companies.map((c) => ({ id: c.id, name: c.name, sphere: c.sphere, note: c.note, ended: !!c.endedAt }))}

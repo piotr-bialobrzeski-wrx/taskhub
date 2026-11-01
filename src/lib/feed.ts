@@ -7,6 +7,9 @@ import type { ChatMessage } from "./repo";
 import type { Task } from "./schema";
 import type { AgentQueue } from "./agent/work";
 
+// wiadomość wzięta przez agenta, a bez odpowiedzi, wraca do kolejki po tylu minutach (repo.listUnseenChat)
+export const CHAT_STALE_MIN = 90;
+
 // kolejka agenta: wszystkie wiadomości z głównej kanwy i paska to jedna pozycja (paczka 29)
 export const CANVAS_KEY = "chat:canvas";
 
@@ -68,8 +71,9 @@ export function workBubble({ task, w, pending, busy, queue = null, now = new Dat
   if (run && run.kind === "send") return { ...base, title: "Wysłane, Claude zacznie po bieżącej wysyłce" };
   if (run) return { ...base, title: "Wysłane, Claude zacznie po bieżącej pracy", line: busy ? `Teraz kończy: „${busy}”` : null };
   if (w.alive && w.hold) return { ...base, title: `Wysłane, ale ${w.name ? w.name : "Mac"} stoi: ${holdText(w.hold)}` };
+  // paczka 32: wiadomość wzięta bez biegu mostka (inny Claude przez konektor): nie obiecujemy „zaraz zacznie”, mówimy, kto i kiedy ją wziął
+  if (newest.seenAt) return { ...base, title: `Claude w chmurze wziął to o ${fmtTime(newest.seenAt)}`, line: `Bez odpowiedzi wróci do kolejki o ${fmtTime(new Date(new Date(newest.seenAt).getTime() + CHAT_STALE_MIN * 60000).toISOString())}` };
   if (w.alive) return { ...base, title: "Wysłane, Claude zaraz zacznie" };
-  if (newest.seenAt) return { ...base, title: `Claude w chmurze wziął to o ${fmtTime(newest.seenAt)}` };
   return { ...base, title: `${w.name ? w.name : "Mac"} śpi, weźmie to automat ${nextAutoAt(now).text}` };
 }
 // stopka dymka w toku: „MacBook Piotra · od 19:41 · potem 1 wiadomość”

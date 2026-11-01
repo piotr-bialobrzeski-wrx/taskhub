@@ -970,7 +970,8 @@ export async function addChat(ownerId: string, taskId: string | null, role: "use
   return r.id as string;
 }
 // wiadomość wzięta do opracowania dawniej niż tyle minut temu i wciąż bez odpowiedzi liczy się jako nowa (bieg mostka padł bez sygnału, automat co godzinę ją weźmie)
-export const CHAT_STALE_MIN = 90;
+export { CHAT_STALE_MIN } from "./feed";   // wiadomość wzięta bez odpowiedzi wraca do kolejki po tylu minutach
+import { CHAT_STALE_MIN } from "./feed";
 // wiadomości Piotra z głównej kanwy i szybkiego paska (bez zadania), czekające na agenta: polecenie do zrobienia od razu albo nowa praca (paczka 29)
 export async function listUnseenCanvasChat(ownerId: string, limit = 30, staleMin = CHAT_STALE_MIN): Promise<ChatMessage[]> {
   const rows = await sql()`select * from chat_messages where owner_id = ${ownerId} and role = 'user' and answered_at is null and task_id is null
@@ -991,6 +992,11 @@ export async function listUnseenChat(ownerId: string, limit = 30, staleMin = CHA
 export async function listPendingChat(ownerId: string, taskId: string | null): Promise<ChatMessage[]> {
   const rows = await sql()`select * from chat_messages where owner_id = ${ownerId} and ${taskId ? sql()`task_id = ${taskId}` : sql()`task_id is null`} and role = 'user' and answered_at is null order by created_at`;
   return rows.map(rowToChat);
+}
+// paczka 32: wiadomości bez odpowiedzi napisane przy kroku (kanwa główna: kafelek zadania liczy stan z kroków, krok z prośbą czeka na agenta)
+export async function listPendingStepChat(ownerId: string): Promise<{ actions: unknown; createdAt: string }[]> {
+  const rows = await sql()`select actions, created_at from chat_messages where owner_id = ${ownerId} and role = 'user' and answered_at is null and task_id is not null and actions->>'stepId' is not null`;
+  return rows.map((r) => ({ actions: r.actions, createdAt: iso(r.createdAt) as string }));
 }
 // ile wiadomości bez odpowiedzi ma każde zadanie (chip „2 wiadomości” na kafelku); taskId zawęża do jednego zadania
 export async function countPendingChat(ownerId: string, taskId: string | null = null): Promise<Map<string, number>> {

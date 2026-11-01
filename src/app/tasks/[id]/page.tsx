@@ -19,7 +19,7 @@ import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
 import { Activity } from "@/components/Activity";
 import type { TileActivity } from "@/components/canvas/ui";
-import { fmtDate, fmtTime, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
+import { fmtDate, fmtTime, stepAsked, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
 import { BlocksView, OptionButtons } from "@/components/BlockRenderer";
 import { ProtoFrame } from "@/components/ProtoFrame";
@@ -80,7 +80,8 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   // kto pracuje teraz (mostek na komputerze z bieżącym biegiem albo automat o pełnej godzinie) i nad czym
   const w: Worker = { alive: bridge.alive, name: bridge.name, run: liveActivity(bridge.run), hold: bridgeHold(bridge.meta, bridge.pause) };
   const busy = busyWith(w.run, b.tasks);
-  const tiles = t.steps.map((s) => stepTile(t, s, b.tasks, w.run));
+  const asked = stepAsked(pending);   // paczka 32: krok z wiadomością Piotra bez odpowiedzi czeka na agenta, nie na Piotra
+  const tiles = t.steps.map((s) => stepTile(t, s, b.tasks, w.run, asked.get(s.id) ?? null));
   const stateOf = (s: Step) => tiles.find((x) => x.id === s.id)!.state;
   const waits = taskWaits(t, b.tasks);
   const bp = !t.steps.length && !t.doneAt ? breakdownPrompt(t, b.rules, { appUrl: origin, projectName: cur.project?.name, companyId: cur.project?.companyId ?? null }) : null;

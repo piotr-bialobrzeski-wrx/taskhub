@@ -37,11 +37,14 @@ export function stepStateOf(t: Task, s: Step, all: Task[]): StepStateKey {
 // wygląd kafelka kroku (paczka 18, tabela stanów z kroku „Zdecyduj o ramkach i etykietach kafelka”):
 // Agent pracuje (bieg mostka „teraz”, krok w toku, zlecenie do chmury; zlecone w rozmowie, a czekające na inne kroki to Zaplanowane) → Agent oddał → Twoja kolej (szkic, decyzja, czynność) → Zaplanowane (kto zrobi) → Zrobione
 const DECIDE_RE = /^\s*(zdecyduj|wybierz|rozstrzygnij)\b/i;
-export function stepLook(s: Step, state: StepStateKey, now: boolean): Look {
+// asked: godzina najstarszej wiadomości Piotra przy tym kroku bez odpowiedzi agenta (paczka 32): Piotr już coś zlecił na kartce,
+// więc krok nie czeka na niego, tylko na agenta („Zlecone agentowi · 10:30”, kolor agenta); gdy bieg nad nim siedzi, „Agent pracuje”
+export function stepLook(s: Step, state: StepStateKey, now: boolean, asked: string | null = null): Look {
   if (state === "done") return { key: "done", label: "Zrobione" };
   // zatwierdzony szkic czeka na bieg wysyłki: agent weźmie go sam, ale jeszcze nie pracuje
   const sendWait = state === "handoff" && !!s.approvedAt && !s.agentStartedAt;
   if (now || (s.cloud && s.cloud.state !== "auto") || (state === "handoff" && !sendWait)) return { key: "live", label: "Agent pracuje" };
+  if (asked) return { key: "plan-ag", label: `Zlecone agentowi · ${fmtTime(asked)}` };
   if (s.leftAt) return { key: "help", label: "Potrzebna pomoc" };
   // paczka 22: szkic bez zgody mówi wprost, że czeka (bez ptaszka, który wyglądał jak „zatwierdzone”); po zgodzie godzina kliknięcia Piotra
   if (state === "draft") return { key: "mine", label: "Czeka na Twoją zgodę" };
@@ -83,11 +86,12 @@ export function estText(t: Task): string {
 }
 
 // activity: co mostek robi teraz, gdy pracuje nad tym zadaniem (kafelek pokazuje to zamiast licznika); pending: wiadomości Piotra bez odpowiedzi
-export function taskTile(s: Scored, all: Task[], questions: number, live: LiveActivity | null = null, pending = 0): TaskTile {
+// asked: krok → godzina najstarszej wiadomości Piotra przy nim bez odpowiedzi (stepAsked)
+export function taskTile(s: Scored, all: Task[], questions: number, live: LiveActivity | null = null, pending = 0, asked: Map<string, string> = new Map()): TaskTile {
   const t = s.task, state = taskStateOf(t, all);
   const activity = taskActivity(t.id, live);
   const nowId = liveStepId(t, all, live);
-  const looks = t.steps.map((x) => stepLook(x, stepStateOf(t, x, all), nowId === x.id));
+  const looks = t.steps.map((x) => stepLook(x, stepStateOf(t, x, all), nowId === x.id, asked.get(x.id) ?? null));
   return {
     look: taskLook(t, state, looks, !!activity, questions),
     activity, pending,
@@ -108,7 +112,17 @@ export function taskTile(s: Scored, all: Task[], questions: number, live: LiveAc
 // bieg mostka związany z tym zadaniem: wiersz czynności na kafelku zadania (kanwa główna i kafelek zadania na kanwie kroków)
 export const taskActivity = (taskId: string, live: LiveActivity | null): TaskTile["activity"] => (live && live.taskId === taskId ? { text: onTileText(live.text), detail: live.detail, since: live.since } : null);
 
-export function stepTile(t: Task, s: Step, all: Task[], live: LiveActivity | null = null): StepTile & { toolName: string } {
+// wiadomości Piotra bez odpowiedzi agenta → krok, przy którym je napisał, i godzina najstarszej (kafelek „Zlecone agentowi”)
+export function stepAsked(pending: { actions: unknown; createdAt: string }[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const x of pending) {
+    const id = (x.actions as { stepId?: string } | null)?.stepId;
+    if (id && (!m.has(id) || x.createdAt < m.get(id)!)) m.set(id, x.createdAt);
+  }
+  return m;
+}
+
+export function stepTile(t: Task, s: Step, all: Task[], live: LiveActivity | null = null, asked: string | null = null): StepTile & { toolName: string } {
   const state = stepStateOf(t, s, all);
   const m = tileMeta(t, s, state);
   // krok zrobiony przez Claude bez śladu na zewnątrz (wysyłka, zmiany w kodzie) jest przygaszony: kroki Piotra widać od razu
@@ -121,7 +135,7 @@ export function stepTile(t: Task, s: Step, all: Task[], live: LiveActivity | nul
   const touched = glow === "touched" && run ? `Claude ${run.what} · ${fmtTime(run.at)}` : null;
   const fresh = !glow && !!s.agentAt && (!s.openedAt || s.agentAt > s.openedAt);
   const activity = live && now ? { text: onTileText(live.text), detail: live.detail, since: live.since } : null;
-  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, ...m, dim, glow, touched, fresh, pos: s.pos, dependsOn: s.dependsOn, activity, look: stepLook(s, state, glow === "live") };
+  return { id: s.id, idx: t.steps.indexOf(s) + 1, title: s.title, tool: s.tool, toolName: toolLabel(s.tool), state, ...m, dim, glow, touched, fresh, pos: s.pos, dependsOn: s.dependsOn, activity, look: stepLook(s, state, glow === "live", asked) };
 }
 
 // jedna dolna linia kafelka i wiersza listy: praca w toku → dokąd poszło albo pójdzie → kto zrobił, o której, ile to zajęło → plan

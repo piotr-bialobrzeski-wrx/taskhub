@@ -576,13 +576,17 @@ function buildHandler(auth: repo.TokenAuth) {
       inputSchema: z.object({ force: z.boolean().optional() }),
     }, async ({ force }) => {
       // mostek pracuje na bieżąco: automat co godzinę i inni agenci ustępują, żeby nie robić tego samego dwa razy (biegi mostka to sam mostek)
-      if (kind === "client" && !force) {
+      // paczka 32: force przy żywym mostku tylko pokazuje listę (peek): nie oznacza wiadomości Piotra jako wziętych, bo wtedy mostek nie widział ich
+      // przez 90 minut, a dymek obiecywał „Claude zaraz zacznie”
+      let look = false;
+      if (kind === "client") {
         const st = await repo.bridgeStatus(ownerId, BRIDGE_ALIVE_MS);
-        if (st.alive) return text(`MOSTEK AKTYWNY: Claude Code na komputerze Piotra (${st.name ?? "mostek"}) wykonuje pracę na bieżąco (ostatni sygnał ${ago(st.seenAt)}). Nic nie rób i zakończ. list_work z force: true pokaże pracę mimo to.`);
+        if (st.alive && !force) return text(`MOSTEK AKTYWNY: Claude Code na komputerze Piotra (${st.name ?? "mostek"}) wykonuje pracę na bieżąco (ostatni sygnał ${ago(st.seenAt)}). Nic nie rób i zakończ. list_work z force: true pokaże pracę mimo to.`);
+        look = st.alive;
       }
       // bieg pracy z doborem modelu widzi tylko swoją grupę pracy (model i wysiłek)
       const focus = scope?.kind === "work" && scope.runId ? (await repo.getBridgeRun(ownerId, scope.runId))?.focus ?? null : null;
-      return text((await workSummary(ownerId, { audience, stepId: scope?.stepId ?? undefined, peek: audience === "send", focus })).text);
+      return text((await workSummary(ownerId, { audience, stepId: scope?.stepId ?? undefined, peek: audience === "send" || look, focus })).text);
     });
 
     // „Uruchom w chmurze” (paczka 13, punkt 3): kroki, które Piotr kliknął w Task Hub, robi wątek projektu Claude w chmurze (zaplanowane zadanie
