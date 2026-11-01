@@ -16,7 +16,7 @@ import { fmtTime } from "@/lib/clock";
 import { connectorIssue, isGitDraft } from "@/lib/bridge";
 import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, shownSig, type Draft } from "@/lib/agent/approval";
 import { workSummary } from "@/lib/agent/work";
-import { decisionText, destOf, isProjectStep, openQuestions, stepKind } from "@/lib/stepcard";
+import { decisionText, destOf, isProjectStep, openQuestions, stepKind, stepsAfterDecision } from "@/lib/stepcard";
 import { isAppCodeStep, isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -648,8 +648,10 @@ export async function answerBlockForm(fd: FormData) {
   const msg = !closes ? `Odpowiedź na pytanie z kartki „${q}”: ${answer}`
     : prev && prev !== answer ? `Zmieniam decyzję w kroku „${title}”: ${answer} (wcześniej: ${prev}). Pytanie z kartki: „${q}”.`
     : `Decyzja w kroku „${title}”: ${answer}. Pytanie z kartki: „${q}”.`;
-  await repo.addChat(o.id, taskId, "user", msg, { stepId });
+  const msgId = await repo.addChat(o.id, taskId, "user", msg, { stepId });
   if (closes && s) {
+    // paczka 32: decyzja jest zgodą na kroki „Zleć w projekcie”, które z niej wynikają (także zaplanowane wcześniej); ruszą w chmurze same po zamknięciu decyzji
+    for (const id of stepsAfterDecision(task.steps, stepId, await projectNameOf(o.id, task))) await repo.armCloud(o.id, id, msgId, stepId);
     await finishStep(o.id, taskId, stepId, { output: decisionText(s), by: "owner" });
     // kroki „Przeczytaj …”, na które decyzja czekała: przeczytane, skoro decyzja zapadła
     for (const d of task.steps) if (s.dependsOn.includes(d.id) && d.status !== "done" && stepKind(d) === "reading") await finishStep(o.id, taskId, d.id, { by: "owner" });

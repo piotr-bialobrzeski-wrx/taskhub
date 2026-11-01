@@ -17,6 +17,18 @@ export function dueOf(due: string | null, now = Date.now()): TaskTile["due"] {
 }
 
 // zadania, na które to zadanie czeka (nieukończone, nie w koszu)
+// paczka 32: czy zadanie self po dopisaniu zależności after czekałoby pośrednio samo na siebie
+export function chainLoops(all: Pick<Task, "id" | "dependsOn">[], self: string, after: string[]): boolean {
+  const seen = new Set<string>(), todo = [...after];
+  while (todo.length) {
+    const id = todo.pop()!;
+    if (id === self) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    todo.push(...(all.find((t) => t.id === id)?.dependsOn ?? []));
+  }
+  return false;
+}
 export const taskWaits = (t: Task, all: Task[]) => t.dependsOn.map((id) => all.find((x) => x.id === id)).filter((x): x is Task => !!x && !x.deletedAt && !isComplete(x));
 
 export function taskStateOf(t: Task, all: Task[]): TaskStateKey {
@@ -70,6 +82,8 @@ export function liveStepId(t: Task, all: Task[], live: LiveActivity | null): str
 // coś czeka na Piotra (Zdecyduj, Zrób, zgoda, pomoc), pasek pokazuje to po prawej (also), więc jego kolej nie znika
 export function taskLook(t: Task, state: TaskStateKey, steps: Look[], working: boolean, questions: number): Look {
   if (state === "done") return { key: "done", label: "Zrobione" };
+  // paczka 32: zadanie w łańcuchu czeka na wcześniejsze zadanie; jego kroki jeszcze nie są niczyją kolejką
+  if (state === "blocked") return { key: "plan-ag", label: "Czeka na inne zadanie" };
   const yours = steps.find((l) => l.key === "mine") ?? (questions ? { key: "mine" as const, label: "Zdecyduj" } : null) ?? steps.find((l) => l.key === "help") ?? null;
   if (working || steps.some((l) => l.key === "live")) return yours ? { key: "live", label: "Agent pracuje", also: { key: yours.key, label: yours.label } } : { key: "live", label: "Agent pracuje" };
   if (yours) return yours;
