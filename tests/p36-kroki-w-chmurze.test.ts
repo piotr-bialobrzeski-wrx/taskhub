@@ -126,7 +126,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("paczka 37: zmiana kroku z czatu
     let all = (await repo.getTask(owner, t.id))!.steps;
     expect(await call("get_task", { taskId: t.id })).toContain("czeka na „Uruchom w chmurze”");
     expect(await call("update_step", { stepId: all[0].id, start: true })).toContain("Krok poszedł do chmury.");
-    expect(await call("update_step", { stepId: all[1].id, start: true })).toContain("ruszy w chmurze sam");
+    expect(await call("update_step", { stepId: all[1].id, start: "true" })).toContain("ruszy w chmurze sam");
     expect(await call("update_step", { stepId: all[2].id, start: true })).toContain("zawsze czeka na kliknięcie");
     all = (await repo.getTask(owner, t.id))!.steps;
     expect(all[0].cloud?.state).toBe("queued");

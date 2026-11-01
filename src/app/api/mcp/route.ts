@@ -44,6 +44,8 @@ const PREVIEW_MAX = 1_500_000;   // znaki pliku HTML podglądu (paczka 22); limi
 const json = (v: unknown) => text(JSON.stringify(v, null, 1));
 // krok należy do właściciela tokenu? zwraca id zadania
 // lista id kroków; klient z nieodświeżonym opisem narzędzia przysyła ją jako napis ("[]", JSON albo id po przecinku)
+// paczka 37: klient ze starym schematem narzędzia wysyła nowe pole tak/nie jako napis „true” / „false”
+const flag = z.preprocess((v) => (v === "true" ? true : v === "false" ? false : v), z.boolean());
 const idList = z.preprocess((v) => {
   if (typeof v !== "string") return v;
   const t = v.trim();
@@ -342,7 +344,7 @@ function buildHandler(auth: repo.TokenAuth) {
     };
     server.registerTool("update_step", {
       title: "Zmień krok", description: "Zmienia tytuł, opis, narzędzie, szacunek, link, połączenie albo poziom pracy kroku (tool = klucz jak w create_task; link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket; connection = nazwa z list_connections, pusty napis zdejmuje; workLevel jak w add_steps, pusty napis = z narzędzia; dependsOn = pełna nowa lista id kroków tego zadania, na których wynik krok naprawdę czeka, zastępuje dotychczasowe strzałki, [] = krok niezależny; attachments = pełna nowa lista id załączników zadania potrzebnych w tym kroku, [] = żadnych). start: true = krok w chmurze (tool cloud, „Zleć w projekcie: …”) ma ruszyć sam, bez „Uruchom w chmurze” (w projekcie Task Hub zawsze wolno; poza nim tylko z cloudFrom = id wiadomości Piotra, w której to zleca); start: false = ma czekać na kliknięcie Piotra. Zmiana tool na cloud w projekcie Task Hub uruchamia krok sama. Gdy Piotr w rozmowie prosi o zmianę rodzaju kroku (kto go robi, czy rusza sam), robisz to tym narzędziem, a nie tylko opisujesz.",
-      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), tool: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional(), workLevel: z.string().optional(), dependsOn: idList.optional(), attachments: idList.optional(), start: z.boolean().optional(), cloudFrom: z.string().optional() }),
+      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), tool: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional(), workLevel: z.string().optional(), dependsOn: idList.optional(), attachments: idList.optional(), start: flag.optional(), cloudFrom: z.string().optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId);
       if (!taskId) return text("Nie ma takiego kroku.");
