@@ -46,7 +46,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const { id } = await params;
   const { step: focus } = await searchParams;
   const o = await requireOwner();
-  const b = await bundle(o.id);
+  const b = await bundle(o.id, id);
   const cur = b.scored.find((s) => s.task.id === id);
   if (!cur) notFound();
   const t = cur.task;
