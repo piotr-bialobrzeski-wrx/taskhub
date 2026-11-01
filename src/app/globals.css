@@ -856,7 +856,8 @@ table.tb tr.new td { background: var(--accent-soft); }
 .ans-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 /* paczka 31, wariant A: karta na cały ekran. W lewym górnym rogu pływa sama strzałka wstecz z nazwą (i rzadkie akcje pod „⋮”); górny pasek kanwy,
    pasek stanu i Kafelek/Grupa chowają się pod kartą, a pole czatu, dymki i kolejka zostają tam, gdzie na kanwie (nad kartą).
-   Jedna środkowa oś: tekst, pola i kroki do 680 px (--tw), porównania, tabele i opcje obok siebie do 1040 px (--ww), symetrycznie na boki.
+   Jedna środkowa oś: tekst, pola i kroki do 680 px (--tw), porównania, tabele, działające okienko prototypu i dwie kolumny do 1040 px (--ww),
+   symetrycznie na boki. Zasada (paczka 38): sekcja jest szeroka tylko wtedy, gdy widać w niej szeroką treść; samo łącze czy tekst nigdy jej nie poszerza.
    Wstawka szeroka siedząca w węższym pudełku (np. tabela w ramce „Teraz”): pudełko rośnie do 1040, a jego wnętrze zostaje na osi 680
    dzięki wewnętrznemu marginesowi; sama wstawka wychodzi na boki ujemnym marginesem do szerokości --wi. */
 .app.haspanel :is(.dockwrap, .feed, .answer) { z-index: 12; }   /* pole czatu i dymki nad kartą (na telefonie nad szufladą) */
@@ -869,8 +870,9 @@ table.tb tr.new td { background: var(--accent-soft); }
   .detail > .d-body { --tw: min(680px, 100cqw); --ww: min(1040px, 100cqw); padding: calc(84px + env(safe-area-inset-top, 0px)) 32px calc(var(--dock-h, 46px) + 72px); }
   .detail > .d-body > * { width: 100%; max-width: var(--tw); margin-inline: auto; flex: none; }
   .detail > .d-body > .zones.two { max-width: var(--ww); }
-  .detail > .d-body > :not(.zones.two):has(.cmp, .tbwrap:not(.msg *)) { --wi: var(--ww); max-width: var(--ww); padding-inline: calc((var(--ww) - var(--tw)) / 2); }
-  .detail > .d-body > .now:has(.cmp, .tbwrap:not(.msg *)) { --wi: calc(var(--ww) - 2 * var(--s-5)); padding-inline: calc((var(--ww) - var(--tw)) / 2 + var(--s-5)); }
+  /* paczka 38: tabela albo porównanie w zwiniętej części (Wynik, Skąd, Skąd to wiemy) nie poszerza sekcji, dopóki jej nie rozwiniesz */
+  .detail > .d-body > :not(.zones.two):has(:is(.cmp, .tbwrap):not(.msg *, details:not([open]) *)) { --wi: var(--ww); max-width: var(--ww); padding-inline: calc((var(--ww) - var(--tw)) / 2); }
+  .detail > .d-body > .now:has(:is(.cmp, .tbwrap):not(.msg *, details:not([open]) *)) { --wi: calc(var(--ww) - 2 * var(--s-5)); padding-inline: calc((var(--ww) - var(--tw)) / 2 + var(--s-5)); }
   .detail > .d-body :is(.cmp, .block:has(.tbwrap)):not(.cmp *, .zones.two *, .msg *) { margin-inline: calc((100% - var(--wi)) / 2); }
   /* lepki pasek formatowania pod pływającym nagłówkiem (84 px wcięcia treści, nagłówek kończy się na 62 px) */
   .detail > .d-body .rf-bar { top: -18px; }
@@ -1209,10 +1211,12 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .protoview .pv-full { width: 100%; height: 100%; border: 0; border-radius: var(--r-md); background: var(--surface); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); }
 .protoview .iv-bar .btn { height: 34px; }
 @media (max-width: 640px) { .protoview { padding: 72px 8px 8px; } }
-/* na pełnoekranowej karcie okienko jest szeroką wstawką (do 1040 px), jak tabela i porównanie */
+/* na pełnoekranowej karcie okienko jest szeroką wstawką (do 1040 px), jak tabela i porównanie.
+   Paczka 38 (zasada szerokości, decyzja Piotra: 1 „Szeroko tylko przy szerokiej treści”): kartę poszerza tylko okienko, które pokazuje
+   prototyp (wczytuje albo działa); okienko z samym łączem (.pframe.no: claude.ai, nieudane wczytanie, ukryty znacznik) zostaje na 680 px */
 @media (min-width: 861px) {
-  .detail > .d-body > .now:has(.pframe) { --wi: calc(var(--ww) - 2 * var(--s-5)); max-width: var(--ww); padding-inline: calc((var(--ww) - var(--tw)) / 2 + var(--s-5)); }
-  .detail > .d-body .now .pframe { margin-inline: calc((100% - var(--wi)) / 2); }
+  .detail > .d-body > .now:has(.pframe:not(.no)) { --wi: calc(var(--ww) - 2 * var(--s-5)); max-width: var(--ww); padding-inline: calc((var(--ww) - var(--tw)) / 2 + var(--s-5)); }
+  .detail > .d-body .now .pframe:not(.no) { margin-inline: calc((100% - var(--wi)) / 2); }
 }
 
 /* ---------- Losowanie (paczka 32, wariant A „Bęben”) ---------- */
