@@ -10,6 +10,7 @@ import { client, hhmm, mayTry, record } from "@/lib/guard";
 import * as repo from "@/lib/repo";
 import { composeFlow, finishStep, layoutLanes, prepareStep, taskQueue } from "@/lib/services";
 import { Q, roundQ } from "@/lib/time";
+import { nextStepLayout, STEP_SIZE } from "@/lib/canvas/layout";
 import { intake, uploads } from "@/lib/intake";
 import { shortTitle, type Queue } from "@/lib/auto";
 import { fmtTime } from "@/lib/clock";
@@ -522,8 +523,12 @@ export async function saveStepPositions(taskId: string, items: { id: string; x: 
 export async function autoLayout(taskId: string | null) {
   const o = await requireOwner();
   if (taskId) {
-    await repo.clearStepPositions(o.id, taskId);
-    for (const g of await repo.listGroups(o.id, taskId)) await repo.updateGroup(o.id, g.id, { auto: true });
+    // paczka 33: pierwsze „Ułóż” = siatka, kolejne = naturalny układ (wątki w rzędach), potem znowu siatka
+    const task = await repo.getTask(o.id, taskId), groups = await repo.listGroups(o.id, taskId);
+    const nat = task ? nextStepLayout(task.steps.map((s) => ({ id: s.id, dependsOn: s.dependsOn, pos: s.pos })), groups, STEP_SIZE) : null;
+    if (nat) await repo.setStepPositions(o.id, taskId, Object.entries(nat).map(([id, q]) => ({ id, x: q.x, y: q.y })).slice(0, 200));
+    else await repo.clearStepPositions(o.id, taskId);
+    for (const g of groups) await repo.updateGroup(o.id, g.id, { auto: true });
   } else await layoutLanes(o.id);
   refresh(taskId);
 }

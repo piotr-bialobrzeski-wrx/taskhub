@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { bounds, computePositions, edgePath, gridFor, GX, OX, OY, STEP_SIZE } from "@/lib/canvas/layout";
+import { sample } from "./path-sample";
+import { bounds, computePositions, gridFor, routeEdges, GX, OX, OY, STEP_SIZE } from "@/lib/canvas/layout";
 
 const S = STEP_SIZE;
 describe("paczka 19: układ kafelków, strzałki i granice kanwy", () => {
@@ -33,21 +34,16 @@ describe("paczka 19: układ kafelków, strzałki i granice kanwy", () => {
     expect([b.x0, b.y0]).toEqual([0, 0]);
   });
 
-  it("strzałka przez kilka kolumn omija kafelek po drodze, sąsiednie kolumny dostają zwykły łuk", () => {
+  it("strzałka przez kilka kolumn omija kafelek po drodze łukiem (paczka 33: bez łamanej)", () => {
     const col = (c: number) => OX + c * (S.w + GX);
-    const mid = { x: col(1), y: OY, w: S.w, h: S.h };
-    const y = OY + S.h / 2;
-    const near = edgePath(col(0) + S.w, y, col(1) - 4, y, []);
-    expect(near.startsWith("M") && near.includes("C")).toBe(true);
-    const far = edgePath(col(0) + S.w, y, col(2) - 4, y, [mid]);
-    expect(far).toContain("Q");   // łamana szczeliną
-    // żaden punkt łamanej nie leży w środku kafelka po drodze
-    const nums = far.replace(/[MLQC,]/g, " ").trim().split(/\s+/).map(Number);
-    for (let i = 0; i < nums.length; i += 2) {
-      const [px, py] = [nums[i], nums[i + 1]];
-      expect(px > mid.x && px < mid.x + mid.w && py > mid.y && py < mid.y + mid.h).toBe(false);
-    }
-    // bez przeszkody: łuk
-    expect(edgePath(col(0) + S.w, y, col(2) - 4, y, [])).toContain("C");
+    const a = { x: col(0), y: OY, w: S.w, h: S.h }, mid = { x: col(1), y: OY, w: S.w, h: S.h }, b = { x: col(2), y: OY, w: S.w, h: S.h };
+    const [far] = routeEdges([{ a, b }], [a, mid, b]);
+    expect(far).not.toContain("Q");
+    expect(far).toContain("C");
+    for (const [px, py] of sample(far)) expect(px > mid.x + 2 && px < mid.x + mid.w - 2 && py > mid.y + 2 && py < mid.y + mid.h - 2).toBe(false);
+    // sąsiednie kolumny: jeden łuk albo prosta
+    const [near] = routeEdges([{ a, b: mid }], [a, mid]);
+    expect(near.startsWith("M")).toBe(true);
+    expect(near).not.toContain("Q");
   });
 });

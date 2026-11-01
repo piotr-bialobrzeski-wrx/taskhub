@@ -3,7 +3,7 @@
 // Rysuje tylko to, co dostanie; co znaczy kafelek i co robią akcje, decyduje rodzic (Board / TaskCanvas).
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { bounds, centerOf, computePositions, edgePath, groupAt, reassign, type DropChange, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
+import { bounds, centerOf, computePositions, groupAt, routeEdges, reassign, type DropChange, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
 import { GCOL, Icon } from "./ui";
 
 export type CanvasItem = LItem & { cls: string; done?: boolean; aria: string };
@@ -372,19 +372,21 @@ export function Canvas(p: CanvasProps) {
   // ---------- strzałki ----------
   const edges: ReactNode[] = [];
   const H = p.size.h;
-  // kafelki jako przeszkody: strzałka przez kilka kolumn omija je szczeliną zamiast biec pod nimi
+  // paczka 33: wszystkie linie to spline'y po szczelinach między kolumnami (routeEdges), bez łamanych z narożnikami
   const tiles = Object.values(P).map((q) => ({ x: q.x, y: q.y, w: p.size.w, h: H }));
   if (layout.origin) tiles.push({ ...layout.origin, w: p.size.w, h: H });
-  const curve = (a: Pos, aw: number, ay: number, b: Pos, done: boolean, key: string | null) => {
-    const x1 = a.x + aw, y1 = a.y + ay, x2 = b.x - 4, y2 = b.y + H / 2;
-    const d = edgePath(x1, y1, x2, y2, tiles.filter((r) => !(r.x === a.x && r.y === a.y) && !(r.x === b.x && r.y === b.y)));
-    if (!key) return <path key={"s" + b.x + b.y} className="edge start" markerEnd="url(#ah)" d={d} />;
-    return <g key={key}><path className="edge-hit" data-edge={key} d={d}><title>Kliknij, aby usunąć to połączenie</title></path><path className={"edge" + (done ? " done" : "")} markerEnd={`url(#${done ? "ah-done" : "ah"})`} d={d} /></g>;
-  };
+  const rect = (q: Pos) => ({ x: q.x, y: q.y, w: p.size.w, h: H });
+  const lines: { a: Pos; b: Pos; ay?: number; done: boolean; key: string | null }[] = [];
   p.items.forEach((x) => {
     const deps = x.dependsOn.filter((k) => P[k]);
-    if (layout.origin && !deps.length && P[x.id]) edges.push(curve(layout.origin, p.size.w, 58, P[x.id], false, null));
-    deps.forEach((k) => edges.push(curve(P[k], p.size.w, H / 2, P[x.id], !!itemsDone.get(k), k + ">" + x.id)));
+    if (layout.origin && !deps.length && P[x.id]) lines.push({ a: layout.origin, b: P[x.id], ay: 58, done: false, key: null });
+    deps.forEach((k) => lines.push({ a: P[k], b: P[x.id], done: !!itemsDone.get(k), key: k + ">" + x.id }));
+  });
+  const paths = routeEdges(lines.map((l) => ({ a: rect(l.a), b: rect(l.b), ay: l.ay })), tiles);
+  lines.forEach((l, i) => {
+    const d = paths[i];
+    if (!l.key) edges.push(<path key={"s" + l.b.x + l.b.y} className="edge start" markerEnd="url(#ah)" d={d} />);
+    else edges.push(<g key={l.key}><path className="edge-hit" data-edge={l.key} d={d}><title>Kliknij, aby usunąć to połączenie</title></path><path className={"edge" + (l.done ? " done" : "")} markerEnd={`url(#${l.done ? "ah-done" : "ah"})`} d={d} /></g>);
   });
   const temp = drag?.kind === "link" && P[drag.from] ? (() => { const a = P[drag.from]; const x1 = a.x + p.size.w, y1 = a.y + H / 2, k = Math.max(40, Math.abs(drag.p.x - x1) / 2); return <path className="edge temp" d={`M${x1} ${y1} C${x1 + k} ${y1}, ${drag.p.x - k} ${drag.p.y}, ${drag.p.x} ${drag.p.y}`} />; })() : null;
   const linkTarget = drag?.kind === "link" ? drag.to : null;

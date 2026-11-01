@@ -162,43 +162,125 @@ export function bounds(P: Record<string, Pos>, groups: LGroup[], size: Size, ori
   return { x0: Math.min(0, nx - MARGIN.left), y0: Math.min(0, ny - MARGIN.top), w: mx + MARGIN.right, h: my + MARGIN.bottom };
 }
 
-// Strzałka od prawej krawędzi kafelka A (wysokość ay) do lewej krawędzi B. Zwykle łuk; gdy łuk przeszedłby przez inny kafelek
-// (zależność przez kilka kolumn), strzałka idzie szczeliną: w prawo do odstępu za A, pionowo do wolnego pasa między wierszami,
-// poziomo do odstępu przed B i do B. Kafelki to prostokąty `obstacles` (bez A i B).
+// Linie między kafelkami (paczka 33): zawsze spline, bez łamanych z narożnikami. Linia wychodzi poziomo z prawego boku kafelka A
+// i wchodzi poziomo w lewy bok B; w każdej kolumnie kafelków po drodze biegnie poziomo wolnym pasem między kafelkami (tor), a między
+// kolumnami łączą ją łuki z poziomymi stycznymi. Wyjścia i wejścia na boku kafelka są rozłożone po wysokości drugiego końca,
+// żeby linie nie krzyżowały się przy kafelku. Port z prototypu „Naturalny układ kroków” (notatki/prototypy/2026-10-31-…).
 export type Rect = { x: number; y: number; w: number; h: number };
-const PADR = 6;
-const hitsRect = (x: number, y: number, rs: Rect[]) => rs.some((r) => x > r.x - PADR && x < r.x + r.w + PADR && y > r.y - PADR && y < r.y + r.h + PADR);
-const segHits = (x1: number, y1: number, x2: number, y2: number, rs: Rect[]) =>
-  rs.some((r) => Math.max(x1, x2) > r.x - PADR && Math.min(x1, x2) < r.x + r.w + PADR && Math.max(y1, y2) > r.y - PADR && Math.min(y1, y2) < r.y + r.h + PADR);
-export function edgePath(x1: number, y1: number, x2: number, y2: number, obstacles: Rect[]): string {
-  const k = Math.max(40, Math.abs(x2 - x1) / 2);
-  const curve = `M${x1} ${y1} C${x1 + k} ${y1}, ${x2 - k} ${y2}, ${x2} ${y2}`;
-  if (x2 - x1 < 2 * GX) return curve;   // sąsiednie kolumny (albo strzałka wstecz): między nimi nie ma kafelków
-  const between = obstacles.filter((r) => r.x + r.w > x1 && r.x < x2);
-  // próbki łuku Béziera: czy przechodzi przez kafelek
-  let crosses = false;
-  for (let i = 1; i < 24 && !crosses; i++) {
-    const t = i / 24, u = 1 - t;
-    const x = u * u * u * x1 + 3 * u * u * t * (x1 + k) + 3 * u * t * t * (x2 - k) + t * t * t * x2;
-    const y = u * u * u * y1 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y2;
-    crosses = hitsRect(x, y, between);
+export type EdgeIn = { a: Rect; b: Rect; ay?: number };   // ay = stała wysokość wyjścia (kafelek zadania: 58), inaczej środek boku
+const r1 = (v: number) => Math.round(v * 10) / 10;
+export function splineD(pts: [number, number][]): string {
+  let d = `M${r1(pts[0][0])} ${r1(pts[0][1])}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [x1, y1] = pts[i - 1], [x2, y2] = pts[i];
+    if (Math.abs(y2 - y1) < 0.5 && x2 >= x1) { d += ` L${r1(x2)} ${r1(y2)}`; continue; }
+    // linia wstecz (kafelek przeciągnięty w lewo od poprzednika): jeden szerszy łuk, jak przy przeciąganiu połączenia
+    const k = x2 >= x1 ? Math.max(18, (x2 - x1) * 0.5) : Math.max(40, (x1 - x2) / 2);
+    d += ` C${r1(x1 + k)} ${r1(y1)}, ${r1(x2 - k)} ${r1(y2)}, ${r1(x2)} ${r1(y2)}`;
   }
-  if (!crosses) return curve;
-  const xa = x1 + GX / 2, xb = x2 - GX / 2;
-  // pas poziomy: wysokość źródła, celu, albo tuż nad / pod którymś kafelkiem po drodze; najbliższy wolny
-  const cands = [y1, y2, ...between.flatMap((r) => [r.y - GY / 2, r.y + r.h + GY / 2])];
-  const ok = (y: number) => !segHits(xa, y, xb, y, between) && !segHits(xa, y1, xa, y, between) && !segHits(xb, y, xb, y2, between);
-  const yc = cands.filter(ok).sort((a, b) => Math.abs(a - y1) + Math.abs(a - y2) - (Math.abs(b - y1) + Math.abs(b - y2)))[0];
-  if (yc === undefined) return curve;
-  // łamana z zaokrąglonymi narożnikami
-  const pts: [number, number][] = [[x1, y1], [xa, y1], [xa, yc], [xb, yc], [xb, y2], [x2, y2]]
-    .filter((p, i, a) => i === 0 || p[0] !== a[i - 1][0] || p[1] !== a[i - 1][1]) as [number, number][];
-  let d = `M${pts[0][0]} ${pts[0][1]}`;
-  for (let i = 1; i < pts.length - 1; i++) {
-    const [px, py] = pts[i - 1], [cx, cy] = pts[i], [nx, ny] = pts[i + 1];
-    const r = Math.min(12, Math.hypot(cx - px, cy - py) / 2, Math.hypot(nx - cx, ny - cy) / 2);
-    const ax = cx - Math.sign(cx - px) * r, ay = cy - Math.sign(cy - py) * r, bx = cx + Math.sign(nx - cx) * r, by = cy + Math.sign(ny - cy) * r;
-    d += ` L${ax} ${ay} Q${cx} ${cy}, ${bx} ${by}`;
+  return d;
+}
+// kolumny = kafelki, których zakresy w poziomie na siebie zachodzą (po przeciągnięciu kolumny nie muszą być równe)
+function columnsOf(tiles: Rect[]) {
+  const cols: { x0: number; x1: number; tiles: Rect[] }[] = [];
+  [...tiles].sort((a, b) => a.x - b.x).forEach((t) => {
+    const c = cols[cols.length - 1];
+    if (c && t.x < c.x1 - 1) { c.x1 = Math.max(c.x1, t.x + t.w); c.tiles.push(t); } else cols.push({ x0: t.x, x1: t.x + t.w, tiles: [t] });
+  });
+  return cols;
+}
+const same = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y;
+export function routeEdges(E: EdgeIn[], tiles: Rect[]): string[] {
+  const cols = columnsOf(tiles), used: number[][] = cols.map(() => []);
+  const freeY = (ci: number, want: number, skip: Rect[]) => {
+    const blocks = cols[ci].tiles.filter((t) => !skip.some((s) => same(s, t))).map((p) => [p.y - 8, p.y + p.h + 8]);
+    used[ci].forEach((v) => blocks.push([v - 7, v + 7]));
+    const ok = (v: number) => !blocks.some(([a, b]) => v > a && v < b);
+    if (ok(want)) return want;
+    return blocks.flatMap(([a, b]) => [a - 0.1, b + 0.1]).filter(ok).sort((a, b) => Math.abs(a - want) - Math.abs(b - want))[0] ?? want;
+  };
+  const mids = E.map(({ a, b, ay }) => {
+    const out: [number, number][] = [], x1 = a.x + a.w, x2 = b.x - 4;
+    const y1 = a.y + (ay ?? a.h / 2), y2 = b.y + b.h / 2;
+    cols.forEach((c, ci) => {
+      if (c.x0 < x1 - 2 || c.x1 > x2 + 6 || c.tiles.some((t) => same(t, a) || same(t, b))) return;
+      const t = ((c.x0 + c.x1) / 2 - x1) / Math.max(1, x2 - x1), v = freeY(ci, y1 + (y2 - y1) * t, [a, b]);
+      used[ci].push(v); out.push([c.x0 - 4, v], [c.x1 + 4, v]);
+    });
+    return out;
+  });
+  // rozłożenie wyjść i wejść na boku kafelka: kolejność po wysokości drugiego końca
+  const ys: number[] = [], ye: number[] = [];
+  const spread = (list: number[], key: (i: number) => number, center: number, half: number, into: number[]) => {
+    list.sort((i, j) => key(i) - key(j));
+    const n = list.length, step = Math.min(12, n > 1 ? (2 * half) / (n - 1) : 0);
+    list.forEach((i, j) => (into[i] = center + (j - (n - 1) / 2) * step));
+  };
+  const outs = new Map<string, number[]>(), ins = new Map<string, number[]>();
+  const k = (r: Rect) => r.x + "," + r.y;
+  E.forEach((e, i) => { outs.set(k(e.a), [...(outs.get(k(e.a)) ?? []), i]); ins.set(k(e.b), [...(ins.get(k(e.b)) ?? []), i]); });
+  for (const list of outs.values()) { const e = E[list[0]]; spread(list, (i) => (mids[i].length ? mids[i][0][1] : E[i].b.y + E[i].b.h / 2), e.a.y + (e.ay ?? e.a.h / 2), e.ay != null ? 30 : e.a.h / 2 - 18, ys); }
+  for (const list of ins.values()) { const e = E[list[0]]; spread(list, (i) => (mids[i].length ? mids[i][mids[i].length - 1][1] : ys[i]), e.b.y + e.b.h / 2, e.b.h / 2 - 18, ye); }
+  return E.map((e, i) => splineD([[e.a.x + e.a.w, ys[i]], ...mids[i], [e.b.x - 4, ye[i]]]));
+}
+
+// Naturalny układ kroków (paczka 33, decyzja Piotra: wariant C „Wątki w rzędach”), drugie „Ułóż” na kanwie zadania.
+// Kolumna = głębokość jak w siatce. Krok z jednym poprzednikiem, który jest jego pierwszym następcą, idzie dalej w rzędzie poprzednika
+// (wątek); każdy inny start albo odgałęzienie zaczyna nowy rząd. Krok łączący kilka wątków stoi w połowie wysokości między poprzednikami,
+// na wolnym miejscu w swojej kolumnie, a jego następcy ciągną się w jego rzędzie. Kafelek zadania zostaje w (OX, OY), na wysokości
+// pierwszego rzędu (w prototypie stał na środku startów, ale wtedy górne kroki wchodziły pod pasek u góry ekranu).
+export const NGX = 80, NGY = 28;
+export function naturalLayout(list: LItem[], size: Size): Record<string, Pos> {
+  const W = size.w, H = size.h, ids = new Set(list.map((x) => x.id)), by = new Map(list.map((x) => [x.id, x]));
+  const deps = (x: LItem) => x.dependsOn.filter((k) => ids.has(k) && k !== x.id);
+  const children: Record<string, string[]> = {};
+  list.forEach((s) => deps(s).forEach((k) => (children[k] = children[k] || []).push(s.id)));
+  const L: Record<string, number> = {};
+  const dep = (x: LItem, seen = new Set<string>()): number => {
+    if (L[x.id] != null) return L[x.id];
+    if (seen.has(x.id)) return 1; seen.add(x.id);
+    const ds = deps(x).map((k) => by.get(k)!);
+    return (L[x.id] = ds.length ? 1 + Math.max(...ds.map((y) => dep(y, seen))) : 1);
+  };
+  list.forEach((x) => dep(x));
+  const colX = (id: string) => OX + L[id] * (W + NGX);
+  const band: Record<string, number> = {}, bands: string[][] = [], rest: string[] = [];
+  list.forEach((s) => {
+    const ds = deps(s);
+    if (ds.length === 1 && band[ds[0]] != null && children[ds[0]][0] === s.id && L[s.id] > L[ds[0]]) { band[s.id] = band[ds[0]]; bands[band[s.id]].push(s.id); }
+    else if (!ds.length || (ds.length === 1 && band[ds[0]] != null)) { band[s.id] = bands.length; bands.push([s.id]); }   // start albo odgałęzienie: nowy rząd
+    else rest.push(s.id);
+  });
+  const P: Record<string, Pos> = {};
+  bands.forEach((b, i) => b.forEach((id) => (P[id] = { x: colX(id), y: OY + i * (H + NGY) })));
+  const place = (id: string) => {
+    const ys = deps(by.get(id)!).map((k) => P[k]?.y).filter((v): v is number => v != null);
+    let yy = ys.length ? Math.round((Math.min(...ys) + Math.max(...ys)) / 2) : OY;
+    const x = colX(id), col = Object.values(P).filter((p) => p.x === x);
+    const free = (v: number) => v >= OY && !col.some((p) => v < p.y + H + NGY && v + H + NGY > p.y);
+    let dy = 0; while (!free(yy + dy) && !free(yy - dy)) dy += 8;
+    yy = free(yy + dy) ? yy + dy : yy - dy;
+    P[id] = { x, y: yy };
+    // następcy jednego rodzica idą za nim w tym samym rzędzie
+    const nx = children[id]?.[0];
+    if (nx && !P[nx] && deps(by.get(nx)!).length === 1) place(nx);
+  };
+  // kroki spoza wątków po kolumnach: najpierw te, których poprzednicy już stoją
+  let left = rest.filter((id) => !P[id]);
+  while (left.length) {
+    const ready = left.filter((id) => deps(by.get(id)!).every((k) => P[k])).sort((a, b) => L[a] - L[b]);
+    place((ready[0] ?? left.sort((a, b) => L[a] - L[b])[0]));
+    left = left.filter((id) => !P[id]);
   }
-  return d + ` L${pts[pts.length - 1][0]} ${pts[pts.length - 1][1]}`;
+  return P;
+}
+
+// „Ułóż” na kanwie zadania przełącza dwa układy: gdy wszystkie kroki stoją w siatce (bez zapisanych położeń), układa naturalnie
+// (wolne kroki, bez grup); inaczej wraca do siatki (null = wyczyść położenia).
+export function nextStepLayout(steps: LItem[], groups: { members: string[] }[], size: Size): Record<string, Pos> | null {
+  if (steps.some((s) => s.pos && Number.isFinite(s.pos.x))) return null;
+  const inGroup = new Set(groups.flatMap((g) => g.members));
+  const free = steps.filter((s) => !inGroup.has(s.id));
+  if (free.length < 2) return null;
+  return naturalLayout(free, size);
 }

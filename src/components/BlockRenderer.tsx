@@ -8,19 +8,24 @@ import { Icon, plural } from "@/components/canvas/ui";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { CopyButton } from "@/components/CopyButton";
 import { isHttpUrl, isLocalPath, isMediaUrl, safeHref, thumbSrc } from "@/lib/safeurl";
-import { groupBlocks } from "@/lib/stepcard";
+import { groupBlocks, normUrl } from "@/lib/stepcard";
 
 // gdzie blok pytania ma zapisać odpowiedź (panel kroku); bez tego pytanie jest tylko do odczytu
 export type BlockForm = { taskId: string; stepId: string };
+// paczka 33, „link stoi raz”: hide = adresy, które kartka pokazuje już w ważniejszym miejscu (okienko prototypu, karta publikacji), więc nagłówek
+// klocka ich nie powtarza; hideLinks = adresy, których klocek link nie powtarza; proto = „Otwórz prototyp” w klocku pytania (on = widoczny od razu,
+// inaczej tylko gdy okienka prototypu nie da się pokazać, przez CSS :has(.pframe.no))
+export type CardLinks = { hide?: string[]; hideLinks?: string[]; proto?: { url: string; on: boolean } | null };
+const hidden = (list: string[] | undefined, u: string | undefined) => !!u && !!list?.includes(normUrl(u));
 
 const TOOL_COLORS: Record<string, string> = { slack: "var(--t-slack)", gmail: "var(--t-mail)", clickup: "var(--t-clickup)", calendar: "var(--t-calendar)", claude: "var(--t-claude)", claudeapp: "var(--t-claude)", code: "var(--t-claude)", manual: "var(--t-manual)", github: "var(--t-github)", figma: "var(--t-figma)", mural: "var(--t-mural)" };
 export const toolColor = (app: string) => TOOL_COLORS[app] ?? "var(--sub)";
 
 // nagłówek klocka kontekstu: kropka aplikacji, nazwa, miejsce (ref), licznik, przycisk „Otwórz w <app>” gdy jest adres (jeden kształt
 // dla wszystkich klocków źródłowych; open = własna etykieta, np. „Otwórz podgląd” dla zmian w kodzie); ten sam dla wątku, maila, komentarza, tabeli i wolnej treści
-export function SrcHead({ s, title, meta, open }: { s?: Provenance; title?: string; meta?: string; open?: string }) {
+export function SrcHead({ s, title, meta, open, hide }: { s?: Provenance; title?: string; meta?: string; open?: string; hide?: string[] }) {
   if (!s && !title && !meta) return null;
-  const href = safeHref(s?.url);   // adresy z danych tylko przez safeHref: javascript:, file:, taskhub: zostają bez linku
+  const href = hidden(hide, s?.url) ? undefined : safeHref(s?.url);   // adresy z danych tylko przez safeHref: javascript:, file:, taskhub: zostają bez linku
   return (
     <div className="src-h">
       {s ? <><span className="tool-dot" style={{ ["--c" as string]: toolColor(s.app) }} /><b>{toolLabel(s.app)}</b></> : null}
@@ -33,12 +38,12 @@ export function SrcHead({ s, title, meta, open }: { s?: Provenance; title?: stri
 }
 // karta źródła tylko do odczytu (paczka 10, punkt 2): klocek free z adresem http(s) wygląda jak karta szkicu (nagłówek z aplikacją,
 // tytuł, linia metadanych, treść na białym polu), ale bez paska formatowania; Piotr czyta ticket albo dokument, poprawia go w aplikacji źródłowej
-function SourceDoc({ b, href }: { b: Extract<Block, { type: "free" }>; href: string }) {
+function SourceDoc({ b, href, hide }: { b: Extract<Block, { type: "free" }>; href: string; hide?: string[] }) {
   const app = b.source?.app ?? "", key = normalizeTool(app);   // openLabel oczekuje klucza: „ClickUp” od agenta -> „Otwórz w ClickUpie”
   return (
     <div className="block kctx srcdoc">
       <div className="src-h"><span className="tool-dot" style={{ ["--c" as string]: toolColor(key) }} /><b>{appName(app)}</b><span>· tylko do odczytu</span><span className="sp" />
-        <a className="btn ico sm" href={href} target="_blank" rel="noopener">{openLabel(key)}<Icon k="ext" size={13} sw={1.6} /></a></div>
+        {hidden(hide, href) ? null : <a className="btn ico sm" href={href} target="_blank" rel="noopener">{openLabel(key)}<Icon k="ext" size={13} sw={1.6} /></a>}</div>
       {b.title ? <h4>{b.title}</h4> : null}
       {b.meta ? <div className="src-meta">{b.meta}</div> : null}
       <div className="msg doc"><Markdown text={b.markdown} /></div>
@@ -81,7 +86,8 @@ export function Table({ columns, rows, highlightFrom, md }: { columns: string[];
   );
 }
 
-export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; index?: number }) {
+export function BlockView({ b, form, index, links: L }: { b: Block; form?: BlockForm; index?: number; links?: CardLinks }) {
+  const hide = L?.hide;
   switch (b.type) {
     case "text":
       return <div className="block kctx">{b.title ? <h4>{b.title}</h4> : null}<p>{b.body}</p></div>;
@@ -92,7 +98,7 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
       const bubble = (m: (typeof b.messages)[number], i: number) => <div key={i} className={"msg" + (m.mine ? " mine" : "")}><div className="who"><b>{m.author}</b>{m.at ? <span>{m.at}</span> : null}</div><p>{m.text}</p></div>;
       return (
         <div className="block kctx">
-          <SrcHead s={b.source} title={b.title} meta={`${n} ${plural(n, "wiadomość", "wiadomości", "wiadomości")}`} />
+          <SrcHead hide={hide} s={b.source} title={b.title} meta={`${n} ${plural(n, "wiadomość", "wiadomości", "wiadomości")}`} />
           <div className="thread">
             {older.length ? <details className="more"><summary>Pokaż wcześniejsze ({older.length})</summary><div className="thread">{older.map(bubble)}</div></details> : null}
             {last.map((m, i) => bubble(m, older.length + i))}
@@ -111,7 +117,7 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
       );
       return (
         <div className="block kctx">
-          <SrcHead s={b.source ?? { app: "gmail" }} title={b.title} meta={`${n} ${plural(n, "mail", "maile", "maili")}`} />
+          <SrcHead hide={hide} s={b.source ?? { app: "gmail" }} title={b.title} meta={`${n} ${plural(n, "mail", "maile", "maili")}`} />
           <div className="thread">
             {older.length ? <details className="more"><summary>Pokaż wcześniejsze ({older.length})</summary><div className="thread">{older.map((m, i) => env(m, i, true))}</div></details> : null}
             {last.map((m, i) => env(m, older.length + i, i < last.length - 1))}
@@ -122,21 +128,21 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
     case "comment":
       return (
         <div className="block kctx">
-          <SrcHead s={b.source} title={b.source?.ref ? undefined : "Komentarz"} />
+          <SrcHead hide={hide} s={b.source} title={b.source?.ref ? undefined : "Komentarz"} />
           <div className="thread"><div className="msg"><div className="who"><b>{b.author}</b>{b.at ? <span>{b.at}</span> : null}</div><p>{b.text}</p></div></div>
         </div>
       );
     case "table":
       return (
         <div className="block kctx">
-          <SrcHead s={b.source} title={b.title} meta={`${b.rows.length} ${plural(b.rows.length, "wiersz", "wiersze", "wierszy")}`} />
+          <SrcHead hide={hide} s={b.source} title={b.title} meta={`${b.rows.length} ${plural(b.rows.length, "wiersz", "wiersze", "wierszy")}`} />
           <Table columns={b.columns} rows={b.rows} highlightFrom={b.highlightFrom} />
         </div>
       );
     case "free": {
       // z adresem http(s) = karta źródła tylko do odczytu; bez adresu jak dotąd (notatka agenta)
       const url = b.source?.url;
-      return isHttpUrl(url) ? <SourceDoc b={b} href={url.trim()} /> : <div className="block kctx"><SrcHead s={b.source} title={b.title} /><Markdown text={b.markdown} /></div>;
+      return isHttpUrl(url) ? <SourceDoc b={b} href={url.trim()} hide={hide} /> : <div className="block kctx"><SrcHead hide={hide} s={b.source} title={b.title} /><Markdown text={b.markdown} /></div>;
     }
     case "draft":
       return (
@@ -173,17 +179,22 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
         </div>
       );
     case "link":
-      return <div className="links">{b.links.map((l, i) => {
+    {
+      // klocek link: adres, który kartka już pokazuje gdzie indziej, znika; pusty klocek nie zostaje
+      const seen = new Set<string>(), rest = b.links.filter((l) => { const n = normUrl(l.url); if (hidden(L?.hideLinks, l.url) || seen.has(n)) return false; seen.add(n); return true; });
+      if (!rest.length) return null;
+      return <div className="links">{rest.map((l, i) => {
         const href = safeHref(l.url), dot = l.source ? <span className="tool-dot" style={{ ["--c" as string]: toolColor(l.source.app) }} /> : null;
         return href ? <a key={i} className="btn" href={href} target="_blank" rel="noopener">{dot}{l.title ?? l.url} ↗</a> : <span key={i} className="btn" title={l.url}>{dot}{l.title ?? l.url}</span>;
       })}</div>;
+    }
     case "changes": {
       // zmiany w kodzie: repozytorium i gałąź, podgląd, lista plików z diffem po rozwinięciu (karta publikacji prowadzi tu przez „Zobacz zmiany”)
       const n = b.files.length, http = isHttpUrl(b.preview) ? b.preview.trim() : undefined;
       const place = [b.repo, b.branch].filter(Boolean).join(" · ") || undefined;
       return (
         <div className="block kctx" id={form ? "zm-" + form.stepId : undefined}>
-          <SrcHead s={{ app: "github", ref: place, url: http }} title={b.title ?? "Zmiany w kodzie"} meta={`${n} ${plural(n, "plik", "pliki", "plików")}`} open="Otwórz podgląd" />
+          <SrcHead hide={hide} s={{ app: "github", ref: place, url: http }} title={b.title ?? "Zmiany w kodzie"} meta={`${n} ${plural(n, "plik", "pliki", "plików")}`} open="Otwórz podgląd" />
           {b.summary ? <p>{b.summary}</p> : null}
           {b.preview && !http ? <p className="sub">Podgląd: <code>{b.preview}</code>{isLocalPath(b.preview) ? <> <CopyButton text={b.preview.trim()} label="Kopiuj ścieżkę" /></> : null}</p> : null}
           {n ? (
@@ -213,6 +224,7 @@ export function BlockView({ b, form, index }: { b: Block; form?: BlockForm; inde
           <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
           <p>{b.text}</p>
           <OptionButtons options={b.options} recommended={b.recommended} why={b.why} />
+          {L?.proto ? <div className={"q-proto" + (L.proto.on ? " on" : "")}><a className="btn ico" href={L.proto.url} target="_blank" rel="noopener" title={`Prototyp do tego wyboru: ${L.proto.url}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a></div> : null}
           <div className="row q-own" style={{ marginTop: 8 }}>
             <GrowTextarea name="answer" minRows={1} placeholder="Albo odpowiedz własnymi słowami…" submitOnModEnter />
             <button className="btn" type="submit">Odpowiedz</button>
@@ -252,8 +264,8 @@ export function OptionButtons({ options, recommended, why, className = "opts" }:
 // indexOf: pozycja klocka na całej kartce (formularz pytania zapisuje odpowiedź pod tym indeksem), gdy blocks to tylko jej część.
 // 2+ kolejne klocki źródłowe z adresem (dwa tickety, wątki, maile) stoją obok siebie w siatce .cmp (paczka 10, punkt 1); klucz i indeks
 // to pozycja klocka w blocks, ta sama co bez grupowania
-export function BlocksView({ blocks, form, indexOf }: { blocks: Block[]; form?: BlockForm; indexOf?: (b: Block) => number }) {
+export function BlocksView({ blocks, form, indexOf, links }: { blocks: Block[]; form?: BlockForm; indexOf?: (b: Block) => number; links?: CardLinks }) {
   let i = 0;
-  const view = (b: Block) => { const k = i++; return <BlockView key={k} b={b} form={form} index={indexOf ? indexOf(b) : k} />; };
+  const view = (b: Block) => { const k = i++; return <BlockView key={k} b={b} form={form} index={indexOf ? indexOf(b) : k} links={links} />; };
   return <div className="stack">{groupBlocks(blocks).map((g) => { if (!Array.isArray(g)) return view(g); const k = "cmp" + i; return <div key={k} className="cmp">{g.map(view)}</div>; })}</div>;
 }

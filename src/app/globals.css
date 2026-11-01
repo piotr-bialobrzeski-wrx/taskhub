@@ -1165,6 +1165,10 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .pframe { border-radius: var(--r-md); overflow: hidden; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
 .pframe .pf-h { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-2) var(--s-2) var(--s-4); border-bottom: 1px solid var(--line); min-height: 44px; }
 .pframe.no .pf-h { border-bottom: 0; }
+/* paczka 33: „Otwórz prototyp” w klocku z opcjami, gdy prototypu nie da się pokazać w okienku (od razu albo po nieudanym wczytaniu) */
+.pframe.quiet.no { display: none; }
+.q-proto { display: none; margin-top: var(--s-2); }
+.q-proto.on, .now:has(.pframe.quiet.no) .q-proto { display: flex; }
 .pframe .pf-h .sp { flex: 1; }
 .pframe .pf-h b { font-size: 13px; font-weight: 600; flex: none; }
 .pframe .pf-h small { font-size: 12px; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

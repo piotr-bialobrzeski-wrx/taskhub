@@ -21,12 +21,12 @@ import { Activity } from "@/components/Activity";
 import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepAsked, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
 import { Why } from "@/components/Prio";
-import { BlocksView, OptionButtons } from "@/components/BlockRenderer";
+import { BlocksView, OptionButtons, type CardLinks } from "@/components/BlockRenderer";
 import { ProtoFrame } from "@/components/ProtoFrame";
 import { embedMode, isOwnPreview } from "@/lib/embed";
 import { agentFeed, stepWaits, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
-import { decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
+import { decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -275,14 +275,22 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // bo ten przycisk niesie blok zmian (BlockRenderer); „Repozytorium” i inne linki zostają
   const found = pageLinks(s, result[0] ?? null, link ?? null, mode, done);
   const done0 = done && !found.length && mode !== "sent" ? targetLink(s, s.blocks) : null;   // zrobione bez linku do wyniku: zostaje chociaż miejsce, którego dotyczyło
-  const links = done0 ? [done0] : found;
   // miejsce docelowe (ticket, wątek, dokument) w nagłówku „Teraz” tylko bez karty publikacji: karta ma własny przycisk celu w nagłówku (przy opcjach
   // każda swój); po wysyłce jego miejsce zajmuje link do wyniku
-  const target = !done && !mode ? targetLink(s, s.blocks) : null;
+  const target0 = !done && !mode ? targetLink(s, s.blocks) : null;
   const proto0 = prototypeLink(t.steps, s);   // paczka 19, punkt 1 i paczka 25: najnowszy podgląd prototypu, zawsze widoczny
-  // paczka 31, krok 13: na kartce decyzji prototyp stoi w okienku pod pytaniem (z własnym „Otwórz prototyp”), więc przycisk w nagłówku znika
-  const pframe = proto0 && kind === "decision" ? <ProtoFrame url={proto0} mode={embedMode(proto0, appUrl())} own={isOwnPreview(proto0, appUrl())} /> : null;
-  const proto = pframe ? null : proto0;
+  // paczka 31, krok 13: na kartce decyzji prototyp stoi w okienku pod pytaniem (z własnym „Otwórz prototyp”), więc przycisk w nagłówku znika.
+  // Paczka 33: gdy decyzja ma otwarte pytanie, a strony nie da się osadzić, okienka nie ma, a „Otwórz prototyp” stoi w klocku z opcjami
+  const em = proto0 ? embedMode(proto0, appUrl()) : "link";
+  const qProto = !!proto0 && kind === "decision" && open.length > 0 && !done && !mode;
+  const pframe = proto0 && kind === "decision" && !(qProto && em === "link") ? <ProtoFrame url={proto0} mode={em} own={isOwnPreview(proto0, appUrl())} quiet={qProto} /> : null;
+  // paczka 33, „link stoi raz, w klocku, którego dotyczy”: okienko prototypu i karta publikacji mają pierwszeństwo, potem klocki z własnym
+  // przyciskiem, potem nagłówek „Teraz” i rząd akcji, na końcu klocki link
+  const plan = linkPlan(s.blocks, [kind === "decision" ? proto0 : null, ...(mode ? [null, ...draftsOf(s)].map((d) => targetLink(s, s.blocks, d ?? undefined)?.url) : [])]);
+  const proto = kind !== "decision" && plan.keep(proto0) ? proto0 : null;
+  const target = target0 && plan.keep(target0.url) ? target0 : null;
+  const links = (done0 ? [done0] : found).filter((l) => plan.keep(l.url));
+  const cl: CardLinks = { hide: plan.hide, hideLinks: plan.linkHide(), proto: qProto && proto0 ? { url: proto0, on: em === "link" } : null };
   // paczka 31, krótsza kartka decyzji (wariant A „Pytanie na górze, reszta zwinięta”): otwarta decyzja ma na wierzchu tylko pytanie z opcjami
   // (opis każdej przy jej przycisku) i prototyp pod pytaniem; notatki, tabele, listy i materiał ze źródłem zwijają się pod „Skąd to wiemy”
   const shortDecision = kind === "decision" && open.length > 0 && !done && !mode;
@@ -312,14 +320,10 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {cloudNote && !mode ? <div className="note">{cloudNote}</div> : null}
       {addFolder ? <div className="note">Claude potrzebuje folderu {addFolder.path} w Ustawieniach aplikacji na Macu ({addFolder.section}). „Dodaj folder” otworzy aplikację i zapyta o zgodę; potem krok ruszy sam.</div> : null}
       {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : cloud?.state === "auto" ? "Ruszy w chmurze sam, gdy skończą się kroki, na które czeka." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
-      {open.length && !done ? <BlocksView blocks={open} form={form} indexOf={indexOf} /> : null}
-      {proto && shortDecision ? (
-        <div className="proto-row"><span className="t"><b>Prototyp</b> · {proto.replace(/^https?:\/\//, "")}</span>
-          <a className="btn ico" href={proto} target="_blank" rel="noopener" title={`Najnowszy podgląd prototypu: ${proto}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a></div>
-      ) : null}
+      {open.length && !done ? <BlocksView links={cl} blocks={open} form={form} indexOf={indexOf} /> : null}
       {done && kind === "decision" && decisionText(s) ? <div className="note">{decisionText(s)}</div> : null}
       {pframe}
-      {done && result.length ? <BlocksView blocks={result} form={form} indexOf={indexOf} /> : null}
+      {done && result.length ? <BlocksView links={cl} blocks={result} form={form} indexOf={indexOf} /> : null}
       {done && lines.length ? <div className="stack">{lines.map((l, i) => l.confirm
         ? <div key={i} className="confirm"><b>Do potwierdzenia:</b><span>{l.text.replace(/^do potwierdzenia:\s*/i, "")}</span></div>
         : <div key={i} className="note">{l.text}</div>)}</div> : null}
@@ -367,7 +371,10 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   ) : null;
   // paczka 15 (punkty 7–9): bez sekcji „Co” (opis kroku idzie na dół, do zwiniętych informacji); główna treść zaraz pod „Teraz”,
   // „Skąd” (materiał z pochodzeniem) pod nią i zwinięte; karta z kartą publikacji i odczyt bez zmian (materiał jest tam treścią)
-  const split = mode || readingResult(s, material) ? { main: [], sources: material } : splitMain(material);
+  // klocek link, którego wszystkie adresy stoją już gdzie indziej na kartce (paczka 33), nie liczy się do treści ani do podpisu sekcji
+  const vis = (b: Block) => !(b.type === "link" && b.links.every((l) => cl.hideLinks?.includes(normUrl(l.url))));
+  const split0 = mode || readingResult(s, material) ? { main: [] as Block[], sources: material } : splitMain(material);
+  const split = { main: split0.main.filter(vis), sources: split0.sources.filter(vis) };
   // paczka 19 (wariant A): zrobiony krok ma pod wynikiem sekcję „Zlecenie” z klockami sprzed zamknięcia, każdy z ptaszkiem; pytanie pokazuje
   // wybraną odpowiedź. Bez zmian: karta publikacji (wysłany szkic jest zleceniem) i zrobiony odczyt Claude'a (materiał jest jego wynikiem)
   const order = done && !mode && !readingResult(s, material) ? doneOrder(s, split.main, prev) : [];
@@ -375,16 +382,16 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const orderZone = order.length ? (
     <div className="zone order">
       <div className="lbl">Zlecenie<span className="done-mark">{tick}Zrobione, {whoDid(s)}{s.doneAt ? `, ${fmtTime(s.doneAt)}` : ""}</span></div>
-      {order.map((b, i) => <div key={i} className="order-b">{tick}<BlocksView blocks={[b]} /></div>)}
+      {order.map((b, i) => <div key={i} className="order-b">{tick}<BlocksView links={cl} blocks={[b]} /></div>)}
     </div>
   ) : null;
-  const main = order.length ? orderZone : split.main.length && folds.material ? <div className="zone src main">{undo ? <div className="lbl">{undo}</div> : null}<BlocksView blocks={split.main} form={form} indexOf={indexOf} /></div>
-    : split.main.length ? <details className="fold"><summary><span className="k">Wynik</span><span className="t">{kindsOf(split.main)}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView blocks={split.main} form={form} indexOf={indexOf} /></details> : null;
+  const main = order.length ? orderZone : split.main.length && folds.material ? <div className="zone src main">{undo ? <div className="lbl">{undo}</div> : null}<BlocksView links={cl} blocks={split.main} form={form} indexOf={indexOf} /></div>
+    : split.main.length ? <details className="fold"><summary><span className="k">Wynik</span><span className="t">{kindsOf(split.main)}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView links={cl} blocks={split.main} form={form} indexOf={indexOf} /></details> : null;
   const kinds = kindsOf(split.sources);
   const srcOpen = folds.material && !split.main.length;   // „Skąd” rozwinięte tylko, gdy na karcie nie ma innej treści
   const skad = split.sources.length ? (srcOpen
-    ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span>{split.main.length ? null : undo}</div><BlocksView blocks={split.sources} form={form} indexOf={indexOf} /></div>
-    : <details className="fold"><summary><span className="k">Skąd</span><span className="t">{kinds}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView blocks={split.sources} form={form} indexOf={indexOf} /></details>) : null;
+    ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span>{split.main.length ? null : undo}</div><BlocksView links={cl} blocks={split.sources} form={form} indexOf={indexOf} /></div>
+    : <details className="fold"><summary><span className="k">Skąd</span><span className="t">{kinds}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView links={cl} blocks={split.sources} form={form} indexOf={indexOf} /></details>) : null;
   // paczka 17, punkt 1: materiał z kroków Claude'a, od których zależy ten krok Piotra, stoi na jego kartce (tylko do odczytu)
   const fromDeps = depCardsFor(t.steps, s).map((d) => (
     <div key={d.id} className="zone src"><div className="lbl">Z kroku {String(d.idx).padStart(2, "0")}<span className="n">{d.title}</span></div><BlocksView blocks={d.blocks} /></div>
@@ -397,8 +404,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {undo ? <div className="undo-row">{undo}</div> : null}
       <details className="fold why-fold"><summary><span className="k">Skąd to wiemy</span><span className="t">{kindsOf([...split.main, ...split.sources])}</span><Icon k="chev" size={10} sw={2.2} /></summary>
         <div className="stack">
-          {split.main.length ? <BlocksView blocks={split.main} form={form} indexOf={indexOf} /> : null}
-          {split.sources.length ? <BlocksView blocks={split.sources} form={form} indexOf={indexOf} /> : null}
+          {split.main.length ? <BlocksView links={cl} blocks={split.main} form={form} indexOf={indexOf} /> : null}
+          {split.sources.length ? <BlocksView links={cl} blocks={split.sources} form={form} indexOf={indexOf} /> : null}
           {fromDeps}
         </div>
       </details>

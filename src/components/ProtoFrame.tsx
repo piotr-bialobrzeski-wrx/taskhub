@@ -12,7 +12,9 @@ type State = "loading" | "ok" | "no";
 
 const hostOf = (url: string) => { try { return new URL(url, "https://x").hostname.replace(/^www\./, ""); } catch { return ""; } };
 
-export function ProtoFrame({ url, mode, own }: { url: string; mode: EmbedMode; own: boolean }) {
+// quiet (paczka 33): kartka z pytaniem ma „Otwórz prototyp” w klocku z opcjami; gdy strony nie da się osadzić, okienko znika całe
+// (zostaje pusty znacznik .pframe.no, po którym CSS pokazuje link w pytaniu), żeby link stał raz
+export function ProtoFrame({ url, mode, own, quiet }: { url: string; mode: EmbedMode; own: boolean; quiet?: boolean }) {
   const [state, setState] = useState<State>(mode === "link" ? "no" : "loading");
   // ramka dopiero po zamontowaniu (inaczej załadowanie przed hydratacją umyka onLoad) i, w trybie check, po sprawdzeniu nagłówków
   const [show, setShow] = useState(false);
@@ -45,8 +47,9 @@ export function ProtoFrame({ url, mode, own }: { url: string; mode: EmbedMode; o
   const host = own ? "Task Hub" : hostOf(url);
   const open = <a className="btn ico primary" href={url} target="_blank" rel="noopener" title={`Otwiera prototyp w nowej karcie: ${url}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a>;
   const frame = (cls: string) => <iframe className={cls} title="Prototyp" src={url} sandbox={sandbox} referrerPolicy="no-referrer" allow="fullscreen" />;
+  if (quiet && state === "no") return <div className="pframe quiet no" aria-hidden="true" />;
   return (
-    <div className={"pframe" + (state === "no" ? " no" : "")}>
+    <div className={"pframe" + (state === "no" ? " no" : "") + (quiet ? " quiet" : "")}>
       <div className="pf-h">
         <b>Prototyp</b>{host ? <small>{host}</small> : null}
         <span className="sp" />

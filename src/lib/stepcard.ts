@@ -404,3 +404,25 @@ export function folderLink(s: Pick<Step, "leftAt" | "need" | "status">): { href:
   // encodeURIComponent, nie URLSearchParams: spacja jako %20 (URLComponents na Macu nie zamienia „+” na spację)
   return { href: `taskhub://add-folder?kind=${s.need.folder}&path=${encodeURIComponent(s.need.path)}`, path: s.need.path, section: FOLDER_SECTION[s.need.folder] };
 }
+
+// ---------- link stoi raz, w klocku, którego dotyczy (paczka 33) ----------
+// Każdy adres http na kartce kroku pokazuje się najwyżej raz. Pierwszeństwo: okienko prototypu albo pytanie z prototypem i karta publikacji
+// (strong), potem klocki z własnym przyciskiem (nagłówek klocka źródła, karta źródła, podgląd zmian), potem przyciski poza klockami
+// (nagłówek „Teraz”, rząd akcji) w kolejności wywołań keep, a na końcu klocki link.
+export const normUrl = (u: string) => u.trim().replace(/#.*$/, "").replace(/\/+$/, "");
+const httpU = (u: unknown): u is string => typeof u === "string" && /^https?:\/\//i.test(u.trim());
+export function blockUrls(blocks: Block[] | null | undefined): string[] {
+  const out: string[] = [];
+  for (const b of blocks ?? []) {
+    if (b.type === "changes") { if (httpU(b.preview)) out.push(normUrl(b.preview)); }
+    else if (b.type === "thread" || b.type === "mail" || b.type === "comment" || b.type === "table" || b.type === "free") { const u = b.source?.url; if (httpU(u)) out.push(normUrl(u)); }
+  }
+  return out;
+}
+export function linkPlan(blocks: Block[] | null | undefined, strong: (string | null | undefined)[]) {
+  const S = new Set(strong.filter(httpU).map(normUrl));
+  const taken = new Set([...S, ...blockUrls(blocks)]);
+  // przycisk poza klockami: true = pokaż (adres jeszcze nigdzie nie stoi), od tej chwili adres jest zajęty
+  const keep = (u: string | null | undefined) => { if (!httpU(u)) return false; const n = normUrl(u); if (taken.has(n)) return false; taken.add(n); return true; };
+  return { hide: [...S], keep, linkHide: () => [...taken] };
+}
