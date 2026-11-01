@@ -117,6 +117,13 @@ a { color: var(--accent); }
 .node.lk-plan-ag .lk-bar, .node.lk-plan-me .lk-bar { background: color-mix(in srgb, var(--sc) 10%, transparent); color: color-mix(in srgb, var(--sc) 62%, var(--text));
   border-bottom: calc(1px / var(--z, 1)) dashed var(--sc); }
 .node.lk .n-dot { top: 32px; }
+/* paczka 32: agent pracuje, a coś czeka też na Piotra: jego stan jako pigułka w kolorze „Twoja kolej” po prawej stronie paska */
+.lk-also { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 1px 7px; border-radius: 999px;
+  background: color-mix(in srgb, var(--lk-bl) 82%, #000); color: #fff; font-size: 10.5px; }
+.lk-also > span { overflow: hidden; text-overflow: ellipsis; }
+.lk-also-help { background: color-mix(in srgb, var(--lk-rd) 82%, #000); }
+.canvas.far .lk-also { font-size: 18px; padding: 2px 12px; gap: 6px; }
+.canvas.far .lk-also svg { width: 22px; height: 22px; }
 .lk-spin { animation: lk-rot .9s linear infinite; }
 @keyframes lk-rot { to { transform: rotate(360deg); } }
 /* przy oddaleniu (poniżej 60%) pasek rośnie, żeby stan dało się przeczytać; tytuł w jednej linii, bez dolnej linii */

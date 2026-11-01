@@ -62,15 +62,14 @@ export function liveStepId(t: Task, all: Task[], live: LiveActivity | null): str
   if (live.kind === "send") return null;
   return t.steps.find((x) => x.status === "todo" && !isOwnerStep(x) && !x.cloud && stepStateOf(t, x, all) === "ready")?.id ?? null;
 }
-// kafelek zadania bierze stan najważniejszego kroku w kolejności: Twoja kolej, Agent oddał, Agent pracuje, Zaplanowane (kolor wg pierwszego otwartego kroku)
+// kafelek zadania bierze stan najważniejszego kroku w kolejności: Agent pracuje, Twoja kolej, Agent oddał, Zaplanowane (kolor wg pierwszego otwartego kroku).
+// Paczka 32: praca agenta nad którymkolwiek krokiem wygrywa, żeby na głównej kanwie było widać, że zadanie jest w toku; gdy przy tym
+// coś czeka na Piotra (Zdecyduj, Zrób, zgoda, pomoc), pasek pokazuje to po prawej (also), więc jego kolej nie znika
 export function taskLook(t: Task, state: TaskStateKey, steps: Look[], working: boolean, questions: number): Look {
   if (state === "done") return { key: "done", label: "Zrobione" };
-  const mine = steps.find((l) => l.key === "mine");
-  if (mine) return mine;
-  if (questions) return { key: "mine", label: "Zdecyduj" };
-  const help = steps.find((l) => l.key === "help");
-  if (help) return help;
-  if (working || steps.some((l) => l.key === "live")) return { key: "live", label: "Agent pracuje" };
+  const yours = steps.find((l) => l.key === "mine") ?? (questions ? { key: "mine" as const, label: "Zdecyduj" } : null) ?? steps.find((l) => l.key === "help") ?? null;
+  if (working || steps.some((l) => l.key === "live")) return yours ? { key: "live", label: "Agent pracuje", also: { key: yours.key, label: yours.label } } : { key: "live", label: "Agent pracuje" };
+  if (yours) return yours;
   const next = t.steps.findIndex((x) => x.status !== "done");
   return next >= 0 ? steps[next] : { key: "plan-ag", label: "Zaplanowane" };
 }

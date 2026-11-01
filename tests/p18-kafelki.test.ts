@@ -39,13 +39,24 @@ describe("wygląd kafelka kroku", () => {
 
 describe("wygląd kafelka zadania", () => {
   const L = (t: ReturnType<typeof task>, working = false, q = 0) => taskLook(t, "active", t.steps.map((s) => stepLook(s, stepStateOf(t, s, [t]), false)), working, q);
-  it("kolejność: Twoja kolej, Agent oddał, Agent pracuje, Zaplanowane", () => {
+  it("kolejność: Agent pracuje (z tym, co czeka na Piotra), Twoja kolej, Agent oddał, Zaplanowane", () => {
     const live = step({ tool: "claude", status: "handoff", agentStartedAt: "x" }), help = step({ tool: "gmail", leftAt: "x" }), mine = step({ tool: "slack", status: "draft" });
-    expect(L(task({ steps: [live, help, mine] }))).toEqual({ key: "mine", label: "Czeka na Twoją zgodę" });
-    expect(L(task({ steps: [live, help] })).key).toBe("help");
-    expect(L(task({ steps: [live] })).key).toBe("live");
+    // paczka 32: krok w pracy agenta wygrywa, a kolej Piotra zostaje na pasku po prawej
+    expect(L(task({ steps: [live, help, mine] }))).toEqual({ key: "live", label: "Agent pracuje", also: { key: "mine", label: "Czeka na Twoją zgodę" } });
+    expect(L(task({ steps: [live, help] }))).toEqual({ key: "live", label: "Agent pracuje", also: { key: "help", label: "Potrzebna pomoc" } });
+    expect(L(task({ steps: [help, mine] }))).toEqual({ key: "mine", label: "Czeka na Twoją zgodę" });
+    expect(L(task({ steps: [help] })).key).toBe("help");
+    expect(L(task({ steps: [live] }))).toEqual({ key: "live", label: "Agent pracuje" });
     expect(L(task({ steps: [step({ tool: "claude" })] }), true).key).toBe("live");
     expect(L(task({ steps: [step({ tool: "claude" })] }), false, 1)).toEqual({ key: "mine", label: "Zdecyduj" });
+  });
+  it("zrzut Piotra: krok zlecony w projekcie pracuje, inny krok czeka na decyzję → zadanie w toku z „Zdecyduj” po prawej (paczka 32)", () => {
+    const d = step({ status: "done" });
+    const cloud = step({ tool: "manual", title: "Zleć w projekcie: wdrożenie", dependsOn: [d.id], cloud: { state: "working", at: "2026-11-01T08:00:00Z" } as never });
+    const decide = step({ tool: "manual", title: "Zdecyduj wariant przeglądu", dependsOn: [d.id] });
+    const t = task({ steps: [d, cloud, decide] });
+    expect(L(t)).toEqual({ key: "live", label: "Agent pracuje", also: { key: "mine", label: "Zdecyduj" } });
+    expect(L(task({ steps: [step({ tool: "claude" })] }), true, 1)).toEqual({ key: "live", label: "Agent pracuje", also: { key: "mine", label: "Zdecyduj" } });
   });
   it("Zaplanowane w kolorze pierwszego otwartego kroku; bez kroków agent rozpisze", () => {
     const d = step({ status: "done" }), ag = step({ tool: "claude", dependsOn: [d.id] });

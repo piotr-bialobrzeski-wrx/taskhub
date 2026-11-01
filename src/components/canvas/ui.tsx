@@ -11,7 +11,8 @@ export const TS_SHORT: Record<TaskStateKey, string> = { ...TS_LABEL, draft: "Do 
 export const ST_LABEL: Record<StepStateKey, string> = { done: "Zrobione", ready: "Do zrobienia", draft: "Do zatwierdzenia", blocked: "Czeka", handoff: "Pracuje" };
 // wygląd kafelka (paczka 18, wariant B „Ramka i pasek z etykietą”): 5 stanów z jednej palety; „Zaplanowane” w kolorze tego, kto zrobi krok
 export type LookKey = "live" | "mine" | "help" | "plan-ag" | "plan-me" | "done";
-export type Look = { key: LookKey; label: string };
+// also: drugi stan na pasku kafelka zadania, gdy agent pracuje, a coś czeka też na Piotra (paczka 32: „Agent pracuje” + po prawej „Zdecyduj”)
+export type Look = { key: LookKey; label: string; also?: { key: LookKey; label: string } };
 const LOOK_PATH: Record<LookKey, string> = {
   live: '<path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5" />',
   mine: '<circle cx="8" cy="5.5" r="2.5"/><path d="M3.5 13.5a4.5 4.5 0 0 1 9 0"/>',
@@ -25,10 +26,16 @@ const LOOK_PATH: Record<LookKey, string> = {
 export function LookBar({ look }: { look: Look }) {
   const k = look.key;
   return (
-    <span className="lk-bar" title={look.label}>
+    <span className="lk-bar" title={look.also ? `${look.label}, czeka też na Ciebie: ${look.also.label}` : look.label}>
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
         className={look.key === "live" ? "lk-spin" : undefined} dangerouslySetInnerHTML={{ __html: LOOK_PATH[k] }} />
       <span>{look.label}</span>
+      {look.also ? (
+        <span className={"lk-also lk-also-" + look.also.key}>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: LOOK_PATH[look.also.key] }} />
+          <span>{look.also.label}</span>
+        </span>
+      ) : null}
     </span>
   );
 }
