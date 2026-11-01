@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, STEP_SIZE } from "@/lib/canvas/layout";
-import { Icon, LookBar, Lvl, ST_LABEL, TS_LABEL, ToolChip, plural, type GroupVM, type StepTile, type TaskStateKey, type TileActivity } from "./ui";
+import { Icon, LookTag, Lvl, TS_LABEL, ToolChip, plural, type GroupVM, type StepTile, type TaskStateKey, type TileActivity } from "./ui";
 import { waiting, type Queue } from "@/lib/auto";
 import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
 import { AddButton, AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
@@ -119,9 +119,8 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {view === "canvas" ? (
         <Canvas zoomKey={"task"} apiRef={api} items={items} size={STEP_SIZE} groups={groups} render={(id) => { const s = byId.get(id)!; return (
             <>
-              {/* paczka 18, wariant B: pasek z etykietą stanu u góry zamiast plakietki obok narzędzia */}
-              <LookBar look={s.look} />
-              <span className="n-top"><span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} /></span>
+              {/* paczka 34, wariant C: zamiast paska u góry drobna etykieta stanu w rogu, obok numeru i narzędzia */}
+              <span className="n-top"><span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} /><LookTag look={s.look} /></span>
               <span className="n-title">{s.title}</span>
               {/* dolna linia: praca na żywo → co Claude zrobił w tym biegu → dokąd poszło → plan; kropka = zmienione, jeszcze nieotwarte */}
               <span className="n-meta">{s.activity ? <Activity text={s.activity.text} detail={s.activity.detail} since={s.activity.since} />
@@ -150,9 +149,9 @@ export function TaskCanvas(p: TaskCanvasProps) {
           <div className="stage-grp">
             <button type="button" className="lrow" onClick={() => setPanel("__task")}><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="n-title">{t.title}</span><span className="n-meta" style={{ margin: 0 }}>{t.progress.done}/{t.progress.all}</span></button>
             {p.steps.map((s) => (
-              <button key={s.id} type="button" className={"lrow" + (s.dim ? " dim" : "") + (s.glow ? " " + s.glow : "")} onClick={() => openStep(s.id)}>
+              <button key={s.id} type="button" className={"lrow lk lk-" + s.look.key + (s.dim ? " dim" : "") + (s.glow ? " " + s.glow : "")} onClick={() => openStep(s.id)}>
                 <span className="n-num">{pad(s.idx)}</span><ToolChip tool={s.tool} label={s.toolName} />
-                <span className="n-title">{s.title}</span>{s.touched ? <span className="n-dest act"><span className="act-t">{s.touched}</span></span> : s.dest ? <span className="n-dest">{s.dest}</span> : null}<span className={"st " + s.state} style={{ margin: 0 }}>{ST_LABEL[s.state]}</span>
+                <span className="n-title">{s.title}</span>{s.touched ? <span className="n-dest act"><span className="act-t">{s.touched}</span></span> : s.dest ? <span className="n-dest">{s.dest}</span> : null}<LookTag look={s.look} />
                 {s.fresh && !opened.has(s.id) ? <i className="n-dot" title="Claude zmienił ten krok, jeszcze go nie otwierałeś" /> : null}
               </button>
             ))}

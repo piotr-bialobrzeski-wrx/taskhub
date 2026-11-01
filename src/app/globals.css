@@ -85,55 +85,77 @@ a { color: var(--accent); }
 .lrow.live, .lrow.touched { box-shadow: 0 1px 6px var(--shadow), 0 0 0 1.5px var(--t-claude); }
 .n-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--t-claude); box-shadow: 0 0 0 2px var(--surface); }
 @media (prefers-reduced-motion: reduce) { .node.live::after, .feed .fb.work.on::after { animation: none; background: var(--t-claude); } }
-/* paczka 18, wariant B „Ramka i pasek z etykietą”: 5 stanów z jednej palety (Agent pracuje, Twoja kolej, Agent oddał, Zaplanowane, Zrobione).
-   Ramka to outline, więc obwódki zaznaczenia (.sel, .picked) zostają pod nią; grubość ramki dzielimy przez powiększenie (--z), żeby przy oddaleniu nie chudła */
-:root { --lk-or: #F97316; --lk-bl: #2563EB; --lk-vi: #9333EA; --lk-rd: #DC2626; --lk-gr: #9CA3AF; }
-.node.lk { --bw: 3px; --sc: var(--sub); padding-top: calc(var(--s-3) + 24px); padding-bottom: var(--s-3); gap: 4px;
-  outline: calc(var(--bw) / var(--z, 1)) solid var(--sc); outline-offset: 0; box-shadow: 0 2px 10px var(--shadow); }
-.node.task.lk { gap: 6px; }
-.node.lk:not(.sel) { background: color-mix(in srgb, var(--sc) 8%, var(--surface)); }
-.node.lk-live { --sc: var(--lk-or); }
-.node.lk-mine { --sc: var(--lk-bl); }
-.node.lk-help { --sc: var(--lk-rd); }
-.node.lk-plan-ag { --sc: var(--lk-vi); }
-.node.lk-plan-me { --sc: var(--lk-bl); }
-.node.lk-plan-ag, .node.lk-plan-me { --bw: 2px; outline-style: dashed; }
-.node.lk-plan-ag:not(.sel), .node.lk-plan-me:not(.sel) { background: color-mix(in srgb, var(--sc) 5%, var(--surface)); }
-.node.lk-done { --sc: var(--lk-gr); outline: none; }
-.node.lk-done:not(.sel) { background: var(--surface); }
-.node.lk-done:not(.sel):not(.picked):not(.dragging):not(.dim):not(:hover) { opacity: .6; }
+/* paczka 34, wariant C „Szeroka obwódka” (zadanie „Lżejsze kafelki zadań i kroków”): bez grubego paska u góry; stan niesie szeroka obwódka (5 px)
+   i tło w kolorze stanu, a w rogu stoi drobna etykieta (kropka w kolorze stanu, szary tekst). Dwa główne kolory: fiolet = czeka na Piotra,
+   morski = działa agent. Zaplanowane mają przerywaną obwódkę w kolorze tego, kto ruszy („Ruszy samo” albo „Będzie Twój ruch”).
+   Obwódka to outline, więc obwódki zaznaczenia (.sel, .picked) zostają pod nią; grubość dzielimy przez powiększenie (--z), żeby przy oddaleniu nie chudła */
+:root { --lk-mine: #5A5CE6; --lk-live: #2E9C8A; --lk-help: #E0697A; --lk-done: #BFC1D2; --lk-tint: 9%; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --lk-mine: #8486F7; --lk-live: #4FC2AE; --lk-help: #F07E8D; --lk-done: #5A5C74; --lk-tint: 12%; }
+}
+.lk { --bw: 5px; --sc: var(--sub); }
+.lk-live { --sc: var(--lk-live); }
+.lk-mine, .lk-plan-me { --sc: var(--lk-mine); }
+.lk-help { --sc: var(--lk-help); }
+.lk-plan-ag { --sc: var(--lk-live); }
+.lk-done { --sc: var(--lk-done); }
+.lk-plan-ag, .lk-plan-me { --bw: 3.5px; }
+.node.lk { padding: var(--s-4) var(--s-5) var(--s-4); gap: 4px; outline: calc(var(--bw) / var(--z, 1)) solid var(--sc); outline-offset: 0; box-shadow: 0 2px 10px var(--shadow); }
+.node.task.lk { gap: 5px; }
+.node.lk:not(.sel) { background: color-mix(in srgb, var(--sc) var(--lk-tint), var(--surface)); }
+.node.lk-plan-ag, .node.lk-plan-me { outline-style: dashed; }
+.node.lk-plan-ag:not(.sel), .node.lk-plan-me:not(.sel) { background: color-mix(in srgb, var(--sc) calc(var(--lk-tint) * .6), var(--surface)); }
+.node.lk-done { outline-width: calc(1px / var(--z, 1)); }
+.node.lk-done:not(.sel) { background: color-mix(in srgb, var(--sc) 14%, var(--surface)); }
+.node.lk-done:not(.sel):not(.picked):not(.dragging):not(.dim):not(:hover) { opacity: .62; }
 .node.lk.sel, .node.lk.drop { outline-offset: 3px; }
 .node.lk.picked, .node.lk.dragging, .node.lk.hit { outline-offset: 2px; }
-.node.lk-live { box-shadow: 0 2px 10px var(--shadow), 0 0 18px color-mix(in srgb, var(--sc) 35%, transparent); }
+/* agent pracuje: światełko biegnące po obwódce jak dotąd */
+.node.lk-live { box-shadow: 0 2px 10px var(--shadow), 0 0 16px color-mix(in srgb, var(--sc) 30%, transparent); }
 .node.lk-live::after { content: ""; position: absolute; inset: calc(-1 * var(--bw) / var(--z, 1)); border-radius: calc(var(--r-md) + var(--bw) / var(--z, 1));
   padding: calc(var(--bw) / var(--z, 1)); pointer-events: none;
   background: conic-gradient(from var(--a), transparent 0 65%, color-mix(in srgb, var(--sc) 25%, white) 88%, var(--sc) 100%);
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; animation: run-light 1.4s linear infinite; }
-.lk-bar { position: absolute; left: 0; right: 0; top: 0; height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 var(--s-5);
-  border-radius: var(--r-md) var(--r-md) 0 0; background: color-mix(in srgb, var(--sc) 82%, #000); color: #fff; font-size: 11.5px; font-weight: 650;
-  white-space: nowrap; overflow: hidden; pointer-events: none; }
-.lk-bar svg { flex: none; }
-.node.lk-done .lk-bar { background: color-mix(in srgb, var(--sc) 30%, var(--surface)); color: var(--sub); }
-.node.lk-plan-ag .lk-bar, .node.lk-plan-me .lk-bar { background: color-mix(in srgb, var(--sc) 10%, transparent); color: color-mix(in srgb, var(--sc) 62%, var(--text));
-  border-bottom: calc(1px / var(--z, 1)) dashed var(--sc); }
-.node.lk .n-dot { top: 32px; }
-/* paczka 32: agent pracuje, a coś czeka też na Piotra: jego stan jako pigułka w kolorze „Twoja kolej” po prawej stronie paska */
-.lk-also { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 1px 7px; border-radius: 999px;
-  background: color-mix(in srgb, var(--lk-bl) 82%, #000); color: #fff; font-size: 10.5px; }
-.lk-also > span { overflow: hidden; text-overflow: ellipsis; }
-.lk-also-help { background: color-mix(in srgb, var(--lk-rd) 82%, #000); }
-.canvas.far .lk-also { font-size: 18px; padding: 2px 12px; gap: 6px; }
-.canvas.far .lk-also svg { width: 22px; height: 22px; }
-.lk-spin { animation: lk-rot .9s linear infinite; }
-@keyframes lk-rot { to { transform: rotate(360deg); } }
-/* przy oddaleniu (poniżej 60%) pasek rośnie, żeby stan dało się przeczytać; tytuł w jednej linii, bez dolnej linii */
-.canvas.far .node.lk { padding-top: calc(var(--s-3) + 56px); }
-.canvas.far .lk-bar { height: 56px; gap: 8px; padding: 0 12px; font-size: 20px; }
-.canvas.far .lk-bar svg { width: 28px; height: 28px; }
+.node.lk-live .act { color: var(--sc); }
+/* kropka „zmienione, jeszcze nieotwarte” siedzi na rogu obwódki, bo prawy górny róg zajmuje etykieta */
+.node.lk .n-dot { top: -6px; right: -6px; width: 12px; height: 12px; }
+/* etykieta stanu: kropka w kolorze stanu i szary tekst; zaplanowane: pusta kropka i tekst w kolorze tego, kto ruszy */
+.lk-tag { margin-left: auto; flex: none; max-width: 70%; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; line-height: 16px;
+  color: var(--sub); white-space: nowrap; overflow: hidden; }
+.lk-tag::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--sc); }
+.lk-live .lk-tag::before { box-shadow: 0 0 0 3px color-mix(in srgb, var(--sc) 25%, transparent); }
+.lk-plan-ag .lk-tag::before, .lk-plan-me .lk-tag::before { background: transparent; box-shadow: inset 0 0 0 2px var(--sc); width: 8px; height: 8px; }
+.lk-plan-ag .lk-tag, .lk-plan-me .lk-tag { color: color-mix(in srgb, var(--sc) 80%, var(--text)); }
+.lk-t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.lk-also { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.lk-also::before { content: "·"; }
+/* przy oddaleniu (poniżej 60%) etykieta zajmuje całą górną linię i rośnie, żeby stan dało się przeczytać; tytuł w jednej linii */
+.canvas.far .node.lk .n-top > :not(.lk-tag), .canvas.far .node.lk .t-top > :not(.lk-tag) { display: none; }
+.canvas.far .lk-tag { margin-left: 0; max-width: 100%; font-size: 20px; line-height: 28px; gap: 8px; }
+.canvas.far .lk-tag::before { width: 16px; height: 16px; }
+.canvas.far .lk-plan-ag .lk-tag::before, .canvas.far .lk-plan-me .lk-tag::before { width: 18px; height: 18px; box-shadow: inset 0 0 0 4px var(--sc); }
 .canvas.far .node.lk .n-title { -webkit-line-clamp: 1; }
 .canvas.far .node.lk:not(.task) .n-meta { display: none; }
-.canvas.far .node.lk .n-dot { top: 64px; }
-@media (prefers-reduced-motion: reduce) { .node.lk-live::after, .lk-spin { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .node.lk-live::after { animation: none !important; } }
+/* pasek planu na kafelku zadania: jeden odcinek na krok; przerywany morski = później ruszy samo, pusty fioletowy = później czeka na Piotra */
+.tplan { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; }
+.t-row > .tplan { flex: 1 1 auto; }
+.plan-s { display: flex; gap: 3px; flex: 1 1 60px; min-width: 40px; height: 7px; }
+.plan-s i { flex: 1; min-width: 3px; border-radius: 99px; }
+.plan-s .ps-d { background: var(--lk-done); }
+.plan-s .ps-l { background: var(--lk-live); }
+.plan-s .ps-m { background: var(--lk-mine); }
+.plan-s .ps-h { background: var(--lk-help); }
+.plan-s .ps-a { background: repeating-linear-gradient(-45deg, var(--lk-live) 0 2px, color-mix(in srgb, var(--lk-live) 25%, transparent) 2px 4px); }
+.plan-s .ps-p { box-shadow: inset 0 0 0 1.5px var(--lk-mine); background: color-mix(in srgb, var(--lk-mine) 12%, transparent); }
+.plan-n { flex: none; display: inline-flex; gap: 6px; font-size: 11px; font-weight: 600; }
+.pn-a { color: color-mix(in srgb, var(--lk-live) 85%, var(--text)); }
+.pn-p { color: color-mix(in srgb, var(--lk-mine) 85%, var(--text)); }
+/* wiersze listy: ten sam kolor stanu, cieńsza obwódka (lista jest gęsta) */
+.lrow.lk { --bw: 2.5px; outline: var(--bw) solid var(--sc); outline-offset: 0; background: color-mix(in srgb, var(--sc) var(--lk-tint), var(--surface)); margin-bottom: 10px; }
+.lrow.lk-plan-ag, .lrow.lk-plan-me { --bw: 2px; outline-style: dashed; }
+.lrow.lk-done { outline-width: 1px; }
+.lrow.lk .lk-tag { margin-left: 0; }
 .node.dragging { cursor: grabbing; box-shadow: 0 18px 40px var(--shadow), 0 0 0 2px var(--accent); z-index: 3; }
 /* otwarty krok (paczka 6, punkt 2): wypełnienie w kolorze akcentu, gruba ramka i poświata; „Gotowy” ma tylko cienką ramkę */
 .node.sel { background: color-mix(in srgb, var(--accent) 22%, var(--surface));
@@ -163,10 +185,14 @@ a { color: var(--accent); }
 .canvas.panning, .canvas.panning .node { cursor: grabbing; }
 .marquee { position: absolute; z-index: 4; pointer-events: none; border: 1.5px solid var(--accent); background: var(--accent-soft); border-radius: 6px; }
 
-.t-head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
-.t-ico { flex: none; margin-top: 1px; color: var(--c); }
+.t-head { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.t-top { display: flex; align-items: center; gap: 8px; min-width: 0; height: 16px; }
+.t-top .proj-tag { min-width: 0; overflow: hidden; } .t-top .proj-tag > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-rt { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+.t-row > .t-rt { flex: 0 1 auto; }
+.t-ico { flex: none; display: grid; color: var(--c); }
 .t-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.proj-tag ~ .t-sum { -webkit-line-clamp: 1; }
+.node.task .t-sum { -webkit-line-clamp: 1; }
 .t-sum { font-size: 12px; line-height: 1.4; color: var(--sub); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .t-sum.done { color: var(--ok); }
 .t-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--sub); min-width: 0; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
@@ -1209,11 +1235,11 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .reel.go > div { filter: none; }
 .reel > div small { font-weight: 600; font-size: 11.5px; color: var(--sub); overflow: hidden; text-overflow: ellipsis; }
 .dwrap { position: relative; width: min(420px, 100%); }
-.dpick { --sc: var(--lk-bl); width: 100%; border: 0; padding: 0; text-align: left; color: var(--text); border-radius: var(--r-lg); overflow: hidden; background: color-mix(in srgb, var(--sc) 6%, var(--surface));
+.dpick { --sc: var(--lk-mine); width: 100%; border: 0; padding: 0; text-align: left; color: var(--text); border-radius: var(--r-lg); overflow: hidden; background: color-mix(in srgb, var(--sc) 6%, var(--surface));
   box-shadow: 0 10px 30px var(--shadow), 0 0 0 2px var(--sc); display: flex; flex-direction: column; transition: transform .15s; animation: dland .45s cubic-bezier(.2, .9, .3, 1.3) both; }
 .dpick:hover { transform: translateY(-2px); }
-.dpick.lk-live { --sc: var(--lk-or); }
-.dpick.lk-help { --sc: var(--lk-rd); }
+.dpick.lk-live { --sc: var(--lk-live); }
+.dpick.lk-help { --sc: var(--lk-help); }
 .dp-hd { display: flex; justify-content: space-between; gap: 8px; padding: 8px 14px; background: var(--sc); color: #fff; font-size: 13px; font-weight: 600; }
 .dp-hd span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dp-bd { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px 16px; }

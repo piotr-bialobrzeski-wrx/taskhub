@@ -9,33 +9,32 @@ export type StepStateKey = "done" | "draft" | "handoff" | "blocked" | "ready";
 export const TS_LABEL: Record<TaskStateKey, string> = { done: "Ukończone", draft: "Do zatwierdzenia", active: "W toku", blocked: "Czeka", new: "Nowe" };
 export const TS_SHORT: Record<TaskStateKey, string> = { ...TS_LABEL, draft: "Do zatw." };   // na kafelku, obok terminu
 export const ST_LABEL: Record<StepStateKey, string> = { done: "Zrobione", ready: "Do zrobienia", draft: "Do zatwierdzenia", blocked: "Czeka", handoff: "Pracuje" };
-// wygląd kafelka (paczka 18, wariant B „Ramka i pasek z etykietą”): 5 stanów z jednej palety; „Zaplanowane” w kolorze tego, kto zrobi krok
+// wygląd kafelka (paczka 18, od paczki 34 wariant C): 5 stanów z jednej palety; zaplanowane w kolorze tego, kto ruszy („Ruszy samo” albo „Będzie Twój ruch”)
 export type LookKey = "live" | "mine" | "help" | "plan-ag" | "plan-me" | "done";
 // also: drugi stan na pasku kafelka zadania, gdy agent pracuje, a coś czeka też na Piotra (paczka 32: „Agent pracuje” + po prawej „Zdecyduj”)
 export type Look = { key: LookKey; label: string; also?: { key: LookKey; label: string } };
-const LOOK_PATH: Record<LookKey, string> = {
-  live: '<path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5" />',
-  mine: '<circle cx="8" cy="5.5" r="2.5"/><path d="M3.5 13.5a4.5 4.5 0 0 1 9 0"/>',
-  help: '<path d="M8 4v5M8 11.8h.01"/>',
-  "plan-ag": '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',
-  "plan-me": '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',
-  done: '<path d="M4 8.5l2.6 2.5L12 5.5"/>',
-};
-// pasek u góry kafelka: ikona stanu (przy „Agent pracuje” obracający się spinner) i etykieta; ptaszek tylko przy „Zrobione”
-// (paczka 22: szkic czekający na zgodę ma ludzika „Twoja kolej”, bo ptaszek wyglądał jak zatwierdzone)
-export function LookBar({ look }: { look: Look }) {
-  const k = look.key;
+// paczka 34, wariant C „Szeroka obwódka”: bez grubego paska u góry. Stan niesie szeroka obwódka i tło w kolorze stanu,
+// a w rogu kafelka stoi drobna etykieta: kropka w kolorze stanu i szary tekst (zaplanowane: pusta kropka w kolorze tego, kto ruszy)
+export function LookTag({ look }: { look: Look }) {
+  // agent pracuje, a coś czeka też na Piotra: „Pracuje · Zdecyduj”, żeby obie rzeczy zmieściły się w rogu
+  const label = look.also && look.key === "live" ? "Pracuje" : look.label;
   return (
-    <span className="lk-bar" title={look.also ? `${look.label}, czeka też na Ciebie: ${look.also.label}` : look.label}>
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-        className={look.key === "live" ? "lk-spin" : undefined} dangerouslySetInnerHTML={{ __html: LOOK_PATH[k] }} />
-      <span>{look.label}</span>
-      {look.also ? (
-        <span className={"lk-also lk-also-" + look.also.key}>
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: LOOK_PATH[look.also.key] }} />
-          <span>{look.also.label}</span>
-        </span>
-      ) : null}
+    <span className="lk-tag" title={look.also ? `${look.label}, czeka też na Ciebie: ${look.also.label}` : look.label}>
+      <span className="lk-t">{label}</span>
+      {look.also ? <span className={"lk-also lk-also-" + look.also.key}>{look.also.label}</span> : null}
+    </span>
+  );
+}
+// pasek planu na kafelku zadania: jeden odcinek na krok (zrobione, teraz agent albo Ty, później samo albo czeka na Ciebie) i licznik
+export type PlanSeg = "d" | "l" | "m" | "h" | "a" | "p";
+export function PlanStrip({ plan }: { plan: PlanSeg[] }) {
+  if (!plan.length) return null;
+  const a = plan.filter((x) => x === "a").length, me = plan.filter((x) => x === "p").length;
+  const tip = `Plan kroków: ${plan.filter((x) => x === "d").length} zrobione` + (a ? `, ${a} ruszy samo` : "") + (me ? `, ${me} czeka na Ciebie` : "");
+  return (
+    <span className="tplan" title={tip} aria-label={tip}>
+      <span className="plan-s">{plan.map((x, i) => <i key={i} className={"ps-" + x} />)}</span>
+      {a || me ? <span className="plan-n">{a ? <span className="pn-a">{a} samo</span> : null}{me ? <span className="pn-p">{me} Ty</span> : null}</span> : null}
     </span>
   );
 }
@@ -51,7 +50,8 @@ export type TaskTile = {
   pending: number;   // wiadomości Piotra w zadaniu bez odpowiedzi agenta (chip „2 wiadomości”)
   tool: string; pos: Pos | null; dependsOn: string[];
   activity: TileActivity | null;
-  look: Look;        // ramka i pasek: stan najważniejszego kroku (Twoja kolej, Agent oddał, Agent pracuje, Zaplanowane)
+  look: Look;        // obwódka, tło i etykieta: stan najważniejszego kroku (Twoja kolej, Agent oddał, Agent pracuje, Zaplanowane)
+  plan: PlanSeg[];   // pasek planu (paczka 34): stan każdego kroku po kolei
   draw: { min: number; step: string } | null;   // losowanie (paczka 32): Twój następny krok i ile Twojej pracy zostało; null = nic dla Ciebie
 };
 // co mostek robi teraz na tym kafelku (pasek z kropkami): czynność, szczegół (np. polecenie), od kiedy trwa bieg
@@ -66,7 +66,7 @@ export type StepTile = {
   fresh: boolean;            // agent zmienił krok, Piotr jeszcze go nie otworzył: kropka
   pos: Pos | null; dependsOn: string[];
   activity: TileActivity | null;
-  look: Look;                // ramka i pasek z etykietą (paczka 18)
+  look: Look;                // obwódka, tło i etykieta w rogu (paczka 18, wariant C od paczki 34)
 };
 export type GroupVM = { id: string; name: string; color: number; x: number; y: number; w: number; h: number; members: string[]; auto: boolean; lane?: string | null };
 export type ProjectVM = { id: string; name: string; color: number };

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, TASK_SIZE } from "@/lib/canvas/layout";
-import { Icon, LookBar, Lvl, ToolIcon, TS_LABEL, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
+import { Icon, LookTag, Lvl, PlanStrip, ToolIcon, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
 import { AgentFeed, Dock, Namer, PrioPicker, ProjectPicker, TileMenu, Toast, useToast } from "./widgets";
 import { msgCount } from "@/lib/auto";
 import type { FeedItem, WorkBubble } from "@/lib/feed";
@@ -33,37 +33,37 @@ type LayoutSnap = { items: { id: string; x: number; y: number }[]; groups: { id:
 const UNDO_MS = 8000;   // tyle „Cofnij” zostaje po „Ułóż”
 
 export function TaskTileView({ t }: { t: TaskTile }) {
-  const pct = t.progress.all ? (100 * t.progress.done) / t.progress.all : 0;
   // przy dwóch i więcej plakietkach licznik skraca się do „zrobione/wszystkie”, żeby nic nie było ucięte
   const badges = (t.drafts ? 1 : 0) + (t.handed ? 1 : 0) + (t.questions ? 1 : 0) + (t.pending ? 1 : 0);
   const cnt = !t.progress.all ? t.estText : badges >= 2 ? `${t.progress.done}/${t.progress.all}` : `${t.progress.done}/${t.progress.all} · ${t.estText}`;
+  // paczka 34, wariant C: górna linia = narzędzie, projekt i etykieta stanu w rogu; na dole priorytet, termin i licznik, pod nimi pasek planu kroków
   return (
     <>
-      <LookBar look={t.look} />
-      <span className="t-head">
-        <span className="t-ico" style={{ ["--c" as string]: toolColor(t.tool) }}><ToolIcon tool={t.tool} /></span>
-        <span className="t-main">
-          {t.project ? <span className="proj-tag" style={{ ["--c" as string]: projColor(t.project.color) }}>{t.project.name}</span> : null}
-          <span className="n-title">{t.title}</span>
-          {t.summary ? <span className={"t-sum" + (t.state === "done" ? " done" : "")}>{t.summary}</span> : null}
-        </span>
+      <span className="t-top">
+        <span className="t-ico" style={{ ["--c" as string]: toolColor(t.tool) }}><ToolIcon tool={t.tool} size={14} /></span>
+        {t.project ? <span className="proj-tag" style={{ ["--c" as string]: projColor(t.project.color) }}><span>{t.project.name}</span></span> : null}
+        <LookTag look={t.look} />
       </span>
-      <span className="t-row" style={{ marginTop: "auto" }}>
+      <span className="t-head">
+        <span className="n-title">{t.title}</span>
+        {t.summary ? <span className={"t-sum" + (t.state === "done" ? " done" : "")}>{t.summary}</span> : null}
+      </span>
+      <span className="t-row">
         <Lvl base={t.base} eff={t.eff} why={t.why} />
         {t.due ? <span className={"st due " + t.due.cls} title={"Termin: " + t.due.iso}>{t.due.text}</span> : null}
+        {t.activity ? (
+          <span className="t-rt"><Activity text={t.activity.text} detail={t.activity.detail} since={t.activity.since} who="Claude" /></span>
+        ) : (
+          <span className="t-rt">
+            <span className="cnt" style={{ fontVariantNumeric: "tabular-nums" }} title={`Kroki ${t.progress.done}/${t.progress.all} · ${t.estText}`}>{cnt}</span>
+            {t.drafts ? <span className="st draft" title={`${t.drafts} do zatwierdzenia`}>{t.drafts} szkic{t.drafts === 1 ? "" : t.drafts < 5 ? "e" : "ów"}</span> : null}
+            {t.handed ? <span className="st handoff" title={`${t.handed} w Claude`}>{t.handed} w Claude</span> : null}
+            {t.questions ? <span className="st draft" style={{ display: "inline-flex", gap: 3 }} title="Pytania od agenta czekają na Twoją odpowiedź"><Icon k="question" size={12} sw={1.8} />{t.questions}</span> : null}
+            {t.pending ? <span className="st handoff" title="Twoje wiadomości w zadaniu czekają na odpowiedź agenta">{msgCount(t.pending)}</span> : null}
+          </span>
+        )}
       </span>
-      {t.activity ? (
-        <span className="t-row"><Activity text={t.activity.text} detail={t.activity.detail} since={t.activity.since} who="Claude" /></span>
-      ) : (
-        <span className="t-row">
-          <span className="bar"><b style={{ width: pct + "%" }} /></span>
-          <span className="cnt" style={{ fontVariantNumeric: "tabular-nums" }} title={`Kroki ${t.progress.done}/${t.progress.all} · ${t.estText}`}>{cnt}</span>
-          {t.drafts ? <span className="st draft" title={`${t.drafts} do zatwierdzenia`}>{t.drafts} szkic{t.drafts === 1 ? "" : t.drafts < 5 ? "e" : "ów"}</span> : null}
-          {t.handed ? <span className="st handoff" title={`${t.handed} w Claude`}>{t.handed} w Claude</span> : null}
-          {t.questions ? <span className="st draft" style={{ display: "inline-flex", gap: 3 }} title="Pytania od agenta czekają na Twoją odpowiedź"><Icon k="question" size={12} sw={1.8} />{t.questions}</span> : null}
-          {t.pending ? <span className="st handoff" title="Twoje wiadomości w zadaniu czekają na odpowiedź agenta">{msgCount(t.pending)}</span> : null}
-        </span>
-      )}
+      {t.plan.length ? <span className="t-row"><PlanStrip plan={t.plan} /></span> : null}
     </>
   );
 }
@@ -228,11 +228,11 @@ export function Board(p: BoardProps) {
         <div className="listview">
           <div className="stage-grp">
             {hits.length ? hits.map((t) => (
-              <button key={t.id} type="button" className="lrow" onClick={() => open(t.id)}>
+              <button key={t.id} type="button" className={"lrow lk lk-" + t.look.key} onClick={() => open(t.id)}>
                 <Lvl base={t.base} eff={t.eff} why={t.why} />
                 <span className="n-title">{t.title}</span>
                 {t.due ? <span className={"st due " + t.due.cls}>{t.due.text}</span> : null}
-                <span className={"st " + t.state} style={{ margin: 0 }}>{TS_LABEL[t.state]}</span>
+                <LookTag look={t.look} />
                 <span className="n-meta" style={{ margin: 0 }}>{t.progress.done}/{t.progress.all}</span>
               </button>
             )) : <p className="sub">{words.length ? "Brak pasujących zadań." : "Brak zadań."}</p>}

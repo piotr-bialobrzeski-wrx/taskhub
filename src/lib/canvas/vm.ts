@@ -4,7 +4,7 @@ import { dueLeftH, isComplete, whyText } from "../priority";
 import { agentMinOf, estOf, fmtMin, remainEst, spentMin, taskAgent, taskEst, taskSpent } from "../time";
 import { isOwnerStep, toolLabel, type Step, type Task } from "../schema";
 import { destOf, tileDest, tileDestHref, whoDid } from "../stepcard";
-import type { Look, StepStateKey, StepTile, TaskStateKey, TaskTile } from "@/components/canvas/ui";
+import type { Look, PlanSeg, StepStateKey, StepTile, TaskStateKey, TaskTile } from "@/components/canvas/ui";
 
 export { fmtDate, fmtTime } from "../clock";   // zawsze czas polski (serwer liczy w UTC)
 import { fmtDate, fmtTime } from "../clock";
@@ -67,7 +67,8 @@ export function stepLook(s: Step, state: StepStateKey, now: boolean, asked: stri
     return { key: "mine", label: ask ? "Zdecyduj" : "Zrób" };
   }
   // zlecone do chmury, a czekające na inne kroki (zgoda z rozmowy albo z decyzji, paczka 22): ruszy samo, więc to nie Twoja kolej
-  return { key: own && s.cloud?.state !== "auto" ? "plan-me" : "plan-ag", label: "Zaplanowane" };
+  // paczka 34 (wariant C): zaplanowany krok mówi wprost, kto ruszy: agent weźmie go sam albo zatrzyma się na Piotrze
+  return own && s.cloud?.state !== "auto" ? { key: "plan-me", label: "Będzie Twój ruch" } : { key: "plan-ag", label: "Ruszy samo" };
 }
 // krok „teraz” biegu: wskazany przez agenta albo, gdy bieg pracuje w zadaniu bez wskazania kroku (np. po rozpisaniu od razu zbiera fakty
 // do szkicu), pierwszy gotowy krok agenta; inaczej taki krok udawałby „Zaplanowane” z przyciskiem „Uruchom”, choć agent już nad nim siedzi
@@ -88,7 +89,7 @@ export function taskLook(t: Task, state: TaskStateKey, steps: Look[], working: b
   if (working || steps.some((l) => l.key === "live")) return yours ? { key: "live", label: "Agent pracuje", also: { key: yours.key, label: yours.label } } : { key: "live", label: "Agent pracuje" };
   if (yours) return yours;
   const next = t.steps.findIndex((x) => x.status !== "done");
-  return next >= 0 ? steps[next] : { key: "plan-ag", label: "Zaplanowane" };
+  return next >= 0 ? steps[next] : { key: "plan-ag", label: "Ruszy samo" };
 }
 
 // czas na kafelku zadania: szacunek i czas Piotra (jego kroki); zadanie bez kroków Piotra pokazuje czas Claude'a
@@ -108,6 +109,7 @@ export function taskTile(s: Scored, all: Task[], questions: number, live: LiveAc
   const looks = t.steps.map((x) => stepLook(x, stepStateOf(t, x, all), nowId === x.id, asked.get(x.id) ?? null));
   return {
     look: taskLook(t, state, looks, !!activity, questions),
+    plan: planOf(looks),
     draw: drawInfo(t, state, looks, questions),
     activity, pending,
     id: t.id, title: t.title, summary: state === "done" && t.noteSummary ? t.noteSummary : t.summary, state,
@@ -123,6 +125,10 @@ export function taskTile(s: Scored, all: Task[], questions: number, live: LiveAc
     pos: t.pos, dependsOn: t.dependsOn,
   };
 }
+
+// pasek planu na kafelku zadania (paczka 34, wariant C): jeden odcinek na krok, w kolejności kroków
+const PLAN_SEG: Record<Look["key"], PlanSeg> = { done: "d", live: "l", mine: "m", help: "h", "plan-ag": "a", "plan-me": "p" };
+export const planOf = (looks: Look[]): PlanSeg[] => looks.map((l) => PLAN_SEG[l.key]);
 
 // losowanie zadania (paczka 32): zadanie bierze udział, gdy Piotr ma w nim następny krok (Zrób, Zdecyduj, zgoda na szkic) albo pytanie od agenta;
 // min = ile jego pracy zostało (ten sam szacunek co „Piotrowi zostało”), step = tytuł jego pierwszego kroku na kafelku wyniku
