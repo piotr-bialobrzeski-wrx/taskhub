@@ -25,6 +25,26 @@ export function fmtMin(m: number): string {
   return h ? `${h} h${r ? " " + r + " min" : ""}` : `${r} min`;
 }
 
+// paczka 32: czas kroku podany przez Piotra. Przyciski co 15 minut i pole „godziny:minuty” (np. 2:15), zapis w minutach.
+export const SPENT_CHIPS: { min: number; label: string }[] = [
+  { min: 15, label: "15 min" }, { min: 30, label: "30 min" }, { min: 45, label: "45 min" },
+  { min: 60, label: "1 h" }, { min: 90, label: "1,5 h" }, { min: 120, label: "2 h" },
+];
+// „2:15” → 135, „0:40” → 40, „45” → 45 (same cyfry = minuty), „1,5” albo „1.5” → 90 (ułamek = godziny), „1 h 30”, „1h30m” → 90;
+// pusty albo nieczytelny wpis → null (nic nie zapisujemy)
+export function parseSpent(raw: string): number | null {
+  const s = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!s) return null;
+  let m: RegExpMatchArray | null;
+  if ((m = s.match(/^(\d{1,3}):(\d{1,2})$/))) { const min = Number(m[2]); return min < 60 ? Number(m[1]) * 60 + min : null; }
+  if ((m = s.match(/^(\d{1,4})( ?min| ?m)?$/))) return Number(m[1]);
+  if ((m = s.match(/^(\d{1,3})[.,](\d{1,2})( ?h)?$/))) return Math.round(Number(`${m[1]}.${m[2]}`) * 60);
+  if ((m = s.match(/^(\d{1,3}) ?h(?: ?(\d{1,2}) ?(?:min|m)?)?$/))) { const min = Number(m[2] ?? 0); return min < 60 ? Number(m[1]) * 60 + min : null; }
+  return null;
+}
+// minuty → „g:mm” do pola wpisu (135 → „2:15”, 40 → „0:40”)
+export const fmtHM = (m: number) => `${Math.floor(m / 60)}:${String(Math.round(m) % 60).padStart(2, "0")}`;
+
 // ---------- kalibracja: mediana rzeczywisty/szacunek, osobno dla czasów Piotra i Claude'a ----------
 export type Calibration = { k: number; n: number; scope: "tool" | "all" };
 export type Who = "owner" | "agent";

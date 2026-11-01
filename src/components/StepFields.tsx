@@ -7,7 +7,7 @@ import { Picker } from "@/components/canvas/widgets";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { Icon } from "@/components/canvas/ui";
 import { DECISION_TITLE_RE, isGoogleApp, TOOL_LABELS } from "@/lib/schema";
-import { Q, fmtMin, roundQ } from "@/lib/time";
+import { Q, SPENT_CHIPS, fmtHM, fmtMin, parseSpent } from "@/lib/time";
 
 type Patch = Parameters<typeof patchStep>[2];
 type Field = "title" | "detail" | "link";
@@ -48,12 +48,19 @@ export function ConnectionHead({ taskId, stepId, app, connectionId, connections,
   );
 }
 
-// liczba minut w pigułce takiej jak wybory obok (pióro zamiast strzałki): klik → pole liczbowe w tym samym miejscu
-function NumChip({ value, stepBy, min, label, onSave }: { value: number; stepBy: number; min: number; label: string; onSave: (v: number) => void }) {
+// liczba minut w pigułce takiej jak wybory obok (pióro zamiast strzałki): klik → pole w tym samym miejscu.
+// hm (czas Piotra, paczka 32): pole tekstowe „godziny:minuty” jak przy „Ile to zajęło?” (2:15, 45, 1,5 h), zapis w minutach
+function NumChip({ value, stepBy, min, label, onSave, hm = false }: { value: number; stepBy: number; min: number; label: string; onSave: (v: number) => void; hm?: boolean }) {
   const [edit, setEdit] = useState(false);
-  const done = (raw: string) => { setEdit(false); const v = Number(raw); if (Number.isFinite(v) && v !== value && raw !== "") onSave(Math.max(min, v)); };
-  if (edit) return <input className="in num" type="number" min={min} step={stepBy} defaultValue={value} aria-label={label} autoFocus onFocus={(e) => e.currentTarget.select()} onBlur={(e) => done(e.currentTarget.value)}
-    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); done(e.currentTarget.value); } else if (e.key === "Escape") { e.preventDefault(); setEdit(false); } }} />;
+  const done = (raw: string) => {
+    setEdit(false);
+    const v = hm ? parseSpent(raw) : raw === "" ? null : Number(raw);
+    if (v !== null && Number.isFinite(v) && v !== value) onSave(Math.max(min, v));
+  };
+  const key = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") { e.preventDefault(); done(e.currentTarget.value); } else if (e.key === "Escape") { e.preventDefault(); setEdit(false); } };
+  if (edit) return hm
+    ? <input className="in num" type="text" inputMode="numeric" placeholder="g:mm" defaultValue={value ? fmtHM(value) : ""} aria-label={label + " (godziny:minuty)"} autoFocus onFocus={(e) => e.currentTarget.select()} onBlur={(e) => done(e.currentTarget.value)} onKeyDown={key} />
+    : <input className="in num" type="number" min={min} step={stepBy} defaultValue={value} aria-label={label} autoFocus onFocus={(e) => e.currentTarget.select()} onBlur={(e) => done(e.currentTarget.value)} onKeyDown={key} />;
   return <button type="button" className="pp boxed num" title={label + ": kliknij, aby zmienić"} onClick={() => setEdit(true)}><span className="pp-t">{fmtMin(value)}</span><Icon k="pen" size={11} sw={1.8} /></button>;
 }
 
@@ -83,7 +90,7 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
             options={tools.map(([k, v]) => ({ key: k, on: k === step.tool, node: <span>{v}</span> }))} /></div>
         {step.own ? <>
           <div><div className="lbl">Szacunek{step.estHint ? <span className="hint"> {step.estHint}</span> : null}</div><NumChip value={step.estMin} stepBy={Q} min={Q} label="Szacunek w minutach" onSave={(v) => patch({ estMin: v })} /></div>
-          <div><div className="lbl">Twój czas</div><NumChip value={step.spentMin} stepBy={5} min={0} label="Twój czas w minutach" onSave={(v) => patch({ spentMin: v })} /></div>
+          <div><div className="lbl">Twój czas</div><NumChip value={step.spentMin} stepBy={5} min={0} label="Twój czas" hm onSave={(v) => patch({ spentMin: v })} /></div>
         </> : <div><div className="lbl">Czas Claude'a</div><span className="pp boxed" title="Liczy się sam: od chwili, gdy Claude zaczął krok, do jego zamknięcia"><span className="pp-t">{step.agentMin ? fmtMin(step.agentMin) : "jeszcze nic"}</span></span></div>}
         {model ? <div><div className="lbl">Model{model.last ? <span className="hint"> ostatnio: {model.last}</span> : null}</div>
           <Picker cls="boxed" title="Którym modelem Claude ma zrobić ten krok: auto dobiera model i wysiłek do poziomu kroku (Ustawienia → Agent)" trigger={<span className="pp-t">{model.pick ? model.choices.find((c) => c.key === model.pick)?.label ?? model.pick : `auto · ${model.auto}`}</span>} onPick={(k) => patch({ modelPick: k || null })}
@@ -110,24 +117,32 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
   );
 }
 
-// „Zrobione” kroku Piotra poza aplikacją: po kliknięciu pyta, ile to zajęło (chipy wokół szacunku, ten równy szacunkowi wyróżniony, albo „Pomiń”),
-// a wybór zamyka krok z tym czasem. Zamiast stopera: Piotr i tak robi takie kroki poza aplikacją.
+// „Zrobione” kroku Piotra poza aplikacją: po kliknięciu pyta, ile to zajęło, a wybór zamyka krok z tym czasem. Zamiast stopera: Piotr i tak robi
+// takie kroki poza aplikacją. Paczka 32: przyciski co 15 minut (15 min … 2 h, wyróżniony najbliższy szacunkowi), pole „g:mm” na dowolny czas
+// (np. 2:15, zapis w minutach, Enter albo „Zapisz”) i „Pomiń”.
 // Krok-wybór bez pytania na kartce („Wybierz…”, „Zdecyduj…”) pyta też, co Piotr wybrał: wpis idzie do wyniku kroku, żeby agent go widział (paczka 9)
 export function DoneAsk({ taskId, stepId, est, title = "", primary = true }: { taskId: string; stepId: string; est: number; title?: string; primary?: boolean }) {
   const [ask, setAsk] = useState(false);
   const [picked, setPicked] = useState<number | null | undefined>(undefined);
   const [result, setResult] = useState("");
+  const [typed, setTyped] = useState("");
   const [pending, start] = useTransition();
   const decision = DECISION_TITLE_RE.test(title.trim());
   const finish = (min: number | null) => { setPicked(min); start(() => doneWithTime(taskId, stepId, min, decision ? result : undefined)); };
   if (!ask) return <button type="button" className={primary ? "btn primary" : "btn"} onClick={() => setAsk(true)}>Zrobione</button>;
-  const base = roundQ(est), mins = [...new Set([roundQ(est / 2), base, roundQ(est * 2)])];
+  const near = SPENT_CHIPS.reduce((a, c) => (Math.abs(c.min - est) < Math.abs(a.min - est) ? c : a)).min;
+  const p = parseSpent(typed), own = p && p < 24 * 60 ? p : null, bad = !!typed.trim() && own === null;   // 0 i doba lub więcej: nie zapisujemy
   const label = (m: number | null, txt: string) => (pending && picked === m ? "Zapisuję…" : txt);
   return (
     <div className="actions ask-time" role="group" aria-label="Ile to zajęło?">
       {decision ? <GrowTextarea className="in" minRows={1} placeholder="Co wybrałeś? (agent zobaczy to w wyniku kroku)" value={result} onChange={(e) => setResult(e.target.value)} disabled={pending} aria-label="Co wybrałeś?" style={{ width: "100%" }} /> : null}
       <span className="lbl">Ile to zajęło?</span>
-      {mins.map((m) => <button key={m} type="button" className={"btn" + (m === base ? " primary" : "")} disabled={pending} onClick={() => finish(m)}>{label(m, fmtMin(m))}</button>)}
+      {SPENT_CHIPS.map((c) => <button key={c.min} type="button" className={"btn" + (c.min === near ? " primary" : "")} disabled={pending} onClick={() => finish(c.min)}>{label(c.min, c.label)}</button>)}
+      <span className="ask-own">
+        <input className={"in" + (bad ? " bad" : "")} type="text" inputMode="numeric" placeholder="g:mm" value={typed} disabled={pending} aria-label="Własny czas (godziny:minuty, np. 2:15)" title="Własny czas: godziny:minuty, np. 2:15"
+          aria-invalid={bad || undefined} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && own !== null) { e.preventDefault(); finish(own); } }} />
+        {own !== null ? <button type="button" className="btn" disabled={pending} onClick={() => finish(own)}>{label(own, `Zapisz ${fmtMin(own)}`)}</button> : null}
+      </span>
       <button type="button" className="btn" disabled={pending} title="Zamknij krok bez zapisu czasu" onClick={() => finish(null)}>{label(null, "Pomiń")}</button>
     </div>
   );

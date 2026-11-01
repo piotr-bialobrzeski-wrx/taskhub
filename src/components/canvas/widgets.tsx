@@ -76,7 +76,7 @@ export function InlineDate({ value, onChange, min }: { value: string | null; onC
     try { e.showPicker(); } catch { e.focus(); }
   };
   return (
-    <span className={"date-in" + (v ? "" : " empty")}>
+    <span className={"date-in" + (v ? "" : " unset")}>
       <button type="button" className="date-pick" aria-label={v ? "Zmień termin zadania" : "Ustaw termin zadania"} title="Najpóźniejsza data wykonania" onClick={open}>
         {v ? fmtDateLong(v + "T12:00") : "Bez terminu"}
       </button>
