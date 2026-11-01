@@ -14,6 +14,7 @@ import { QueuePanel } from "./Queue";
 import { AddButton, AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
 import { Draw } from "./Draw";
+import { Review } from "./Review";
 import { Projects, type ProjectPatch } from "./Projects";
 import { matches, norm, tokens, type Screen, type SearchItem } from "@/lib/search-core";
 import { autoLayout, batchTasks, chat, createCompanyAction, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeCompany, removeProject, reopenLast, restoreLayout, restoreTask, queueNext, stopWork, saveTaskPositions, withdrawMessages, updateCompanyAction, updateGroupAction, updateProjectAction } from "@/app/actions";
@@ -224,6 +225,8 @@ export function Board(p: BoardProps) {
           )} />
       ) : view === "draw" ? (
         <Draw tasks={p.tasks} onOpen={open} onToast={show} />
+      ) : view === "review" ? (
+        <Review tasks={p.tasks} onOpen={open} onDone={() => onView("canvas")} onToast={show} />
       ) : (
         <div className="listview">
           <div className="stage-grp">
