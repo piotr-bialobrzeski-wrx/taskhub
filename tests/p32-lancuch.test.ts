@@ -83,7 +83,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("decyzja i łańcuch w bazie", a
     expect(all[1].cloud).toMatchObject({ state: "queued", from: dec.id });
     expect(all[2].cloud).toMatchObject({ state: "auto", from: dec.id });
     expect(all[3].cloud ?? null).toBeNull();
-    expect((await repo.listChat(owner, t.id, 50)).some((m) => m.text.includes("po Twojej decyzji w kroku 01"))).toBe(true);
+    expect((await repo.listChat(owner, t.id, 50)).some((m) => m.text.includes("po Twoim kroku 01"))).toBe(true);
   });
 
   it("create_task i update_task z after łączą zadania; zły id i koło są odrzucane", async () => {

@@ -900,11 +900,11 @@ export async function armCloud(ownerId: string, stepId: string, msgId: string, f
   return r.length > 0;
 }
 // „auto” bez niezrobionych zależności → zlecenie do chmury (mostek odpali ją jak po kliknięciu); zwraca kroki, które właśnie ruszyły
-export async function promoteCloud(taskId: string): Promise<{ id: string; title: string; from: string | null }[]> {
+export async function promoteCloud(taskId: string): Promise<{ id: string; title: string; from: string | null; msg: string | null }[]> {
   return (await sql()`update steps s set cloud = s.cloud || jsonb_build_object('state', 'queued', 'at', now())
     where s.task_id = ${taskId} and s.status = 'todo' and s.cloud->>'state' = 'auto'
       and not exists (select 1 from step_dependencies d join steps x on x.id = d.depends_on_id where d.step_id = s.id and x.status <> 'done')
-    returning s.id, s.title, s.cloud->>'from' as "from"`).map((r) => ({ id: r.id as string, title: r.title as string, from: (r.from as string | null) ?? null }));
+    returning s.id, s.title, s.cloud->>'from' as "from", s.cloud->>'msg' as msg`).map((r) => ({ id: r.id as string, title: r.title as string, from: (r.from as string | null) ?? null, msg: (r.msg as string | null) ?? null }));
 }
 // promoteCloud z linią w rozmowie zadania: Piotr widzi, że krok ruszył bez jego kliknięcia
 export async function startAutoCloud(taskId: string): Promise<string[]> {
@@ -914,8 +914,9 @@ export async function startAutoCloud(taskId: string): Promise<string[]> {
     const order = went.some((x) => x.from) ? (await sql()`select id, title from steps where task_id = ${taskId} order by position, created_at`).map((r) => ({ id: r.id as string, title: r.title as string })) : [];
     for (const x of went) {
       const k = x.from ? order.findIndex((o) => o.id === x.from) : -1;
-      const why = k >= 0 ? `po Twojej decyzji w kroku ${String(k + 1).padStart(2, "0")} „${shortTitle(order[k].title, 50)}”` : "tak jak prosiłeś w rozmowie";
-      if (t) await addChat(t.ownerId as string, taskId, "agent", `Zlecone do chmury: „${shortTitle(x.title, 70)}”, ${why}. Claude w chmurze weźmie ten krok i zamknie go z wynikiem.`, { stepId: x.id });
+      // paczka 36: zgoda z kroku Piotra (decyzja albo „Zrobione”), z rozmowy albo z samego zadania Task Hub (msg „task”: kroki w chmurze ruszają same)
+      const why = k >= 0 ? `, po Twoim kroku ${String(k + 1).padStart(2, "0")} „${shortTitle(order[k].title, 50)}”` : x.msg === "task" ? "" : ", tak jak prosiłeś w rozmowie";
+      if (t) await addChat(t.ownerId as string, taskId, "agent", `Zlecone do chmury: „${shortTitle(x.title, 70)}”${why}. Claude w chmurze weźmie ten krok i zamknie go z wynikiem.`, { stepId: x.id });
     }
   }
   return went.map((x) => x.id);

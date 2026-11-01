@@ -264,7 +264,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const fromIx = s.cloud?.from ? t.steps.findIndex((x) => x.id === s.cloud!.from) : -1;
   const fromStep = fromIx >= 0 ? t.steps[fromIx] : null;
   const consent = fromStep && !done ? `Zgoda z kroku ${String(fromIx + 1).padStart(2, "0")} „${shortTitle(fromStep.title, 50)}”${decisionText(fromStep) ? `: ${decisionText(fromStep).replace(/^Decyzj[ae]:\s*/i, "")}` : ""}.` : null;
-  const cloudNote = !cloud ? null : cloud.state === "auto" ? (fromStep ? null : "Zleciłeś ten krok w rozmowie.")
+  const cloudNote = !cloud ? null : cloud.state === "auto" ? (fromStep ? null : cloud.msg === "task" ? "Ruszy w chmurze sam, gdy skończą się kroki przed nim." : "Zleciłeś ten krok w rozmowie.")
     : cloud.state === "rung" ? `Mac odpalił Claude w chmurze${cloud.rungAt ? ` o ${fmtTime(cloud.rungAt)}` : ""}; zaraz weźmie ten krok i zamknie go z wynikiem.`
     : macAlive ? "Mac zaraz odpali Claude w chmurze; to trwa kilkanaście sekund." : "Aplikacja Task Hub na Macu teraz nie działa: chmura ruszy, gdy Mac wróci. Awaryjnie skopiuj polecenie i wklej je w projekcie Claude.";
   const draft = draftOf(s);   // wybrana opcja albo pierwszy szkic: linie raportu bez powtórki jej treści

@@ -17,7 +17,7 @@ import { fmtTime } from "@/lib/clock";
 import { connectorIssue, isGitDraft } from "@/lib/bridge";
 import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, shownSig, type Draft } from "@/lib/agent/approval";
 import { workSummary } from "@/lib/agent/work";
-import { decisionText, destOf, isProjectStep, openQuestions, stepKind, stepsAfterDecision } from "@/lib/stepcard";
+import { decisionText, destOf, isDeployStep, isProjectStep, openQuestions, stepKind, stepsAfterDecision } from "@/lib/stepcard";
 import { isAppCodeStep, isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -191,7 +191,8 @@ export async function handoff(taskId: string, stepId: string) {
   const o = await requireOwner();
   const { task, step } = await stepOf(o.id, taskId, stepId);
   // „Uruchom” na kroku z kodem Task Hub (np. z menu kafelka) zleca go chmurze, bo mostek go nie zrobi
-  if (isAppCodeStep(step, await projectNameOf(o.id, task))) { if (await repo.queueCloud(o.id, stepId)) await repo.addChat(o.id, taskId, "agent", cloudChat(step.title), { stepId }); }
+  const project = await projectNameOf(o.id, task);
+  if (isAppCodeStep(step, project)) { if (await repo.queueCloud(o.id, stepId)) { await repo.addChat(o.id, taskId, "agent", cloudChat(step.title), { stepId }); await armAfter(o.id, task.steps, stepId, project, stepId); } }
   else if (step.status === "todo") await repo.updateStep(stepId, { status: "handoff", prevStatus: "todo", handoffAt: new Date().toISOString() });
   refresh(taskId);
 }
@@ -200,8 +201,18 @@ export async function handoff(taskId: string, stepId: string) {
 export async function runInCloud(taskId: string, stepId: string) {
   const o = await requireOwner();
   const { task, step } = await stepOf(o.id, taskId, stepId);
-  if (isProjectStep(step, await projectNameOf(o.id, task)) && (await repo.queueCloud(o.id, stepId))) await repo.addChat(o.id, taskId, "agent", cloudChat(step.title), { stepId });
+  const project = await projectNameOf(o.id, task);
+  if (isProjectStep(step, project) && (await repo.queueCloud(o.id, stepId))) {
+    await repo.addChat(o.id, taskId, "agent", cloudChat(step.title), { stepId });
+    // paczka 36: kliknięcie to zgoda także na kroki w chmurze, które czekają na ten krok (ciąg aż do kroku Piotra albo wdrożenia)
+    if (!isDeployStep(step)) await armAfter(o.id, task.steps, stepId, project, stepId);
+  }
   refresh(taskId);
+}
+// paczka 36: kroki „Claude w chmurze” (i dawne „Zleć w projekcie”), które czekają na krok stepId, ruszą same, gdy skończą się ich kroki;
+// „Wdróż na produkcję” zawsze czeka na kliknięcie Piotra
+async function armAfter(ownerId: string, steps: Step[], stepId: string, project: string | null, msg: string) {
+  for (const id of stepsAfterDecision(steps, stepId, project)) await repo.armCloud(ownerId, id, msg, stepId);
 }
 export async function cancelCloudRun(taskId: string, stepId: string) {
   const o = await requireOwner();
@@ -365,9 +376,11 @@ export async function addOwnTime(taskId: string, stepId: string, sec: number) {
 // result = co wybrał (krok-wybór bez pytania na kartce): idzie do wyniku kroku, a stamtąd do get_task („wynik:”)
 export async function doneWithTime(taskId: string, stepId: string, min: number | null, result?: string) {
   const o = await requireOwner();
-  await stepOf(o.id, taskId, stepId);
+  const { task, step } = await stepOf(o.id, taskId, stepId);
   if (min != null && Number.isFinite(min) && min > 0 && min < 60 * 24) await repo.updateStep(stepId, { spentSec: Math.round(min * 60), spentManual: true });
   const out = typeof result === "string" ? result.trim().slice(0, 2000) : "";
+  // paczka 36: „Zrobione” na kroku Piotra (nie tylko odpowiedź na pytanie z kartki) jest zgodą na kroki w chmurze, które na niego czekają
+  if (isOwnerStep(step) && step.status !== "done") await armAfter(o.id, task.steps, stepId, await projectNameOf(o.id, task), stepId);
   await finishStep(o.id, taskId, stepId, { by: "owner", ...(out ? { output: out } : {}) });
   refresh(taskId);
 }

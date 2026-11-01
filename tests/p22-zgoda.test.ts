@@ -83,7 +83,7 @@ describe.skipIf(!DB)("zgoda na szkic w bazie", async () => {
     s = await get(taskId, stepId);
     expect(s.status).toBe("done"); expect(s.approvedAt).toBeNull();
     expect(s.approval?.source).toBe("click");
-    expect((await call("get_task", { taskId })).text).toMatch(/zrobił: Claude \| zgoda Piotra: \d+ paź 2026, \d\d:\d\d/);
+    expect((await call("get_task", { taskId })).text).toMatch(/zrobił: Claude \| zgoda Piotra: \d+ \S+ 2026, \d\d:\d\d/);
     // przywrócenie do zrobienia kasuje zapis: nowa wysyłka to nowa zgoda
     await sql()`update steps set blocks = ${sql().json([draft("Inna treść")] as never)} where id = ${stepId}`;
     await actions.reopen(taskId, stepId);

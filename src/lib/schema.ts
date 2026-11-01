@@ -351,7 +351,7 @@ export type TimeSample = z.infer<typeof TimeSample>;
 export const TOOL_LABELS: Record<string, string> = {
   slack: "Slack", gmail: "E-mail", clickup: "ClickUp", calendar: "Kalendarz", claude: "Dokument",
   claudeapp: "Claude", code: "Claude Code", manual: "Ty", browser: "Przeglądarka", github: "GitHub", figma: "Figma", mural: "Mural",
-  whatsapp: "WhatsApp", sheets: "Arkusz Google", docs: "Dokument Google", file: "Plik na Macu",
+  whatsapp: "WhatsApp", sheets: "Arkusz Google", docs: "Dokument Google", file: "Plik na Macu", cloud: "Claude w chmurze",
 };
 export const toolLabel = (tool: string) => TOOL_LABELS[tool] ?? tool;
 // krok Piotra (narzędzie „Ty”): jego szacunki, jego czas i jego kalibracja; resztę robi Claude i liczy się czas Claude'a
@@ -359,7 +359,10 @@ export const isOwnerStep = (s: Pick<Step, "tool">) => s.tool === "manual";
 // krok z kodem (Claude Code) w projekcie Task Hub (paczka 14, punkt 1): zmiany w repozytorium samej aplikacji robi wątek projektu Claude w chmurze
 // (zasada „Task Hub: zmiany w kodzie robi projekt w chmurze”), więc mostek i automat go nie biorą; Piotr zleca go przyciskiem „Uruchom w chmurze”
 export const APP_PROJECT_RE = /^task[\s-]?hub$/i;
-export const isAppCodeStep = (s: Pick<Step, "tool">, project: string | null | undefined) => s.tool === "code" && !!project && APP_PROJECT_RE.test(project.trim());
+// paczka 36: narzędzie „Claude w chmurze” (cloud) = krok agenta, który robi wątek projektu w chmurze („Zleć w projekcie: …”), w każdym projekcie;
+// wcześniej taki krok był krokiem Piotra (manual) i wyglądał jak jego praca
+export const isAppCodeStep = (s: Pick<Step, "tool">, project: string | null | undefined) => s.tool === "cloud" || (s.tool === "code" && !!project && APP_PROJECT_RE.test(project.trim()));
+export const isAppProject = (project: string | null | undefined) => !!project && APP_PROJECT_RE.test(project.trim());
 export const doneByOf = (s: Pick<Step, "tool" | "doneBy">): "owner" | "agent" => s.doneBy ?? (isOwnerStep(s) ? "owner" : "agent");
 // krok-wybór Piotra (Wybierz…, Zdecyduj…, Ustal…): bez pytania na kartce „Zrobione” pyta „Co wybrałeś?” (wynik kroku), a get_task pokazuje
 // jego kartkę po zrobieniu (paczka 9). Tu, nie w stepcard.ts: ten plik importuje komponent kliencki, a stepcard ciągnie node:crypto.
@@ -381,6 +384,7 @@ export const TOOL_KEYS = Object.keys(TOOL_LABELS);
 // Klucz narzędzia przy zapisie: agent i formularze podają czasem etykietę („Claude Code”, „Ty”) albo alias (claude-code, e-mail);
 // bez tego ten sam agent liczył się jako dwa narzędzia, a chip kroku był szary. Nieznany napis zostaje (małymi literami).
 const TOOL_ALIASES: Record<string, string> = {
+  chmura: "cloud", "w chmurze": "cloud", "claude cloud": "cloud",
   "claude-code": "code", "claude_code": "code", "claudecode": "code", "kod": "code",
   piotr: "manual", me: "manual", ja: "manual", "ręcznie": "manual", recznie: "manual", human: "manual",
   email: "gmail", mail: "gmail", poczta: "gmail", outlook: "gmail",
@@ -398,4 +402,4 @@ export function normalizeTool(input: string | null | undefined, fallback = "manu
   return TOOL_LABELS[raw] ? raw : TOOL_ALIASES[raw] ?? LABEL_KEYS[raw] ?? raw;
 }
 // kroki robione poza aplikacją (hand-off do Claude / Claude Code)
-export const EXTERNAL_TOOLS = new Set(["claudeapp", "code"]);
+export const EXTERNAL_TOOLS = new Set(["claudeapp", "code", "cloud"]);

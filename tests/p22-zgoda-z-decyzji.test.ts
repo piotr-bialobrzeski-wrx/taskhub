@@ -54,7 +54,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("zgoda z decyzji przechodzi dale
     expect(by("starych zgód").cloud ?? null).toBeNull();
     expect(by("pole czatu").cloud ?? null).toBeNull();
     expect(by("na produkcję").cloud ?? null).toBeNull();
-    expect((await repo.listChat(owner, t.id, 50)).some((m) => m.text.includes("po Twojej decyzji w kroku 01"))).toBe(true);
+    expect((await repo.listChat(owner, t.id, 50)).some((m) => m.text.includes("po Twoim kroku 01"))).toBe(true);
   });
 
   it("czeka na inny krok jako „auto” z decyzją; po nim rusza; „Zmień odpowiedź” wstrzymuje niewzięte zlecenie", async () => {

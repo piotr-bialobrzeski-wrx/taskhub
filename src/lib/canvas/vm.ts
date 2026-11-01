@@ -61,10 +61,12 @@ export function stepLook(s: Step, state: StepStateKey, now: boolean, asked: stri
   // paczka 22: szkic bez zgody mówi wprost, że czeka (bez ptaszka, który wyglądał jak „zatwierdzone”); po zgodzie godzina kliknięcia Piotra
   if (state === "draft") return { key: "mine", label: "Czeka na Twoją zgodę" };
   if (sendWait) return { key: "plan-ag", label: `Zatwierdziłeś ${fmtTime(s.approval?.at ?? s.approvedAt!)}` };
-  const own = isOwnerStep(s);
+  // paczka 36: krok „Claude w chmurze” bez zlecenia (krok spoza wybranej opcji, needsClick) czeka na „Uruchom w chmurze” Piotra
+  const click = s.tool === "cloud" && !s.cloud;
+  const own = isOwnerStep(s) || click;
   if (state === "ready" && own) {
     const ask = (s.blocks ?? []).some((b) => b.type === "question") || DECIDE_RE.test(s.title);
-    return { key: "mine", label: ask ? "Zdecyduj" : "Zrób" };
+    return { key: "mine", label: click ? "Uruchom w chmurze" : ask ? "Zdecyduj" : "Zrób" };
   }
   // zlecone do chmury, a czekające na inne kroki (zgoda z rozmowy albo z decyzji, paczka 22): ruszy samo, więc to nie Twoja kolej
   // paczka 34 (wariant C): zaplanowany krok mówi wprost, kto ruszy: agent weźmie go sam albo zatrzyma się na Piotrze
@@ -76,7 +78,7 @@ export function liveStepId(t: Task, all: Task[], live: LiveActivity | null): str
   if (!live || live.taskId !== t.id) return null;
   if (live.stepId) return t.steps.some((x) => x.id === live.stepId) ? live.stepId : null;
   if (live.kind === "send") return null;
-  return t.steps.find((x) => x.status === "todo" && !isOwnerStep(x) && !x.cloud && stepStateOf(t, x, all) === "ready")?.id ?? null;
+  return t.steps.find((x) => x.status === "todo" && !isOwnerStep(x) && x.tool !== "cloud" && !x.cloud && stepStateOf(t, x, all) === "ready")?.id ?? null;
 }
 // kafelek zadania bierze stan najważniejszego kroku w kolejności: Agent pracuje, Twoja kolej, Agent oddał, Zaplanowane (kolor wg pierwszego otwartego kroku).
 // Paczka 32: praca agenta nad którymkolwiek krokiem wygrywa, żeby na głównej kanwie było widać, że zadanie jest w toku; gdy przy tym
