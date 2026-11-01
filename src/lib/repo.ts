@@ -1347,7 +1347,16 @@ export async function discardBridgeRun(ownerId: string, id: string): Promise<boo
 export async function setTaskPositions(ownerId: string, items: { id: string; x: number; y: number }[]): Promise<void> {
   for (const it of items) await sql()`update tasks set pos = ${sql().json({ x: Math.round(it.x), y: Math.round(it.y) })} where id = ${it.id} and owner_id = ${ownerId}`;
 }
-export async function clearTaskPositions(ownerId: string): Promise<void> { await sql()`update tasks set pos = null where owner_id = ${ownerId}`; }
+// ids: tylko te kafelki (paczka 34: kafelki wzięte do nowej grupy tracą zapisane położenie, żeby kanwa ułożyła grupę zwartym blokiem)
+export async function clearTaskPositions(ownerId: string, ids?: string[]): Promise<void> {
+  if (ids && !ids.length) return;
+  await sql()`update tasks set pos = null where owner_id = ${ownerId} ${ids ? sql()`and id = any(${pgArr(ids)}::uuid[])` : sql()``}`;
+}
+// paczka 34: „pogrupuj” zastępuje wszystkie grupy na głównej kanwie (także pola „Pilne i szybkie”)
+export async function deleteCanvasGroups(ownerId: string): Promise<number> {
+  const rows = await sql()`delete from canvas_groups where owner_id = ${ownerId} and task_id is null returning id`;
+  return rows.length;
+}
 export async function setStepPositions(ownerId: string, taskId: string, items: { id: string; x: number; y: number }[]): Promise<void> {
   for (const it of items) await sql()`update steps set pos = ${sql().json({ x: Math.round(it.x), y: Math.round(it.y) })} where id = ${it.id} and task_id = ${taskId} and task_id in (select id from tasks where owner_id = ${ownerId})`;
 }

@@ -155,7 +155,7 @@ export async function applyActions(r: ChatResult, deps: ChatDeps & { tasks: Task
       done.push({ label: "Fakty: " + s.title, taskId: cur.id });
     } else if (a.type === "create_group" && !deps.taskId) {
       const ids = a.taskIds.filter((id) => deps.tasks.some((t) => t.id === id && !t.deletedAt));
-      if (ids.length) { await repo.createGroup(deps.ownerId, null, a.name, ids); done.push({ label: "Grupa: " + a.name }); }
+      if (ids.length) { await repo.clearTaskPositions(deps.ownerId, ids); await repo.createGroup(deps.ownerId, null, a.name, ids); done.push({ label: "Grupa: " + a.name }); }
     }
   }
   return done;

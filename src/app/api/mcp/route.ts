@@ -675,20 +675,43 @@ function buildHandler(auth: repo.TokenAuth) {
       return text(`Odpowiedź zapisana na głównej kanwie${answers.length ? ` (załatwione wiadomości: ${answers.length})` : ""}.${left ? ` Bez odpowiedzi zostało: ${left}.` : ""}`);
     });
 
+    // jedna grupa na głównej kanwie: istniejąca o tej nazwie dostaje nowy skład; kafelki tracą zapisane położenie, żeby kanwa ułożyła
+    // grupę zwartym blokiem pod resztą (paczka 34: wcześniej prostokąt rozciągał się wokół kafelków tam, gdzie stały, i nakładał na inne grupy)
+    const putGroup = async (name: string, ids: string[]) => {
+      const same = (await repo.listGroups(ownerId, null)).find((g) => g.name.trim().toLowerCase() === name.trim().toLowerCase());
+      await repo.clearTaskPositions(ownerId, ids);
+      if (same) await repo.updateGroup(ownerId, same.id, { members: ids, auto: true });
+      else await repo.createGroup(ownerId, null, name.trim(), ids);
+      return !!same;
+    };
     server.registerTool("create_group", {
-      title: "Grupa na głównej kanwie", description: "Układa kafelki zadań w nazwaną grupę na głównej kanwie (np. jedna grupa na projekt). taskIds: id zadań z list_tasks; kafelek jest w jednej grupie naraz, więc przechodzi z poprzedniej. Grupa o tej samej nazwie już istnieje: dostaje dokładnie te kafelki (nie powstaje druga). Grup ani zadań nie usuwasz.",
+      title: "Jedna grupa na głównej kanwie", description: "Dodaje jedną nazwaną grupę kafelków na głównej kanwie, zostawiając pozostałe grupy (np. „zrób grupę na dziś”). Gdy Piotr prosi o pogrupowanie całej kanwy (według projektów, firm, terminów), użyj group_canvas, nie kilku create_group. taskIds: id zadań z list_tasks; kafelek jest w jednej grupie naraz, więc przechodzi z poprzedniej. Grupa o tej samej nazwie już istnieje: dostaje dokładnie te kafelki (nie powstaje druga). Grup ani zadań nie usuwasz.",
       inputSchema: z.object({ name: z.string().min(1).max(60), taskIds: z.array(z.string()).min(1).max(200) }),
     }, async (a) => {
       const tasks = await repo.listTasks(ownerId);
       const ids = [...new Set(a.taskIds)].filter((id) => tasks.some((t) => t.id === id));
       if (!ids.length) return text("Żadne z podanych id nie jest otwartym zadaniem; grupa nie powstała.");
-      const same = (await repo.listGroups(ownerId, null)).find((g) => g.name.trim().toLowerCase() === a.name.trim().toLowerCase());
-      // istniejąca grupa: nowy skład i auto, żeby kanwa ułożyła ją od nowa wokół jej kafelków
-      if (same) await repo.updateGroup(ownerId, same.id, { members: ids, auto: true });
-      else await repo.createGroup(ownerId, null, a.name.trim(), ids);
+      const same = await putGroup(a.name, ids);
       await markRun();
       const skipped = a.taskIds.length - ids.length;
       return text(`Grupa „${a.name.trim()}”: ${ids.length} kafelków${same ? " (zmieniona)" : ""}.${skipped ? ` Pominięte id (nie ma takich otwartych zadań): ${skipped}.` : ""}`);
+    });
+
+    // paczka 34: „pogrupuj kafelki według …” = nowy podział całej kanwy: stare grupy (także pola „Pilne i szybkie”) znikają, kafelki
+    // układają się od nowa, każda grupa zwartym blokiem; kafelek jest w jednej grupie (Piotr, 2026-11-01: nakładanie nowych grup na stare było nieczytelne)
+    server.registerTool("group_canvas", {
+      title: "Pogrupuj całą główną kanwę", description: "Zastępuje wszystkie grupy na głównej kanwie nowym podziałem (np. jedna grupa na projekt: name = nazwa projektu; zadania bez projektu w grupie „Bez projektu”) i układa kafelki od nowa, każda grupa zwartym blokiem. Dotychczasowe grupy i pola „Pilne i szybkie” znikają (kafelek jest w jednej grupie). Każde otwarte zadanie ma być w dokładnie jednej grupie; zadanie pominięte zostaje poza grupami. Jedno wywołanie na całe polecenie Piotra, nie create_group na każdą grupę. Grup pustych nie podawaj.",
+      inputSchema: z.object({ groups: z.array(z.object({ name: z.string().min(1).max(60), taskIds: z.array(z.string()).min(1).max(200) })).min(1).max(40) }),
+    }, async (a) => {
+      const open = new Set((await repo.listTasks(ownerId)).map((t) => t.id)), used = new Set<string>();
+      const groups = a.groups.map((g) => ({ name: g.name.trim(), ids: g.taskIds.filter((id) => open.has(id) && !used.has(id) && (used.add(id), true)) })).filter((g) => g.ids.length);
+      if (!groups.length) return text("Żadne z podanych id nie jest otwartym zadaniem; kanwa bez zmian.");
+      const removed = await repo.deleteCanvasGroups(ownerId);
+      await repo.clearTaskPositions(ownerId);
+      for (const g of groups) await repo.createGroup(ownerId, null, g.name, g.ids);
+      await markRun();
+      const outside = [...open].filter((id) => !used.has(id)).length;
+      return text(`Kanwa pogrupowana od nowa: ${groups.length} grup (${groups.map((g) => `„${g.name}”: ${g.ids.length}`).join(", ")}); usunięte poprzednie grupy: ${removed}.${outside ? ` Poza grupami zostało zadań: ${outside}.` : ""}`);
     });
 
     server.registerTool("get_attachment", {

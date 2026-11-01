@@ -98,6 +98,28 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("polecenia z kanwy: kolejka, lis
     expect((await workSummary(owner, { peek: true, audience: "work" })).text).not.toContain("WIADOMOŚCI Z GŁÓWNEJ KANWY");
   });
 
+  it("paczka 34: group_canvas zastępuje wszystkie grupy i układa kafelki od nowa; create_group zdejmuje położenia swoich kafelków", async () => {
+    const tasks = await repo.listTasks(owner);
+    const [a, b] = tasks;
+    const c = await repo.createTask(owner, { title: "Trzecie zadanie" });
+    // pole „Pilne i szybkie” i ręczne położenia jak po „Ułóż” i przeciąganiu
+    await repo.createGroup(owner, null, "Pilne i szybkie", [c.id], { x: 900, y: 900, w: 300, h: 200 }, { lane: "pilne-szybkie" });
+    await repo.setTaskPositions(owner, [{ id: a.id, x: 10, y: 10 }, { id: b.id, x: 700, y: 10 }, { id: c.id, x: 950, y: 950 }]);
+    const r = await call("group_canvas", { groups: [{ name: "Widelab", taskIds: [a.id] }, { name: "Bez projektu", taskIds: [b.id, c.id, a.id, "00000000-0000-0000-0000-000000000000"] }, { name: "Pusta", taskIds: ["00000000-0000-0000-0000-000000000000"] }] });
+    expect(r).toContain("2 grup");
+    expect(r).toContain("usunięte poprzednie grupy: 2");
+    const groups = await repo.listGroups(owner, null);
+    expect(groups.map((g) => [g.name, [...g.members].sort(), g.auto, g.lane])).toEqual([["Widelab", [a.id], true, null], ["Bez projektu", [b.id, c.id].sort(), true, null]]);
+    expect((await repo.listTasks(owner)).every((t) => t.pos === null)).toBe(true);
+
+    await repo.setTaskPositions(owner, [{ id: a.id, x: 10, y: 10 }, { id: b.id, x: 700, y: 10 }]);
+    expect(await call("create_group", { name: "Na dziś", taskIds: [b.id] })).toContain("1 kafelków");
+    const after = await repo.listTasks(owner);
+    expect(after.find((t) => t.id === a.id)?.pos).toEqual({ x: 10, y: 10 });
+    expect(after.find((t) => t.id === b.id)?.pos).toBeNull();
+    expect((await repo.listGroups(owner, null)).map((g) => [g.name, g.members.length])).toEqual([["Widelab", 1], ["Bez projektu", 1], ["Na dziś", 1]]);
+  });
+
   it("z plikiem: zadanie od razu, jak dotąd (pliki potrzebują zadania)", async () => {
     const f = new File([new Uint8Array([1, 2, 3])], "umowa.pdf", { type: "application/pdf" });
     const r = await intake(owner, { typed: "Sprawdź umowę", files: [f], taskId: null, stepId: null });
