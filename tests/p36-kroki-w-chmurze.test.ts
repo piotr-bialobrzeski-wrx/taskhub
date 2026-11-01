@@ -48,7 +48,6 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("kroki w chmurze w bazie", async
     client = await repo.createApiToken(owner, "Claude", "client");
     hub = (await repo.createProject(owner, "Task Hub")).id;
   });
-  afterAll(async () => { await sql().end({ timeout: 2 }); });
 
   it("rozpisanie w Task Hub: kroki w chmurze są krokami agenta i ruszają same; wybór i wdrożenie są Piotra", async () => {
     const t = await repo.createTask(owner, { title: "Paczka poprawek", projectId: hub });
@@ -95,5 +94,53 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("kroki w chmurze w bazie", async
     expect(all[0].status).toBe("done");
     expect(all[1].cloud).toMatchObject({ state: "queued", from: all[0].id });
     expect((await repo.listChat(owner, t.id, 50)).some((m) => m.text.includes("po Twoim kroku 01 „Wybierz wariant”"))).toBe(true);
+  });
+});
+
+describe.skipIf(!process.env.TEST_DATABASE_URL)("paczka 37: zmiana kroku z czatu", async () => {
+  const repo = await import("@/lib/repo");
+  const { sql } = await import("@/lib/db");
+  const mcp = await import("@/app/api/mcp/route");
+  let owner = "", client = "", hub = "";
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const r = await mcp.POST(new Request("http://x/api/mcp", { method: "POST", headers: { authorization: `Bearer ${client}`, "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) }));
+    const msgs = (await r.text()).split("\n").filter((l) => l.startsWith("data: ")).map((l) => JSON.parse(l.slice(6)));
+    const m = msgs.find((x) => x.id === 1);
+    return ((m?.result?.content ?? []) as { text?: string }[]).map((c) => c.text ?? "").join("\n") + (m?.error ? m.error.message : "");
+  };
+  beforeAll(async () => {
+    owner = (await repo.ensureOwner()).id;
+    client = await repo.createApiToken(owner, "Claude", "client");
+    hub = (await repo.listProjects(owner)).find((p) => p.name === "Task Hub")?.id ?? (await repo.createProject(owner, "Task Hub")).id;
+  });
+  afterAll(async () => { await sql().end({ timeout: 2 }); });
+
+  it("start: true uruchamia stary krok w chmurze; get_task mówi, czy ruszy sam; wdrożenie odmawia", async () => {
+    const t = await repo.createTask(owner, { title: "Stare kroki", projectId: hub, steps: [
+      { title: "Zleć w projekcie: analiza", tool: "manual" },
+      { title: "Zleć w projekcie: prototypy", tool: "manual", dependsOn: ["n1"] },
+      { title: "Wdróż na produkcję", tool: "manual", dependsOn: ["n2"] },
+    ] as never });
+    // jak po migracji: narzędzie cloud, bez zlecenia
+    await sql()`update steps set tool = 'cloud', cloud = null where task_id = ${t.id} and title like 'Zleć%'`;
+    let all = (await repo.getTask(owner, t.id))!.steps;
+    expect(await call("get_task", { taskId: t.id })).toContain("czeka na „Uruchom w chmurze”");
+    expect(await call("update_step", { stepId: all[0].id, start: true })).toContain("Krok poszedł do chmury.");
+    expect(await call("update_step", { stepId: all[1].id, start: true })).toContain("ruszy w chmurze sam");
+    expect(await call("update_step", { stepId: all[2].id, start: true })).toContain("zawsze czeka na kliknięcie");
+    all = (await repo.getTask(owner, t.id))!.steps;
+    expect(all[0].cloud?.state).toBe("queued");
+    expect(all[1].cloud?.state).toBe("auto");
+    expect(all[2].cloud ?? null).toBeNull();
+    expect(await call("get_task", { taskId: t.id })).toContain("ruszy sam po swoich krokach");
+  });
+
+  it("zmiana narzędzia na cloud w Task Hub uruchamia krok; start: false go wstrzymuje", async () => {
+    const t = await repo.createTask(owner, { title: "Zmiana rodzaju", projectId: hub, steps: [{ title: "Sprawdź przyczynę błędu", tool: "manual" }] as never });
+    const id = t.steps[0].id;
+    expect(await call("update_step", { stepId: id, tool: "cloud" })).toContain("Krok poszedł do chmury.");
+    expect((await repo.getTask(owner, t.id))!.steps[0].tool).toBe("cloud");
+    expect(await call("update_step", { stepId: id, start: false })).toContain("czeka na „Uruchom w chmurze”");
+    expect((await repo.getTask(owner, t.id))!.steps[0].cloud ?? null).toBeNull();
   });
 });

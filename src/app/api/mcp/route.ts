@@ -210,7 +210,7 @@ function buildHandler(auth: repo.TokenAuth) {
       const ax = att.length ? "ZAŁĄCZNIKI ZADANIA (grafikę albo plik tekstowy pokaże get_attachment; opis zapisz przez describe_attachment; „kroki” = kroki, którym są przypisane: przy pracy nad krokiem oglądaj tylko jego załączniki, a krok bez przypisanych (stary) wszystkie potrzebne):\n" + att.map((a) => { const u = usedBy(a.id); return `- [${a.id}] ${a.kind} „${a.name ?? a.url ?? ""}”${a.mime ? ` (${a.mime})` : ""}${a.caption ? ` · ${a.caption}` : ""}${u.length ? ` · kroki: ${u.join(", ")}` : ""}${a.analysis ? `: ${a.analysis.slice(0, 400)}` : ""}`; }).join("\n") : "";
       // rozmowa w zadaniu: Piotr dopisuje tu wymagania i pytania; NOWE = jeszcze bez odpowiedzi agenta
       const chat = await repo.listChat(ownerId, taskId, 12);
-      const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy; NOWE [id] = Piotr napisał, nikt nie odpowiedział: zrób, o co prosi, i odpowiedz przez reply_chat z messageIds = [id] tej wiadomości, osobno po każdej załatwionej prośbie; gdy prośba zmienia zakres, najpierw add_steps z before; gdy Piotr wprost zleca zmianę kodu albo prototypu Task Hub, add_steps z cloudFrom = [id] tej wiadomości):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${m.role === "user" ? stepRef(m) : ""}${m.role === "user" && !m.answeredAt ? ` NOWE [${m.id}]` : ""}: ${capText(m.text)}${whyOf(m) ? ` (powód: ${capText(whyOf(m)!)})` : ""}`).join("\n") : "";
+      const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy; NOWE [id] = Piotr napisał, nikt nie odpowiedział: zrób, o co prosi, i odpowiedz przez reply_chat z messageIds = [id] tej wiadomości, osobno po każdej załatwionej prośbie; gdy prośba zmienia zakres, najpierw add_steps z before; gdy Piotr wprost zleca zmianę kodu albo prototypu Task Hub, add_steps z cloudFrom = [id] tej wiadomości; gdy prosi o zmianę istniejącego kroku (kto go robi, czy rusza sam, co ma zrobić), zmieniasz go przez update_step (tool, detail, start), a nie tylko opisujesz zmianę):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${m.role === "user" ? stepRef(m) : ""}${m.role === "user" && !m.answeredAt ? ` NOWE [${m.id}]` : ""}: ${capText(m.text)}${whyOf(m) ? ` (powód: ${capText(whyOf(m)!)})` : ""}`).join("\n") : "";
       await markRun();
       return text(ctx + (fx ? "\n" + fx : "") + (kx ? "\n" + kx : "") + (dx ? "\n" + dx : "") + (qx ? "\n" + qx : "") + (ax ? "\n" + ax : "") + (cx ? "\n" + cx : ""));
     });
@@ -325,9 +325,24 @@ function buildHandler(auth: repo.TokenAuth) {
       return out;
     });
 
+    // paczka 37: zlecenie kroku w chmurze po update_step; napis = co się stało (do odpowiedzi agenta), null = nic do powiedzenia
+    const cloudAfterUpdate = async (taskId: string, stepId: string, start: boolean | undefined, from: string | undefined, toCloud: boolean): Promise<string | null> => {
+      if (start === undefined && !toCloud) return null;
+      const t = await repo.getTask(ownerId, taskId); const s = t?.steps.find((x) => x.id === stepId);
+      if (!t || !s) return null;
+      const project = t.projectId ? (await repo.listProjects(ownerId)).find((p) => p.id === t.projectId)?.name ?? null : null;
+      if (start === false) return (await repo.cancelCloud(ownerId, stepId)) ? "Krok nie ruszy sam: czeka na „Uruchom w chmurze”." : null;
+      if (!isProjectStep(s, project) || s.status !== "todo") return start ? "Tego kroku nie robi chmura (narzędzie inne niż cloud) albo jest już zrobiony: nic nie zlecono." : null;
+      if (isDeployStep(s)) return start ? "„Wdróż na produkcję” zawsze czeka na kliknięcie Piotra: nic nie zlecono." : null;
+      if (s.cloud) return null;
+      if (!isAppProject(project) && !from) return start ? "Poza projektem Task Hub krok w chmurze rusza sam tylko z cloudFrom (wiadomość Piotra, w której to zleca): nic nie zlecono." : null;
+      if (!(await repo.armCloud(ownerId, stepId, from ?? "task"))) return null;
+      const went = await repo.startAutoCloud(taskId);
+      return went.includes(stepId) ? "Krok poszedł do chmury." : "Krok ruszy w chmurze sam, gdy skończą się kroki, na które czeka.";
+    };
     server.registerTool("update_step", {
-      title: "Zmień krok", description: "Zmienia tytuł, opis, narzędzie, szacunek, link, połączenie albo poziom pracy kroku (tool = klucz jak w create_task; link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket; connection = nazwa z list_connections, pusty napis zdejmuje; workLevel jak w add_steps, pusty napis = z narzędzia; dependsOn = pełna nowa lista id kroków tego zadania, na których wynik krok naprawdę czeka, zastępuje dotychczasowe strzałki, [] = krok niezależny; attachments = pełna nowa lista id załączników zadania potrzebnych w tym kroku, [] = żadnych).",
-      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), tool: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional(), workLevel: z.string().optional(), dependsOn: idList.optional(), attachments: idList.optional() }),
+      title: "Zmień krok", description: "Zmienia tytuł, opis, narzędzie, szacunek, link, połączenie albo poziom pracy kroku (tool = klucz jak w create_task; link = element w zewnętrznej aplikacji, np. utworzone wydarzenie albo ticket; connection = nazwa z list_connections, pusty napis zdejmuje; workLevel jak w add_steps, pusty napis = z narzędzia; dependsOn = pełna nowa lista id kroków tego zadania, na których wynik krok naprawdę czeka, zastępuje dotychczasowe strzałki, [] = krok niezależny; attachments = pełna nowa lista id załączników zadania potrzebnych w tym kroku, [] = żadnych). start: true = krok w chmurze (tool cloud, „Zleć w projekcie: …”) ma ruszyć sam, bez „Uruchom w chmurze” (w projekcie Task Hub zawsze wolno; poza nim tylko z cloudFrom = id wiadomości Piotra, w której to zleca); start: false = ma czekać na kliknięcie Piotra. Zmiana tool na cloud w projekcie Task Hub uruchamia krok sama. Gdy Piotr w rozmowie prosi o zmianę rodzaju kroku (kto go robi, czy rusza sam), robisz to tym narzędziem, a nie tylko opisujesz.",
+      inputSchema: z.object({ stepId: z.string(), title: z.string().optional(), detail: z.string().optional(), tool: z.string().optional(), est: z.number().int().optional(), link: z.string().optional(), connection: z.string().optional(), workLevel: z.string().optional(), dependsOn: idList.optional(), attachments: idList.optional(), start: z.boolean().optional(), cloudFrom: z.string().optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId);
       if (!taskId) return text("Nie ma takiego kroku.");
@@ -353,9 +368,15 @@ function buildHandler(auth: repo.TokenAuth) {
       if (a.connection?.trim() && !connectionId) return text("Nie ma takiego połączenia (list_connections).");
       const was = await stepById(a.stepId);
       if (a.workLevel?.trim() && !normalizeLevel(a.workLevel)) return text("Nieznany poziom pracy: strategy, analysis, execution albo mechanics (Strategia, Analiza, Wykonanie, Mechanika).");
-      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, tool: a.tool, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null, connectionId, workLevel: a.workLevel === undefined ? undefined : a.workLevel.trim() || null, attachmentIds });
+      if (a.cloudFrom && !(await repo.ownerChatIn(ownerId, taskId, a.cloudFrom.trim()))) return text("Nic nie zmieniono: cloudFrom to nie wiadomość Piotra z rozmowy tego zadania z ostatniej doby.");
+      const tool = a.tool === undefined ? undefined : cloudTool(a.title ?? was?.title ?? "", a.tool);
+      await repo.updateStep(a.stepId, { title: a.title, detail: a.detail, tool, estMin: a.est, link: a.link === undefined ? undefined : externalLink(a.link) ?? null, connectionId, workLevel: a.workLevel === undefined ? undefined : a.workLevel.trim() || null, attachmentIds });
       if (deps) await repo.setStepDependencies(a.stepId, deps);
       await mark(a.stepId, "zmienił krok");
+      // paczka 37: krok w chmurze zmieniony z czatu rusza naprawdę. Uruchamia go start: true (w projekcie Task Hub albo z cloudFrom = polecenie Piotra)
+      // i sama zmiana narzędzia na cloud w projekcie Task Hub; start: false wstrzymuje zlecenie, którego chmura jeszcze nie wzięła. Wdrożenie zawsze czeka na Piotra
+      const cloudMsg = await cloudAfterUpdate(taskId, a.stepId, a.start, a.cloudFrom?.trim(), tool === "cloud" && was?.tool !== "cloud");
+      if (cloudMsg) return text(`Zmieniono. ${cloudMsg}`);
       // zmiana narzędzia albo połączenia kroku z zatwierdzonym szkicem kasuje zgodę (inne konto, inna aplikacja niż te, które Piotr widział)
       if (was?.approvedAt && !(await stepById(a.stepId))?.approvedAt) return text("Zmieniono. Zgoda Piotra na szkic tego kroku wygasła (zmienione narzędzie albo połączenie): szkic wrócił do zatwierdzenia.");
       return text("Zmieniono.");

@@ -9,6 +9,12 @@ import { laneName, laneOf } from "../canvas/lanes";
 import { draftOf, isExternalApp, isPromptDraft, isSendable, optionLabel, optionsOf, type Approvable } from "./approval";
 import { fmtDateTime } from "../clock";
 
+// paczka 37: agent widzi, czy krok w chmurze ruszy sam, czy czeka na „Uruchom w chmurze” (wtedy może go uruchomić przez update_step start)
+const cloudNote = (s: Pick<Step, "tool" | "status" | "cloud">): string => {
+  if (s.status !== "todo" || (s.tool !== "cloud" && !s.cloud)) return "";
+  if (!s.cloud) return " (w chmurze: czeka na „Uruchom w chmurze”; update_step start: true uruchomi)";
+  return s.cloud.state === "auto" ? " (w chmurze: ruszy sam po swoich krokach)" : " (w chmurze: zlecony, chmura go bierze)";
+};
 export type Scored = { task: Task; score: Score; project: Project | null };
 
 export function scoreAll(tasks: Task[], projects: Project[], samples: TimeSample[], now = Date.now()): Scored[] {
@@ -138,7 +144,7 @@ OBECNE ZADANIE: priorytet ${t.level}/5 (${LEVELS[cur.score.eff]}${cur.score.why.
 Podsumowanie: ${t.summary || "-"}
 Jak wpadło: ${capText(t.source) || "-"}
 Kroki:
-${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status} | po: ${s.dependsOn.join(", ") || "-"}${isOwnerStep(s) ? ` | szacunek ${s.estMin} min` : agentMinOf(s) ? ` | czas Claude'a ${agentMinOf(s)} min` : ""}${s.status === "done" ? ` | zrobił: ${doneByOf(s) === "owner" ? "Piotr" : "Claude"}${consentNote(s)}` : ""}${connLabel(s.connectionId, c.connections)}${s.workLevel && s.tool !== "manual" ? ` | poziom: ${LEVEL_LABELS[normalizeLevel(s.workLevel) ?? "analysis"]}` : ""}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + outputText(s) : ""}`).join("\n") || "(brak kroków)"}
+${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status}${cloudNote(s)} | po: ${s.dependsOn.join(", ") || "-"}${isOwnerStep(s) ? ` | szacunek ${s.estMin} min` : agentMinOf(s) ? ` | czas Claude'a ${agentMinOf(s)} min` : ""}${s.status === "done" ? ` | zrobił: ${doneByOf(s) === "owner" ? "Piotr" : "Claude"}${consentNote(s)}` : ""}${connLabel(s.connectionId, c.connections)}${s.workLevel && s.tool !== "manual" ? ` | poziom: ${LEVEL_LABELS[normalizeLevel(s.workLevel) ?? "analysis"]}` : ""}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + outputText(s) : ""}`).join("\n") || "(brak kroków)"}
 INNE ZADANIA NA GŁÓWNEJ KANWIE (${others.length}):
 ${others.slice(0, 40).map(brief).join("\n") || "(brak)"}${notesText(c.tasks)}`;
 }
