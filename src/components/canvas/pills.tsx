@@ -13,17 +13,20 @@ export function AgentPill({ agent, aiOn }: { agent: string; aiOn: boolean }) {
   );
 }
 
-export const ViewPill = ({ view, onView }: { view: "canvas" | "list"; onView: (v: "canvas" | "list") => void }) => (
-  <div className="gpill glass center" role="tablist" aria-label="Widok">
-    <button className={"seg" + (view === "canvas" ? " on" : "")} role="tab" aria-selected={view === "canvas"} onClick={() => onView("canvas")}><Icon k="canvas" size={14} />Kanwa</button>
-    <button className={"seg" + (view === "list" ? " on" : "")} role="tab" aria-selected={view === "list"} onClick={() => onView("list")}><Icon k="list" size={14} />Lista</button>
+export type View = "canvas" | "list" | "draw";
+// draw: trzecia pozycja „Losowanie” tylko na głównej kanwie (paczka 32); na telefonie pigułka pokazuje same ikony
+export const ViewPill = ({ view, onView, draw }: { view: View; onView: (v: View) => void; draw?: boolean }) => (
+  <div className={"gpill glass center" + (draw ? " vp3" : "")} role="tablist" aria-label="Widok">
+    <button className={"seg" + (view === "canvas" ? " on" : "")} role="tab" aria-selected={view === "canvas"} aria-label="Kanwa" onClick={() => onView("canvas")}><Icon k="canvas" size={14} /><span className="vl">Kanwa</span></button>
+    <button className={"seg" + (view === "list" ? " on" : "")} role="tab" aria-selected={view === "list"} aria-label="Lista" onClick={() => onView("list")}><Icon k="list" size={14} /><span className="vl">Lista</span></button>
+    {draw ? <button className={"seg" + (view === "draw" ? " on" : "")} role="tab" aria-selected={view === "draw"} aria-label="Losowanie" onClick={() => onView("draw")}><Icon k="dice" size={14} /><span className="vl">Losowanie</span></button> : null}
   </div>
 );
 
 export function useView(key: string) {
-  const [view, setView] = useState<"canvas" | "list">("canvas");
-  useEffect(() => { try { const v = localStorage.getItem("th-view-" + key); if (v === "list") setView("list"); } catch { /* brak storage */ } }, [key]);
-  const onView = (v: "canvas" | "list") => { setView(v); try { localStorage.setItem("th-view-" + key, v); } catch { /* brak storage */ } };
+  const [view, setView] = useState<View>("canvas");
+  useEffect(() => { try { const v = localStorage.getItem("th-view-" + key); if (v === "list" || (v === "draw" && key === "board")) setView(v); } catch { /* brak storage */ } }, [key]);
+  const onView = (v: View) => { setView(v); try { localStorage.setItem("th-view-" + key, v); } catch { /* brak storage */ } };
   return { view, onView };
 }
 

@@ -52,6 +52,7 @@ export type TaskTile = {
   tool: string; pos: Pos | null; dependsOn: string[];
   activity: TileActivity | null;
   look: Look;        // ramka i pasek: stan najważniejszego kroku (Twoja kolej, Agent oddał, Agent pracuje, Zaplanowane)
+  draw: { min: number; step: string } | null;   // losowanie (paczka 32): Twój następny krok i ile Twojej pracy zostało; null = nic dla Ciebie
 };
 // co mostek robi teraz na tym kafelku (pasek z kropkami): czynność, szczegół (np. polecenie), od kiedy trwa bieg
 export type TileActivity = { text: string; detail: string | null; since: string };
@@ -110,6 +111,7 @@ const PATHS: Record<string, string> = {
   group: '<rect x="1.5" y="2.5" width="13" height="11" rx="2.5" stroke-dasharray="2.2 1.8"/>',
   canvas: '<rect x="2" y="2" width="5" height="5" rx="1.5"/><rect x="9" y="9" width="5" height="5" rx="1.5"/><path d="M7 4.5h2.5A1.5 1.5 0 0 1 11 6v3"/>',
   list: '<rect x="2" y="3" width="12" height="4" rx="1.5"/><rect x="2" y="9" width="12" height="4" rx="1.5"/>',
+  dice: '<rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M5.6 5.6h.01M10.4 10.4h.01M8 8h.01M10.4 5.6h.01M5.6 10.4h.01" stroke-width="2.2"/>',
   send: '<path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/>',
   chev: '<path d="m4 6 4 4 4-4"/>',
   chevL: '<path d="m10 4-4 4 4 4"/>',

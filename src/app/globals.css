@@ -1180,3 +1180,54 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
   .detail > .d-body > .now:has(.pframe) { --wi: calc(var(--ww) - 2 * var(--s-5)); max-width: var(--ww); padding-inline: calc((var(--ww) - var(--tw)) / 2 + var(--s-5)); }
   .detail > .d-body .now .pframe { margin-inline: calc((100% - var(--wi)) / 2); }
 }
+
+/* ---------- Losowanie (paczka 32, wariant A „Bęben”) ---------- */
+.drawv { position: absolute; inset: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s-5); text-align: center;
+  padding: calc(84px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) calc(120px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.drawv h2 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+.drawv .sub { margin: 0; color: var(--sub); }
+.dtimes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-4); width: min(560px, 100%); }
+.dtime { border: 0; border-radius: 18px; padding: 22px 8px; background: var(--surface); color: var(--text); box-shadow: 0 4px 16px var(--shadow), 0 0 0 1px var(--line); display: grid; place-items: center; transition: transform .15s, box-shadow .15s; }
+.dtime:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 10px 26px var(--shadow), 0 0 0 2px var(--accent); }
+.dtime b { font-size: 24px; letter-spacing: -0.02em; }
+.dtime:disabled { opacity: .4; box-shadow: 0 0 0 1px var(--line); cursor: not-allowed; }
+.reelbox { position: relative; width: min(440px, 100%); height: 228px; border-radius: var(--r-lg); overflow: hidden; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line), 0 10px 30px var(--shadow); }
+.reelbox::before, .reelbox::after { content: ""; position: absolute; left: 0; right: 0; height: 76px; z-index: 2; pointer-events: none; }
+.reelbox::before { top: 0; background: linear-gradient(var(--surface), transparent); }
+.reelbox::after { bottom: 0; background: linear-gradient(transparent, var(--surface)); }
+.reelbox .win { position: absolute; left: 10px; right: 10px; top: 76px; height: 76px; border-radius: var(--r-md); box-shadow: 0 0 0 2px var(--accent); z-index: 3; pointer-events: none; }
+.reel { position: absolute; left: 0; right: 0; top: 76px; will-change: transform; transition-property: transform; transition-timing-function: cubic-bezier(.12, .72, .16, 1.02); }
+.reel > div { height: 76px; display: flex; flex-direction: column; justify-content: center; padding: 0 24px; font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; filter: blur(1.2px); transition: filter .3s 1.6s; }
+.reel.go > div { filter: none; }
+.reel > div small { font-weight: 600; font-size: 11.5px; color: var(--sub); overflow: hidden; text-overflow: ellipsis; }
+.dwrap { position: relative; width: min(420px, 100%); }
+.dpick { --sc: var(--lk-bl); width: 100%; border: 0; padding: 0; text-align: left; color: var(--text); border-radius: var(--r-lg); overflow: hidden; background: color-mix(in srgb, var(--sc) 6%, var(--surface));
+  box-shadow: 0 10px 30px var(--shadow), 0 0 0 2px var(--sc); display: flex; flex-direction: column; transition: transform .15s; animation: dland .45s cubic-bezier(.2, .9, .3, 1.3) both; }
+.dpick:hover { transform: translateY(-2px); }
+.dpick.lk-live { --sc: var(--lk-or); }
+.dpick.lk-help { --sc: var(--lk-rd); }
+.dp-hd { display: flex; justify-content: space-between; gap: 8px; padding: 8px 14px; background: var(--sc); color: #fff; font-size: 13px; font-weight: 600; }
+.dp-hd span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-bd { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px 16px; }
+.dp-tt { font-size: 19px; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; }
+.dp-nx { font-size: 13.5px; } .dp-nx b { color: var(--sub); font-weight: 600; }
+.dp-open { color: var(--accent); font-weight: 600; font-size: 12.5px; margin-top: 2px; }
+.dused { color: var(--sub); font-size: 12.5px; max-width: 420px; }
+.dwrap + .btn + .dused { margin-top: -8px; }
+@keyframes dland { 0% { transform: scale(.7) translateY(20px); opacity: 0; } 100% { transform: none; opacity: 1; } }
+.dflash { position: absolute; inset: -60%; pointer-events: none; z-index: 2; background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 55%); animation: dflash .8s ease-out both; }
+@keyframes dflash { 0% { opacity: 1; transform: scale(.6); } 100% { opacity: 0; transform: scale(1.6); } }
+.dspark { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; border-radius: 2px; z-index: 3; pointer-events: none; animation: dspark 1s ease-out both; }
+.dspark.c0 { background: var(--p1); } .dspark.c1 { background: var(--ok); } .dspark.c2 { background: var(--accent); } .dspark.c3 { background: var(--p3); } .dspark.c4 { background: var(--p2); }
+@keyframes dspark { 0% { transform: translate(0, 0) rotate(0); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) rotate(260deg); opacity: 0; } }
+@media (max-width: 860px) {
+  .dtimes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .drawv h2 { font-size: 22px; }
+  /* przełącznik widoku na głównej kanwie zostaje na telefonie, same ikony */
+  .gpill.center.vp3 { display: flex; position: static; transform: none; flex: none; }
+  .gpill.center.vp3 .seg { padding: 6px 9px; }
+  .gpill.center.vp3 .vl { display: none; }
+}
+/* trzy pozycje w przełączniku: szukajka ustępuje szerszej środkowej pigułce, w węższym oknie przełącznik pokazuje same ikony */
+@media (min-width: 861px) { .pillbar:has(.vp3) .srchw { width: clamp(160px, calc(50vw - 350px), 440px); } }
+@media (min-width: 861px) and (max-width: 1180px) { .gpill.center.vp3 .seg { padding: 6px 10px; } .gpill.center.vp3 .vl { display: none; } .pillbar:has(.vp3) .srchw { width: clamp(160px, calc(50vw - 260px), 440px); } }
