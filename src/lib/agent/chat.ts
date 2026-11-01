@@ -53,7 +53,7 @@ export type Done = { label: string; taskId?: string; note?: string };   // note:
 
 export async function runChat(text: string, deps: ChatDeps): Promise<{ reply: string; done: Done[]; result: ChatResult }> {
   const [tasks, projects, companies, connections, rules, samples, factPrefs, hist] = await Promise.all([
-    repo.listTasks(deps.ownerId, { all: true }), repo.listProjects(deps.ownerId), repo.listCompanies(deps.ownerId), repo.listConnections(deps.ownerId), repo.listRules(deps.ownerId), repo.listSamples(deps.ownerId), repo.factPreferencesText(deps.ownerId), repo.listChat(deps.ownerId, deps.taskId, 6),
+    repo.listTasks(deps.ownerId, { all: true, full: deps.taskId }), repo.listProjects(deps.ownerId), repo.listCompanies(deps.ownerId), repo.listConnections(deps.ownerId), repo.listRules(deps.ownerId), repo.listSamples(deps.ownerId), repo.factPreferencesText(deps.ownerId), repo.listChat(deps.ownerId, deps.taskId, 6),
   ]);
   const ctx = contextText({ tasks, projects, companies, connections, rules, samples, factPrefs, currentTaskId: deps.taskId });
   const step = deps.stepId ? tasks.find((t) => t.id === deps.taskId)?.steps.find((s) => s.id === deps.stepId) ?? null : null;

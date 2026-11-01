@@ -92,7 +92,7 @@ export async function updateCompany(ownerId: string, id: string, patch: Partial<
   await sql()`update companies set ${sql()(p)} where id = ${id} and owner_id = ${ownerId}`;
 }
 // projekty zostają (tracą firmę), zasady o zakresie „firma” znikają razem z nią, pochodzenie zasad pustoszeje
-export async function deleteCompany(ownerId: string, id: string): Promise<void> { await sql()`delete from companies where id = ${id} and owner_id = ${ownerId}`; }
+export async function deleteCompany(ownerId: string, id: string): Promise<void> { await sql()`delete from companies where id = ${id} and owner_id = ${ownerId}`; rulesMem.delete(ownerId); }
 export async function findCompanyByName(ownerId: string, name: string): Promise<Company | null> {
   const [r] = await sql()`select * from companies where owner_id = ${ownerId} and lower(name) = lower(${name.trim()}) limit 1`;
   return r ? rowToCompany(r) : null;
@@ -127,6 +127,7 @@ export async function updateProject(ownerId: string, id: string, patch: Partial<
 export async function deleteProject(ownerId: string, id: string): Promise<void> {
   // zadania zostają, tracą tylko etykietę
   await sql()`delete from projects where id = ${id} and owner_id = ${ownerId}`;
+  rulesMem.delete(ownerId);   // zasady projektu znikają razem z nim
 }
 export async function findProjectByName(ownerId: string, name: string): Promise<Project | null> {
   const [r] = await sql()`select * from projects where owner_id = ${ownerId} and archived_at is null and lower(name) = lower(${name.trim()}) limit 1`;
@@ -276,14 +277,21 @@ const STEP_COLS = ["id", "task_id", "position", "title", "detail", "tool", "stat
   "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for", "left_at", "approval", "need", "attachment_ids"];
 const taskCols = () => sql()(TASK_COLS);
 
-async function hydrate(rows: Row[]): Promise<Task[]> {
+// kroki zamkniętych zadań (zrobione albo w koszu) to ~80% wagi kroków, a na liście potrzeba z nich tylko tytułu i stanu:
+// czytamy je bez treści kartki (blocks, output, report, review); pełną treść dociąga getTask, gdy ktoś otworzy takie zadanie
+const STEP_HEAVY = new Set(["report", "output", "review", "blocks"]);
+const STEP_LITE_COLS = STEP_COLS.filter((c) => !STEP_HEAVY.has(c));
+async function hydrate(rows: Row[], lite: Set<string> = new Set()): Promise<Task[]> {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id as string);
-  const [stepRows, sdeps, tdeps] = await Promise.all([
-    sql()`select ${sql()(STEP_COLS)}, (blocks_prev is not null) as has_prev_blocks from steps where task_id in ${sql()(ids)} order by task_id, position, created_at`,
+  const fullIds = ids.filter((x) => !lite.has(x)), liteIds = ids.filter((x) => lite.has(x));
+  const stepsOf = (cols: string[], of: string[]) => of.length ? sql()`select ${sql()(cols)}, (blocks_prev is not null) as has_prev_blocks from steps where task_id in ${sql()(of)} order by task_id, position, created_at` : Promise.resolve([] as Row[]);
+  const [fullRows, liteRows, sdeps, tdeps] = await Promise.all([
+    stepsOf(STEP_COLS, fullIds), stepsOf(STEP_LITE_COLS, liteIds),
     sql()`select sd.* from step_dependencies sd join steps s on s.id = sd.step_id where s.task_id in ${sql()(ids)}`,
     sql()`select * from task_dependencies where task_id in ${sql()(ids)}`,
   ]);
+  const stepRows = [...fullRows, ...liteRows];
   const sdep = new Map<string, string[]>(); sdeps.forEach((d) => sdep.set(d.stepId as string, [...(sdep.get(d.stepId as string) ?? []), d.dependsOnId as string]));
   const tdep = new Map<string, string[]>(); tdeps.forEach((d) => tdep.set(d.taskId as string, [...(tdep.get(d.taskId as string) ?? []), d.dependsOnId as string]));
   const byTask = new Map<string, Step[]>();
@@ -293,29 +301,32 @@ async function hydrate(rows: Row[]): Promise<Task[]> {
 // Pamięć zadań w instancji serwera (transfer z Supabase): pełne zadania z krokami trzymamy tu, a z bazy przy każdym czytaniu bierzemy
 // tylko odcisk każdego zadania (xmin wiersza zadania, jego kroków i strzałek; zmienia się przy każdej zmianie wiersza). Pełną treść
 // pobieramy wyłącznie dla zadań, których odcisk się zmienił. Wołający dostaje kopie, więc nie zepsuje pamięci, zmieniając wynik.
-type TaskSnap = { fp: string; task: Task };
+type TaskSnap = { fp: string; task: Task; lite: boolean };
 const taskMem = new Map<string, Map<string, TaskSnap>>();
-const TASK_FP = (ownerId: string, id: string | null) => sql()`select t.id, t.deleted_at, md5(concat_ws('|', t.xmin::text,
+const TASK_FP = (ownerId: string, id: string | null) => sql()`select t.id, t.deleted_at, (t.done_at is not null or t.deleted_at is not null) as closed, md5(concat_ws('|', t.xmin::text,
     (select string_agg(s.id::text || ':' || s.xmin::text, ',' order by s.id) from steps s where s.task_id = t.id),
     (select string_agg(sd.step_id::text || '>' || sd.depends_on_id::text, ',' order by sd.step_id, sd.depends_on_id) from step_dependencies sd join steps s on s.id = sd.step_id where s.task_id = t.id),
     (select string_agg(td.depends_on_id::text, ',' order by td.depends_on_id) from task_dependencies td where td.task_id = t.id))) as fp
   from tasks t where t.owner_id = ${ownerId} ${id ? sql()`and t.id = ${id}` : sql()``} order by t.created_at, t.id`;
 
-async function memTasks(ownerId: string, id: string | null = null): Promise<{ task: Task; deletedAt: string | null }[]> {
+// full: id zadania, które ma przyjść w całości także z listy (strona zadania, get_task, rozmowa w zadaniu)
+async function memTasks(ownerId: string, id: string | null = null, full: string | null = id): Promise<{ task: Task; deletedAt: string | null }[]> {
   const fps = await TASK_FP(ownerId, id);
   let mem = taskMem.get(ownerId);
   if (!mem) { mem = new Map(); taskMem.set(ownerId, mem); }
-  const stale = fps.filter((r) => mem!.get(r.id as string)?.fp !== r.fp);
+  // jedno zadanie (getTask) zawsze w pełni; na liście zamknięte zadania wystarczą lekkie
+  const stale = fps.filter((r) => { const m = mem!.get(r.id as string); return m?.fp !== r.fp || (r.id === full && !!m?.lite); });
   if (stale.length) {
     const fpOf = new Map(stale.map((r) => [r.id as string, r.fp as string]));
-    const fresh = await hydrate(await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} and id in ${sql()([...fpOf.keys()])}`);
-    for (const t of fresh) mem.set(t.id, { fp: fpOf.get(t.id)!, task: t });
+    const lite = new Set(stale.filter((r) => r.closed && r.id !== full).map((r) => r.id as string));
+    const fresh = await hydrate(await sql()`select ${taskCols()} from tasks where owner_id = ${ownerId} and id in ${sql()([...fpOf.keys()])}`, lite);
+    for (const t of fresh) mem.set(t.id, { fp: fpOf.get(t.id)!, task: t, lite: lite.has(t.id) });
   }
   if (!id) { const live = new Set(fps.map((r) => r.id as string)); for (const k of [...mem.keys()]) if (!live.has(k)) mem.delete(k); }
   return fps.flatMap((r) => { const m = mem!.get(r.id as string); return m ? [{ task: structuredClone(m.task), deletedAt: iso(r.deletedAt) }] : []; });
 }
-export async function listTasks(ownerId: string, opts: { trash?: boolean; all?: boolean } = {}): Promise<Task[]> {
-  const all = await memTasks(ownerId);
+export async function listTasks(ownerId: string, opts: { trash?: boolean; all?: boolean; full?: string | null } = {}): Promise<Task[]> {
+  const all = await memTasks(ownerId, null, opts.full ?? null);
   if (opts.all) return all.map((x) => x.task);
   if (opts.trash) return all.filter((x) => x.deletedAt).sort((a, b) => b.deletedAt!.localeCompare(a.deletedAt!)).map((x) => x.task);
   return all.filter((x) => !x.deletedAt).map((x) => x.task);
@@ -766,9 +777,16 @@ export async function countAttachments(taskIds: string[]): Promise<Record<string
 
 // ---------- zasady ----------
 const rowToRule = (r: Row): Rule => ({ id: r.id as string, kind: ((r.kind as Rule["kind"]) ?? "rule"), scope: r.scope as Rule["scope"], companyId: (r.companyId as string) ?? null, projectId: (r.projectId as string) ?? null, tool: (r.tool as string) ?? null, originCompanyId: (r.originCompanyId as string) ?? null, title: r.title as string, body: r.body as string, trigger: (r.trigger as string) ?? null, summary: (r.summary as string) ?? null, visibility: r.visibility as Rule["visibility"] });
+// zasady czyta każda strona i każdy przebieg agenta (~50 kB za każdym razem), a zmieniają się rzadko: trzymamy je w pamięci instancji
+// przez RULES_MS; zapis zasady w tej instancji czyści pamięć od razu, inna instancja widzi zmianę najpóźniej po RULES_MS
+const RULES_MS = 2 * 60_000;
+const rulesMem = new Map<string, { at: number; rows: Rule[] }>();
 export async function listRules(ownerId: string): Promise<Rule[]> {
-  const rows = await sql()`select * from rules where owner_id = ${ownerId} order by scope, position, created_at`;
-  return rows.map(rowToRule);
+  const hit = rulesMem.get(ownerId);
+  if (hit && Date.now() - hit.at < RULES_MS) return hit.rows.map((x) => ({ ...x }));
+  const rows = (await sql()`select * from rules where owner_id = ${ownerId} order by scope, position, created_at`).map(rowToRule);
+  rulesMem.set(ownerId, { at: Date.now(), rows });
+  return rows.map((x) => ({ ...x }));
 }
 // zasady pasujące do zadania: ogólne + firmy projektu + projektu + narzędzi użytych w krokach; projekt prywatny nie widzi niczego firmowego
 export function rulesFor(rules: Rule[], projectId: string | null, tools: string[], companyId: string | null = null): Rule[] {
@@ -793,11 +811,13 @@ export async function upsertRule(ownerId: string, rule: RuleInput): Promise<Rule
     : await sql()`insert into rules (owner_id, kind, scope, company_id, project_id, tool, origin_company_id, title, body, trigger, summary, visibility) values (${ownerId}, ${kind}, ${rule.scope}, ${companyId}, ${projectId}, ${tool}, ${origin}, ${title}, ${body}, ${trigger}, ${summary}, ${rule.visibility ?? "private"}) returning *`;
   const r = rows[0];
   if (!r) throw new Error("Nie ma takiej zasady.");
+  rulesMem.delete(ownerId);
   await snapshotRule(ownerId, r, rule.id ? "updated" : "created");
   return rowToRule(r);
 }
 export async function deleteRule(ownerId: string, id: string): Promise<void> {
   const [r] = await sql()`delete from rules where id = ${id} and owner_id = ${ownerId} returning *`;
+  rulesMem.delete(ownerId);
   if (r) await snapshotRule(ownerId, r, "deleted");
 }
 export type RuleChange = "created" | "updated" | "deleted";

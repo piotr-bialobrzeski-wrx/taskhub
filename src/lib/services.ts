@@ -37,8 +37,9 @@ export async function layoutLanes(ownerId: string): Promise<void> {
 }
 
 export type Bundle = { tasks: Task[]; scored: Scored[]; projects: Awaited<ReturnType<typeof repo.listProjects>>; companies: Awaited<ReturnType<typeof repo.listCompanies>>; connections: Awaited<ReturnType<typeof repo.listConnections>>; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>> };
-export async function bundle(ownerId: string): Promise<Bundle> {
-  const [tasks, projects, companies, connections, rules, samples] = await Promise.all([repo.listTasks(ownerId, { all: true }), repo.listProjects(ownerId), repo.listCompanies(ownerId), repo.listConnections(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId)]);
+// full: zadanie otwarte na stronie przychodzi w całości także wtedy, gdy jest zamknięte (lista trzyma zamknięte bez treści kartek)
+export async function bundle(ownerId: string, full: string | null = null): Promise<Bundle> {
+  const [tasks, projects, companies, connections, rules, samples] = await Promise.all([repo.listTasks(ownerId, { all: true, full }), repo.listProjects(ownerId), repo.listCompanies(ownerId), repo.listConnections(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId)]);
   return { tasks, projects, companies, connections, rules, samples, scored: scoreAll(tasks, projects, samples) };
 }
 

@@ -171,7 +171,7 @@ function buildHandler(auth: repo.TokenAuth) {
       title: "Zadanie z kontekstem", description: "Pełny kontekst jednego zadania: cel, jak wpadło, kroki z faktami i linkami, zasady pracy dla projektu i narzędzi, notatki.",
       inputSchema: z.object({ taskId: z.string() }),
     }, async ({ taskId }) => {
-      const [tasks, projects, companies, connections, rules, samples, factPrefs] = await Promise.all([repo.listTasks(ownerId, { all: true }), repo.listProjects(ownerId), repo.listCompanies(ownerId), repo.listConnections(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId), repo.factPreferencesText(ownerId)]);
+      const [tasks, projects, companies, connections, rules, samples, factPrefs] = await Promise.all([repo.listTasks(ownerId, { all: true, full: taskId }), repo.listProjects(ownerId), repo.listCompanies(ownerId), repo.listConnections(ownerId), repo.listRules(ownerId), repo.listSamples(ownerId), repo.factPreferencesText(ownerId)]);
       const t = tasks.find((x) => x.id === taskId); if (!t) return text("Nie ma takiego zadania.");
       // bieg wysyłki widzi tylko podpisany szkic swojego kroku: kontekst zadania (wątki, czat, fakty) pisze też agent i treść z zewnątrz
       if (scope?.kind === "send") {
