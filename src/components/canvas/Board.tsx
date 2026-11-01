@@ -13,6 +13,7 @@ import type { AgentQueue } from "@/lib/agent/work";
 import { QueuePanel } from "./Queue";
 import { AddButton, AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
 import { SearchPill } from "./SearchPill";
+import { Draw } from "./Draw";
 import { Projects, type ProjectPatch } from "./Projects";
 import { matches, norm, tokens, type Screen, type SearchItem } from "@/lib/search-core";
 import { autoLayout, batchTasks, chat, createCompanyAction, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeCompany, removeProject, reopenLast, restoreLayout, restoreTask, queueNext, stopWork, saveTaskPositions, withdrawMessages, updateCompanyAction, updateGroupAction, updateProjectAction } from "@/app/actions";
@@ -221,6 +222,8 @@ export function Board(p: BoardProps) {
           empty={p.tasks.length ? null : (
             <div className="empty glass"><h2>Pierwsze zadanie</h2><p>Napisz na dole, co masz na głowie, albo wklej maila czy wiadomość. Task Hub zrobi z tego zadanie i poprowadzi je krok po kroku.</p></div>
           )} />
+      ) : view === "draw" ? (
+        <Draw tasks={p.tasks} onOpen={open} onToast={show} />
       ) : (
         <div className="listview">
           <div className="stage-grp">
@@ -285,7 +288,7 @@ export function Board(p: BoardProps) {
             </>
           )}
         </div>
-        {off ? null : <ViewPill view={view} onView={onView} />}
+        {off ? null : <ViewPill view={view} onView={onView} draw />}
         <span className="sp" />
         {!off && view === "canvas" ? <AddButton tileLabel="Dodaj zadanie" groupLabel={n ? "Zgrupuj zaznaczone" : "Dodaj grupę"} onTile={() => setNamer("tile")} onGroup={() => setNamer("group")} /> : null}
         <SearchPill index={p.index} screen={screen} value={q} onChange={setQ} onPick={onPick} />

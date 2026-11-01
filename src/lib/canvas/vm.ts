@@ -1,7 +1,7 @@
 // Modele kafelków liczone na serwerze: stan, etykiety, teksty czasu i terminu. Klient tylko rysuje.
 import type { Scored } from "../agent/context";
 import { dueLeftH, isComplete, whyText } from "../priority";
-import { agentMinOf, estOf, fmtMin, spentMin, taskAgent, taskEst, taskSpent } from "../time";
+import { agentMinOf, estOf, fmtMin, remainEst, spentMin, taskAgent, taskEst, taskSpent } from "../time";
 import { isOwnerStep, toolLabel, type Step, type Task } from "../schema";
 import { destOf, tileDest, tileDestHref, whoDid } from "../stepcard";
 import type { Look, StepStateKey, StepTile, TaskStateKey, TaskTile } from "@/components/canvas/ui";
@@ -90,6 +90,7 @@ export function taskTile(s: Scored, all: Task[], questions: number, live: LiveAc
   const looks = t.steps.map((x) => stepLook(x, stepStateOf(t, x, all), nowId === x.id));
   return {
     look: taskLook(t, state, looks, !!activity, questions),
+    draw: drawInfo(t, state, looks, questions),
     activity, pending,
     id: t.id, title: t.title, summary: state === "done" && t.noteSummary ? t.noteSummary : t.summary, state,
     base: s.score.base, eff: s.score.eff, why: whyText(s.score),
@@ -103,6 +104,15 @@ export function taskTile(s: Scored, all: Task[], questions: number, live: LiveAc
     tool: t.steps[0]?.tool ?? "claude",
     pos: t.pos, dependsOn: t.dependsOn,
   };
+}
+
+// losowanie zadania (paczka 32): zadanie bierze udział, gdy Piotr ma w nim następny krok (Zrób, Zdecyduj, zgoda na szkic) albo pytanie od agenta;
+// min = ile jego pracy zostało (ten sam szacunek co „Piotrowi zostało”), step = tytuł jego pierwszego kroku na kafelku wyniku
+export function drawInfo(t: Task, state: TaskStateKey, looks: Look[], questions: number): TaskTile["draw"] {
+  if (state === "done" || state === "blocked") return null;
+  const i = looks.findIndex((l) => l.key === "mine");
+  if (i < 0 && !questions) return null;
+  return { min: remainEst(t), step: i >= 0 ? t.steps[i].title : "Odpowiedz na pytanie agenta" };
 }
 
 // bieg mostka związany z tym zadaniem: wiersz czynności na kafelku zadania (kanwa główna i kafelek zadania na kanwie kroków)
