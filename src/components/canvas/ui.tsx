@@ -11,16 +11,15 @@ export const TS_SHORT: Record<TaskStateKey, string> = { ...TS_LABEL, draft: "Do 
 export const ST_LABEL: Record<StepStateKey, string> = { done: "Zrobione", ready: "Do zrobienia", draft: "Do zatwierdzenia", blocked: "Czeka", handoff: "Pracuje" };
 // wygląd kafelka (paczka 18, od paczki 34 wariant C): 5 stanów z jednej palety; zaplanowane w kolorze tego, kto ruszy („Ruszy samo” albo „Będzie Twój ruch”)
 export type LookKey = "live" | "mine" | "help" | "plan-ag" | "plan-me" | "done";
-// also: drugi stan na pasku kafelka zadania, gdy agent pracuje, a coś czeka też na Piotra (paczka 32: „Agent pracuje” + po prawej „Zdecyduj”)
+// also: drugi stan na pasku kafelka zadania: najgorszy stan kroków na wierzchu, a po prawej „Pracuje”, gdy agent w tym czasie pracuje (paczka 42)
 export type Look = { key: LookKey; label: string; also?: { key: LookKey; label: string } };
 // paczka 34, wariant C „Szeroka obwódka”: bez grubego paska u góry. Stan niesie szeroka obwódka i tło w kolorze stanu,
 // a w rogu kafelka stoi drobna etykieta: kropka w kolorze stanu i szary tekst (zaplanowane: pusta kropka w kolorze tego, kto ruszy)
 export function LookTag({ look }: { look: Look }) {
-  // agent pracuje, a coś czeka też na Piotra: „Pracuje · Zdecyduj”, żeby obie rzeczy zmieściły się w rogu
-  const label = look.also && look.key === "live" ? "Pracuje" : look.label;
+  // najgorszy stan, a agent pracuje nad innym krokiem: „Potrzebna pomoc · Pracuje”; dłuższa etykieta skraca się wielokropkiem, „Pracuje” zostaje
   return (
-    <span className="lk-tag" title={look.also ? `${look.label}, czeka też na Ciebie: ${look.also.label}` : look.label}>
-      <span className="lk-t">{label}</span>
+    <span className="lk-tag" title={look.also ? `${look.label}, a agent w tym czasie pracuje` : look.label}>
+      <span className="lk-t">{look.label}</span>
       {look.also ? <span className={"lk-also lk-also-" + look.also.key}>{look.also.label}</span> : null}
     </span>
   );

@@ -15,7 +15,7 @@ export const isPreset = (v: unknown): v is PresetKey => typeof v === "string" &&
 export const presetName = (k: string) => PRESETS.find((p) => p.key === k)?.name ?? null;
 
 // dueDays: dni do terminu wg kalendarza w Warszawie (ujemne = po terminie, 0 = dziś, null = bez terminu)
-// look: stan kafelka (taskLook), mine = także „Agent pracuje” z czekającą kolejką Piotra (also)
+// look: stan kafelka (taskLook, najgorszy stan kroków), mine = Piotr ma ruch (Twoja kolej albo Potrzebna pomoc)
 export type PresetTask = LaneSortable & { projectId: string | null; dueDays: number | null; look: LookKey; mine: boolean; hasSteps: boolean };
 export type PresetProject = { id: string; name: string; color: number; weight: number };
 export type PresetGroup = { name: string; color: number; ids: string[] };

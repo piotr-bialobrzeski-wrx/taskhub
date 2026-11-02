@@ -85,16 +85,17 @@ export function liveStepId(t: Task, all: Task[], live: LiveActivity | null): str
   if (live.kind === "send") return null;
   return t.steps.find((x) => x.status === "todo" && !isOwnerStep(x) && x.tool !== "cloud" && !x.cloud && stepStateOf(t, x, all) === "ready")?.id ?? null;
 }
-// kafelek zadania bierze stan najważniejszego kroku w kolejności: Agent pracuje, Twoja kolej, Agent oddał, Zaplanowane (kolor wg pierwszego otwartego kroku).
-// Paczka 32: praca agenta nad którymkolwiek krokiem wygrywa, żeby na głównej kanwie było widać, że zadanie jest w toku; gdy przy tym
-// coś czeka na Piotra (Zdecyduj, Zrób, zgoda, pomoc), pasek pokazuje to po prawej (also), więc jego kolej nie znika
+// kafelek zadania bierze najgorszy stan spośród kroków (paczka 42, zadanie „Kafelek zadania w najgorszym statusie”):
+// czerwony (agent oddał krok, Potrzebna pomoc) → czeka na Piotra (zgoda, Zdecyduj, Zrób, pytanie agenta) → Agent pracuje → Zaplanowane (kolor wg pierwszego otwartego kroku).
+// Gdy przy czerwonym albo Twojej kolei agent jednocześnie pracuje nad innym krokiem, po prawej zostaje „Pracuje” (also), żeby praca nie znikała z kanwy
 export function taskLook(t: Task, state: TaskStateKey, steps: Look[], working: boolean, questions: number): Look {
   if (state === "done") return { key: "done", label: "Zrobione" };
   // paczka 32: zadanie w łańcuchu czeka na wcześniejsze zadanie; jego kroki jeszcze nie są niczyją kolejką
   if (state === "blocked") return { key: "plan-ag", label: "Czeka na inne zadanie" };
-  const yours = steps.find((l) => l.key === "mine") ?? (questions ? { key: "mine" as const, label: "Zdecyduj" } : null) ?? steps.find((l) => l.key === "help") ?? null;
-  if (working || steps.some((l) => l.key === "live")) return yours ? { key: "live", label: "Agent pracuje", also: { key: yours.key, label: yours.label } } : { key: "live", label: "Agent pracuje" };
-  if (yours) return yours;
+  const worst = steps.find((l) => l.key === "help") ?? steps.find((l) => l.key === "mine") ?? (questions ? { key: "mine" as const, label: "Zdecyduj" } : null);
+  const live = working || steps.some((l) => l.key === "live");
+  if (worst) return live ? { key: worst.key, label: worst.label, also: { key: "live", label: "Pracuje" } } : { key: worst.key, label: worst.label };
+  if (live) return { key: "live", label: "Agent pracuje" };
   const next = t.steps.findIndex((x) => x.status !== "done");
   return next >= 0 ? steps[next] : { key: "plan-ag", label: "Ruszy samo" };
 }

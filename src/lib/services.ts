@@ -58,7 +58,7 @@ export async function layoutPreset(ownerId: string, key: PresetKey): Promise<voi
   const tasks = open.map((s) => {
     const l = look(s);
     return { id: s.task.id, eff: s.score.eff, remainMin: remainEst(s.task), due: s.task.due, projectId: s.task.projectId ?? null,
-      dueDays: s.task.due ? daysBetween(today, s.task.due.slice(0, 10)) : null, look: l.key, mine: !!l.also, hasSteps: s.task.steps.length > 0 };
+      dueDays: s.task.due ? daysBetween(today, s.task.due.slice(0, 10)) : null, look: l.key, mine: l.key === "mine" || l.key === "help", hasSteps: s.task.steps.length > 0 };
   });
   const groups = presetGroups(key, tasks, b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color, weight: p.weight })));
   await repo.deleteCanvasGroups(ownerId);
