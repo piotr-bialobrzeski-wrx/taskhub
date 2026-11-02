@@ -25,16 +25,16 @@ export function LookTag({ look }: { look: Look }) {
     </span>
   );
 }
-// pasek planu na kafelku zadania: jeden odcinek na krok (zrobione, teraz agent albo Ty, później samo albo czeka na Ciebie) i licznik
-export type PlanSeg = "d" | "l" | "m" | "h" | "a" | "p";
+// pasek kroków na kafelku zadania (paczka 39, wersja A): jeden odcinek na krok, bez dopisków pod spodem; szczegóły w dymku po najechaniu.
+// Odcinek = kto (me Piotr, ag Claude) i stan (plan, now, done) albo fail (agent oddał krok)
+export type PlanSeg = "me-plan" | "ag-plan" | "me-now" | "ag-now" | "me-done" | "ag-done" | "fail";
 export function PlanStrip({ plan }: { plan: PlanSeg[] }) {
   if (!plan.length) return null;
-  const a = plan.filter((x) => x === "a").length, me = plan.filter((x) => x === "p").length;
-  const tip = `Plan kroków: ${plan.filter((x) => x === "d").length} zrobione` + (a ? `, ${a} ruszy samo` : "") + (me ? `, ${me} czeka na Ciebie` : "");
+  const n = (k: string) => plan.filter((x) => x.endsWith(k)).length;
+  const tip = `Kroki: ${n("done")} zrobione, ${n("now")} w toku, ${n("plan")} zaplanowane` + (n("fail") ? `, ${n("fail")} ${n("fail") === 1 ? "nieudany" : "nieudane"}` : "");
   return (
     <span className="tplan" title={tip} aria-label={tip}>
-      <span className="plan-s">{plan.map((x, i) => <i key={i} className={"ps-" + x} />)}</span>
-      {a || me ? <span className="plan-n">{a ? <span className="pn-a">{a} samo</span> : null}{me ? <span className="pn-p">{me} Ty</span> : null}</span> : null}
+      {plan.map((x, i) => { const [w, st] = x === "fail" ? ["ag", "fail"] : x.split("-"); return <i key={i} className={`ps-${w} ps-${st}`} />; })}
     </span>
   );
 }
@@ -154,6 +154,20 @@ export function Lvl({ base, eff, why, label }: { base: number; eff: number; why?
       </span>
       {label ? <span className="lvl-t" data-w={WIDEST}>{LEVELS[eff]}</span> : null}
     </>
+  );
+}
+
+// plakietka priorytetu na kafelku zadania (paczka 39, wersja A): słowo w kolorze poziomu; Wysoki i Krytyczny pełnym kolorem, niższe delikatnym tłem.
+// Strzałka, gdy pokazany priorytet różni się od ustawionego (dymek mówi dlaczego)
+export function PrioPill({ base, eff, why }: { base: number; eff: number; why?: string }) {
+  const b = eff - base;
+  const tip = b ? `Priorytet ${base}/5, pokazany ${eff}/5: ${why ?? ""}` : `Priorytet ${eff}/5: ${LEVELS[eff]}`;
+  return (
+    <span className={"prio-pill" + (eff <= 3 ? " low" : "")} style={{ ["--pc" as string]: `var(--pr${eff})` }} title={tip} aria-label={tip}>
+      {b ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d={b > 0 ? "M12 19V5M5 12l7-7 7 7" : "M12 5v14M5 12l7 7 7-7"} /></svg> : null}
+      {LEVELS[eff]}
+    </span>
   );
 }
 

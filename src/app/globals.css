@@ -89,9 +89,11 @@ a { color: var(--accent); }
    i tło w kolorze stanu, a w rogu stoi drobna etykieta (kropka w kolorze stanu, szary tekst). Dwa główne kolory: fiolet = czeka na Piotra,
    morski = działa agent. Zaplanowane mają przerywaną obwódkę w kolorze tego, kto ruszy („Ruszy samo” albo „Będzie Twój ruch”).
    Obwódka to outline, więc obwódki zaznaczenia (.sel, .picked) zostają pod nią; grubość dzielimy przez powiększenie (--z), żeby przy oddaleniu nie chudła */
-:root { --lk-mine: #5A5CE6; --lk-live: #2E9C8A; --lk-help: #E0697A; --lk-done: #BFC1D2; --lk-tint: 9%; }
+:root { --lk-mine: #5A5CE6; --lk-live: #2E9C8A; --lk-help: #E0697A; --lk-done: #BFC1D2; --lk-tint: 9%;
+  --seg-plan: #E4E5EE; --pr5: #E4572E; --pr4: #E0901A; --pr3: #6E7090; --pr2: #A3A5BC; --pr1: #C4C6D6; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --lk-mine: #8486F7; --lk-live: #4FC2AE; --lk-help: #F07E8D; --lk-done: #5A5C74; --lk-tint: 12%; }
+  :root:not([data-theme="light"]) { --lk-mine: #8486F7; --lk-live: #4FC2AE; --lk-help: #F07E8D; --lk-done: #5A5C74; --lk-tint: 12%;
+    --seg-plan: #2C2D40; --pr5: #F5774D; --pr4: #F0AA45; --pr3: #9A9CB8; --pr2: #6E7090; --pr1: #4A4C62; }
 }
 .lk { --bw: 5px; --sc: var(--sub); }
 .lk-live { --sc: var(--lk-live); }
@@ -138,19 +140,22 @@ a { color: var(--accent); }
 .canvas.far .node.lk:not(.task) .n-meta { display: none; }
 @media (prefers-reduced-motion: reduce) { .node.lk-live::after { animation: none !important; } }
 /* pasek planu na kafelku zadania: jeden odcinek na krok; przerywany morski = później ruszy samo, pusty fioletowy = później czeka na Piotra */
-.tplan { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; }
+.tplan { display: flex; gap: 3px; flex: 1 1 auto; min-width: 40px; width: 100%; height: 9px; }
 .t-row > .tplan { flex: 1 1 auto; }
-.plan-s { display: flex; gap: 3px; flex: 1 1 60px; min-width: 40px; height: 7px; }
-.plan-s i { flex: 1; min-width: 3px; border-radius: 99px; }
-.plan-s .ps-d { background: var(--lk-done); }
-.plan-s .ps-l { background: var(--lk-live); }
-.plan-s .ps-m { background: var(--lk-mine); }
-.plan-s .ps-h { background: var(--lk-help); }
-.plan-s .ps-a { background: repeating-linear-gradient(-45deg, var(--lk-live) 0 2px, color-mix(in srgb, var(--lk-live) 25%, transparent) 2px 4px); }
-.plan-s .ps-p { box-shadow: inset 0 0 0 1.5px var(--lk-mine); background: color-mix(in srgb, var(--lk-mine) 12%, transparent); }
-.plan-n { flex: none; display: inline-flex; gap: 6px; font-size: 11px; font-weight: 600; }
-.pn-a { color: color-mix(in srgb, var(--lk-live) 85%, var(--text)); }
-.pn-p { color: color-mix(in srgb, var(--lk-mine) 85%, var(--text)); }
+/* paczka 39, wersja A: jeden system kresek. Kolor = kto (Piotr --lk-mine, Claude --lk-live), wypełnienie = stan */
+.tplan i { flex: 1; min-width: 3px; border-radius: 99px; --w: var(--lk-mine); }
+.tplan .ps-ag { --w: var(--lk-live); }
+.tplan .ps-plan { background: var(--seg-plan); box-shadow: inset 0 0 0 1.5px var(--w); }
+.tplan .ps-now { background: repeating-linear-gradient(-45deg, var(--w) 0 2.5px, color-mix(in srgb, var(--w) 28%, transparent) 2.5px 5px); box-shadow: inset 0 0 0 1px var(--w); }
+.tplan .ps-done { background: var(--w); }
+.tplan .ps-fail { background: var(--lk-help); }
+/* plakietka priorytetu: Wysoki i Krytyczny pełnym kolorem, niższe delikatnym tłem w kolorze poziomu */
+.prio-pill { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 7px; border-radius: var(--r-pill); font-size: 11px; font-weight: 700; line-height: 1; color: #FFFFFF; background: var(--pc); }
+.prio-pill.low { background: color-mix(in srgb, var(--pc) 22%, transparent); color: var(--text); }
+.prio-pill svg { flex: none; }
+.t-row .cnt.cnt-a { flex: none; display: inline-flex; align-items: baseline; gap: 3px; font-variant-numeric: tabular-nums; }
+.cnt-a .cnt-n { font-size: 12px; font-weight: 700; color: var(--text); }
+.cnt-a small { font-size: 11px; color: var(--sub); }
 /* wiersze listy: ten sam kolor stanu, cieńsza obwódka (lista jest gęsta) */
 .lrow.lk { --bw: 2.5px; outline: var(--bw) solid var(--sc); outline-offset: 0; background: color-mix(in srgb, var(--sc) var(--lk-tint), var(--surface)); margin-bottom: 10px; }
 .lrow.lk-plan-ag, .lrow.lk-plan-me { --bw: 2px; outline-style: dashed; }
@@ -199,7 +204,7 @@ a { color: var(--accent); }
 .t-row > * { flex: none; }
 .t-row .bar { flex: 1 1 24px; min-width: 24px; }
 .t-row .cnt { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }   /* licznik ustępuje plakietkom */
-.t-row .st { display: block; line-height: 1.5; }
+.t-row .st { display: block; line-height: 1.5; padding: 2px 6px; }   /* paczka 39: plakietka priorytetu zabiera miejsce, więc chipy w wierszu kafelka są węższe */
 .t-row .st.due { order: 0; }
 .proj-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--c); }
 .proj-tag::before { content: ""; width: 7px; height: 7px; border-radius: 99px; background: var(--c); }

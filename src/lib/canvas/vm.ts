@@ -2,7 +2,7 @@
 import type { Scored } from "../agent/context";
 import { dueLeftH, isComplete, whyText } from "../priority";
 import { agentMinOf, estOf, fmtMin, remainEst, spentMin, taskAgent, taskEst, taskSpent } from "../time";
-import { isOwnerStep, toolLabel, type Step, type Task } from "../schema";
+import { doneByOf, isOwnerStep, toolLabel, type Step, type Task } from "../schema";
 import { destOf, tileDest, tileDestHref, whoDid } from "../stepcard";
 import type { Look, PlanSeg, StepStateKey, StepTile, TaskStateKey, TaskTile } from "@/components/canvas/ui";
 
@@ -111,7 +111,7 @@ export function taskTile(s: Scored, all: Task[], questions: number, live: LiveAc
   const looks = t.steps.map((x) => stepLook(x, stepStateOf(t, x, all), nowId === x.id, asked.get(x.id) ?? null));
   return {
     look: taskLook(t, state, looks, !!activity, questions),
-    plan: planOf(looks),
+    plan: planOf(t.steps, looks),
     draw: drawInfo(t, state, looks, questions),
     activity, pending,
     id: t.id, title: t.title, summary: state === "done" && t.noteSummary ? t.noteSummary : t.summary, state,
@@ -128,9 +128,12 @@ export function taskTile(s: Scored, all: Task[], questions: number, live: LiveAc
   };
 }
 
-// pasek planu na kafelku zadania (paczka 34, wariant C): jeden odcinek na krok, w kolejności kroków
-const PLAN_SEG: Record<Look["key"], PlanSeg> = { done: "d", live: "l", mine: "m", help: "h", "plan-ag": "a", "plan-me": "p" };
-export const planOf = (looks: Look[]): PlanSeg[] => looks.map((l) => PLAN_SEG[l.key]);
+// pasek kroków na kafelku zadania (paczka 39, wersja A z zadania „Wygląd kafelka zadania”): jeden odcinek na krok, w kolejności kroków.
+// Jeden system dla obu wykonawców: kolor mówi kto (Piotr niebieski, Claude zielony), wypełnienie mówi stan (zaplanowany = szara kreska
+// z obwódką, w toku = paskowana, zrobiony = pełna w kolorze tego, kto zrobił), nieudany (agent oddał) = czerwona
+const PLAN_SEG: Record<Look["key"], PlanSeg> = { done: "me-done", live: "ag-now", mine: "me-now", help: "fail", "plan-ag": "ag-plan", "plan-me": "me-plan" };
+export const planOf = (steps: Pick<Step, "tool" | "doneBy">[], looks: Look[]): PlanSeg[] =>
+  looks.map((l, i) => (l.key === "done" ? (steps[i] && doneByOf(steps[i]) === "agent" ? "ag-done" : "me-done") : PLAN_SEG[l.key]));
 
 // losowanie zadania (paczka 32): zadanie bierze udział, gdy Piotr ma w nim następny krok (Zrób, Zdecyduj, zgoda na szkic) albo pytanie od agenta;
 // min = ile jego pracy zostało (ten sam szacunek co „Piotrowi zostało”), step = tytuł jego pierwszego kroku na kafelku wyniku

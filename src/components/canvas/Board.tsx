@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, TASK_SIZE } from "@/lib/canvas/layout";
-import { Icon, LookTag, Lvl, PlanStrip, ToolIcon, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
+import { Icon, LookTag, Lvl, PlanStrip, PrioPill, ToolIcon, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
 import { AgentFeed, Dock, Namer, PrioPicker, ProjectPicker, TileMenu, Toast, useToast } from "./widgets";
 import { msgCount } from "@/lib/auto";
 import type { FeedItem, WorkBubble } from "@/lib/feed";
@@ -36,8 +36,11 @@ const UNDO_MS = 8000;   // tyle „Cofnij” zostaje po „Ułóż”
 export function TaskTileView({ t }: { t: TaskTile }) {
   // przy dwóch i więcej plakietkach licznik skraca się do „zrobione/wszystkie”, żeby nic nie było ucięte
   const badges = (t.drafts ? 1 : 0) + (t.handed ? 1 : 0) + (t.questions ? 1 : 0) + (t.pending ? 1 : 0);
-  const cnt = !t.progress.all ? t.estText : badges >= 2 ? `${t.progress.done}/${t.progress.all}` : `${t.progress.done}/${t.progress.all} · ${t.estText}`;
-  // paczka 34, wariant C: górna linia = narzędzie, projekt i etykieta stanu w rogu; na dole priorytet, termin i licznik, pod nimi pasek planu kroków
+  // paczka 39, wersja A: licznik „4/7 kroków” pogrubiony, czas obok drobniej; przy plakietkach (szkice, w Claude, pytania) zostaje samo „4/7”
+  const cnt = !t.progress.all ? <span className="cnt-n">{t.estText}</span>
+    : <><span className="cnt-n">{t.progress.done}/{t.progress.all}{badges ? "" : " " + plural(t.progress.all, "krok", "kroki", "kroków")}</span>{badges ? null : <small>{t.estText}</small>}</>;
+  // paczka 34, wariant C: górna linia = narzędzie, projekt i etykieta stanu w rogu; paczka 39, wersja A: na dole plakietka priorytetu, termin i licznik,
+  // pod nimi pasek kroków na całą szerokość
   return (
     <>
       <span className="t-top">
@@ -50,13 +53,13 @@ export function TaskTileView({ t }: { t: TaskTile }) {
         {t.summary ? <span className={"t-sum" + (t.state === "done" ? " done" : "")}>{t.summary}</span> : null}
       </span>
       <span className="t-row">
-        <Lvl base={t.base} eff={t.eff} why={t.why} />
+        <PrioPill base={t.base} eff={t.eff} why={t.why} />
         {t.due ? <span className={"st due " + t.due.cls} title={"Termin: " + t.due.iso}>{t.due.text}</span> : null}
         {t.activity ? (
           <span className="t-rt"><Activity text={t.activity.text} detail={t.activity.detail} since={t.activity.since} who="Claude" /></span>
         ) : (
           <span className="t-rt">
-            <span className="cnt" style={{ fontVariantNumeric: "tabular-nums" }} title={`Kroki ${t.progress.done}/${t.progress.all} · ${t.estText}`}>{cnt}</span>
+            <span className="cnt cnt-a" title={`Kroki ${t.progress.done}/${t.progress.all} · ${t.estText}`}>{cnt}</span>
             {t.drafts ? <span className="st draft" title={`${t.drafts} do zatwierdzenia`}>{t.drafts} szkic{t.drafts === 1 ? "" : t.drafts < 5 ? "e" : "ów"}</span> : null}
             {t.handed ? <span className="st handoff" title={`${t.handed} w Claude`}>{t.handed} w Claude</span> : null}
             {t.questions ? <span className="st draft" style={{ display: "inline-flex", gap: 3 }} title="Pytania od agenta czekają na Twoją odpowiedź"><Icon k="question" size={12} sw={1.8} />{t.questions}</span> : null}
@@ -232,7 +235,7 @@ export function Board(p: BoardProps) {
           <div className="stage-grp">
             {hits.length ? hits.map((t) => (
               <button key={t.id} type="button" className={"lrow lk lk-" + t.look.key} onClick={() => open(t.id)}>
-                <Lvl base={t.base} eff={t.eff} why={t.why} />
+                <PrioPill base={t.base} eff={t.eff} why={t.why} />
                 <span className="n-title">{t.title}</span>
                 {t.due ? <span className={"st due " + t.due.cls}>{t.due.text}</span> : null}
                 <LookTag look={t.look} />

@@ -21,6 +21,12 @@ describe("pasek planu na kafelku zadania", () => {
   it("jeden odcinek na krok w kolejności kroków", () => {
     const a = step({ status: "done" }), b = step({ tool: "manual", dependsOn: [a.id], title: "Zdecyduj" }), c = step({ tool: "claude", dependsOn: [b.id] }), d = step({ tool: "manual", dependsOn: [c.id], title: "Wdróż na produkcję" });
     const t = task({ steps: [a, b, c, d] });
-    expect(taskTile({ task: t, score: { base: 3, eff: 3, why: [] } } as never, [t], 0).plan).toEqual(["d", "m", "a", "p"]);
+    expect(taskTile({ task: t, score: { base: 3, eff: 3, why: [] } } as never, [t], 0).plan).toEqual(["me-done", "me-now", "ag-plan", "me-plan"]);
+  });
+  it("paczka 39: zrobiony odcinek ma kolor tego, kto zrobił, oddany krok jest czerwony", () => {
+    const a = step({ status: "done", tool: "manual", doneBy: "owner" }), b = step({ status: "done", tool: "manual", doneBy: "agent" }),
+      c = step({ tool: "claude", leftAt: "2026-11-02T08:00:00Z" } as never), d = step({ tool: "claude", status: "handoff", dependsOn: [] });
+    const t = task({ steps: [a, b, c, d] });
+    expect(taskTile({ task: t, score: { base: 3, eff: 3, why: [] } } as never, [t], 0).plan).toEqual(["me-done", "ag-done", "fail", "ag-now"]);
   });
 });
