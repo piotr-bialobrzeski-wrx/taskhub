@@ -35,7 +35,8 @@ export function gridFor(list: LItem[], shift: number) {
 export type Layout = { P: Record<string, Pos>; origin: Pos | null; groups: LGroup[] };
 
 // shift = true na kanwie kroków (kolumna 0 zajmuje kafelek zadania)
-export function computePositions(list: LItem[], groupsIn: LGroup[], size: Size, shift: boolean): Layout {
+// aspect (paczka 40): proporcje widocznej kanwy (szerokość / wysokość); pola i grupy automatyczne układają się w ten kształt
+export function computePositions(list: LItem[], groupsIn: LGroup[], size: Size, shift: boolean, aspect = LANE_ASPECT): Layout {
   const H = size.h, Wn = size.w, sh = shift ? 1 : 0;
   const ids = new Set(list.map((x) => x.id)), memberOf: Record<string, LGroup> = {};
   const groups = groupsIn.map((g) => ({ ...g, members: g.members.filter((id) => ids.has(id)) }));
@@ -49,7 +50,7 @@ export function computePositions(list: LItem[], groupsIn: LGroup[], size: Size, 
   if (lanes.length) {
     const cells: string[][] = [[], [], [], []];
     lanes.forEach((g) => { cells[laneIndex(g.lane!)] = g.members; });
-    const box = laneMatrix(cells, size);
+    const box = laneMatrix(cells, size, aspect);
     lanes.forEach((g) => { const i = laneIndex(g.lane!); Object.assign(g, box.cells[i]); for (const [id, q] of Object.entries(box.P[i])) P[id] = q; });
     bottom = OY + box.h;
     const per = Math.max(1, Math.floor((box.w + GX) / (Wn + GX)));
@@ -70,8 +71,27 @@ export function computePositions(list: LItem[], groupsIn: LGroup[], size: Size, 
     bottom = Math.max(bottom, P[x.id].y + H);
   };
   free.forEach((x) => place(x, fg[x.id], OX, fy, true));
+  // paczka 40 (menu „Ułóż”, gotowe układy i grupowanie z czatu): grupy automatyczne na głównej kanwie nie stoją już jedna pod drugą,
+  // tylko w rzędach o proporcjach ekranu (packGroups), pod polami i wolnymi kafelkami
+  const packed = shift ? [] : groups.filter((g) => g.auto && !lanes.includes(g));
+  if (packed.length) {
+    const mems = packed.map((g) => list.filter((x) => memberOf[x.id] === g));
+    const pk = packGroups(mems.map((m) => m.length), size, aspect), y0 = bottom + GGAP;
+    packed.forEach((g, i) => {
+      const b = pk.boxes[i], gx = OX + pk.pos[i].x, gy = y0 + pk.pos[i].y;
+      mems[i].forEach((x, j) => {
+        P[x.id] = hasPos(x) ? { x: x.pos!.x, y: x.pos!.y } : { x: gx + GPAD + (j % b.k) * (Wn + LANE_GX), y: gy + GHEAD + GPAD + Math.floor(j / b.k) * (H + GY) };
+      });
+      if (mems[i].some(hasPos)) {
+        const xs = mems[i].map((x) => P[x.id]);
+        g.x = Math.min(...xs.map((q) => q.x)) - GPAD; g.y = Math.min(...xs.map((q) => q.y)) - GPAD - GHEAD;
+        g.w = Math.max(...xs.map((q) => q.x)) + Wn + GPAD - g.x; g.h = Math.max(...xs.map((q) => q.y)) + H + GPAD - g.y;
+      } else Object.assign(g, { x: gx, y: gy, w: b.w, h: b.h });
+      bottom = Math.max(bottom, g.y + g.h);
+    });
+  }
   groups.forEach((g) => {
-    if (lanes.includes(g)) return;
+    if (lanes.includes(g) || packed.includes(g)) return;
     const mem = list.filter((x) => memberOf[x.id] === g);
     if (mem.length) {
       // grupa automatyczna: blok pod wolnymi kafelkami; narysowana ręcznie: nowe kafelki wewnątrz jej prostokąta
@@ -95,7 +115,7 @@ export function computePositions(list: LItem[], groupsIn: LGroup[], size: Size, 
 // żeby całość miała proporcje szerokiego ekranu (ok. 1,9 : 1) i mieściła się w jak największym powiększeniu. Puste pole zostaje na swoim miejscu.
 export const LANE_ASPECT = 1.9, LANE_GAP = 36, LANE_GX = 28;
 const laneIndex = (k: string) => LANES.findIndex((l) => l.key === k);
-export function laneMatrix(cells: string[][], size: Size) {
+export function laneMatrix(cells: string[][], size: Size, aspect = LANE_ASPECT) {
   const Wn = size.w, H = size.h, n = (i: number) => cells[i]?.length ?? 0;
   const make = (q: number) => {
     const cw = [Math.max(1, Math.min(q, Math.max(n(0), n(2)))), Math.max(1, Math.min(q, Math.max(n(1), n(3))))];
@@ -103,7 +123,7 @@ export function laneMatrix(cells: string[][], size: Size) {
     const rows = (i: number) => Math.max(1, Math.ceil(n(i) / cw[i % 2]));
     const rowH = [Math.max(rows(0), rows(1)), Math.max(rows(2), rows(3))].map((r) => GHEAD + GPAD + r * H + (r - 1) * GY + GPAD);
     const w = colW[0] + LANE_GAP + colW[1], h = rowH[0] + LANE_GAP + rowH[1];
-    return { cw, colW, rowH, w, h, fit: Math.min(LANE_ASPECT / w, 1 / h) };
+    return { cw, colW, rowH, w, h, fit: Math.min(aspect / w, 1 / h) };
   };
   let m = make(1);
   for (let q = 2; q <= 5; q++) { const c = make(q); if (c.fit > m.fit + 1e-9) m = c; }
@@ -114,6 +134,31 @@ export function laneMatrix(cells: string[][], size: Size) {
     out.P.push(Object.fromEntries((cells[i] ?? []).map((id, j) => [id, { x: x + GPAD + (j % m.cw[col]) * (Wn + LANE_GX), y: y + GHEAD + GPAD + Math.floor(j / m.cw[col]) * (H + GY) }])));
   }
   return out;
+}
+
+// Rozkład grup w kształcie ekranu (paczka 40, port pack() z prototypu menu „Ułóż”): każda grupa dostaje do c kolumn kafelków,
+// grupy idą w rzędy (kolejność zostaje) do szerokości mw. Wybieramy c i mw, przy których całość ma proporcje ekranu (LANE_ASPECT)
+// i mieści się w jak największym powiększeniu. Pusta grupa ma miejsce na jeden kafelek.
+export function packGroups(counts: number[], size: Size, aspect = LANE_ASPECT) {
+  const Wn = size.w, H = size.h;
+  const gw = (c: number) => c * Wn + (c - 1) * LANE_GX + 2 * GPAD;
+  const gh = (n: number, c: number) => { const r = Math.max(1, Math.ceil(n / c)); return GHEAD + GPAD + r * H + (r - 1) * GY + GPAD; };
+  type Box = { k: number; w: number; h: number };
+  let best: { boxes: Box[]; pos: Pos[]; w: number; h: number; fit: number } | null = null;
+  for (let c = 1; c <= 6; c++) {
+    const boxes = counts.map((n) => { const k = Math.max(1, Math.min(c, n)); return { k, w: gw(k), h: gh(n, k) }; });
+    const widest = Math.max(...boxes.map((b) => b.w)), total = boxes.reduce((s, b) => s + b.w, 0) + GGAP * (boxes.length - 1);
+    const widths: number[] = [];
+    for (let mw = widest; mw < total; mw += 60) widths.push(mw);
+    widths.push(total);
+    for (const mw of widths) {
+      let x = 0, y = 0, rowH = 0, w = 0; const pos: Pos[] = [];
+      boxes.forEach((b) => { if (x > 0 && x + b.w > mw) { x = 0; y += rowH + GGAP; rowH = 0; } pos.push({ x, y }); w = Math.max(w, x + b.w); x += b.w + GGAP; rowH = Math.max(rowH, b.h); });
+      const h = y + rowH, fit = Math.min(aspect / w, 1 / h);
+      if (!best || fit > best.fit + 1e-12) best = { boxes, pos, w, h, fit };
+    }
+  }
+  return best ?? { boxes: [], pos: [], w: 0, h: 0, fit: 0 };
 }
 
 export const inRect = (g: { x: number; y: number; w: number; h: number }, p: Pos) => p.x >= g.x && p.x <= g.x + g.w && p.y >= g.y && p.y <= g.y + g.h;

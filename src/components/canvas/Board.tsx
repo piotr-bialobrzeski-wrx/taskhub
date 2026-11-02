@@ -17,6 +17,7 @@ import { Draw } from "./Draw";
 import { Review } from "./Review";
 import { Projects, type ProjectPatch } from "./Projects";
 import { matches, norm, tokens, type Screen, type SearchItem } from "@/lib/search-core";
+import { isPreset, presetName, type PresetKey } from "@/lib/canvas/presets";
 import { autoLayout, batchTasks, chat, createCompanyAction, createGroupAction, createProjectAction, createTaskQuick, deleteGroupAction, linkTasks, logout, purgeTaskAction, removeCompany, removeProject, reopenLast, restoreLayout, restoreTask, queueNext, stopWork, saveTaskPositions, withdrawMessages, updateCompanyAction, updateGroupAction, updateProjectAction } from "@/app/actions";
 import { Activity } from "@/components/Activity";
 
@@ -208,7 +209,16 @@ export function Board(p: BoardProps) {
     setNamer(null); setSel(new Set()); run(async () => { await freeze(members); const id = await createGroupAction(null, name, members, rect); setSelGroup(id); });
   };
   const batch = (op: Parameters<typeof batchTasks>[1], ok: string) => { const list = ids; setConfirm(false); setSel(new Set()); run(() => batchTasks(list, op), ok); };
-  const layoutNow = () => { undoL.remember(layoutSnapshot(api.current, p.tasks.map((t) => t.id), p.groups)); run(() => autoLayout(null), "Ułożono"); };
+  // paczka 40: „Ułóż” z gotowym układem (liczony na serwerze, bez agenta); po ułożeniu kanwa sama dopasowuje powiększenie
+  const [lay, setLay] = useState<PresetKey | null>(null);
+  const [fitKey, setFitKey] = useState(0);
+  useEffect(() => { try { const v = localStorage.getItem("th-layout"); if (isPreset(v)) setLay(v); } catch { /* brak storage */ } }, []);
+  const layoutNow = (key: PresetKey) => {
+    undoL.remember(layoutSnapshot(api.current, p.tasks.map((t) => t.id), p.groups));
+    setLay(key); try { localStorage.setItem("th-layout", key); } catch { /* brak storage */ }
+    run(async () => { await autoLayout(null, key); setFitKey((n) => n + 1); }, `Ułożone: ${presetName(key)}`);
+  };
+  const layoutMenu = { current: lay, onPick: layoutNow };
 
   const n = sel.size, word = plural(n, "zadanie", "zadania", "zadań");
   const allDone = n > 0 && ids.every((id) => byId.get(id)?.state === "done");   // same ukończone: przycisk cofa „gotowe”
@@ -222,7 +232,7 @@ export function Board(p: BoardProps) {
           onOpen={(id) => { if (id) open(id); }} onMenu={(id, at) => { if (id) setTmenu({ id, ...at }); }} onMove={(moved) => run(() => saveTaskPositions(moved))}
           onLink={(from, to) => run(() => linkTasks(from, to, true), "Połączono: drugie zadanie zacznie się po pierwszym")} onUnlink={(from, to) => run(() => linkTasks(from, to, false), "Usunięto połączenie")}
           onGroupChange={(id, patch) => run(() => updateGroupAction(null, id, patch))} onGroupCreate={(rect, members) => run(async () => { await freeze(members); await createGroupAction(null, "Nowa grupa", members, rect); })}
-          onAutoLayout={layoutNow} onUndoLayout={undoL.canUndo ? () => undoL.undo(null) : null}
+          onUndoLayout={undoL.canUndo ? () => undoL.undo(null) : null} fitKey={fitKey}
           empty={p.tasks.length ? null : (
             <div className="empty glass"><h2>Pierwsze zadanie</h2><p>Napisz na dole, co masz na głowie, albo wklej maila czy wiadomość. Task Hub zrobi z tego zadanie i poprowadzi je krok po kroku.</p></div>
           )} />
@@ -290,13 +300,13 @@ export function Board(p: BoardProps) {
             <>
               <div className="gpill glass"><BrandButton open={menu} onClick={() => setMenu((m) => !m)} /></div>
               {view === "canvas" ? <div className="zslot" /> : null}
-              {view === "canvas" ? <MakePill tileTitle="Nowe zadanie jako kafelek" groupTitle={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onTile={() => setNamer(namer === "tile" ? null : "tile")} onGroup={() => setNamer(namer === "group" ? null : "group")} /> : null}
+              {view === "canvas" ? <MakePill tileTitle="Nowe zadanie jako kafelek" groupTitle={n ? "Zgrupuj zaznaczone" : "Nowa grupa"} onTile={() => setNamer(namer === "tile" ? null : "tile")} onGroup={() => setNamer(namer === "group" ? null : "group")} layout={layoutMenu} /> : null}
             </>
           )}
         </div>
         {off ? null : <ViewPill view={view} onView={onView} draw />}
         <span className="sp" />
-        {!off && view === "canvas" ? <AddButton tileLabel="Dodaj zadanie" groupLabel={n ? "Zgrupuj zaznaczone" : "Dodaj grupę"} onTile={() => setNamer("tile")} onGroup={() => setNamer("group")} /> : null}
+        {!off && view === "canvas" ? <AddButton tileLabel="Dodaj zadanie" groupLabel={n ? "Zgrupuj zaznaczone" : "Dodaj grupę"} onTile={() => setNamer("tile")} onGroup={() => setNamer("group")} layout={layoutMenu} /> : null}
         <SearchPill index={p.index} screen={screen} value={q} onChange={setQ} onPick={onPick} />
         <AgentPill agent={p.agent} aiOn={p.aiOn} />
       </div>
