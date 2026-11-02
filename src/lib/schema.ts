@@ -1,5 +1,6 @@
 // Typy domenowe i schematy bloków. Jedno źródło prawdy dla UI, agenta, API i MCP.
 import { z } from "zod";
+import { DUE_KINDS, Repeat } from "./due";
 
 // ---------- pochodzenie: skąd jest fakt, wiadomość, akcja ----------
 export const Provenance = z.object({
@@ -192,6 +193,10 @@ export const Step = z.object({
   logged: z.boolean(),
   pos: z.object({ x: z.number(), y: z.number() }).nullable(),
   dependsOn: z.array(z.string()),
+  // termin kroku (paczka 40): data, rodzaj i powtarzanie jak przy zadaniu; brak = krok bez terminu
+  due: z.string().nullable().optional(),
+  dueKind: z.enum(DUE_KINDS).optional(),
+  repeat: Repeat.nullable().optional(),
   // załączniki zadania potrzebne w tym kroku (paczka 27); null = krok sprzed przypisywania (agent widzi wszystkie, „Skąd” żadnych)
   attachmentIds: z.array(z.string()).nullable().optional(),
   connectionId: z.string().nullable(),   // przez które połączenie (konto, firma) zrobić ten krok; null = agent wybiera
@@ -310,6 +315,8 @@ export const Task = z.object({
   source: z.string(),
   level: z.number().int().min(1).max(5),
   due: z.string().nullable(),            // YYYY-MM-DD
+  dueKind: z.enum(DUE_KINDS).optional(),  // „by” = zrób do (najpóźniejsza data), „on” = w dniu (konkretny dzień); brak = „by”
+  repeat: Repeat.nullable().optional(),   // powtarzanie terminu: co N dni, tygodni albo miesięcy; null = bez powtarzania
   doneAt: z.string().nullable(),
   deletedAt: z.string().nullable(),
   noteText: z.string().nullable(),

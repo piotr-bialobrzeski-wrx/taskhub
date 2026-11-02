@@ -25,6 +25,15 @@ export function LookTag({ look }: { look: Look }) {
     </span>
   );
 }
+// chip terminu na kafelku (paczka 40): „do 5 lis” (zrób do) albo „5 lis” (w dniu), ikona powtarzania, gdy termin się powtarza
+export function DueChip({ due }: { due: NonNullable<TaskTile["due"]> }) {
+  const kind = due.kind === "on" ? "W dniu" : "Zrób do";
+  return (
+    <span className={"st due " + due.cls + (due.rep ? " rep" : "")} title={`${kind}: ${due.iso}${due.rep ? `, powtarza się ${due.rep}` : ""}`}>
+      {due.text}{due.rep ? <Icon k="repeat" size={11} sw={1.9} /> : null}
+    </span>
+  );
+}
 // pasek kroków na kafelku zadania (paczka 39, wersja A): jeden odcinek na krok, bez dopisków pod spodem; szczegóły w dymku po najechaniu.
 // Odcinek = kto (me Piotr, ag Claude) i stan (plan, now, done) albo fail (agent oddał krok)
 export type PlanSeg = "me-plan" | "ag-plan" | "me-now" | "ag-now" | "me-done" | "ag-done" | "fail";
@@ -44,7 +53,7 @@ export type TaskTile = {
   id: string; title: string; summary: string; state: TaskStateKey;
   base: number; eff: number; why: string;
   project: { id: string; name: string; color: number } | null;
-  due: { text: string; cls: "" | "soon" | "late"; iso: string } | null;
+  due: { text: string; cls: "" | "soon" | "late"; iso: string; kind?: "by" | "on"; rep?: string | null } | null;
   progress: { done: number; all: number };
   estText: string; drafts: number; handed: number; questions: number;
   pending: number;   // wiadomości Piotra w zadaniu bez odpowiedzi agenta (chip „2 wiadomości”)
@@ -104,6 +113,7 @@ const PATHS: Record<string, string> = {
   back: '<path d="M10 3 5 8l5 5"/>',
   logo: '<path d="M3 8h4M9 4h4M9 12h4M7 8l2-4M7 8l2 4"/>',
   x: '<path d="M4 4l8 8M12 4l-8 8"/>',
+  repeat: '<path d="M11.5 2.5 13.5 4.5l-2 2"/><path d="M13.5 4.5H5a2.5 2.5 0 0 0-2.5 2.5v.5M4.5 13.5l-2-2 2-2"/><path d="M2.5 11.5H11a2.5 2.5 0 0 0 2.5-2.5v-.5"/>',
   undo: '<path d="M5.5 3 2.5 6l3 3"/><path d="M2.5 6h7a4 4 0 0 1 0 8H7"/>',
   full: '<path d="M9.5 2.5h4v4M13.5 2.5 9.5 6.5M6.5 13.5h-4v-4M2.5 13.5l4-4"/>',
   ext: '<path d="M6.5 3.5H4a1.5 1.5 0 0 0-1.5 1.5v7A1.5 1.5 0 0 0 4 13.5h7a1.5 1.5 0 0 0 1.5-1.5V9.5"/><path d="M9.5 2.5h4v4M13.5 2.5 7.5 8.5"/>',

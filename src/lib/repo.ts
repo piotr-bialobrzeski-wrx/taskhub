@@ -10,6 +10,7 @@ import { doneChat, stepKind } from "./stepcard";
 import { shortTitle } from "./auto";
 import { guessProject } from "./project-guess";
 import { isModelName, MAX_ESCALATION, normalizeLevel } from "./agent/models";
+import { parseDueKind, parseRepeat, type DueKind, type Repeat } from "./due";
 export { approvalSig, approvalValid, draftOf, draftsOf, isSendable, optionLabel, optionsOf } from "./agent/approval";
 
 type Row = Record<string, unknown>;
@@ -258,12 +259,13 @@ function rowToStep(r: Row, deps: string[]): Step {
     workLevel: (r.workLevel as string) ?? null, modelPick: (r.modelPick as string) ?? null, escalation: Number(r.escalation ?? 0),
     lastRun: (r.lastRun as Step["lastRun"]) ?? null, cloud: (r.cloud as Step["cloud"]) ?? null, waitFor: (r.waitFor as string) ?? null,
     leftAt: iso(r.leftAt), need: (r.need as Step["need"]) ?? null,
+    due: dateStr(r.due), dueKind: parseDueKind(r.dueKind), repeat: parseRepeat(r.repeat),
   };
 }
 function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
   return {
     id: r.id as string, ownerId: r.ownerId as string, projectId: (r.projectId as string) ?? null, title: r.title as string, titleOriginal: (r.titleOriginal as string) ?? null, summary: (r.summary as string) ?? "",
-    source: (r.source as string) ?? "", level: Number(r.level), due: dateStr(r.due), doneAt: iso(r.doneAt), deletedAt: iso(r.deletedAt),
+    source: (r.source as string) ?? "", level: Number(r.level), due: dateStr(r.due), dueKind: parseDueKind(r.dueKind), repeat: parseRepeat(r.repeat), doneAt: iso(r.doneAt), deletedAt: iso(r.deletedAt),
     noteText: (r.noteText as string) ?? null, noteSummary: (r.noteSummary as string) ?? null, noteAt: iso(r.noteAt),
     pos: (r.pos as { x: number; y: number }) ?? null, lane: (r.lane as string) ?? null, createdAt: iso(r.createdAt) as string, dependsOn: deps, steps,
   };
@@ -271,10 +273,10 @@ function rowToTask(r: Row, steps: Step[], deps: string[]): Task {
 // kolumny do odczytu zadań i kroków: bez `search` (tsvector, sam tekst drugi raz) i bez `blocks_prev` (cała poprzednia kartka, tylko do „Cofnij”),
 // bo listy zadań czyta się bardzo często (mostek, puls strony, konektor), a każdy bajt z bazy liczy się do transferu Supabase.
 // Nowa kolumna potrzebna w rowToTask / rowToStep musi trafić też tutaj.
-const TASK_COLS = ["id", "owner_id", "project_id", "title", "title_original", "summary", "source", "level", "due", "done_at", "deleted_at", "note_text", "note_summary", "note_at", "pos", "lane", "created_at"];
+const TASK_COLS = ["id", "owner_id", "project_id", "title", "title_original", "summary", "source", "level", "due", "due_kind", "repeat", "done_at", "deleted_at", "note_text", "note_summary", "note_at", "pos", "lane", "created_at"];
 const STEP_COLS = ["id", "task_id", "position", "title", "detail", "tool", "status", "prev_status", "needs_approval", "est_min", "spent_sec", "spent_manual", "spent_at", "link", "handoff_at", "done_at",
   "report", "output", "review", "blocks", "blocks_at", "logged", "pos", "connection_id", "file_path", "approved_at", "approved_sig", "send_started_at", "agent_sec", "agent_started_at", "done_by",
-  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for", "left_at", "approval", "need", "attachment_ids"];
+  "agent_at", "opened_at", "work_level", "model_pick", "escalation", "last_run", "cloud", "wait_for", "left_at", "approval", "need", "attachment_ids", "due", "due_kind", "repeat"];
 const taskCols = () => sql()(TASK_COLS);
 
 // kroki zamkniętych zadań (zrobione albo w koszu) to ~80% wagi kroków, a na liście potrzeba z nich tylko tytułu i stanu:
@@ -336,13 +338,13 @@ export async function getTask(ownerId: string, id: string): Promise<Task | null>
   return (await memTasks(ownerId, id))[0]?.task ?? null;
 }
 export type NewStep = { title: string; detail?: string; tool?: string; needsApproval?: boolean; estMin?: number; link?: string; dependsOn?: string[] /* indeksy lub id */; connectionId?: string | null; workLevel?: string | null; attachmentIds?: string[] | null };
-export type NewTask = { title: string; summary?: string; source?: string; level?: number; due?: string | null; projectId?: string | null; steps?: NewStep[]; dependsOn?: string[] };
+export type NewTask = { title: string; summary?: string; source?: string; level?: number; due?: string | null; dueKind?: DueKind; repeat?: Repeat | null; projectId?: string | null; steps?: NewStep[]; dependsOn?: string[] };
 
 export async function createTask(ownerId: string, input: NewTask): Promise<Task> {
   // projekt z treści: gdy nikt go nie podał, a tytuł, cel albo źródło wymienia nazwę projektu, zadanie dostaje go od razu (także bez agenta, gdy mostek stoi)
   const projectId = input.projectId ?? guessProject([input.title, input.summary, input.source].filter(Boolean).join("\n"), await listProjects(ownerId))?.id ?? null;
-  const [t] = await sql()`insert into tasks (owner_id, project_id, title, summary, source, level, due)
-    values (${ownerId}, ${projectId}, ${input.title.slice(0, 200)}, ${input.summary ?? ""}, ${input.source ?? ""}, ${input.level ?? 3}, ${input.due ?? null}) returning id`;
+  const [t] = await sql()`insert into tasks (owner_id, project_id, title, summary, source, level, due, due_kind, repeat)
+    values (${ownerId}, ${projectId}, ${input.title.slice(0, 200)}, ${input.summary ?? ""}, ${input.source ?? ""}, ${input.level ?? 3}, ${input.due ?? null}, ${input.dueKind ?? "by"}, ${input.repeat ? sql().json(input.repeat) : null}) returning id`;
   const id = t.id as string;
   if (input.dependsOn?.length) await sql()`insert into task_dependencies ${sql()(input.dependsOn.map((d) => ({ task_id: id, depends_on_id: d })))} on conflict do nothing`;
   if (input.steps?.length) await addSteps(id, input.steps);
@@ -390,7 +392,7 @@ export async function addSteps(taskId: string, steps: NewStep[], opts: { before?
   const deps = await sql()`select * from step_dependencies where step_id in ${sql()(created.map((c) => c.id))}`;
   return rows.map((r) => rowToStep(r, deps.filter((d) => d.stepId === r.id).map((d) => d.dependsOnId as string)));
 }
-export type TaskPatch = Partial<{ title: string; titleOriginal: string | null; summary: string; source: string; level: number; due: string | null; projectId: string | null; pos: { x: number; y: number } | null; lane: string | null; deletedAt: string | null; noteText: string | null; noteSummary: string | null }>;
+export type TaskPatch = Partial<{ title: string; titleOriginal: string | null; summary: string; source: string; level: number; due: string | null; dueKind: DueKind; repeat: Repeat | null; projectId: string | null; pos: { x: number; y: number } | null; lane: string | null; deletedAt: string | null; noteText: string | null; noteSummary: string | null }>;
 // firma zadania (przez projekt): od niej zależy konto wysyłki kroku bez wskazanego połączenia
 const taskCompany = async (ownerId: string, id: string): Promise<string | null> =>
   ((await sql()`select p.company_id from tasks t left join projects p on p.id = t.project_id where t.id = ${id} and t.owner_id = ${ownerId}`)[0]?.companyId as string) ?? null;
@@ -409,6 +411,8 @@ export async function updateTask(ownerId: string, id: string, patch: TaskPatch):
   if (patch.source !== undefined) p.source = patch.source;
   if (patch.level !== undefined) p.level = patch.level;
   if (patch.due !== undefined) p.due = patch.due;
+  if (patch.dueKind !== undefined) p.due_kind = parseDueKind(patch.dueKind);
+  if (patch.repeat !== undefined) p.repeat = patch.repeat ? sql().json(patch.repeat) : null;
   if (patch.projectId !== undefined) p.project_id = patch.projectId;
   if (patch.pos !== undefined) p.pos = patch.pos === null ? null : sql().json(patch.pos);
   if (patch.lane !== undefined) p.lane = patch.lane;
@@ -432,7 +436,7 @@ export async function purgeTask(ownerId: string, id: string): Promise<void> {
   await sql()`delete from tasks where id = ${id} and owner_id = ${ownerId}`;
 }
 
-export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null; filePath: string | null; agentSec: number; agentStartedAt: string | null; doneBy: "owner" | "agent" | null; workLevel: string | null; modelPick: string | null; attachmentIds: string[] | null }>;
+export type StepPatch = Partial<{ title: string; detail: string; tool: string; status: Step["status"]; prevStatus: string | null; needsApproval: boolean; estMin: number; spentSec: number; spentManual: boolean; link: string | null; doneAt: string | null; handoffAt: string | null; report: string | null; output: string; review: Record<string, unknown> | null; blocks: Block[] | null; position: number; logged: boolean; pos: { x: number; y: number } | null; connectionId: string | null; filePath: string | null; agentSec: number; agentStartedAt: string | null; doneBy: "owner" | "agent" | null; workLevel: string | null; modelPick: string | null; attachmentIds: string[] | null; due: string | null; dueKind: DueKind; repeat: Repeat | null }>;
 const parseBlocks = (v: unknown): Block[] | null => { if (!v) return null; const p = Blocks.safeParse(v); return p.success ? p.data : null; };
 const isApproved = (b: Block) => b.type === "draft" && b.status === "approved";
 const demote = (blocks: Block[]) => blocks.map((b): Block => (b.type === "draft" && b.status === "approved" ? { ...b, status: "proposed" } : b));
@@ -461,6 +465,9 @@ async function writeStep(id: string, patch: StepPatch, opts: { sent?: boolean } 
   if (patch.tool !== undefined) { p.tool = normalizeTool(patch.tool); if (p.tool === "file") p.needs_approval = false; }   // plik na Macu nigdy nie czeka na zgodę
   if (patch.status !== undefined) { p.status = patch.status; p.left_at = null; }   // nowy stan kroku: „Potrzebna pomoc” gaśnie
   if (patch.prevStatus !== undefined) p.prev_status = patch.prevStatus;
+  if (patch.due !== undefined) p.due = patch.due;
+  if (patch.dueKind !== undefined) p.due_kind = parseDueKind(patch.dueKind);
+  if (patch.repeat !== undefined) p.repeat = patch.repeat ? sql().json(patch.repeat) : null;
   if (patch.needsApproval !== undefined) p.needs_approval = patch.needsApproval;
   if (patch.estMin !== undefined) p.est_min = roundQ(patch.estMin);
   if (patch.spentSec !== undefined) { p.spent_sec = Math.max(0, Math.round(patch.spentSec)); p.spent_at = new Date(); }

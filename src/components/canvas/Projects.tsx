@@ -4,7 +4,7 @@
 // Nowy projekt i nową firmę dodaje się w tej samej linii co tytuł widoku; usunięcie potwierdza się w dymku pod ikoną, więc wiersz się nie rozjeżdża.
 import { useEffect, useState } from "react";
 import { fmtMin } from "@/lib/time";
-import { Icon, Lvl, TS_LABEL, GCOL, plural, projColor, type CompanyRow, type ProjTask, type ProjectRow } from "./ui";
+import { DueChip, Icon, Lvl, TS_LABEL, GCOL, plural, projColor, type CompanyRow, type ProjTask, type ProjectRow } from "./ui";
 import { InlineName as Name, Picker, RemovePop as Remove } from "./widgets";
 
 export const LANGS: Record<string, string> = { pl: "polski", en: "angielski", de: "niemiecki", uk: "ukraiński", fr: "francuski", es: "hiszpański" };
@@ -24,7 +24,7 @@ function TaskRow({ t, onOpen }: { t: ProjTask; onOpen: () => void }) {
     <button type="button" className="p-task" onClick={onOpen}>
       <Lvl base={t.base} eff={t.eff} />
       <span className="n-title">{t.title}</span>
-      {t.due ? <span className={"st due " + t.due.cls}>{t.due.text}</span> : null}
+      {t.due ? <DueChip due={t.due} /> : null}
       <span className={"st " + t.state}>{TS_LABEL[t.state]}</span>
     </button>
   );

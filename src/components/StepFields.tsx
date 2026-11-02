@@ -3,7 +3,9 @@
 // Klik otwiera pole, Enter albo zejście z pola zapisuje, Esc cofa. Szczegóły: Ctrl/Cmd+Enter zapisuje (Enter robi nową linię).
 import { useState, useTransition, type KeyboardEvent } from "react";
 import { doneWithTime, linkSteps, patchStep } from "@/app/actions";
-import { Picker } from "@/components/canvas/widgets";
+import { DueControl, Picker } from "@/components/canvas/widgets";
+import type { DueValue } from "@/lib/due";
+import { dayKey } from "@/lib/clock";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { Icon } from "@/components/canvas/ui";
 import { DECISION_TITLE_RE, isGoogleApp, TOOL_LABELS } from "@/lib/schema";
@@ -69,7 +71,7 @@ export type StepModelInfo = { auto: string; pick: string | null; choices: { key:
 
 export function StepMeta({ taskId, step, steps, calText, connections = [], showConnection = true, model = null }: {
   taskId: string;
-  step: { id: string; tool: string; own: boolean; agentMin: number; estMin: number; spentMin: number; needsApproval: boolean; dependsOn: string[]; estHint?: string | null; connectionId?: string | null };
+  step: { id: string; tool: string; own: boolean; agentMin: number; estMin: number; spentMin: number; needsApproval: boolean; dependsOn: string[]; estHint?: string | null; connectionId?: string | null; due?: DueValue };
   steps: { id: string; title: string; done: boolean }[]; calText?: string | null;
   connections?: StepConnection[]; showConnection?: boolean;   // wybór połączenia: w technikaliach tylko, gdy nie ma go w karcie publikacji
   model?: StepModelInfo | null;
@@ -92,6 +94,7 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
           <div><div className="lbl">Szacunek{step.estHint ? <span className="hint"> {step.estHint}</span> : null}</div><NumChip value={step.estMin} stepBy={Q} min={Q} label="Szacunek w minutach" onSave={(v) => patch({ estMin: v })} /></div>
           <div><div className="lbl">Twój czas</div><NumChip value={step.spentMin} stepBy={5} min={0} label="Twój czas" hm onSave={(v) => patch({ spentMin: v })} /></div>
         </> : <div><div className="lbl">Czas Claude'a</div><span className="pp boxed" title="Liczy się sam: od chwili, gdy Claude zaczął krok, do jego zamknięcia"><span className="pp-t">{step.agentMin ? fmtMin(step.agentMin) : "jeszcze nic"}</span></span></div>}
+        {step.due ? <div><div className="lbl">Termin</div><DueControl of="kroku" value={step.due} min={dayKey(new Date())} onChange={(v) => patch({ due: v })} /></div> : null}
         {model ? <div><div className="lbl">Model{model.last ? <span className="hint"> ostatnio: {model.last}</span> : null}</div>
           <Picker cls="boxed" title="Którym modelem Claude ma zrobić ten krok: auto dobiera model i wysiłek do poziomu kroku (Ustawienia → Agent)" trigger={<span className="pp-t">{model.pick ? model.choices.find((c) => c.key === model.pick)?.label ?? model.pick : `auto · ${model.auto}`}</span>} onPick={(k) => patch({ modelPick: k || null })}
             options={[{ key: "", on: !model.pick, node: <span>auto · {model.auto}</span> }, ...model.choices.map((c) => ({ key: c.key, on: c.key === model.pick, node: <span>{c.label}</span> }))]} /></div> : null}

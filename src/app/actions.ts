@@ -21,6 +21,7 @@ import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPrompt
 import { workSummary } from "@/lib/agent/work";
 import { decisionText, destOf, isDeployStep, isProjectStep, openQuestions, stepKind, stepsAfterDecision } from "@/lib/stepcard";
 import { isAppCodeStep, isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
+import { cleanDue, type DueValue } from "@/lib/due";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const num = (fd: FormData, k: string, def: number) => { const v = Number(str(fd, k)); return Number.isFinite(v) && str(fd, k) !== "" ? v : def; };
@@ -132,7 +133,7 @@ export async function addStepForm(fd: FormData) {
   refresh(taskId);
 }
 // edycja w miejscu: jedno pole naraz, tam gdzie je widać w panelu kroku
-export async function patchStep(taskId: string, stepId: string, patch: { title?: string; detail?: string; tool?: string; estMin?: number; spentMin?: number; link?: string; needsApproval?: boolean; connectionId?: string | null; modelPick?: string | null }) {
+export async function patchStep(taskId: string, stepId: string, patch: { title?: string; detail?: string; tool?: string; estMin?: number; spentMin?: number; link?: string; needsApproval?: boolean; connectionId?: string | null; modelPick?: string | null; due?: DueValue }) {
   const o = await requireOwner();
   const { step } = await stepOf(o.id, taskId, stepId);
   const p: repo.StepPatch = {};
@@ -145,6 +146,7 @@ export async function patchStep(taskId: string, stepId: string, patch: { title?:
   if (patch.needsApproval !== undefined) p.needsApproval = patch.needsApproval;
   if (patch.connectionId !== undefined) p.connectionId = patch.connectionId || null;
   if (patch.modelPick !== undefined) p.modelPick = patch.modelPick || null;
+  if (patch.due !== undefined) { const d = cleanDue(patch.due); p.due = d.due; p.dueKind = d.kind; p.repeat = d.repeat; }
   if (Object.keys(p).length) await repo.updateStep(step.id, p);
   refresh(taskId);
 }
@@ -641,6 +643,13 @@ export async function setTaskField(taskId: string, patch: { due?: string | null;
 export async function setLevel(taskId: string, level: number) { await setTaskField(taskId, { level }); }
 export async function setProject(taskId: string, projectId: string | null) { await setTaskField(taskId, { projectId }); }
 export async function setDue(taskId: string, due: string | null) { await setTaskField(taskId, { due }); }
+// kontrolka terminu (paczka 40): data, rodzaj („zrób do” / „w dniu”) i powtarzanie naraz
+export async function setTaskDue(taskId: string, v: DueValue) {
+  const o = await requireOwner();
+  const d = cleanDue(v);
+  await repo.updateTask(o.id, taskId, { due: d.due, dueKind: d.kind, repeat: d.repeat });
+  refresh(taskId);
+}
 export async function setStepLink(taskId: string, stepId: string, link: string) {
   const o = await requireOwner();
   await stepOf(o.id, taskId, stepId);

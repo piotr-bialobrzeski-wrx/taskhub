@@ -47,7 +47,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
   const providers = availableProviders();
   const row = (s: (typeof live)[number], when: string): ArchRow => ({ id: s.task.id, title: s.task.title, when, summary: s.task.noteSummary ?? (s.task.summary || null), base: s.score.base, eff: s.score.eff, project: s.project?.name ?? null });
   // widok „Projekty”: wszystkie żywe zadania (także ukończone) z pozostałym szacunkiem i zmierzonym czasem
-  const projTasks: ProjTask[] = live.map((s) => ({ id: s.task.id, title: s.task.title, state: taskStateOf(s.task, all), base: s.score.base, eff: s.score.eff, due: dueOf(s.task.due), remain: remainEst(s.task), spent: taskSpent(s.task), projectId: s.task.projectId }));
+  const projTasks: ProjTask[] = live.map((s) => ({ id: s.task.id, title: s.task.title, state: taskStateOf(s.task, all), base: s.score.base, eff: s.score.eff, due: dueOf(s.task.due, { kind: s.task.dueKind, repeat: s.task.repeat }), remain: remainEst(s.task), spent: taskSpent(s.task), projectId: s.task.projectId }));
 
   return (
     <>

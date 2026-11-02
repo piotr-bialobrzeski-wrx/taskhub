@@ -9,11 +9,16 @@ import type { Look, PlanSeg, StepStateKey, StepTile, TaskStateKey, TaskTile } fr
 export { fmtDate, fmtTime } from "../clock";   // zawsze czas polski (serwer liczy w UTC)
 import { fmtDate, fmtTime } from "../clock";
 import { onTileText, type LiveActivity } from "../live";
+import { repeatLabel, type DueKind, type Repeat } from "../due";
 
-export function dueOf(due: string | null, now = Date.now()): TaskTile["due"] {
+// chip terminu: „do 5 lis” (zrób do) albo „5 lis” / „dziś” (w dniu: sama data, bez „do”), po dniu „po terminie”; rep = opis powtarzania (ikona w chipie)
+export function dueOf(due: string | null, now: number | { kind?: DueKind | null; repeat?: Repeat | null } = Date.now(), at = Date.now()): TaskTile["due"] {
   if (!due) return null;
-  const h = dueLeftH(due, now);
-  return { iso: due, cls: h < 0 ? "late" : h < 48 ? "soon" : "", text: h < 0 ? "po terminie" : fmtDate(due + "T12:00") };
+  const o = typeof now === "number" ? {} : now, t = typeof now === "number" ? now : at;
+  const h = dueLeftH(due, t), kind: DueKind = o.kind === "on" ? "on" : "by";
+  const day = fmtDate(due + "T12:00");
+  const text = h < 0 ? "po terminie" : kind === "on" ? (h < 24 ? "dziś" : day) : `do ${day}`;
+  return { iso: due, kind, cls: h < 0 ? "late" : h < 48 ? "soon" : "", text, rep: o.repeat ? repeatLabel(o.repeat) : null };
 }
 
 // zadania, na które to zadanie czeka (nieukończone, nie w koszu)
@@ -117,7 +122,7 @@ export function taskTile(s: Scored, all: Task[], questions: number, live: LiveAc
     id: t.id, title: t.title, summary: state === "done" && t.noteSummary ? t.noteSummary : t.summary, state,
     base: s.score.base, eff: s.score.eff, why: whyText(s.score),
     project: s.project ? { id: s.project.id, name: s.project.name, color: s.project.color } : null,
-    due: dueOf(t.due),
+    due: dueOf(t.due, { kind: t.dueKind, repeat: t.repeat }),
     progress: { done: t.steps.filter((x) => x.status === "done").length, all: t.steps.length },
     estText: estText(t),
     drafts: t.steps.filter((x) => x.status === "draft").length,
@@ -188,5 +193,7 @@ export function tileMeta(t: Task, s: Step, state: StepStateKey): { meta: string;
   const deps = s.dependsOn.map((x) => t.steps.findIndex((y) => y.id === x) + 1).filter((n) => n > 0);
   const plan = deps.length ? "Po kroku " + deps.join(", ") : "Start od razu";
   const time = isOwnerStep(s) ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : `Claude${agentMinOf(s) ? " " + fmtMin(agentMinOf(s)) : ""}`;
-  return { meta: `${plan} · ${time}${s.needsApproval ? " · zatw." : ""}`, dest: null, destHref: null };
+  const due = dueOf(s.due ?? null, { kind: s.dueKind, repeat: s.repeat });
+  const dueTxt = due ? ` · ${due.text}${due.rep ? " ↻" : ""}` : "";
+  return { meta: `${plan} · ${time}${dueTxt}${s.needsApproval ? " · zatw." : ""}`, dest: null, destHref: null };
 }

@@ -36,10 +36,10 @@ import { choiceOf, LEVEL_LABELS, modelConfig, modelLabel, runLabel, stepLevel } 
 import { indexFrom } from "@/lib/search";
 import { codexStateOf, runnerOf } from "@/lib/agent/runner";
 import { Icon, plural } from "@/components/canvas/ui";
-import { InlineDate, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
+import { DueControl, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
 import { projColor } from "@/components/canvas/ui";
 import { PublishCard, cardModeOf } from "@/components/PublishCard";
-import { answerQuestionForm, restoreBlocksForm, backToTodo, cancelCloudRun, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, reopen, runInCloud, saveReport, stopWorkForm, setDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
+import { answerQuestionForm, restoreBlocksForm, backToTodo, cancelCloudRun, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, reopen, runInCloud, saveReport, stopWorkForm, setTaskDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -128,7 +128,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       {t.summary ? <p>{t.summary}</p> : null}
       <div className="time-row">
         <div><div className="lbl">Projekt</div><ProjectPicker projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color }))} value={t.projectId} cls="boxed" onPick={setProject.bind(null, t.id)} /></div>
-        <div><div className="lbl">Termin</div><InlineDate value={t.due} min={todayISO()} onChange={setDue.bind(null, t.id)} /></div>
+        <div><div className="lbl">Termin</div><DueControl value={{ due: t.due, kind: t.dueKind ?? "by", repeat: t.repeat ?? null }} min={todayISO()} onChange={setTaskDue.bind(null, t.id)} /></div>
         <div><div className="lbl">Twój czas</div><div className="chip" style={{ height: 34, padding: "0 14px" }} title="Twoje kroki: ile zostało wg szacunków i ile już zmierzyłeś">{[remainEst(t) ? `Zostało ~${fmtMin(remainEst(t))}` : null, taskSpent(t) ? `⏱ ${fmtMin(taskSpent(t))}` : null].filter(Boolean).join(" · ") || "brak"}</div></div>
         {taskAgent(t) ? <div><div className="lbl">Czas Claude'a</div><div className="chip" style={{ height: 34, padding: "0 14px" }} title="Liczy się sam: od chwili, gdy Claude zaczął krok, do jego zamknięcia">{fmtMin(taskAgent(t))}</div></div> : null}
       </div>
@@ -424,7 +424,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           <div className="pctx"><span className="d" style={{ ["--c" as string]: ctx.color }} /><span>Zadanie <b>{t.title}</b> · {ctx.text}</span></div>
           {bare ? null : <div className="zone"><div className="lbl">Opis kroku</div>{brief}</div>}
           <StepMeta taskId={t.id}
-            step={{ id: s.id, tool: s.tool, own, agentMin, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null, connectionId: s.connectionId }}
+            step={{ id: s.id, tool: s.tool, own, agentMin, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null, connectionId: s.connectionId, due: { due: s.due ?? null, kind: s.dueKind ?? "by", repeat: s.repeat ?? null } }}
             steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title, done: x.status === "done" }))}
             connections={connections} showConnection model={done ? null : model}
             calText={calOn && cal ? `Z Twoich czasów (${cal.n} ${plural(cal.n, "krok", "kroki", "kroków")}): takie kroki trwają zwykle ×${String(cal.k).replace(".", ",")}.` : null} />

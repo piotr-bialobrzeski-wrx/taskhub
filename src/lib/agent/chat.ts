@@ -1,4 +1,5 @@
 // Czat z agentem: jedna odpowiedź JSON z akcjami. Agent nigdy nie usuwa.
+import { DUE_KINDS, isIsoDay, Repeat } from "../due";
 import { z } from "zod";
 import { Ai, type ImageInput } from "../ai";
 import * as repo from "../repo";
@@ -20,7 +21,7 @@ const Krok = z.object({
 const Action = z.discriminatedUnion("type", [
   z.object({ type: z.literal("create_task"), title: z.string(), level: z.number().int().min(1).max(5).optional(), summary: z.string().optional(), due: z.string().nullable().optional(), project: z.string().nullable().optional(), steps: z.array(Krok).optional(), link: z.enum(["after_current", "before_current", "none"]).optional() }),
   z.object({ type: z.literal("add_steps"), steps: z.array(Krok) }),
-  z.object({ type: z.literal("update_task"), id: z.string(), title: z.string().optional(), summary: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().nullable().optional(), project: z.string().nullable().optional() }),
+  z.object({ type: z.literal("update_task"), id: z.string(), title: z.string().optional(), summary: z.string().optional(), level: z.number().int().min(1).max(5).optional(), due: z.string().nullable().optional(), dueKind: z.enum(DUE_KINDS).optional(), repeat: Repeat.nullable().optional(), project: z.string().nullable().optional() }),
   z.object({ type: z.literal("update_step"), id: z.string(), title: z.string().optional(), detail: z.string().optional(), output: z.string().optional(), option: z.union([z.number().int(), z.string()]).optional(), status: z.enum(["done", "todo"]).optional(), link: z.string().optional(), est: z.number().int().optional() }),
   z.object({ type: z.literal("set_facts"), stepId: z.string(), facts: z.array(Fact).max(12) }),
   z.object({ type: z.literal("create_group"), name: z.string(), taskIds: z.array(z.string()) }),
@@ -39,7 +40,7 @@ Narzędzia kroków (pole "tool"): "slack", "gmail", "clickup", "calendar", "gith
 Akcje (tylko gdy wiadomość o to prosi; na pytanie po prostu odpowiedz):
 - create_task {title (2–6 słów, samo sedno, nie cała wiadomość Piotra), level 1-5, summary, due "YYYY-MM-DD"|null (tylko gdy Piotr podał termin; bez terminu null, nigdy dzisiejsza data z automatu), project nazwa|null, steps [KROK], link "after_current"|"before_current"|"none"} - nowe zadanie; "link" ma sens tylko wewnątrz zadania.
 - add_steps {steps [KROK]} - nowe kroki w obecnym zadaniu; dependsOn może wskazywać id istniejących kroków.
-- update_task {id, title?, summary?, level?, due?, project?}
+- update_task {id, title?, summary?, level?, due?, dueKind? "by" (zrób do, domyślnie) | "on" (w dniu), repeat? {every N, unit "day"|"week"|"month"} | null (powtarzanie terminu tylko, gdy Piotr o nie prosi), project?}
 - update_step {id, title?, detail?, output?, option?, status? "done"|"todo", link?, est?} - output = poprawiona treść szkicu otwartego kroku (gdy Piotr prosi o zmianę w szkicu); zmienia też treść bloku draft. Gdy krok ma kilka szkiców (opcje), option = numer opcji (0 = Opcja A) albo jej nazwa; bez option poprawka idzie do wybranej, inaczej do pierwszej; nieznana option = odmowa bez zmian.
 - set_facts {stepId, facts [{label, value, source {app, ref, url}}]} - gdy Piotr podaje informacje do kroku (adresat, termin, lista).
 - create_group {name, taskIds} - tylko na głównej kanwie: gdy Piotr prosi o pogrupowanie kafelków (np. jedna grupa na projekt, nazwa = nazwa projektu), albo gdy mówi, ile ma czasu (np. „mam 1,5 h”): wybierz otwarte zadania mieszczące się w czasie, najpierw bliski termin i wysoki priorytet, nazwij np. „Na 1,5 h” i wypisz je w reply z czasami.
@@ -127,7 +128,7 @@ export async function applyActions(r: ChatResult, deps: ChatDeps & { tasks: Task
     } else if (a.type === "update_task") {
       const t = deps.tasks.find((x) => x.id === a.id); if (!t) continue;
       const proj = await projectIdFor(deps.ownerId, a.project);
-      await repo.updateTask(deps.ownerId, t.id, { title: a.title, summary: a.summary, level: a.level, due: a.due, projectId: proj.id });
+      await repo.updateTask(deps.ownerId, t.id, { title: a.title, summary: a.summary, level: a.level, due: a.due === undefined ? undefined : isIsoDay(a.due) ? a.due : null, dueKind: a.dueKind, repeat: a.repeat, projectId: proj.id });
       done.push({ label: "Zmieniono: " + (a.title ?? t.title), taskId: t.id });
       if (proj.unknown) done.push({ label: "Projekt bez zmian: " + (a.title ?? t.title), taskId: deps.taskId ?? undefined, note: `Nie zmieniłem projektu zadania „${a.title ?? t.title}”: ${proj.unknown}.` });
     } else if (a.type === "update_step" && cur) {

@@ -11,6 +11,7 @@ import { workFoot, type FeedItem, type WorkBubble } from "@/lib/feed";
 import { Activity, useMinutes } from "@/components/Activity";
 import { draftKeyOf, readDraft, sendKeepingDraft, writeDraft, type Sent } from "@/lib/chat-draft";
 import { Icon, Lvl, projColor, type ProjectVM } from "./ui";
+import { DUE_KIND_HINTS, DUE_KIND_LABELS, DUE_KINDS, presetOf, REPEAT_PRESETS, REPEAT_UNITS, repeatLabel, unitForm, type DueValue } from "@/lib/due";
 
 // ---------- menu wyboru przy przycisku ----------
 export type PickOption = { key: string; node: ReactNode; on?: boolean };
@@ -64,24 +65,71 @@ export function ProjectPicker({ projects, value, cls, onPick }: { projects: Proj
   );
 }
 
-// termin jest opcjonalny: puste pole mówi „Bez terminu” (samo <input type="date"> w Safari pokazuje wtedy dzisiejszą datę, jakby była ustawiona),
-// klik otwiera kalendarz przeglądarki, × czyści termin
-export function InlineDate({ value, onChange, min }: { value: string | null; onChange: (v: string | null) => void; min?: string }) {
+// Kontrolka terminu zadania i kroku (paczka 40): jeden przycisk, pod nim okienko z rodzajem terminu („Zrób do” = najpóźniejsza data,
+// „W dniu” = konkretny dzień), datą i powtarzaniem jak w Google Calendar (nie, co tydzień, co miesiąc, własny odstęp: co N dni, tygodni, miesięcy).
+// Każda zmiana zapisuje się od razu. Termin jest opcjonalny: puste pole mówi „Bez terminu” (samo <input type="date"> w Safari pokazuje wtedy
+// dzisiejszą datę, jakby była ustawiona), × czyści termin razem z powtarzaniem.
+export function DueControl({ value, onChange, min, of = "zadania" }: { value: DueValue; onChange: (v: DueValue) => void; min?: string; of?: "zadania" | "kroku" }) {
   const [v, setV] = useState(value);
-  useEffect(() => setV(value), [value]);
-  const inp = useRef<HTMLInputElement>(null);
-  const set = (nv: string | null) => { setV(nv); onChange(nv); };
-  const open = () => {
-    const e = inp.current; if (!e) return;
-    try { e.showPicker(); } catch { e.focus(); }
-  };
+  const sig = JSON.stringify(value);
+  useEffect(() => setV(value), [sig]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ left: 0, top: 0 });
+  useEffect(() => {
+    if (!open) return;
+    const r = btn.current!.getBoundingClientRect();
+    setPos({ left: Math.max(16, Math.min(r.left, window.innerWidth - 300 - 16)), top: r.bottom + 6 });
+    const close = (e: Event) => { const el = e.target as HTMLElement; if (!el.closest?.(".duemenu") && !el.closest?.(".date-in")) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", close); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", key); };
+  }, [open]);
+  const set = (p: Partial<DueValue>) => { const nv = { ...v, ...p }; setV(nv); onChange(nv); };
+  const preset = custom ? "custom" : presetOf(v.repeat);
+  const rep = v.repeat ?? { every: 2, unit: "week" as const };
+  const label = v.due ? `${v.kind === "on" ? "W dniu" : "Do"} ${fmtDateLong(v.due + "T12:00")}` : "Bez terminu";
   return (
-    <span className={"date-in" + (v ? "" : " unset")}>
-      <button type="button" className="date-pick" aria-label={v ? "Zmień termin zadania" : "Ustaw termin zadania"} title="Najpóźniejsza data wykonania" onClick={open}>
-        {v ? fmtDateLong(v + "T12:00") : "Bez terminu"}
+    <span className={"date-in" + (v.due ? "" : " unset")}>
+      <button ref={btn} type="button" className="date-pick" aria-haspopup="dialog" aria-expanded={open} aria-label={v.due ? `Zmień termin ${of}` : `Ustaw termin ${of}`}
+        title={v.due ? `${DUE_KIND_LABELS[v.kind]}: ${DUE_KIND_HINTS[v.kind]}${v.repeat ? `, powtarza się ${repeatLabel(v.repeat)}` : ""}` : `Termin ${of}: data, rodzaj i powtarzanie`}
+        onPointerDown={(e) => e.stopPropagation()} onClick={() => { setCustom(false); setOpen((o) => !o); }}>
+        {label}{v.repeat ? <span className="due-rep" title={`Powtarza się ${repeatLabel(v.repeat)}`}><Icon k="repeat" size={12} sw={1.8} />{repeatLabel(v.repeat)}</span> : null}
       </button>
-      {v ? <button type="button" className="date-clear" aria-label="Usuń termin" title="Bez terminu" onClick={() => set(null)}><Icon k="x" size={12} /></button> : null}
-      <input ref={inp} type="date" tabIndex={-1} aria-hidden="true" value={v ?? ""} min={min} onChange={(e) => set(e.currentTarget.value || null)} />
+      {v.due || v.repeat ? <button type="button" className="date-clear" aria-label="Usuń termin" title="Bez terminu i bez powtarzania" onClick={() => { setOpen(false); set({ due: null, repeat: null }); }}><Icon k="x" size={12} /></button> : null}
+      {open ? createPortal(
+        <div className="duemenu ppmenu glass" role="dialog" aria-label={`Termin ${of}`} style={{ position: "fixed", left: pos.left, top: pos.top }} onPointerDown={(e) => e.stopPropagation()}>
+          <div className="due-kind" role="radiogroup" aria-label="Rodzaj terminu">
+            {DUE_KINDS.map((k) => (
+              <button key={k} type="button" role="radio" aria-checked={v.kind === k} className={v.kind === k ? "on" : ""} title={DUE_KIND_HINTS[k]} onClick={() => set({ kind: k })}>{DUE_KIND_LABELS[k]}</button>
+            ))}
+          </div>
+          <div className="due-hint">{DUE_KIND_HINTS[v.kind]}</div>
+          <input className="in due-date" type="date" aria-label="Data" value={v.due ?? ""} min={min} onChange={(e) => set({ due: e.currentTarget.value || null })} />
+          <div className="lbl">Powtarzaj</div>
+          <div className="due-rep-opts" role="radiogroup" aria-label="Powtarzanie">
+            {REPEAT_PRESETS.map((p) => (
+              <button key={p.key} type="button" role="radio" aria-checked={preset === p.key} className={"pp-opt" + (preset === p.key ? " on" : "")} onClick={() => { setCustom(false); set({ repeat: p.repeat }); }}>
+                <span>{p.label}</span>{preset === p.key ? <span className="ck"><Icon k="check" size={12} sw={2.2} /></span> : null}
+              </button>
+            ))}
+            <button type="button" role="radio" aria-checked={preset === "custom"} className={"pp-opt" + (preset === "custom" ? " on" : "")} onClick={() => { setCustom(true); set({ repeat: rep }); }}>
+              <span>Własny odstęp</span>{preset === "custom" ? <span className="ck"><Icon k="check" size={12} sw={2.2} /></span> : null}
+            </button>
+          </div>
+          {preset === "custom" ? (
+            <div className="due-custom">
+              <span>co</span>
+              <input className="in num" type="number" min={1} max={365} aria-label="Co ile" value={rep.every}
+                onChange={(e) => { const n = Math.round(Number(e.currentTarget.value)); if (n >= 1 && n <= 365) set({ repeat: { ...rep, every: n } }); }} />
+              <span className="due-kind due-unit" role="radiogroup" aria-label="Jednostka">
+                {REPEAT_UNITS.map((u) => <button key={u} type="button" role="radio" aria-checked={rep.unit === u} className={rep.unit === u ? "on" : ""} onClick={() => set({ repeat: { ...rep, unit: u } })}>{unitForm(u, rep.every)}</button>)}
+              </span>
+            </div>
+          ) : null}
+          {v.repeat && !v.due ? <div className="due-hint">Ustaw datę: od niej liczy się powtarzanie.</div> : null}
+        </div>, document.body) : null}
     </span>
   );
 }
