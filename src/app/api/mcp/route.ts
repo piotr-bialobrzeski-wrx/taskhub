@@ -27,6 +27,7 @@ import { appKey, approvalSig, approvalValid, coerceAgentDrafts, draftOf, draftsO
 import { matchProjectName } from "@/lib/project-guess";
 import { MAX_ESCALATION, normalizeLevel } from "@/lib/agent/models";
 import { DUE_KINDS, isIsoDay, Repeat } from "@/lib/due";
+import { groupDayWork } from "@/lib/day-work";
 
 // poziom pracy kroku według zasady „Dobór modelu i wysiłku”: od niego mostek dobiera model i wysiłek biegu
 // paczka 32: łańcuch zadań. Zadanie, które powstaje po decyzji Piotra w innym zadaniu albo zaczyna się później, czeka na wcześniejsze (strzałka na głównej kanwie)
@@ -808,6 +809,16 @@ function buildHandler(auth: repo.TokenAuth) {
     }, async () => {
       const [companies, projects] = await Promise.all([repo.listCompanies(ownerId), repo.listProjects(ownerId)]);
       return json(companies.map((c) => ({ id: c.id, name: c.name, sphere: c.sphere, note: c.note, endedAt: c.endedAt, projects: projects.filter((p) => p.companyId === c.id).map((p) => p.name) })));
+    });
+
+    // paczka 42: praca w Task Hub z jednego dnia jako materiał do wpisów czasu (procedura „Wpisy czasu do Pirxey Time”)
+    server.registerTool("day_work", {
+      title: "Praca w Task Hub z dnia", description: "Praca Piotra i Claude'a w Task Hub z jednego dnia (strefa Europe/Warsaw) w zadaniach projektów firm zawodowych: kroki zamknięte tego dnia albo z czasem Piotra zapisanym tego dnia. Pozycje są już połączone: kilka kroków przy tym samym tickecie ClickUp (link kroku albo zadania) to jedna pozycja z sumą minut; bez ticketu jedna pozycja na zadanie. Materiał do wpisów czasu: każdą pozycję dodaj do szkicu dnia jako wiersz (albo dolicz do wiersza tego samego ticketu z kalendarza czy Slacka) z parts = kroki pozycji; zaokrąglenie, projekt, kategorię i tagi dobierz według procedury. date: YYYY-MM-DD; companies: nazwy firm (puste = wszystkie zawodowe).",
+      inputSchema: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), companies: z.array(z.string().max(60)).max(10).optional() }),
+    }, async (a) => {
+      const items = groupDayWork(await repo.dayWork(ownerId, a.date, a.companies ?? []));
+      if (!items.length) return text(`Brak pracy w Task Hub w dniu ${a.date} w zadaniach firm zawodowych${a.companies?.length ? ` (${a.companies.join(", ")})` : ""}.`);
+      return json(items);
     });
 
     server.registerTool("list_connections", {

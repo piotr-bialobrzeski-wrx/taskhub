@@ -39,6 +39,9 @@ import { Icon, plural } from "@/components/canvas/ui";
 import { DueControl, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
 import { projColor } from "@/components/canvas/ui";
 import { PublishCard, cardModeOf } from "@/components/PublishCard";
+import { MonthDays } from "@/components/MonthDays";
+import { monthView } from "@/lib/sheet-month";
+import { dayKey } from "@/lib/clock";
 import { answerQuestionForm, restoreBlocksForm, backToTodo, cancelCloudRun, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, reopen, runInCloud, saveReport, stopWorkForm, setTaskDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
 
 export const dynamic = "force-dynamic";
@@ -122,10 +125,13 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   ) : null;
 
   // ---------- panel zadania ----------
+  // paczka 42: zadanie miesiąca z krokami-arkuszami (wpisy czasu) dostaje kalendarz dni z ich stanem
+  const month = monthView(t, dayKey(new Date()));
   const taskBar = <><span className="d-title" title={t.title}>{t.title}</span><PrioPicker base={cur.score.base} eff={cur.score.eff} why={cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; ")} cls="head" onPick={setLevel.bind(null, t.id)} /><span className="chip">{t.steps.filter((s) => s.status === "done").length}/{t.steps.length} kroków</span></>;
   const taskBody = (
     <>
       {t.summary ? <p>{t.summary}</p> : null}
+      {month ? <MonthDays taskId={t.id} view={month} /> : null}
       <div className="time-row">
         <div><div className="lbl">Projekt</div><ProjectPicker projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color }))} value={t.projectId} cls="boxed" onPick={setProject.bind(null, t.id)} /></div>
         <div><div className="lbl">Termin</div><DueControl value={{ due: t.due, kind: t.dueKind ?? "by", repeat: t.repeat ?? null }} min={todayISO()} onChange={setTaskDue.bind(null, t.id)} /></div>

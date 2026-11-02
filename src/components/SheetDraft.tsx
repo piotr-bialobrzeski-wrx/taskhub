@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { SheetColumn, SheetPart } from "@/lib/schema";
 import { dayKey } from "@/lib/clock";
+import { fmtDuration, longDuration, parseDuration } from "@/lib/sheet-month";
 import { Icon } from "@/components/canvas/ui";
 
 type Row = { k: number; c: string[]; p: SheetPart[] | null };
@@ -17,21 +18,9 @@ type Edit = { row: number | "q"; col: number } | null;
 
 // ---------- wartości komórek ----------
 const MULTI_SEP = ", ";
+export { fmtDuration, longDuration, parseDuration };
 export const splitMulti = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean);
 export const isOn = (v: string) => /^(tak|true|yes|1|on)$/i.test(v.trim());
-// czas trwania z tego, co Piotr wpisze: 1:15, 1,25 h, 75 min, 1.5 (do 12 to godziny, wyżej minuty) → „1:15”
-export function parseDuration(s: string): number | null {
-  const v = s.trim().toLowerCase().replace(",", ".");
-  let m: RegExpExecArray | null;
-  if ((m = /^(\d{1,3}):([0-5]\d)$/.exec(v))) return Number(m[1]) * 60 + Number(m[2]);
-  if ((m = /^(\d+(?:\.\d+)?)\s*h$/.exec(v))) return Math.round(Number(m[1]) * 60);
-  if ((m = /^(\d+)\s*(m|min)$/.exec(v))) return Number(m[1]);
-  if ((m = /^(\d+)\s*h\s*(\d+)\s*(m|min)?$/.exec(v))) return Number(m[1]) * 60 + Number(m[2]);
-  if ((m = /^(\d+(?:\.\d+)?)$/.exec(v))) { const n = Number(m[1]); return n <= 12 ? Math.round(n * 60) : Math.round(n); }
-  return null;
-}
-export const fmtDuration = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`;
-export const longDuration = (n: number) => { const h = Math.floor(n / 60), m = n % 60; return h && m ? `${h} h ${m} min` : h ? `${h} h` : `${m} min`; };
 // godzina: 9, 930, 9:30, 9.30 → „09:30”
 export function parseTime(s: string): string | null {
   const v = s.trim().replace(".", ":");

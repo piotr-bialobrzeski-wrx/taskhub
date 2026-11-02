@@ -217,6 +217,10 @@ export function cardText(steps: CardStep[], max = 6000, doneMax = 3000, doneTota
 // (send prawdziwe), widzi tylko wybraną: bieg wysyłki bierze „sekcję SZKIC KROKU” i ma dostać dokładnie jedną.
 type DraftStep = Pick<Step, "id" | "title" | "status" | "blocks"> & Partial<Pick<Step, "approvedAt" | "approvedSig" | "sendStartedAt">>;
 const legacySend = (s: DraftStep) => !("approvedSig" in s) || isSendable(s as Approvable);
+const SHEET_KIND_TEXT: Record<string, string> = {
+  text: "tekst", choice: "wartość z listy aplikacji", multi: "kilka wartości z listy, po przecinku", date: "data YYYY-MM-DD", time: "godzina HH:MM",
+  duration: "czas trwania h:mm", toggle: "tak albo nie",
+};
 export function draftsText(steps: DraftStep[], opts: { send?: (s: DraftStep) => boolean } = {}): string {
   const send = opts.send ?? legacySend;
   const out: string[] = [];
@@ -239,6 +243,8 @@ export function draftsText(steps: DraftStep[], opts: { send?: (s: DraftStep) => 
       if (b.subject) lines.push(`- temat: ${b.subject}`);
       if (b.fields?.length) lines.push(`- pola: ${b.fields.map((f) => `${f.label} = ${f.value}`).join("; ")}`);
       if (b.columns?.length) lines.push(`- wiersze (${b.columns.join(" | ")}):\n${(b.rows ?? []).map((r) => `  ${r.join(" | ")}`).join("\n")}`);
+      // paczka 42: arkusz (np. wpisy czasu): każdy wiersz to osobny element w aplikacji docelowej; rodzaje kolumn mówią, jak czytać komórki
+      if (b.columns?.length && b.sheet?.length) lines.push(`- arkusz: każdy wiersz to osobny element do utworzenia w miejscu z linii „dokąd” (${(b.rows ?? []).length} ${(b.rows ?? []).length === 1 ? "wiersz" : "wierszy"}), z wartościami kolumn dokładnie jak w wierszu; kolumny: ${b.columns.map((c, i) => `${c} (${SHEET_KIND_TEXT[b.sheet![i]?.kind ?? "text"]})`).join(", ")}; pusta komórka = pole puste`);
       if (b.body) {
         lines.push(`- treść w Markdown (dokładnie, między liniami ---):\n---\n${b.body}\n---`);
         // formatowanie: każda aplikacja dostaje swój format, inaczej gwiazdki i krzyżyki lecą dosłownie

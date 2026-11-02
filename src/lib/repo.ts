@@ -1484,3 +1484,25 @@ export async function restorePrevBlocks(stepId: string): Promise<boolean> {
   await sql()`update steps set ${sql()(p)} where id = ${stepId}`;
   return true;
 }
+
+// ---------- paczka 42: praca w Task Hub z jednego dnia (materiał do wpisów czasu) ----------
+// Kroki zamknięte tego dnia albo z czasem Piotra zapisanym tego dnia (strefa Europe/Warsaw), w zadaniach projektów firm zawodowych
+// (companies: nazwy firm, puste = wszystkie zawodowe). Pomija kroki ze szkicem-arkuszem (to same wpisy czasu, nie praca).
+export async function dayWork(ownerId: string, day: string, companies: string[] = []): Promise<import("./day-work").DayWorkStep[]> {
+  const want = companies.map((c) => c.trim().toLowerCase()).filter(Boolean);
+  const rows = await sql()`
+    select s.id, s.title, s.task_id, s.spent_sec, s.agent_sec, s.link, s.blocks, t.title as task_title, p.name as project, c.name as company,
+      (select coalesce(json_agg(x.link), '[]'::json) from steps x where x.task_id = t.id and x.link is not null) as task_links
+    from steps s join tasks t on t.id = s.task_id join projects p on p.id = t.project_id join companies c on c.id = p.company_id
+    where t.owner_id = ${ownerId} and t.deleted_at is null and c.sphere = 'work'
+      and (((s.done_at at time zone 'Europe/Warsaw')::date = ${day}::date) or (s.spent_sec > 0 and (s.spent_at at time zone 'Europe/Warsaw')::date = ${day}::date))
+    order by s.done_at nulls last`;
+  return rows
+    .filter((r) => !want.length || want.includes(String(r.company).toLowerCase()))
+    .filter((r) => !(Blocks.safeParse(r.blocks).data ?? []).some((b) => b.type === "draft" && b.sheet?.some((c) => c.kind === "date")))
+    .map((r) => ({
+      stepId: r.id as string, stepTitle: r.title as string, taskId: r.taskId as string, taskTitle: r.taskTitle as string,
+      project: (r.project as string) ?? null, company: (r.company as string) ?? null, ownerSec: Number(r.spentSec ?? 0), agentSec: Number(r.agentSec ?? 0),
+      link: (r.link as string) ?? null, taskLinks: (r.taskLinks as string[]) ?? [],
+    }));
+}
