@@ -1321,7 +1321,7 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { --d-today: #E8775C; --d-tom: #DE8B62; --d-week: #5CC28F; --d-next: #5FA2E8; --d-date: #8B8DF7; --d-later: #9A9CB8; }
 }
-.a-today { --c: var(--d-today); } .a-tom { --c: var(--d-tom); } .a-week { --c: var(--d-week); } .a-next { --c: var(--d-next); } .a-date { --c: var(--d-date); } .a-later { --c: var(--d-later); }
+.a-today { --c: var(--d-today); } .a-tom { --c: var(--d-tom); } .a-week { --c: var(--d-week); } .a-next { --c: var(--d-next); } .a-date { --c: var(--d-date); } .a-later { --c: var(--d-later); } .a-trash { --c: var(--danger); }
 .revv { position: absolute; inset: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; gap: 18px;
   padding: calc(84px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) calc(120px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
 .rv-nav { width: min(640px, 100%); display: flex; align-items: center; gap: 10px; flex: none; }
@@ -1357,6 +1357,11 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .rv-opt.sel kbd { color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .5); }
 .rv-opt input[type=date] { font: inherit; font-size: 12px; font-weight: 600; border: 0; border-radius: 8px; padding: 3px 6px; background: var(--surface-2); color: var(--text); max-width: 130px; }
 .rv-opt.sel input[type=date] { background: rgba(255, 255, 255, .22); color: #fff; color-scheme: dark; }
+.rv-opts.off { opacity: .45; }
+.rv-opts.off .rv-opt { cursor: default; transform: none; }
+.rv-gone { color: var(--danger); }
+.rv-del { width: min(520px, 100%); display: flex; justify-content: center; flex: none; font-size: 12.5px; font-weight: 600; color: var(--sub); }
+.rv-del .btn { display: inline-flex; align-items: center; gap: 6px; }
 .rv-end { width: min(520px, 100%); border-radius: var(--r-lg); padding: 22px; display: flex; flex-direction: column; gap: 12px; text-align: center; align-items: center; margin: auto 0; }
 .rv-end h2 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }
 .rv-end p { margin: 0; color: var(--sub); }

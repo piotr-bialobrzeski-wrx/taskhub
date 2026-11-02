@@ -3,8 +3,10 @@
 // jedno zadanie na ekranie, u góry pasek z kawałkiem na zadanie (zrobione w kolorze odpowiedzi) i strzałki wstecz i dalej,
 // pod zadaniem sześć dużych przycisków w dwóch rzędach, na komputerze z klawiszami 1-6. Lista zadań ustala się przy wejściu,
 // więc zadanie, któremu właśnie ustawiono termin, nie znika spod strzałki wstecz.
+// Pod przyciskami „Usuń” (klawisz Delete): zadanie, które przestało być istotne, idzie do kosza (miękkie usunięcie,
+// to samo co „Do kosza” w zadaniu), znika z kanwy i z pracy agenta, a w widoku Kosz można je przywrócić.
 import { useEffect, useRef, useState } from "react";
-import { setTaskField } from "@/app/actions";
+import { batchTasks, setTaskField } from "@/app/actions";
 import { dayKey } from "@/lib/clock";
 import { REVIEW_ANSWERS, answerTip, fmtDay, reviewPatch, reviewQueue, type ReviewAnswer } from "@/lib/canvas/review";
 import { Icon, Lvl, type TaskTile } from "./ui";
@@ -12,7 +14,7 @@ import { Icon, Lvl, type TaskTile } from "./ui";
 const NEXT_MS = 420;   // po tylu ms od kliknięcia przychodzi następne zadanie (najpierw widać kolorowe zaznaczenie)
 
 type Item = { t: TaskTile; level0: number; due0: string | null };
-type Dec = { k: ReviewAnswer; custom: string };
+type Dec = { k: ReviewAnswer | "trash"; custom: string };
 
 export function Review({ tasks, onOpen, onDone, onToast }: { tasks: TaskTile[]; onOpen: (id: string) => void; onDone: () => void; onToast: (t: string) => void }) {
   const [today] = useState(() => dayKey(new Date()));
@@ -36,7 +38,7 @@ export function Review({ tasks, onOpen, onDone, onToast }: { tasks: TaskTile[]; 
   };
 
   const decide = (k: ReviewAnswer, picked?: string) => {
-    if (!cur || busy) return;
+    if (!cur || busy || dec[cur.t.id]?.k === "trash") return;
     const id = cur.t.id, day = picked ?? custom[id] ?? "";
     if (k === "date" && !day) {
       const inp = dateRef.current;
@@ -53,6 +55,18 @@ export function Review({ tasks, onOpen, onDone, onToast }: { tasks: TaskTile[]; 
     });
     timer.current = window.setTimeout(() => { setBusy(false); setPos((p) => (items[p]?.t.id === id ? nextPos(p, d) : p)); }, NEXT_MS);
   };
+  // do kosza: kawałek paska robi się czerwony, po chwili następne zadanie (jak po odpowiedzi)
+  const remove = () => {
+    if (!cur || busy || dec[cur.t.id]?.k === "trash") return;
+    const id = cur.t.id, before = dec[id];
+    const d = { ...dec, [id]: { k: "trash" as const, custom: "" } };
+    setDec(d); setBusy(true);
+    batchTasks([id], { trash: true }).then(() => onToast("Zadanie w koszu.")).catch((e) => {
+      setDec((x) => { const n = { ...x }; if (before) n[id] = before; else delete n[id]; return n; });
+      onToast("Nie udało się usunąć: " + (e instanceof Error ? e.message : String(e)));
+    });
+    timer.current = window.setTimeout(() => { setBusy(false); setPos((p) => (items[p]?.t.id === id ? nextPos(p, d) : p)); }, NEXT_MS);
+  };
   const back = () => { if (!busy && pos > 0) setPos(pos - 1); };
   const fwd = () => { if (!busy && pos < items.length) setPos(pos + 1); };
   const restart = () => { setItems(reviewQueue(tasks, today).map((t) => ({ t, level0: t.base, due0: t.due?.iso ?? null }))); setDec({}); setCustom({}); setPos(0); };
@@ -65,6 +79,7 @@ export function Review({ tasks, onOpen, onDone, onToast }: { tasks: TaskTile[]; 
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "ArrowLeft") { e.preventDefault(); back(); return; }
     if (e.key === "ArrowRight") { e.preventDefault(); fwd(); return; }
+    if (e.key === "Delete" && cur) { e.preventDefault(); remove(); return; }
     const i = Number(e.key);
     if (i >= 1 && i <= REVIEW_ANSWERS.length && cur) { e.preventDefault(); decide(REVIEW_ANSWERS[i - 1].k); }
   };
@@ -112,6 +127,7 @@ export function Review({ tasks, onOpen, onDone, onToast }: { tasks: TaskTile[]; 
 
   const t = live(cur), a = dec[t.id];
   const late = cur.due0 && cur.due0 < today;
+  const gone = a?.k === "trash";
   return (
     <div className="revv">
       {nav}
@@ -123,22 +139,30 @@ export function Review({ tasks, onOpen, onDone, onToast }: { tasks: TaskTile[]; 
           <span className="rv-mt">
             <span className="rv-lv">Priorytet <Lvl base={t.base} eff={t.eff} why={t.why} /></span>
             {late ? <span className="rv-late">Po terminie: {fmtDay(cur.due0!)}</span> : <span>Bez terminu</span>}
+            {gone ? <span className="rv-gone">W koszu</span> : null}
           </span>
         </span>
       </button>
-      <div className="rv-opts">
+      <div className={"rv-opts" + (gone ? " off" : "")}>
         {REVIEW_ANSWERS.map((o, i) => (
-          <button key={o.k} type="button" className={"rv-opt a-" + o.k + (a?.k === o.k ? " sel" : "")} title={answerTip(o.k, today)} aria-pressed={a?.k === o.k}
+          <button key={o.k} type="button" disabled={gone} className={"rv-opt a-" + o.k + (a?.k === o.k ? " sel" : "")} title={answerTip(o.k, today)} aria-pressed={a?.k === o.k}
             onClick={(e) => { if ((e.target as HTMLElement).closest("input")) return; decide(o.k); }}>
             <kbd>{i + 1}</kbd>
             {o.label}
             {o.k === "date" ? (
-              <input ref={dateRef} type="date" min={today} value={custom[t.id] ?? a?.custom ?? ""} aria-label="Dzień"
+              <input ref={dateRef} type="date" disabled={gone} min={today} value={custom[t.id] ?? a?.custom ?? ""} aria-label="Dzień"
                 onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}
                 onChange={(e) => { const v = e.target.value; setCustom((c) => ({ ...c, [t.id]: v })); if (v) decide("date", v); }} />
             ) : null}
           </button>
         ))}
+      </div>
+      <div className="rv-del">
+        {gone ? <span>Zadanie jest w koszu. Przywrócisz je w widoku Kosz.</span> : (
+          <button type="button" className="btn danger" title="Do kosza: znika z kanwy i z pracy agenta, w Koszu można je przywrócić (Delete)" disabled={busy} onClick={remove}>
+            <Icon k="trash" size={14} /> Usuń
+          </button>
+        )}
       </div>
     </div>
   );
