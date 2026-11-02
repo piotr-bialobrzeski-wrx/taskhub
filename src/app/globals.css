@@ -1360,7 +1360,7 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .rv-opts.off { opacity: .45; }
 .rv-opts.off .rv-opt { cursor: default; transform: none; }
 .rv-gone { color: var(--danger); }
-.rv-del { width: min(520px, 100%); display: flex; justify-content: center; flex: none; font-size: 12.5px; font-weight: 600; color: var(--sub); }
+.rv-del { width: min(520px, 100%); display: flex; align-items: center; gap: 10px; justify-content: center; flex: none; font-size: 12.5px; font-weight: 600; color: var(--sub); }
 .rv-del .btn { display: inline-flex; align-items: center; gap: 6px; }
 .rv-end { width: min(520px, 100%); border-radius: var(--r-lg); padding: 22px; display: flex; flex-direction: column; gap: 12px; text-align: center; align-items: center; margin: auto 0; }
 .rv-end h2 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }

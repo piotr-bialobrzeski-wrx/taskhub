@@ -5,8 +5,10 @@
 // więc zadanie, któremu właśnie ustawiono termin, nie znika spod strzałki wstecz.
 // Pod przyciskami „Usuń” (klawisz Delete): zadanie, które przestało być istotne, idzie do kosza (miękkie usunięcie,
 // to samo co „Do kosza” w zadaniu), znika z kanwy i z pracy agenta, a w widoku Kosz można je przywrócić.
+// Po cofnięciu strzałką usunięte zadanie ma „W koszu” i przycisk „Przywróć” (też Delete): wraca na kanwę w poprzednim
+// stanie (kosz to tylko znacznik usunięcia), a w przeglądzie wraca odpowiedź sprzed usunięcia albo zadanie czeka na nią.
 import { useEffect, useRef, useState } from "react";
-import { batchTasks, setTaskField } from "@/app/actions";
+import { batchTasks, restoreTask, setTaskField } from "@/app/actions";
 import { dayKey } from "@/lib/clock";
 import { REVIEW_ANSWERS, answerTip, fmtDay, reviewPatch, reviewQueue, type ReviewAnswer } from "@/lib/canvas/review";
 import { Icon, Lvl, type TaskTile } from "./ui";
@@ -14,7 +16,7 @@ import { Icon, Lvl, type TaskTile } from "./ui";
 const NEXT_MS = 420;   // po tylu ms od kliknięcia przychodzi następne zadanie (najpierw widać kolorowe zaznaczenie)
 
 type Item = { t: TaskTile; level0: number; due0: string | null };
-type Dec = { k: ReviewAnswer | "trash"; custom: string };
+type Dec = { k: ReviewAnswer | "trash"; custom: string; prev?: Dec };
 
 export function Review({ tasks, onOpen, onDone, onToast }: { tasks: TaskTile[]; onOpen: (id: string) => void; onDone: () => void; onToast: (t: string) => void }) {
   const [today] = useState(() => dayKey(new Date()));
@@ -59,13 +61,25 @@ export function Review({ tasks, onOpen, onDone, onToast }: { tasks: TaskTile[]; 
   const remove = () => {
     if (!cur || busy || dec[cur.t.id]?.k === "trash") return;
     const id = cur.t.id, before = dec[id];
-    const d = { ...dec, [id]: { k: "trash" as const, custom: "" } };
+    const d = { ...dec, [id]: { k: "trash" as const, custom: "", prev: before } };
     setDec(d); setBusy(true);
     batchTasks([id], { trash: true }).then(() => onToast("Zadanie w koszu.")).catch((e) => {
       setDec((x) => { const n = { ...x }; if (before) n[id] = before; else delete n[id]; return n; });
       onToast("Nie udało się usunąć: " + (e instanceof Error ? e.message : String(e)));
     });
     timer.current = window.setTimeout(() => { setBusy(false); setPos((p) => (items[p]?.t.id === id ? nextPos(p, d) : p)); }, NEXT_MS);
+  };
+  // z kosza z powrotem: zadanie zostaje na tej karcie, przyciski terminu znów działają
+  const restore = () => {
+    if (!cur || busy) return;
+    const id = cur.t.id, gone = dec[id];
+    if (gone?.k !== "trash") return;
+    const put = (x: Record<string, Dec>) => { const n = { ...x }; if (gone.prev) n[id] = gone.prev; else delete n[id]; return n; };
+    setDec(put); setBusy(true);
+    restoreTask(id).then(() => onToast("Zadanie przywrócone.")).catch((e) => {
+      setDec((x) => ({ ...x, [id]: gone }));
+      onToast("Nie udało się przywrócić: " + (e instanceof Error ? e.message : String(e)));
+    }).finally(() => setBusy(false));
   };
   const back = () => { if (!busy && pos > 0) setPos(pos - 1); };
   const fwd = () => { if (!busy && pos < items.length) setPos(pos + 1); };
@@ -79,7 +93,7 @@ export function Review({ tasks, onOpen, onDone, onToast }: { tasks: TaskTile[]; 
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "ArrowLeft") { e.preventDefault(); back(); return; }
     if (e.key === "ArrowRight") { e.preventDefault(); fwd(); return; }
-    if (e.key === "Delete" && cur) { e.preventDefault(); remove(); return; }
+    if (e.key === "Delete" && cur) { e.preventDefault(); if (dec[cur.t.id]?.k === "trash") restore(); else remove(); return; }
     const i = Number(e.key);
     if (i >= 1 && i <= REVIEW_ANSWERS.length && cur) { e.preventDefault(); decide(REVIEW_ANSWERS[i - 1].k); }
   };
@@ -158,7 +172,14 @@ export function Review({ tasks, onOpen, onDone, onToast }: { tasks: TaskTile[]; 
         ))}
       </div>
       <div className="rv-del">
-        {gone ? <span>Zadanie jest w koszu. Przywrócisz je w widoku Kosz.</span> : (
+        {gone ? (
+          <>
+            <span>Zadanie jest w koszu.</span>
+            <button type="button" className="btn" title="Z kosza z powrotem na kanwę, w poprzednim stanie (Delete)" disabled={busy} onClick={restore}>
+              <Icon k="undo" size={14} /> Przywróć
+            </button>
+          </>
+        ) : (
           <button type="button" className="btn danger" title="Do kosza: znika z kanwy i z pracy agenta, w Koszu można je przywrócić (Delete)" disabled={busy} onClick={remove}>
             <Icon k="trash" size={14} /> Usuń
           </button>
