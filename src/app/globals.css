@@ -842,7 +842,7 @@ details.tech > summary .k { font-weight: 600; }
 .lbl .undo { margin-left: auto; }
 .lbl .undo .btn { text-transform: none; letter-spacing: 0; padding: 4px 10px; font-size: 11.5px; }
 @container (min-width: 900px) {
-  .zones.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-5); }
+  .zones.two { grid-template-columns: minmax(0, 660px) minmax(0, 660px); justify-content: center; gap: var(--s-5); }   /* paczka 42: każda kolumna do 660 px */
   .zones.two > .zone.src { grid-column: 1; grid-row: 1; }   /* w DOM „Teraz” jest pierwsze (wąski panel: nad materiałami), w szerokim panelu idzie na prawo */
   .zones.two > .zone.ans { grid-column: 2; grid-row: 1; }
   .zones.two .zone.ans { position: sticky; top: 0; }
@@ -881,7 +881,9 @@ pre.code.diff { max-height: 320px; overflow: auto; font-size: 11.5px; white-spac
 .tbwrap { overflow-x: auto; padding-bottom: var(--s-3); }
 table.tb { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 table.tb th, table.tb td { text-align: left; vertical-align: top; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-table.tb td { white-space: normal; min-width: 10ch; overflow-wrap: break-word; }
+/* paczka 42 (wariant A): komórki nie łamią się na wąskie słupki; pierwsza kolumna (nazwa wiersza) w jednej linii, za szeroka tabela przewija się w bok */
+table.tb td { white-space: normal; min-width: 16ch; overflow-wrap: break-word; }
+table.tb td:first-child { white-space: nowrap; min-width: 0; }
 table.tb th { color: var(--sub); font-weight: 600; font-size: 11px; }
 table.tb tr.new td { background: var(--accent-soft); }
 .pub .msg.rows { padding-bottom: var(--s-3); }
@@ -898,10 +900,12 @@ table.tb tr.new td { background: var(--accent-soft); }
 .ans-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 /* paczka 31, wariant A: karta na cały ekran. W lewym górnym rogu pływa sama strzałka wstecz z nazwą (i rzadkie akcje pod „⋮”); górny pasek kanwy,
    pasek stanu i Kafelek/Grupa chowają się pod kartą, a pole czatu, dymki i kolejka zostają tam, gdzie na kanwie (nad kartą).
-   Jedna środkowa oś: tekst, pola i kroki do 680 px (--tw), porównania, tabele, działające okienko prototypu i dwie kolumny do 1040 px (--ww),
-   symetrycznie na boki. Zasada (paczka 38): sekcja jest szeroka tylko wtedy, gdy widać w niej szeroką treść; samo łącze czy tekst nigdy jej nie poszerza.
-   Wstawka szeroka siedząca w węższym pudełku (np. tabela w ramce „Teraz”): pudełko rośnie do 1040, a jego wnętrze zostaje na osi 680
-   dzięki wewnętrznemu marginesowi; sama wstawka wychodzi na boki ujemnym marginesem do szerokości --wi. */
+   Paczka 42, wariant A „Wspólna oś” (decyzja Piotra 2026-11-02): wszystko na jednej środkowej osi, każdy komponent we własnej szerokości.
+   Tekst, opcje, pola i kroki do 760 px (--tw); porównanie i dwie kolumny (szkic obok „Skąd”) po 660 px na kolumnę, razem do 1336 px (--cw);
+   tabele i działające okienko prototypu na całą szerokość ekranu, do 1440 px (--ww). Zasada z paczki 38 zostaje: sekcja jest szeroka tylko wtedy,
+   gdy widać w niej szeroką treść; samo łącze czy tekst nigdy jej nie poszerza.
+   Wstawka szeroka siedząca w węższym pudełku (np. tabela w ramce „Teraz”): pudełko rośnie, a jego wnętrze zostaje na osi 760
+   dzięki wewnętrznemu marginesowi; sama wstawka wychodzi na boki ujemnym marginesem do szerokości --wi (porównanie najwyżej --cw). */
 .app.haspanel :is(.dockwrap, .feed, .answer) { z-index: 12; }   /* pole czatu i dymki nad kartą (na telefonie nad szufladą) */
 @media (min-width: 861px) {
   .app.haspanel :is(.pillbar, .mkpill, .namer, .runbar, .selbar, .zmenu) { display: none; }
@@ -909,13 +913,19 @@ table.tb tr.new td { background: var(--accent-soft); }
     min-height: 44px; padding: 4px 14px 4px 4px; gap: var(--s-2); border-bottom: 0; border-radius: 22px;
     background: var(--glass); backdrop-filter: blur(22px) saturate(160%); box-shadow: 0 8px 28px var(--shadow), inset 0 0 0 1px var(--glass-edge), 0 0 0 1px var(--line); }
   .d-bar .n-num { margin-left: 2px; }
-  .detail > .d-body { --tw: min(680px, 100cqw); --ww: min(1040px, 100cqw); padding: calc(84px + env(safe-area-inset-top, 0px)) 32px calc(var(--dock-h, 46px) + 72px); }
+  .detail > .d-body { --tw: min(760px, 100cqw); --cw: min(1336px, 100cqw); --ww: min(1440px, 100cqw); padding: calc(84px + env(safe-area-inset-top, 0px)) 32px calc(var(--dock-h, 46px) + 72px); }
   .detail > .d-body > * { width: 100%; max-width: var(--tw); margin-inline: auto; flex: none; }
-  .detail > .d-body > .zones.two { max-width: var(--ww); }
-  /* paczka 38: tabela albo porównanie w zwiniętej części (Wynik, Skąd, Skąd to wiemy) nie poszerza sekcji, dopóki jej nie rozwiniesz */
-  .detail > .d-body > :not(.zones.two):has(:is(.cmp, .tbwrap):not(.msg *, details:not([open]) *)) { --wi: var(--ww); max-width: var(--ww); padding-inline: calc((var(--ww) - var(--tw)) / 2); }
-  .detail > .d-body > .now:has(:is(.cmp, .tbwrap):not(.msg *, details:not([open]) *)) { --wi: calc(var(--ww) - 2 * var(--s-5)); padding-inline: calc((var(--ww) - var(--tw)) / 2 + var(--s-5)); }
-  .detail > .d-body :is(.cmp, .block:has(.tbwrap)):not(.cmp *, .zones.two *, .msg *) { margin-inline: calc((100% - var(--wi)) / 2); }
+  .detail > .d-body > .zones.two { max-width: var(--cw); }
+  /* paczka 38: tabela albo porównanie w zwiniętej części (Wynik, Skąd, Skąd to wiemy) nie poszerza sekcji, dopóki jej nie rozwiniesz.
+     Paczka 42: porównanie poszerza sekcję do --cw, tabela do --ww (gdy są obie, wygrywa tabela, a porównanie zostaje na --cw) */
+  .detail > .d-body > :not(.zones.two):has(.cmp:not(.msg *, details:not([open]) *)) { --wi: var(--cw); max-width: var(--cw); padding-inline: calc((var(--cw) - var(--tw)) / 2); }
+  .detail > .d-body > :not(.zones.two):has(.tbwrap:not(.msg *, details:not([open]) *)) { --wi: var(--ww); max-width: var(--ww); padding-inline: calc((var(--ww) - var(--tw)) / 2); }
+  .detail > .d-body > .now:has(.cmp:not(.msg *, details:not([open]) *)) { --wi: calc(var(--cw) - 2 * var(--s-5)); padding-inline: calc((var(--cw) - var(--tw)) / 2 + var(--s-5)); }
+  .detail > .d-body > .now:has(.tbwrap:not(.msg *, details:not([open]) *)) { --wi: calc(var(--ww) - 2 * var(--s-5)); padding-inline: calc((var(--ww) - var(--tw)) / 2 + var(--s-5)); }
+  .detail > .d-body .block:has(.tbwrap):not(.cmp *, .zones.two *, .msg *) { margin-inline: calc((100% - var(--wi)) / 2); }
+  .detail > .d-body .cmp:not(.cmp *, .zones.two *, .msg *) { margin-inline: calc((100% - min(var(--wi), var(--cw))) / 2); }
+  /* porównanie: kolumny po 660 px, wyśrodkowane; węższy ekran sam układa je jedna pod drugą */
+  .detail > .d-body .cmp:not(.msg *) { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 660px)); justify-content: center; }
   /* lepki pasek formatowania pod pływającym nagłówkiem (84 px wcięcia treści, nagłówek kończy się na 62 px) */
   .detail > .d-body .rf-bar { top: -18px; }
   .detail > .d-body .rf-link { top: 23px; }
@@ -1257,9 +1267,9 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 .protoview .pv-full { width: 100%; height: 100%; border: 0; border-radius: var(--r-md); background: var(--surface); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); }
 .protoview .iv-bar .btn { height: 34px; }
 @media (max-width: 640px) { .protoview { padding: 72px 8px 8px; } }
-/* na pełnoekranowej karcie okienko jest szeroką wstawką (do 1040 px), jak tabela i porównanie.
+/* na pełnoekranowej karcie okienko jest szeroką wstawką (do 1440 px, paczka 42), jak tabela.
    Paczka 38 (zasada szerokości, decyzja Piotra: 1 „Szeroko tylko przy szerokiej treści”): kartę poszerza tylko okienko, które pokazuje
-   prototyp (wczytuje albo działa); okienko z samym łączem (.pframe.no: claude.ai, nieudane wczytanie, ukryty znacznik) zostaje na 680 px */
+   prototyp (wczytuje albo działa); okienko z samym łączem (.pframe.no: claude.ai, nieudane wczytanie, ukryty znacznik) zostaje na osi tekstu (760 px) */
 @media (min-width: 861px) {
   .detail > .d-body > .now:has(.pframe:not(.no)) { --wi: calc(var(--ww) - 2 * var(--s-5)); max-width: var(--ww); padding-inline: calc((var(--ww) - var(--tw)) / 2 + var(--s-5)); }
   .detail > .d-body .now .pframe:not(.no) { margin-inline: calc((100% - var(--wi)) / 2); }

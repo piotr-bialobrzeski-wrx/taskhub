@@ -54,7 +54,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const [namer, setNamer] = useState<"tile" | "group" | null>(null);
   // kontekst pola czatu: domyślnie to, co jest otwarte (krok w panelu, inaczej zadanie); X zawęża o poziom wyżej (krok → zadanie → wszystkie zadania)
   // paczka 31 (wariant A „Jedna oś, szersze wstawki”): otwarta karta zawsze zakrywa cały ekran, bez przełącznika szerokości i bez uchwytu;
-  // szerokości treści (680 tekst, 1040 porównania i tabele) ustala CSS (.detail, .d-body)
+  // szerokości treści (760 tekst, 2 × 660 porównania, 1440 tabele; paczka 42) ustala CSS (.detail, .d-body)
   // przycisk w pasku („Rozpisz teraz”): panel zadania i rozwinięta sekcja, do której prowadzi
   const runAct = (anchor: string) => { setSel(new Set()); setPanel("__task"); setTimeout(() => { const el = document.getElementById(anchor); if (el instanceof HTMLDetailsElement) el.open = true; el?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, 80); };
   useEffect(() => {

@@ -405,8 +405,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {undo ? <div className="undo-row">{undo}</div> : null}
       <details className="fold why-fold"><summary><span className="k">Skąd to wiemy</span><span className="t">{kindsOf([...split.main, ...split.sources])}</span><Icon k="chev" size={10} sw={2.2} /></summary>
         <div className="stack">
-          {split.main.length ? <BlocksView links={cl} blocks={split.main} form={form} indexOf={indexOf} /> : null}
-          {split.sources.length ? <BlocksView links={cl} blocks={split.sources} form={form} indexOf={indexOf} /> : null}
+          {/* paczka 42: jedna lista klocków, żeby sąsiednie źródła (np. obecna i nowa story) złożyły się w porównanie obok siebie */}
+          {split.main.length || split.sources.length ? <BlocksView links={cl} blocks={[...split.main, ...split.sources]} form={form} indexOf={indexOf} /> : null}
           {fromDeps}
         </div>
       </details>
