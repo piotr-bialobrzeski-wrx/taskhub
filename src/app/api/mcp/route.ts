@@ -10,7 +10,8 @@ import { companyOf, contextText, brief, scoreAll, capText, draftsText, cardText 
 import { rulesText } from "@/lib/agent/context";
 import { audienceOf, WAIT_RE, waitTarget, workSummary } from "@/lib/agent/work";
 import { BRIDGE_ALIVE_MS, ago, connectorProblem, knownApp } from "@/lib/bridge";
-import { finishStep } from "@/lib/services";
+import { finishStep, layoutPreset } from "@/lib/services";
+import { PRESETS, presetName, type PresetKey } from "@/lib/canvas/presets";
 import { composeStatic } from "@/lib/agent/compose";
 import { appName, Blocks, ChangedFile, Fact, isAppProject, isOwnerStep, normalizeTool, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
 import { destOf, doneChat, isDeployStep, isProjectStep, PROJECT_RE, stepKind, keepOwnerAnswers, leaveChat, whyOf, projectPrompt, READ_RE, sameTarget } from "@/lib/stepcard";
@@ -733,9 +734,20 @@ function buildHandler(auth: repo.TokenAuth) {
     // paczka 34: „pogrupuj kafelki według …” = nowy podział całej kanwy: stare grupy (także pola „Pilne i szybkie”) znikają, kafelki
     // układają się od nowa, każda grupa zwartym blokiem; kafelek jest w jednej grupie (Piotr, 2026-11-01: nakładanie nowych grup na stare było nieczytelne)
     server.registerTool("group_canvas", {
-      title: "Pogrupuj całą główną kanwę", description: "Zastępuje wszystkie grupy na głównej kanwie nowym podziałem (np. jedna grupa na projekt: name = nazwa projektu; zadania bez projektu w grupie „Bez projektu”) i układa kafelki od nowa, każda grupa zwartym blokiem. Dotychczasowe grupy i pola „Pilne i szybkie” znikają (kafelek jest w jednej grupie). Każde otwarte zadanie ma być w dokładnie jednej grupie; zadanie pominięte zostaje poza grupami. Jedno wywołanie na całe polecenie Piotra, nie create_group na każdą grupę. Grup pustych nie podawaj.",
-      inputSchema: z.object({ groups: z.array(z.object({ name: z.string().min(1).max(60), taskIds: z.array(z.string()).min(1).max(200) })).min(1).max(40) }),
+      title: "Pogrupuj całą główną kanwę", description: `Zastępuje wszystkie grupy na głównej kanwie nowym podziałem (np. jedna grupa na projekt: name = nazwa projektu; zadania bez projektu w grupie „Bez projektu”) i układa kafelki od nowa, każda grupa zwartym blokiem. Dotychczasowe grupy i pola „Pilne i szybkie” znikają (kafelek jest w jednej grupie). Każde otwarte zadanie ma być w dokładnie jednej grupie; zadanie pominięte zostaje poza grupami. Jedno wywołanie na całe polecenie Piotra, nie create_group na każdą grupę. Grup pustych nie podawaj. Gotowy układ (preset) zamiast groups, gdy prośba Piotra to jeden z nich: ${PRESETS.map((x) => `${x.key} = „${x.name}”`).join(", ")}; aplikacja liczy go od razu, tak jak menu „Ułóż”. Grupy układają się same w kształt ekranu, a kanwa dopasowuje powiększenie.`,
+      inputSchema: z.object({
+        preset: z.enum(PRESETS.map((x) => x.key) as [PresetKey, ...PresetKey[]]).optional(),
+        groups: z.array(z.object({ name: z.string().min(1).max(60), taskIds: z.array(z.string()).min(1).max(200) })).min(1).max(40).optional(),
+      }),
     }, async (a) => {
+      // krok 05 zadania „Menu Ułóż z gotowymi układami kanwy”: prośba o gotowy układ idzie tą samą drogą co menu „Ułóż”
+      if (a.preset) {
+        await layoutPreset(ownerId, a.preset);
+        await markRun();
+        const n = (await repo.listGroups(ownerId, null)).length;
+        return text(`Kanwa ułożona: ${presetName(a.preset)} (${n} grup).`);
+      }
+      if (!a.groups?.length) return text("Podaj preset (gotowy układ) albo groups; kanwa bez zmian.");
       const open = new Set((await repo.listTasks(ownerId)).map((t) => t.id)), used = new Set<string>();
       const groups = a.groups.map((g) => ({ name: g.name.trim(), ids: g.taskIds.filter((id) => open.has(id) && !used.has(id) && (used.add(id), true)) })).filter((g) => g.ids.length);
       if (!groups.length) return text("Żadne z podanych id nie jest otwartym zadaniem; kanwa bez zmian.");

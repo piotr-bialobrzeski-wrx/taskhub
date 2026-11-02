@@ -213,6 +213,17 @@ export function Board(p: BoardProps) {
   // paczka 40: „Ułóż” z gotowym układem (liczony na serwerze, bez agenta); po ułożeniu kanwa sama dopasowuje powiększenie
   const [lay, setLay] = useState<PresetKey | null>(null);
   const [fitKey, setFitKey] = useState(0);
+  // grupowanie z czatu (group_canvas, krok 05 zadania „Menu Ułóż z gotowymi układami kanwy”): gdy z serwera przyjdzie całkiem nowy zestaw
+  // grup automatycznych (żadna dawna nie została), kanwa sama robi „Dopasuj”, tak jak po „Ułóż”; jedna dodatkowa grupa niczego nie przesuwa
+  const autoSig = p.groups.filter((g) => g.auto).map((g) => g.id).sort().join(",");
+  const lastSig = useRef(autoSig);
+  useEffect(() => {
+    const prev = lastSig.current;
+    lastSig.current = autoSig;
+    if (!autoSig || prev === autoSig) return;
+    const old = new Set(prev.split(",").filter(Boolean));
+    if (autoSig.split(",").every((id) => !old.has(id))) setFitKey((n) => n + 1);
+  }, [autoSig]);
   useEffect(() => { try { const v = localStorage.getItem("th-layout"); if (isPreset(v)) setLay(v); } catch { /* brak storage */ } }, []);
   const layoutNow = (key: PresetKey) => {
     undoL.remember(layoutSnapshot(api.current, p.tasks.map((t) => t.id), p.groups));
