@@ -61,7 +61,8 @@ export function stepLevel(s: StepLike, o: { weight?: number | null } = {}): Leve
 }
 
 // model i wysiłek dla jednej pozycji pracy; pick = wybór Piotra na karcie (wysiłek zostaje z poziomu, zapasowy to model poziomu albo jego zapasowy)
-export type Choice = { level: Level; model: string; effort: Effort; fallback: string; picked: boolean; key: string };
+// runner: "gpt" = grupa pracy dla Codex (przełącznik Claude/GPT, paczka 40); model ma wtedy prefiks „gpt:”
+export type Choice = { level: Level; model: string; effort: Effort; fallback: string; picked: boolean; key: string; runner?: "gpt" };
 export function choiceOf(cfg: ModelConfig, level: Level, pick?: string | null): Choice {
   const l = cfg.levels[level];
   const p = isModelName(pick) ? pick.trim() : "";
@@ -97,6 +98,8 @@ export function pickRun(choices: Choice[], limits: Limits): RunPick | { blockedU
 
 // „claude-sonnet-5-5” → „Sonnet 5.5”, „opus” → „Opus”, „claude-opus-5-5[1m]” → „Opus 5.5”
 export function modelLabel(m: string | null | undefined): string {
+  // bieg GPT (Codex): „gpt:” = domyślny model Codex, „gpt:gpt-5.5-codex” = „GPT gpt-5.5-codex”
+  if (m?.startsWith("gpt:")) return ["GPT", m.slice(4).trim()].filter(Boolean).join(" ");
   const t = (m ?? "").trim().replace(/\[[^\]]*\]$/, "").replace(/^claude-/i, "");
   if (!t) return "";
   const parts = t.split("-");

@@ -12,6 +12,7 @@ import type { FeedItem, WorkBubble } from "@/lib/feed";
 import type { AgentQueue } from "@/lib/agent/work";
 import { QueuePanel } from "./Queue";
 import { AddButton, AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
+import type { CodexState, Runner } from "@/lib/agent/runner";
 import { SearchPill } from "./SearchPill";
 import { Draw } from "./Draw";
 import { Review } from "./Review";
@@ -25,7 +26,7 @@ export type ArchRow = { id: string; title: string; when: string; summary: string
 export type BoardInitial = { view?: string; p?: string; t?: string; focus?: string };
 export type BoardProps = {
   tasks: TaskTile[]; groups: GroupVM[]; projects: ProjectRow[]; companies: CompanyRow[]; projTasks: ProjTask[]; index: SearchItem[]; initial: BoardInitial;
-  aiOn: boolean; agent: string; feed: FeedItem[];
+  aiOn: boolean; agent: Runner; codex?: CodexState; feed: FeedItem[];
   work?: WorkBubble | null;   // dymek pracy: wiadomość z kanwy czeka na Claude albo Claude ją robi (paczka 29)
   agentQueue: AgentQueue;   // kolejka agenta w lewym dolnym rogu (paczka 18)
   archive: { done: ArchRow[]; trash: ArchRow[]; trashDays: number };
@@ -298,7 +299,7 @@ export function Board(p: BoardProps) {
         <span className="sp" />
         {!off && view === "canvas" ? <AddButton tileLabel="Dodaj zadanie" groupLabel={n ? "Zgrupuj zaznaczone" : "Dodaj grupę"} onTile={() => setNamer("tile")} onGroup={() => setNamer("group")} /> : null}
         <SearchPill index={p.index} screen={screen} value={q} onChange={setQ} onPick={onPick} />
-        <AgentPill agent={p.agent} aiOn={p.aiOn} />
+        <AgentPill agent={p.agent} codex={p.codex} aiOn={p.aiOn} />
       </div>
 
       {menu ? (

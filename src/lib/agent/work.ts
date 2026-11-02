@@ -4,6 +4,7 @@ import { isAppCodeStep, type Step, type Task } from "@/lib/schema";
 import { brief, scoreAll } from "./context";
 import { approvalValid, draftOf, isPromptDraft, isSendable, type Draft } from "./approval";
 import { choiceOf, modelConfig, runLabel, stepChoice, type Choice } from "./models";
+import { GPT_PREFIX, codexStateOf, gptCanStep, gptChoice, gptModelOf, runnerOf } from "./runner";
 import { CANVAS_KEY } from "@/lib/feed";
 import { nowText } from "@/lib/live";
 // list_work pokazuje początek wiadomości; całość (do 50 tys. znaków) jest w get_task
@@ -121,10 +122,19 @@ async function sendSummary(ownerId: string, stepId: string | undefined): Promise
   return { text: `SZKIC DO WYSŁANIA W TYM BIEGU (get_task tego zadania, wyślij dokładnie treść z sekcji „SZKIC KROKU ${st.id}”, bez zmian, tam, gdzie wskazuje „dokąd”, w formacie z linii „formatowanie”, raz; potem complete_step z linkiem; przy jakiejkolwiek wątpliwości leave_step z powodem i nic nie wysyłaj):\n- krok [${st.id}] „${st.title}” (${st.tool}) w zadaniu [${t.id}] „${t.title}”`, counts, total: 1 };
 }
 
+// przełącznik Claude/GPT (paczka 40): praca idzie do Codex tylko, gdy Piotr wybrał GPT, a mostek, który odezwał się w ostatnich 2 minutach,
+// zgłasza Codex gotowy (zainstalowany i zalogowany). Inaczej wszystko robi Claude, jak dotąd
+const GPT_ALIVE_MS = 120_000;
+export async function gptRouting(ownerId: string, settings: Record<string, unknown>): Promise<boolean> {
+  if (runnerOf(settings) !== "gpt") return false;
+  return codexStateOf(await repo.bridgeMeta(ownerId, GPT_ALIVE_MS)) === "ready";
+}
+
 // peek: tylko policz, nie oznaczaj odpowiedzi Piotra jako odczytanych (mostek zagląda tu co kilkanaście sekund)
 // focus: bieg pracy mostka z doborem modelu widzi tylko swoją grupę („model|wysiłek”); resztę zrobi osobny bieg na modelu dobranym do niej
 // tasks: zadania już wczytane przez wołającego (bez kosza), żeby strona i puls mostka nie czytały całej bazy drugi raz
-export async function workSummary(ownerId: string, opts: { peek?: boolean; audience?: WorkAudience; stepId?: string; focus?: string | null; tasks?: Task[] } = {}): Promise<WorkSummary> {
+// gpt: czy praca, którą zrobi Codex, idzie do osobnej grupy (bez podania: z ustawień i stanu Codex na Macu; bieg GPT zawsze)
+export async function workSummary(ownerId: string, opts: { peek?: boolean; audience?: WorkAudience; stepId?: string; focus?: string | null; tasks?: Task[]; gpt?: boolean } = {}): Promise<WorkSummary> {
   const audience = opts.audience ?? "bridge-v1";
   if (audience === "send") return sendSummary(ownerId, opts.stepId);
   const sends = audience === "bridge-v1";   // tylko stary mostek wysyła z listy pracy; reszta nie widzi zatwierdzonych szkiców
@@ -132,6 +142,10 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
   const canvasChat = audience === "bridge-v1" ? [] : await repo.listUnseenCanvasChat(ownerId);
   // dobór modelu: każda pozycja listy dostaje grupę (model i wysiłek z poziomu kroku); bez konfiguracji wszystko w jednej, pustej grupie
   const cfg = modelConfig(settings);
+  const gpt = audience === "work" && (opts.gpt ?? (!!opts.focus?.startsWith(GPT_PREFIX) || (await gptRouting(ownerId, settings))));
+  const gptModel = gptModelOf(settings);
+  // pozycja, którą zrobi Codex: ta sama grupa wysiłku, ale osobny bieg (model z prefiksem „gpt:”)
+  const viaGpt = (c: Choice | null): Choice | null => (gpt ? gptChoice(c, gptModel) : c);
   const weightOf = new Map(tasks.map((t) => [t.id, projects.find((p) => p.id === t.projectId)?.weight ?? null]));
   const stepOf = new Map(tasks.flatMap((t) => t.steps.map((st) => [st.id, st] as const)));
   const projectOf = new Map(tasks.map((t) => [t.id, projects.find((p) => p.id === t.projectId)?.name ?? null]));
@@ -149,11 +163,11 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
   };
   const forStep = (st: Step, taskId: string) => (cfg ? stepChoice(cfg, st, { weight: weightOf.get(taskId) }) : null);
   // wiadomość albo odpowiedź przy kroku idzie na poziomie tego kroku (kartka Piotra co najmniej Analiza), bez kroku na Analizie
-  const forTaskMsg = (taskId: string, stepId?: string | null) => { const st = stepId ? stepOf.get(stepId) : undefined; return cfg ? (st ? forStep(st, taskId) : choiceOf(cfg, "analysis")) : null; };
+  const forTaskMsg = (taskId: string, stepId?: string | null) => { const st = stepId ? stepOf.get(stepId) : undefined; return viaGpt(cfg ? (st ? forStep(st, taskId) : choiceOf(cfg, "analysis")) : null); };
   const chatStep = (m: (typeof allChat)[number]) => (m.actions as { stepId?: string } | null)?.stepId ?? null;
   const chat = allChat.filter((m) => take(forTaskMsg(m.taskId, chatStep(m)), 0, { key: `chat:${m.taskId}`, kind: "chat", taskId: m.taskId, taskTitle: m.taskTitle, stepId: chatStep(m), label: `Twoja wiadomość: „${m.text.replace(/\s+/g, " ").slice(0, 80)}”`, line: `wiadomość w zadaniu [${m.taskId}] „${m.taskTitle}” (sekcja WIADOMOŚCI PIOTRA)` }));
   // wiadomości z głównej kanwy i paska (paczka 29): jedna pozycja kolejki na całą kanwę, na Analizie
-  const commands = canvasChat.filter(() => take(cfg ? choiceOf(cfg, "analysis") : null, 0, { key: CANVAS_KEY, kind: "chat", taskId: "", taskTitle: "Główna kanwa", stepId: null, label: `Twoja wiadomość: „${canvasChat[0].text.replace(/\s+/g, " ").slice(0, 80)}”`, line: "wiadomość z głównej kanwy (sekcja WIADOMOŚCI Z GŁÓWNEJ KANWY)" }));
+  const commands = canvasChat.filter(() => take(viaGpt(cfg ? choiceOf(cfg, "analysis") : null), 0, { key: CANVAS_KEY, kind: "chat", taskId: "", taskTitle: "Główna kanwa", stepId: null, label: `Twoja wiadomość: „${canvasChat[0].text.replace(/\s+/g, " ").slice(0, 80)}”`, line: "wiadomość z głównej kanwy (sekcja WIADOMOŚCI Z GŁÓWNEJ KANWY)" }));
   const open = scoreAll(tasks, projects, samples).filter((s) => !s.task.doneAt && !s.task.deletedAt);
   const unfinished = new Set(tasks.filter((t) => !t.doneAt && !t.deletedAt).map((t) => t.id));
   const free = open.filter((s) => !s.task.dependsOn.some((d) => unfinished.has(d)));   // zadania, które nie czekają na inne zadania
@@ -161,12 +175,12 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
   const accessAt = bridgeAccessAt(settings);
   const waitingTask = new Set(openQ.map((q) => q.taskId));
   // rozpisanie zadania zawsze na Strategii
-  const noSteps = free.filter((s) => !s.task.steps.length && !waitingTask.has(s.task.id) && take(cfg ? choiceOf(cfg, "strategy") : null, 3,
+  const noSteps = free.filter((s) => !s.task.steps.length && !waitingTask.has(s.task.id) && take(viaGpt(cfg ? choiceOf(cfg, "strategy") : null), 3,
     { key: `task:${s.task.id}`, kind: "breakdown", taskId: s.task.id, taskTitle: s.task.title, stepId: null, label: "Rozpisanie na kroki", line: `rozpisanie zadania [${s.task.id}] „${s.task.title}” (sekcja ZADANIA BEZ KROKÓW)` }));
   const attN = await repo.countAttachments(noSteps.map((s) => s.task.id));
   // tytuły zadań wpisane jako cała wiadomość Piotra (dłuższe niż 6 słów albo zdanie z kropką), których agent jeszcze nie skrócił
   // samo skrócenie tytułu to Mechanika
-  const longTitles = open.filter((s) => !s.task.titleOriginal && isLongTitle(s.task.title) && take(cfg ? choiceOf(cfg, "mechanics") : null, 8,
+  const longTitles = open.filter((s) => !s.task.titleOriginal && isLongTitle(s.task.title) && take(viaGpt(cfg ? choiceOf(cfg, "mechanics") : null), 8,
     { key: `title:${s.task.id}`, kind: "title", taskId: s.task.id, taskTitle: s.task.title, stepId: null, label: "Skrócenie tytułu", line: `tytuł zadania [${s.task.id}] (sekcja TYTUŁY DO SKRÓCENIA)` }));
   const titleOf = new Map(tasks.map((t) => [t.id, t.title]));
   const answered = allAnswered.filter((q) => take(forTaskMsg(q.taskId, q.stepId), 4,
@@ -178,7 +192,8 @@ export async function workSummary(ownerId: string, opts: { peek?: boolean; audie
   for (const s of free) {
     if (waitingTask.has(s.task.id)) continue;
     for (const st of s.task.steps) {
-      const c = forStep(st, s.task.id);
+      // krok z aplikacją z konta Claude, z kodem, plikiem albo modelem wybranym na karcie zostaje przy Claude także po przełączeniu na GPT
+      const c = gpt && gptCanStep(st) ? viaGpt(forStep(st, s.task.id)) : forStep(st, s.task.id);
       // grafiki kroku (paczka 29): agent ogląda tylko je; [] = krok bez grafik, brak listy = krok sprzed przypisywania
       const pics = st.attachmentIds ? (st.attachmentIds.length ? ` | grafiki kroku: ${st.attachmentIds.map((id) => `[${id}]`).join(", ")} (get_attachment tylko te)` : " | bez grafik") : "";
       const line = `- krok [${st.id}] „${st.title}” (${st.tool}) w zadaniu [${s.task.id}] „${s.task.title}”${st.detail ? ": " + st.detail.slice(0, 200) : ""}${pics}`;

@@ -7,6 +7,9 @@
 // Paczka 12: model, wysiłek i model zapasowy biegu dobiera Task Hub (poziom kroku); przy limicie modelu następny bieg idzie na zapasowym,
 // a gdy w limicie są wszystkie potrzebne modele, Task Hub odpowiada 429 z godziną powrotu.
 // Paczka 13: kroki kliknięte „Uruchom w chmurze” mostek tylko odpala w chmurze (ringCloud); kodu Task Hub na Macu nie zmienia.
+// Paczka 40: drugi wykonawca, Codex CLI. Mostek co kilka minut sprawdza, czy Codex jest zainstalowany i zalogowany kontem ChatGPT,
+// i zgłasza to w pulsie (codex=ready|auth|missing). Gdy Piotr wybrał w Task Hub „GPT”, serwer daje bieg z runner=codex i mostek
+// uruchamia codex exec zamiast Claude Code; wysyłki i kroki z aplikacjami z konta Claude dalej robi Claude.
 import Foundation
 
 struct BridgeWork {
@@ -35,6 +38,8 @@ final class Bridge: ObservableObject {
     @Published private(set) var runs = 0             // udane biegi od startu
     @Published private(set) var isRunningNow = false // trwa bieg (Claude albo commit): „Zatrzymaj bieg” w menu i w powiadomieniu
     @Published private(set) var runLabel = ""        // co robi bieg, po ludzku
+    @Published private(set) var codexState: CodexCLI.State? = nil   // nil = jeszcze nie sprawdzone
+    @Published private(set) var codexNote = ""
 
     private let store: Store
     private var loopTask: Task<Void, Never>? = nil
@@ -53,6 +58,8 @@ final class Bridge: ObservableObject {
     private var noSendsUntil: Date? = nil            // serwer nie dał wysyłki (204): przez chwilę nie pytamy
     private var lastReport: Date? = nil              // kiedy ostatnio zgłoszono listę konektorów do rejestru połączeń
     private var cloudNext: Date? = nil               // odpalenie chmury po błędzie: nie częściej niż co kilka minut
+    private var codexAt: Date? = nil                 // ostatnie sprawdzenie Codex (instalacja i logowanie)
+    private let codexEvery: Double = 10 * 60
     private let reportEvery: Double = 6 * 3600
     private let probeEvery: Double = 6 * 3600
     private let stopHold: Double = 10 * 60
@@ -131,6 +138,7 @@ final class Bridge: ObservableObject {
         noSendsUntil = nil
         stuckKey = nil     // „Sprawdź teraz” puszcza też pracę, która ostatnio stała w miejscu
         lastReport = nil   // „Sprawdź teraz” odświeża też rejestr połączeń
+        codexAt = nil      // i stan Codex
         sleeper?.cancel()
     }
 
@@ -190,6 +198,7 @@ final class Bridge: ObservableObject {
             var wait = 15.0
             do {
                 if let u = until, Date() >= u { until = nil; state = .idle; detail = "Próbuję ponownie." }
+                await refreshCodex()
                 let w = try await poll()
                 lastPoll = Date()
                 pending = w.pending
@@ -282,6 +291,8 @@ final class Bridge: ObservableObject {
             // odcisk folderów i narzędzi z Ustawień: po zmianie Task Hub znowu daje kroki oddane z braku dostępu (paczka 22)
             URLQueryItem(name: "access", value: store.cfg.accessKey),
         ]
+        // stan Codex (paczka 40): od niego Task Hub zależy, czy przełącznik GPT kieruje pracę do Codex
+        if let c = codexState { items.append(URLQueryItem(name: "codex", value: c.rawValue)) }
         if let u = until { items.append(URLQueryItem(name: "until", value: ISO8601DateFormatter().string(from: u))) }
         var c = URLComponents()
         c.queryItems = items
@@ -322,6 +333,22 @@ final class Bridge: ObservableObject {
         cloudNext = Date().addingTimeInterval(r.ok ? 30 : 300)
         Log.write(r.ok ? "chmura: odpalone zadanie \(trigger)" : "chmura: nie odpaliłem (\(r.note)), ponowię o \(ClaudeCLI.hhmm(cloudNext ?? Date()))")
         _ = try? await request("POST", "/api/bridge/cloud", body: r.ok ? ["ok": true] : ["ok": false, "note": r.note])
+    }
+
+    // Codex: zainstalowany? zalogowany kontem ChatGPT? Po starcie, co 10 minut, po „Sprawdź teraz” i po biegu, który trafił na wylogowanie
+    func refreshCodex(force: Bool = false) async {
+        if !force, let a = codexAt, Date().timeIntervalSince(a) < codexEvery { return }
+        codexAt = Date()
+        guard let bin = CodexCLI.find(store.cfg.codex) else {
+            if codexState != .missing { Log.write("Codex: nie ma go na tym Macu") }
+            codexState = .missing
+            codexNote = "nie znaleziono Codex CLI"
+            return
+        }
+        let (st, note) = await CodexCLI.loginState(bin)
+        if st != codexState { Log.write("Codex: \(note)") }
+        codexState = st
+        codexNote = note
     }
 
     // koniec biegu w Task Hub; osobne zadanie, żeby zgłoszenie wyszło także po wyłączeniu mostka (anulowana pętla)
@@ -475,12 +502,13 @@ final class Bridge: ObservableObject {
             return hold(.error, "Task Hub nie obsługuje jeszcze mostka v2. Zaktualizuj serwer Task Hub.", 10 * 60)
         }
         let maxMin = (j["maxMinutes"] as? Int) ?? (kind == .send ? 10 : 45)
+        let viaCodex = kind == .work && (j["runner"] as? String) == "codex"
         let title = ((j["step"] as? [String: Any])?["title"] as? String) ?? ""
         let app = ((j["target"] as? [String: Any])?["app"] as? String) ?? ""
         let git = kind == .send ? (j["git"] as? [String: Any]) : nil
         let label: String
         let modelText = (j["modelLabel"] as? String) ?? ""   // „Opus · wysoki” albo „limit Fable do 01:00, pracuję na Opusie”
-        if kind == .work { label = "Claude pracuje nad zadaniami" + (modelText.isEmpty ? "" : " (\(modelText))") }
+        if kind == .work { label = (viaCodex ? "GPT" : "Claude") + " pracuje nad zadaniami" + (modelText.isEmpty ? "" : " (\(modelText))") }
         else if git != nil { label = "Commit: " + (title.isEmpty ? "zatwierdzony szkic" : title) }
         else { label = "Wysyłka" + (app.isEmpty ? "" : " do \(app)") + (title.isEmpty ? "" : ": \(title)") }
 
@@ -504,7 +532,7 @@ final class Bridge: ObservableObject {
         let result: ProcessResult
         var sent: [String: Any]? = nil
         var limitUntil: Date? = nil
-        let served = !((j["model"] as? String) ?? "").isEmpty   // model dobrał Task Hub (poziom kroku)
+        let served = viaCodex || !((j["model"] as? String) ?? "").isEmpty   // model dobrał Task Hub (poziom kroku); bieg Codex zawsze od Task Hub
         planFailed = false
         if let g = git {
             if let job = GitJob(g) {
@@ -522,6 +550,8 @@ final class Bridge: ObservableObject {
             } else {
                 result = ProcessResult(ok: false, text: "Task Hub podał niepełne dane commita (repo, gałąź, opis, pliki).")
             }
+        } else if viaCodex {
+            result = await runCodex(id: id, j: j, maxMin: maxMin)
         } else {
             result = await runClaude(kind, id: id, j: j, probe: pr, bin: bin, maxMin: maxMin)
         }
@@ -570,6 +600,15 @@ final class Bridge: ObservableObject {
                 until = limitUntil ?? Date().addingTimeInterval(30 * 60)
                 detail = "limit Claude"
             }
+        } else if viaCodex && (codexMissing || ClaudeCLI.isAuth(result.text)) {
+            // Codex wylogowany albo zniknął: Claude działa dalej, więc mostek nie staje; puls zgłosi nowy stan i Task Hub odda pracę Claude'owi
+            outcome = .error
+            state = .idle
+            until = Date().addingTimeInterval(20)
+            detail = ""
+            note = "Codex: " + (codexMissing ? "nie znaleziono Codex CLI na tym Macu" : "wylogowany (w Terminalu: codex login)") + ". Do tego czasu pracuje Claude."
+            codexMissing = false
+            await refreshCodex(force: true)
         } else if ClaudeCLI.isAuth(result.text) {
             outcome = .auth
             state = .auth
@@ -594,6 +633,40 @@ final class Bridge: ObservableObject {
         Notifier.shared.runEnded()
         Log.write("\(outcome == .done ? "✓" : "✗") bieg \(id.prefix(8)) (\(kind.rawValue), \(outcome.rawValue)): \(note.prefix(200))")
         return outcome
+    }
+
+    // bieg Codex (przełącznik GPT): ten sam prompt z Task Hub, token biegu w zmiennej środowiska, tylko konektor Task Hub
+    private var codexMissing = false
+    private func runCodex(id: String, j: [String: Any], maxMin: Int) async -> ProcessResult {
+        guard let bin = CodexCLI.find(store.cfg.codex) else {
+            codexMissing = true
+            return ProcessResult(ok: false, text: "nie znaleziono Codex CLI")
+        }
+        guard let prompt = j["prompt"] as? String, !prompt.isEmpty, let mcp = j["mcp"] as? String else {
+            planFailed = true
+            return ProcessResult(ok: false, text: "Task Hub nie podał promptu albo adresu konektora.")
+        }
+        let plan: CodexCLI.Plan
+        do {
+            plan = try CodexCLI.work(prompt: prompt, mcp: mcp, token: (j["token"] as? String) ?? "", model: ((j["model"] as? String) ?? "").trimmingCharacters(in: .whitespaces),
+                                     effort: (j["effort"] as? String) ?? "", disabled: ((j["disabledTools"] as? [Any]) ?? []).compactMap { $0 as? String })
+        } catch {
+            planFailed = true
+            return ProcessResult(ok: false, text: error.localizedDescription)
+        }
+        if userStopped || serverStopped || Task.isCancelled { return ProcessResult(ok: false, text: "zatrzymany przez Ciebie") }
+        let bridge = self
+        let runner = ProcessRunner(bin: bin, args: plan.args, cwd: Store.workDir.path, env: plan.env, maxSeconds: Double(maxMin * 60), codex: true)
+        current = runner
+        let result = await runner.run { step in
+            Task { @MainActor in
+                bridge.detail = step
+                Log.write("  · \(step)")
+                await bridge.touch(id, note: step)
+            }
+        }
+        current = nil
+        return result
     }
 
     // serwery z folderów z narzędziami dla biegu: tylko te, z którymi szła próba (inaczej ich narzędzia nie miałyby reguł)

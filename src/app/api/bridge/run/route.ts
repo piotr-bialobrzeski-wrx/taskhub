@@ -6,12 +6,13 @@ import * as repo from "@/lib/repo";
 import { listSendable, type Sendable } from "@/lib/agent/work";
 import type { RunModel } from "@/lib/repo";
 import { isExternalApp, isLocalFile } from "@/lib/agent/approval";
-import { RUN_MAX_MIN, RUN_STALE_MIN, SEND_MAX_MIN, authBridge, bridgePrompt, bridgeWorkPrompt, connectorProblem, gitSend, isGitDraft, mcpUrl, protocolOf, sendPrompt, sendServers, type BridgeAuth } from "@/lib/bridge";
+import { RUN_MAX_MIN, RUN_STALE_MIN, SEND_MAX_MIN, authBridge, bridgePrompt, bridgeWorkPrompt, codexWorkPrompt, connectorProblem, gitSend, isGitDraft, mcpUrl, protocolOf, sendPrompt, sendServers, type BridgeAuth } from "@/lib/bridge";
 import { normalizeTool, toolLabel } from "@/lib/schema";
 import { shortTitle } from "@/lib/auto";
 import { workSummary } from "@/lib/agent/work";
 import { activeLimits, choiceOf, modelConfig, modelLabel, pickRun, runLabel, type RunPick } from "@/lib/agent/models";
 import { fmtTime } from "@/lib/clock";
+import { CODEX_DISABLED_TOOLS, codexEffort, gptModelName } from "@/lib/agent/runner";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "cache-control": "no-store" };
@@ -47,7 +48,13 @@ export async function POST(req: Request) {
   if (!run) return busy(a.ownerId);
   // Claude Code dostaje token tego biegu (bez wysyłek, gaśnie z końcem biegu), nigdy token mostka
   const token = await repo.createRunToken(a.ownerId, { kind: "work", runId: run.id }, RUN_MAX_MIN + 10);
-  return Response.json({ run, kind: "work", prompt: bridgeWorkPrompt(), mcp: mcpUrl(), token, maxMinutes: RUN_MAX_MIN, staleMinutes: RUN_STALE_MIN, ...modelFields(pick) }, { headers: NO_STORE });
+  // przełącznik GPT (paczka 40): grupa pracy dla Codex; aplikacja na Macu uruchamia wtedy codex exec zamiast Claude Code, z tym samym tokenem biegu
+  if (pick?.choice.runner === "gpt") {
+    return Response.json({ run, kind: "work", runner: "codex", prompt: codexWorkPrompt(), mcp: mcpUrl(), token, maxMinutes: RUN_MAX_MIN, staleMinutes: RUN_STALE_MIN,
+      model: gptModelName(pick.model), effort: codexEffort(pick.choice.effort), fallbackModel: "", level: pick.choice.level, disabledTools: CODEX_DISABLED_TOOLS,
+      modelLabel: pick.limited ? `limit ${modelLabel(pick.limited.model)} do ${fmtTime(pick.limited.until)}` : runLabel(pick.model, pick.choice.effort) }, { headers: NO_STORE });
+  }
+  return Response.json({ run, kind: "work", runner: "claude", prompt: bridgeWorkPrompt(), mcp: mcpUrl(), token, maxMinutes: RUN_MAX_MIN, staleMinutes: RUN_STALE_MIN, ...modelFields(pick) }, { headers: NO_STORE });
 }
 
 // model biegu: zapisany w biegu (list_work, „ostatnio: model · wysiłek” na krokach) i podany aplikacji na Macu (--model, --effort, --fallback-model)

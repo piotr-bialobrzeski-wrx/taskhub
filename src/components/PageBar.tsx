@@ -5,14 +5,15 @@ import { useEffect } from "react";
 import { AgentPill, BackPill } from "./canvas/pills";
 import { SearchPill } from "./canvas/SearchPill";
 import type { Screen, SearchItem } from "@/lib/search-core";
+import type { CodexState, Runner } from "@/lib/agent/runner";
 
-export function PageBar({ title, index, screen, agent, aiOn }: { title: string; index: SearchItem[]; screen: Screen; agent: string; aiOn: boolean }) {
+export function PageBar({ title, index, screen, agent, codex, aiOn }: { title: string; index: SearchItem[]; screen: Screen; agent: Runner; codex?: CodexState; aiOn: boolean }) {
   return (
     <div className="pillbar fixed">
       <div className="pl"><BackPill title={title} /></div>
       <span className="sp" />
       <SearchPill index={index} screen={screen} />
-      <AgentPill agent={agent} aiOn={aiOn} />
+      <AgentPill agent={agent} codex={codex} aiOn={aiOn} />
     </div>
   );
 }

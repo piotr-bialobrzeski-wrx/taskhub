@@ -4,7 +4,8 @@
 import { requireOwner } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { availableProviders } from "@/lib/ai";
-import { agentLabel, indexFrom } from "@/lib/search";
+import { indexFrom } from "@/lib/search";
+import { runnerOf } from "@/lib/agent/runner";
 import { bundle } from "@/lib/services";
 import { toolLabel, type Rule, type RuleKind } from "@/lib/schema";
 import { PendingButton } from "@/components/Pending";
@@ -35,7 +36,7 @@ export default async function Rules() {
   const chars = rules.filter((r) => r.kind !== "procedure").reduce((a, r) => a + r.body.length, 0);
   return (
     <main className="page withbar">
-      <PageBar title="Zasady pracy" index={indexFrom(b)} screen="rules" agent={agentLabel(avail)} aiOn={avail.length > 0} />
+      <PageBar title="Zasady pracy" index={indexFrom(b)} screen="rules" agent={runnerOf(o.settings)} aiOn={avail.length > 0} />
       <HashOpener />
       <p className="sub" style={{ marginTop: 0 }}>Agent w aplikacji, Claude, Claude Code i GPT dostają te zasady przy każdym zadaniu (przez konektor MCP albo w prompcie). Profile i zasady idą zawsze{chars ? ` (razem ${chars.toLocaleString("pl-PL")} znaków)` : ""}, procedury tylko wtedy, gdy pasują do pracy.</p>
       {groups.map((g) => {

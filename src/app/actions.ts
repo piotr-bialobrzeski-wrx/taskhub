@@ -1,6 +1,7 @@
 "use server";
 // Akcje serwera dla widoków. Każda sprawdza zalogowanego właściciela; agent nigdy nie usuwa, człowiek może.
 import { modelConfig, normalizeLevel } from "@/lib/agent/models";
+import { gptModelOf, isRunner } from "@/lib/agent/runner";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -486,6 +487,21 @@ export async function saveSettings(fd: FormData) {
   const o = await requireOwner();
   const p = str(fd, "aiProvider");
   await repo.setUserSettings(o.id, { aiProvider: p === "anthropic" || p === "openai" ? p : null });
+  revalidatePath("/settings");
+}
+// przełącznik Claude | GPT w pigułce Agent (paczka 40): tylko zwrotnica dla następnych biegów mostka, bez logowania i bez zmian u dostawców
+export async function setAgentRunner(runner: string) {
+  const o = await requireOwner();
+  if (!isRunner(runner)) return;
+  await repo.setUserSettings(o.id, { agentRunner: runner });
+  revalidatePath("/"); revalidatePath("/settings");
+}
+// model GPT dla Codex: nazwa jako dane (puste = domyślny model Codex); zła nazwa się nie zapisuje
+export async function saveGptModel(fd: FormData) {
+  const o = await requireOwner();
+  const m = str(fd, "gptModel");
+  if (m && gptModelOf({ gptModel: m }) !== m) return;
+  await repo.setUserSettings(o.id, { gptModel: m || null });
   revalidatePath("/settings");
 }
 // dobór modelu: jeden poziom (model, wysiłek, zapasowy); całość przechodzi przez modelConfig, więc zły wpis niczego nie psuje

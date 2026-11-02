@@ -1,4 +1,4 @@
-// Ustawienia aplikacji (⌘,): połączenie z Task Hub, szybki pasek (skrót), mostek, Claude Code, foldery z kodem i z narzędziami, start po zalogowaniu, dziennik.
+// Ustawienia aplikacji (⌘,): połączenie z Task Hub, szybki pasek (skrót), mostek, Claude Code, Codex (paczka 40), foldery z kodem i z narzędziami, start po zalogowaniu, dziennik.
 import AppKit
 import ServiceManagement
 import SwiftUI
@@ -28,6 +28,21 @@ struct SettingsView: View {
         let custom = store.cfg.claude.trimmingCharacters(in: .whitespaces)
         if !custom.isEmpty { return custom }
         return ClaudeCLI.find("") ?? "nie znaleziono (zainstaluj Claude Code)"
+    }
+
+    var codexPath: String {
+        let custom = store.cfg.codex.trimmingCharacters(in: .whitespaces)
+        if !custom.isEmpty { return custom }
+        return CodexCLI.find("") ?? "nie znaleziono (zainstaluj Codex CLI)"
+    }
+
+    var codexLine: String {
+        switch bridge.codexState {
+        case .ready: return "gotowy: " + bridge.codexNote
+        case .auth: return bridge.codexNote
+        case .missing: return "nie znaleziono Codex CLI (w Terminalu: brew install codex)"
+        case nil: return "jeszcze nie sprawdzony"
+        }
     }
 
     var body: some View {
@@ -79,6 +94,19 @@ struct SettingsView: View {
                     .onChange(of: loginItem) { v in setLogin(v) }
                 if !loginError.isEmpty { Text(loginError).font(.system(size: 12)).foregroundColor(Theme.danger) }
                 Text("Mostek pyta Task Hub co kilkanaście sekund (bez tokenów) i uruchamia Claude Code tylko wtedy, gdy czeka praca. Gdy Mac śpi, pracę przejmuje automat co godzinę.")
+                    .font(.system(size: 11.5)).foregroundColor(Theme.sub)
+            }
+            Section("Codex: GPT zamiast Claude") {
+                LabeledContent("Stan") { Text(codexLine).lineLimit(2) }
+                LabeledContent("Codex CLI") {
+                    HStack(spacing: 8) {
+                        Text(codexPath).lineLimit(1).truncationMode(.middle)
+                        Button("Zmień…") { pickCodex() }
+                        if !store.cfg.codex.isEmpty { Button("Domyślna") { store.cfg.codex = ""; Task { @MainActor in await bridge.refreshCodex(force: true) } } }
+                        Button("Sprawdź") { Task { @MainActor in await bridge.refreshCodex(force: true) } }
+                    }
+                }
+                Text("Gdy w Task Hub wybierzesz w pigułce „Agent” opcję GPT, mostek uruchamia Codex na Twoim koncie ChatGPT (bez klucza API) zamiast Claude Code. Zaloguj się raz w Terminalu: codex login, „Sign in with ChatGPT”. Przełączanie nie wylogowuje ani Claude, ani Codex. Kroki z aplikacjami z konta Claude, kodem i plikami robi dalej Claude.")
                     .font(.system(size: 11.5)).foregroundColor(Theme.sub)
             }
             Section("Foldery z kodem") {
@@ -230,6 +258,18 @@ struct SettingsView: View {
         Task { @MainActor in
             if let v = await ClaudeCLI.version(bin) { claudeInfo = "Claude Code \(v) (\(bin)). Zalogowanie sprawdzi pierwszy bieg." }
             else { claudeInfo = "Plik \(bin) nie odpowiada na --version." }
+        }
+    }
+
+    @MainActor private func pickCodex() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = true
+        p.canChooseDirectories = false
+        p.showsHiddenFiles = true
+        p.message = "Wskaż program „codex” (np. /opt/homebrew/bin/codex)"
+        if p.runModal() == .OK, let u = p.url {
+            store.cfg.codex = u.path
+            Task { @MainActor in await bridge.refreshCodex(force: true) }
         }
     }
 

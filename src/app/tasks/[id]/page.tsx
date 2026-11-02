@@ -33,7 +33,8 @@ import { TaskCanvas } from "@/components/canvas/TaskCanvas";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { DoneAsk, InlineText, PromptBox, StepMeta, type StepConnection, type StepModelInfo } from "@/components/StepFields";
 import { choiceOf, LEVEL_LABELS, modelConfig, modelLabel, runLabel, stepLevel } from "@/lib/agent/models";
-import { agentLabel, indexFrom } from "@/lib/search";
+import { indexFrom } from "@/lib/search";
+import { codexStateOf, runnerOf } from "@/lib/agent/runner";
 import { Icon, plural } from "@/components/canvas/ui";
 import { InlineDate, PrioPicker, ProjectPicker } from "@/components/canvas/widgets";
 import { projColor } from "@/components/canvas/ui";
@@ -210,7 +211,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       agentQueue={aq}
       steps={tiles}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
-      aiOn={aiOn} agent={agentLabel(providers)} index={indexFrom(b)}
+      aiOn={aiOn} agent={runnerOf(o.settings)} codex={codexStateOf(bridge.meta)} index={indexFrom(b)}
       feed={feed} work={bubble}
       focus={focus ?? null} runbar={runbar} runAction={runAction} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} />
     </>

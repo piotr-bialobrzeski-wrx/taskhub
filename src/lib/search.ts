@@ -59,5 +59,3 @@ export function indexFrom(b: Bundle, now = Date.now()): SearchItem[] {
 
 export async function searchIndex(ownerId: string): Promise<SearchItem[]> { return indexFrom(await bundle(ownerId)); }
 
-// etykieta agenta w prawej pigułce: wbudowany (gdy jest klucz) albo Claude przez konektor
-export const agentLabel = (providers: string[]) => (providers.length ? (providers[0] === "anthropic" ? "Claude" : "GPT") : "Claude");

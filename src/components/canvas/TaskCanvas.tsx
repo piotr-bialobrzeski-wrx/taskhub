@@ -8,6 +8,7 @@ import { Icon, LookTag, Lvl, TS_LABEL, ToolChip, plural, type GroupVM, type Step
 import { waiting, type Queue } from "@/lib/auto";
 import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
 import { AddButton, AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
+import type { CodexState, Runner } from "@/lib/agent/runner";
 import { SearchPill } from "./SearchPill";
 import type { SearchItem } from "@/lib/search-core";
 import { AgentFeed, Dock, MoreMenu, Namer, TileMenu, Toast, useToast } from "./widgets";
@@ -25,7 +26,7 @@ export type TaskCanvasProps = {
   queue: Queue | null;                     // wiadomości Piotra bez odpowiedzi: kto je weźmie i kiedy (karta nad dokiem, historia rozmowy)
   steps: (StepTile & { toolName: string })[];
   groups: GroupVM[]; index: SearchItem[];
-  aiOn: boolean; agent: string; feed: FeedItem[];
+  aiOn: boolean; agent: Runner; codex?: CodexState; feed: FeedItem[];
   agentQueue: AgentQueue;                  // kolejka agenta: wskaźnik w lewym dolnym rogu (paczka 18)
   work: WorkBubble | null;                 // dymek pracy nad polem czatu: Claude pracuje nad tym zadaniem albo wysłana wiadomość czeka
   focus: string | null;
@@ -170,7 +171,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
         <span className="sp" />
         {view === "canvas" ? <AddButton tileLabel={after ? "Dodaj krok po zaznaczonym" : "Dodaj krok"} groupLabel={n ? "Zgrupuj zaznaczone" : "Dodaj grupę"} onTile={() => setNamer("tile")} onGroup={() => setNamer("group")} /> : null}
         <SearchPill index={p.index} screen="task" here={t.id} onPick={onPick} />
-        <AgentPill agent={p.agent} aiOn={p.aiOn} />
+        <AgentPill agent={p.agent} codex={p.codex} aiOn={p.aiOn} />
       </div>
 
       {p.runbar ? <div className="runbar glass">{p.runbar}{p.runAction ? <button className="btn" type="button" onClick={() => runAct(p.runAction!.anchor)}>{p.runAction.label}</button> : null}</div> : null}

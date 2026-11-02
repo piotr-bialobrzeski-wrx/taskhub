@@ -1,14 +1,34 @@
 "use client";
 // Pigułki górnego paska wspólne dla wszystkich ekranów: logo-menu, wstecz, Kafelek/Grupa, widok, agent.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Icon } from "./ui";
+import { setAgentRunner } from "@/app/actions";
+import { RUNNERS, RUNNER_LABELS, type CodexState, type Runner } from "@/lib/agent/runner";
 
-export function AgentPill({ agent, aiOn }: { agent: string; aiOn: boolean }) {
+// Agent: przełącznik Claude | GPT (paczka 40). Kieruje pracę mostka na Macu do Claude Code albo do Codex; obaj zostają zalogowani,
+// więc przełączenie nie wymaga logowania. Gdy Codex na Macu nie jest gotowy, pracuje Claude, a podpowiedź mówi dlaczego
+const CODEX_HINT: Record<string, string> = {
+  auth: "Codex na Macu jest wylogowany (w Terminalu: codex login), więc do tego czasu pracuje Claude",
+  missing: "Na Macu nie ma Codex CLI albo aplikacja Task Hub jest za stara, więc do tego czasu pracuje Claude",
+  unknown: "Mac nie zgłosił jeszcze stanu Codex (zaktualizuj aplikację Task Hub na Macu), więc do tego czasu pracuje Claude",
+};
+export function AgentPill({ agent, codex, aiOn }: { agent: Runner; codex?: CodexState; aiOn: boolean }) {
+  const [cur, setCur] = useState<Runner>(agent);
+  const [pending, start] = useTransition();
+  useEffect(() => setCur(agent), [agent]);
+  const pick = (r: Runner) => {
+    if (r === cur || pending) return;
+    setCur(r);
+    start(async () => { try { await setAgentRunner(r); } catch { setCur(agent); } });
+  };
+  const waiting = cur === "gpt" && codex && codex !== "ready" ? CODEX_HINT[codex] : null;
+  const title = aiOn ? "Agent wbudowany w aplikację" : waiting ?? (cur === "gpt" ? "Pracę na Macu robi GPT (Codex na Twoim koncie ChatGPT); kroki z aplikacjami z konta Claude, kodem i plikami robi dalej Claude" : "Pracę na Macu robi Claude (Claude Code na Twojej subskrypcji)");
   return (
-    <div className="gpill glass" aria-label="Agent" title={aiOn ? "Agent wbudowany w aplikację" : "Twój Claude podłączony przez konektor Task Hub"}>
-      <span className="agent-label">Agent</span><span className="seg on">{agent}</span>
+    <div className={"gpill glass" + (waiting ? " agent-wait" : "")} role="radiogroup" aria-label="Agent" title={title}>
+      <span className="agent-label">Agent</span>
+      {RUNNERS.map((r) => <button key={r} type="button" role="radio" aria-checked={cur === r} className={"seg" + (cur === r ? " on" : "")} onClick={() => pick(r)}>{RUNNER_LABELS[r]}</button>)}
     </div>
   );
 }

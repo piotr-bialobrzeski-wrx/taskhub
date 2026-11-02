@@ -10,7 +10,8 @@ import { dueOf, fmtDate, stepAsked, taskStateOf, taskTile } from "@/lib/canvas/v
 import { remainEst, taskSpent } from "@/lib/time";
 import type { ProjTask } from "@/components/canvas/ui";
 import { Board, type ArchRow, type BoardInitial } from "@/components/canvas/Board";
-import { agentLabel, indexFrom } from "@/lib/search";
+import { indexFrom } from "@/lib/search";
+import { codexStateOf, runnerOf } from "@/lib/agent/runner";
 import { ARCHIVE_AFTER_MS, isArchivedDone } from "@/lib/search-core";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import { liveActivity, liveKey } from "@/lib/live";
@@ -59,7 +60,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
       projTasks={projTasks}
       index={indexFrom(b, now)} initial={{ view: initial.view, p: initial.p, t: initial.t, focus: initial.focus }}
       aiOn={providers.length > 0}
-      agent={agentLabel(providers)}
+      agent={runnerOf(o.settings)} codex={codexStateOf(bridge.meta)}
       feed={agentFeed(chatLog, now, (id) => stepWaits(b.tasks.flatMap((t) => t.steps).find((s) => s.id === id)))}
       work={work}
       agentQueue={aq}

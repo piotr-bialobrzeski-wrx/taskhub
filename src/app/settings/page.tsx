@@ -6,17 +6,18 @@ import Link from "next/link";
 import { requireOwner, appUrl } from "@/lib/session";
 import * as repo from "@/lib/repo";
 import { availableProviders } from "@/lib/ai";
-import { agentLabel, searchIndex } from "@/lib/search";
+import { searchIndex } from "@/lib/search";
+import { codexStateOf, gptModelOf, runnerOf } from "@/lib/agent/runner";
 import { fmtTime } from "@/lib/canvas/vm";
 import { PendingButton } from "@/components/Pending";
 import { TokenForm } from "@/components/TokenForm";
 import { CopyButton } from "@/components/CopyButton";
-import { ClientGuide, ModelLevels, ProviderPicker } from "@/components/SettingsBits";
+import { ClientGuide, GptModelField, ModelLevels, ProviderPicker } from "@/components/SettingsBits";
 import { activeLimits, EFFORT_LABELS, EFFORTS, LEVEL_HINTS, LEVEL_LABELS, LEVELS, modelConfig, modelLabel, runLabel } from "@/lib/agent/models";
 import { ConnectionsPanel, EngineConfig } from "@/components/ConnectionsPanel";
 import { HashOpener, PageBar } from "@/components/PageBar";
 import { Icon } from "@/components/canvas/ui";
-import { createBridgeToken, createToken, revokeToken, saveModelLevel, saveSettings } from "../actions";
+import { createBridgeToken, createToken, revokeToken, saveGptModel, saveModelLevel, saveSettings } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,15 @@ function bridgeLine(b: repo.BridgeStatus): string {
   return `czuwa, sprawdza pracę co kilkanaście sekund (sygnał ${ago(b.seenAt)})`;
 }
 
+// stan wykonawcy w Ustawieniach → Agent (paczka 40): co robi przełącznik i czy Codex na Macu jest gotowy
+const RUNNER_LINE: Record<string, string> = {
+  claude: "Pracę na Macu robi Claude Code.",
+  ready: "Pracę na Macu robi Codex na Twoim koncie ChatGPT; kroki z aplikacjami z konta Claude, kodem i plikami robi Claude.",
+  auth: "Codex na Macu jest wylogowany (w Terminalu: codex login), więc na razie pracuje Claude.",
+  missing: "Na Macu nie ma Codex CLI, więc na razie pracuje Claude.",
+  unknown: "Mac nie zgłosił jeszcze stanu Codex (zaktualizuj aplikację Task Hub na Macu), więc na razie pracuje Claude.",
+};
+
 export default async function Settings() {
   const o = await requireOwner();
   const [tokens, index, bridge, runs, connections, companies] = await Promise.all([repo.listApiTokens(o.id), searchIndex(o.id), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.listBridgeRuns(o.id, 6), repo.listConnections(o.id), repo.listCompanies(o.id)]);
@@ -54,6 +64,7 @@ export default async function Settings() {
   const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace("T", " ") : "nigdy");
   // dobór modelu: poziomy z ustawień i limity, które jeszcze trwają („limit Fable do 01:00, poziomy z nim pracują na Opusie”)
   const mcfg = modelConfig(o.settings);
+  const runner = runnerOf(o.settings), codex = codexStateOf(bridge.meta);
   const limits = Object.entries(activeLimits((o.settings as { modelLimits?: unknown }).modelLimits));
   const limitLine = mcfg && limits.length ? limits.map(([m, u]) => {
     const subs = [...new Set(LEVELS.filter((l) => mcfg.levels[l].model === m).map((l) => mcfg.levels[l].fallback).filter((f) => f && !limits.some(([x]) => x === f)))];
@@ -61,7 +72,7 @@ export default async function Settings() {
   }).join(" · ") : null;
   return (
     <main className="page withbar">
-      <PageBar title="Ustawienia" index={index} screen="settings" agent={agentLabel(avail)} aiOn={avail.length > 0} />
+      <PageBar title="Ustawienia" index={index} screen="settings" agent={runnerOf(o.settings)} codex={codexStateOf(bridge.meta)} aiOn={avail.length > 0} />
       <HashOpener />
 
       <section className="set" id="agent">
@@ -78,6 +89,7 @@ export default async function Settings() {
               <div className="kv"><span className="k">Mostek</span><span className={"st" + (bridge.alive ? " active" : "")}>{bridge.alive ? "działa" : "nieaktywny"}</span><span className="sub" style={{ flex: 1 }}>{bridgeLine(bridge)}{bridge.name ? ` · ${bridge.name}` : ""}</span></div>
               {limitLine ? <div className="kv"><span className="k">Limit modelu</span><span className="sub" style={{ flex: 1 }}>{limitLine}. Po tej godzinie biegi same wracają na model główny.</span></div> : null}
               <div className="kv"><span className="k">Zapas</span><span className="sub" style={{ flex: 1 }}>{AUTO_TEXT}</span></div>
+              <div className="kv"><span className="k">Wykonawca</span><span className={"st" + (runner === "claude" || codex === "ready" ? " active" : "")}>{runner === "gpt" ? "GPT" : "Claude"}</span><span className="sub" style={{ flex: 1 }}>{RUNNER_LINE[runner === "gpt" ? codex : "claude"]} Przełączasz go w pigułce „Agent” w prawym górnym rogu.</span></div>
             </>
           )}
           <div className="kv"><span className="k">Zasady pracy</span><span className="sub" style={{ flex: 1 }}>Jak agent ma działać: ogólne, projektu, narzędzia.</span><Link className="pill" href="/rules">Otwórz zasady</Link></div>
@@ -90,6 +102,17 @@ export default async function Settings() {
                 efforts={EFFORTS.map((e) => ({ key: e, label: EFFORT_LABELS[e] }))} />
             </div>
           </More> : null}
+          <More id="codex" title="GPT (Codex na Macu)">
+            <div className="stack">
+              <p className="sub" style={{ margin: 0 }}>Po wybraniu GPT w pigułce „Agent” mostek uruchamia Codex na Twoim koncie ChatGPT zamiast Claude Code. Codex dostaje tylko konektor Task Hub i wyszukiwarkę, więc kroki z aplikacjami z konta Claude (Slack, poczta, ClickUp), z kodem i z plikami na Macu robi dalej Claude. Wysiłek bierze się z poziomu kroku.</p>
+              <ol className="steps">
+                <li>Na Macu zainstaluj Codex CLI (w Terminalu: <code>brew install codex</code> albo <code>npm install -g @openai/codex</code>).</li>
+                <li>Zaloguj się kontem ChatGPT: <code>codex login</code> i wybierz „Sign in with ChatGPT” (bez klucza API). Logowanie zostaje, więc przełączanie Claude i GPT go nie rusza.</li>
+                <li>W aplikacji Task Hub na Macu: Ustawienia → Codex pokazuje stan; „Sprawdź teraz” odświeża go od razu.</li>
+              </ol>
+              <div className="kv"><span className="k">Model GPT</span><GptModelField value={gptModelOf(o.settings)} action={saveGptModel} /></div>
+            </div>
+          </More>
           <More id="bridge" title="Jak uruchomić mostek na komputerze (praca od razu, jak w Project Hub)">
             <div className="stack">
               <p className="sub" style={{ margin: 0 }}>{BRIDGE_TEXT} Mostek siedzi w aplikacji Task Hub na Maca: co kilkanaście sekund pyta Task Hub o pracę za darmo i tylko wtedy uruchamia w tle Claude Code na Twojej subskrypcji, z konektorami, które masz w Claude Code na tym komputerze. Działa, gdy komputer nie śpi; w pozostałym czasie pracuje zapas co godzinę.</p>

@@ -20,6 +20,16 @@ export function ProviderPicker({ value, available, action }: { value: string; av
   );
 }
 
+// model GPT dla Codex (paczka 40): nazwa modelu jako tekst, bo listę modeli zna tylko Codex; puste = domyślny model Codex
+export function GptModelField({ value, action }: { value: string; action: (fd: FormData) => Promise<void> }) {
+  return (
+    <form action={action} className="row" style={{ gap: "var(--s-3)", flex: 1 }}>
+      <input className="in" name="gptModel" aria-label="Model GPT" defaultValue={value} placeholder="domyślny model Codex" maxLength={64} spellCheck={false} autoComplete="off" style={{ maxWidth: 360 }} />
+      <button className="pill" type="submit">Zapisz</button>
+    </form>
+  );
+}
+
 const CLIENTS = [
   { key: "claude", name: "Aplikacja Claude" },
   { key: "code", name: "Claude Code" },

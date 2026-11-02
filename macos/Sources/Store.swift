@@ -9,6 +9,7 @@ struct Config: Codable, Equatable {
     var name = ""           // nazwa tego komputera (widać ją w Task Hub)
     var claude = ""         // ścieżka do Claude Code; puste = szukaj w typowych miejscach
     var model = ""          // model dla biegów; puste = domyślny Claude Code
+    var codex = ""          // ścieżka do Codex CLI (paczka 40); puste = szukaj w typowych miejscach
     var bridge = true       // czy mostek ma pracować
     var autoUpdate = true   // czy aplikacja ma się sama aktualizować (wydania przez Task Hub)
     var codeFolders: [String] = []   // foldery z kodem (ścieżki bezwzględne): tylko tu Claude zmienia pliki w krokach z kodem
@@ -27,6 +28,7 @@ struct Config: Codable, Equatable {
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         claude = try c.decodeIfPresent(String.self, forKey: .claude) ?? ""
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        codex = (try? c.decodeIfPresent(String.self, forKey: .codex)) ?? ""
         bridge = try c.decodeIfPresent(Bool.self, forKey: .bridge) ?? true
         autoUpdate = try c.decodeIfPresent(Bool.self, forKey: .autoUpdate) ?? true
         codeFolders = (try? c.decodeIfPresent([String].self, forKey: .codeFolders)) ?? []

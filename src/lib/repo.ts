@@ -1218,6 +1218,11 @@ export async function bridgeStatus(ownerId: string, aliveMs: number): Promise<Br
   const seenAt = t ? (iso(t.seenAt) as string) : null;
   return { alive: !!seenAt && Date.now() - new Date(seenAt).getTime() < aliveMs, seenAt, name: t ? (t.name as string) : null, meta: t ? ((t.meta as Record<string, unknown>) ?? {}) : {}, run: r ? rowToRun(r) : null, pause: await stopPause(ownerId) };
 }
+// meta mostka, który odezwał się ostatnio (np. stan Codex na Macu, paczka 40): jedno małe zapytanie, bez biegu i przerwy
+export async function bridgeMeta(ownerId: string, aliveMs: number): Promise<Record<string, unknown> | null> {
+  const [t] = await sql()`select meta from api_tokens where owner_id = ${ownerId} and kind = 'bridge' and seen_at > now() - make_interval(secs => ${aliveMs / 1000}) order by seen_at desc limit 1`;
+  return t ? ((t.meta as Record<string, unknown>) ?? {}) : null;
+}
 export async function expireBridgeRuns(ownerId: string, staleMin: number): Promise<number> {
   const rows = await sql()`update bridge_runs set ended_at = now(), outcome = 'stale' where owner_id = ${ownerId} and ended_at is null and touched_at < now() - make_interval(mins => ${staleMin}) returning id, started_at, kind, step_id, outcome, note`;
   for (const r of rows) await requeueChat(ownerId, r.startedAt as Date);

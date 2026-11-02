@@ -30,7 +30,8 @@ export async function GET(req: Request) {
   if (a instanceof Response) return a;
   const q = new URL(req.url).searchParams;
   const meta: Record<string, string> = {};
-  for (const k of ["host", "runner", "state", "until", "v"]) { const v = q.get(k); if (v) meta[k] = v.slice(0, 120); }
+  // codex: stan Codex CLI na Macu (ready, auth, missing; aplikacja 0.1.20+), od niego zależy, czy przełącznik GPT kieruje tam pracę
+  for (const k of ["host", "runner", "state", "until", "v", "codex"]) { const v = q.get(k); if (v) meta[k] = v.slice(0, 120); }
   if (meta.state && meta.state !== "check" && !meta.until) meta.until = "";   // stary termin po limicie nie zostaje w meta, gdy mostek już go nie zgłasza
   await repo.bridgeSeen(a.tokenId, meta);
   // odcisk folderów i narzędzi z Ustawień aplikacji (0.1.17+): zmiana oddaje do pracy kroki, które agent oddał z braku dostępu (paczka 22)

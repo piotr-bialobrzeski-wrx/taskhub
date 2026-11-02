@@ -2,6 +2,8 @@
 // jako postęp, bierze wynik z ostatniego zdarzenia „result”. Strażnik: brak sygnału przez 10 min albo bieg dłuższy niż limit → przerwanie.
 // Zdarzenie startowe (system/init) mówi, z jakimi zasadami Claude Code naprawdę ruszył: sprawdzamy je, zanim użyje narzędzia.
 // Przerwanie zabija całe drzewo procesów (claude, jego powłoki, serwery MCP), nie tylko sam proces claude.
+// codex: true (paczka 40) = bieg `codex exec --json`: zdarzenia JSONL Codex (thread.started, item.*, turn.completed, turn.failed, error;
+// starsze wersje: {"msg": {"type": …}}), wynik = ostatnia wiadomość agenta.
 import Darwin
 import Foundation
 
@@ -45,6 +47,11 @@ final class ProcessRunner {
     private let maxText: Int   // ile znaków wyjścia zwrócić bez stream-json (wersja: koniec; lista konektorów: całość)
     private let onInit: (@Sendable (InitInfo) -> String?)?   // nil = zasady w porządku; tekst = przerwij bieg z tym powodem
     private let stopAfterInit: Bool                          // próba: wystarczy zdarzenie startowe
+    private let mergeErr: Bool                               // bez stream-json: wynik = stdout i stderr (np. codex login status pisze na stderr)
+    private let codex: Bool                                  // zdarzenia Codex zamiast Claude Code
+    private var codexDone = false
+    private var codexLast = ""
+    private var codexFailure: String? = nil
 
     private let queue = DispatchQueue(label: "taskhub.process")
     private let proc = Process()
@@ -66,10 +73,10 @@ final class ProcessRunner {
     private var done: ((ProcessResult) -> Void)? = nil
 
     init(bin: String, args: [String], cwd: String, env: [String: String], maxSeconds: Double, stallSeconds: Double = 600, json: Bool = true, maxText: Int = 600,
-         onInit: (@Sendable (InitInfo) -> String?)? = nil, stopAfterInit: Bool = false) {
+         onInit: (@Sendable (InitInfo) -> String?)? = nil, stopAfterInit: Bool = false, mergeErr: Bool = false, codex: Bool = false) {
         self.bin = bin; self.args = args; self.cwd = cwd; self.env = env
         self.maxSeconds = maxSeconds; self.stallSeconds = stallSeconds; self.json = json; self.maxText = maxText
-        self.onInit = onInit; self.stopAfterInit = stopAfterInit
+        self.onInit = onInit; self.stopAfterInit = stopAfterInit; self.mergeErr = mergeErr; self.codex = codex
     }
 
     private var name: String { (bin as NSString).lastPathComponent }
@@ -154,7 +161,8 @@ final class ProcessRunner {
             started = Date()
             lastData = Date()
         } catch {
-            let hint = name == "claude" ? " Zainstaluj Claude Code i zaloguj się (w Terminalu: claude, potem /login) albo wskaż ścieżkę w Ustawieniach." : ""
+            let hint = name == "claude" ? " Zainstaluj Claude Code i zaloguj się (w Terminalu: claude, potem /login) albo wskaż ścieżkę w Ustawieniach."
+                : name == "codex" ? " Zainstaluj Codex CLI i zaloguj się kontem ChatGPT (w Terminalu: codex login)." : ""
             killedWhy = "nie udało się uruchomić „\(bin)”: \(error.localizedDescription).\(hint)"
             finish()
         }
@@ -218,6 +226,11 @@ final class ProcessRunner {
         if probeDone { done(ProcessResult(ok: true, text: "", initInfo: initInfo)); return }
         if let why = killedWhy { done(ProcessResult(ok: false, text: why, initInfo: initInfo)); return }
         let code: Int32 = proc.isRunning ? -1 : proc.terminationStatus
+        if codex {
+            // tura skończona wygrywa z wcześniejszym błędem (np. chwilowe zerwanie połączenia, po którym Codex sam ponowił)
+            if codexDone { done(ProcessResult(ok: true, text: codexLast)); return }
+            if let f = codexFailure { done(ProcessResult(ok: false, text: f)); return }
+        }
         if json && onInit != nil && initInfo == nil {
             done(ProcessResult(ok: false, text: "Claude Code nie przyjął zasad mostka (brak zdarzenia startowego)"))
             return
@@ -237,7 +250,10 @@ final class ProcessRunner {
         let tail = String((errText.isEmpty ? outText : errText).suffix(400)).trimmingCharacters(in: .whitespacesAndNewlines)
         if code != 0 { done(ProcessResult(ok: false, text: "\(name) zakończył się kodem \(code): \(tail.isEmpty ? "(bez komunikatu)" : tail)", initInfo: initInfo)); return }
         if json { done(ProcessResult(ok: false, text: "brak wyniku z \(name): \(tail)", initInfo: initInfo)) }
-        else { done(ProcessResult(ok: true, text: String(outText.trimmingCharacters(in: .whitespacesAndNewlines).suffix(maxText)))) }
+        else {
+            let all = mergeErr ? [outText, errText].filter { !$0.isEmpty }.joined(separator: "\n") : outText
+            done(ProcessResult(ok: true, text: String(all.trimmingCharacters(in: .whitespacesAndNewlines).suffix(maxText))))
+        }
     }
 
     // linie stream-json: init → kontrola zasad, użycia narzędzi → postęp, zdarzenie result → wynik
@@ -245,6 +261,7 @@ final class ProcessRunner {
         while let nl = buf.firstIndex(of: 0x0A) {
             let line = buf.subdata(in: buf.startIndex..<nl)
             buf.removeSubrange(buf.startIndex...nl)
+            if codex { if !line.isEmpty, let ev = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] { codexEvent(ev, onStep: onStep) }; continue }
             guard !line.isEmpty, let ev = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any], let type = ev["type"] as? String else { continue }
             if type == "system", (ev["subtype"] as? String) == "init" {
                 let info = InitInfo(ev)
@@ -270,6 +287,38 @@ final class ProcessRunner {
             } else if type == "result" {
                 finalEvent = ev
             }
+        }
+    }
+
+    // jedno zdarzenie Codex: wywołania narzędzi MCP i wyszukiwania → postęp, wiadomość agenta → wynik, koniec tury → sukces albo błąd
+    private func codexEvent(_ ev: [String: Any], onStep: @escaping @Sendable (String) -> Void) {
+        if let msg = ev["msg"] as? [String: Any] {   // starszy format codex exec --json
+            switch msg["type"] as? String ?? "" {
+            case "mcp_tool_call_begin":
+                let inv = msg["invocation"] as? [String: Any] ?? [:]
+                if !killing { onStep(CodexCLI.label(tool: inv["tool"] as? String ?? "narzędzie", arguments: inv["arguments"])) }
+            case "agent_message": if let t = msg["message"] as? String, !t.isEmpty { codexLast = t }
+            case "task_complete":
+                if let t = msg["last_agent_message"] as? String, !t.isEmpty { codexLast = t }
+                codexDone = true
+            case "error", "stream_error": codexFailure = (msg["message"] as? String) ?? "Codex zgłosił błąd"
+            default: break
+            }
+            return
+        }
+        switch ev["type"] as? String ?? "" {
+        case "item.started", "item.completed":
+            let item = ev["item"] as? [String: Any] ?? [:]
+            let kind = (item["type"] as? String) ?? (item["item_type"] as? String) ?? ""
+            let started = (ev["type"] as? String) == "item.started"
+            if kind == "mcp_tool_call", started, !killing { onStep(CodexCLI.label(tool: item["tool"] as? String ?? "narzędzie", arguments: item["arguments"])) }
+            else if kind == "web_search", started, !killing { onStep("wyszukiwanie: " + String(((item["query"] as? String) ?? "").prefix(60))) }
+            else if kind == "agent_message", !started, let t = item["text"] as? String, !t.isEmpty { codexLast = t }
+            else if kind == "error", !started, let t = item["message"] as? String, !t.isEmpty, codexLast.isEmpty { codexLast = "Codex: " + t }
+        case "turn.completed": codexDone = true
+        case "turn.failed": codexDone = false; codexFailure = ((ev["error"] as? [String: Any])?["message"] as? String) ?? "Codex przerwał turę"
+        case "error": codexFailure = (ev["message"] as? String) ?? "Codex zgłosił błąd"
+        default: break
         }
     }
 
