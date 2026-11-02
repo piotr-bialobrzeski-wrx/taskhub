@@ -29,13 +29,15 @@ export function scoreOf({ task: t, project: pr, blockedCount, samples, now = Dat
   if (isComplete(t) || t.deletedAt) return { base, eff: base, why };
   const pw = pr?.weight ?? PW_DEF;
   if (pr && pw !== PW_DEF) { const v = (pw - PW_DEF) * 0.5; d += v; why.push({ v, txt: `projekt „${pr.name}” ma ważność ${pw}/5` }); }
-  if (t.due) {
+  // „w dniu” (paczka 40): przed swoim dniem termin nic nie dodaje (zadania nie da się zrobić wcześniej), w swoim dniu „termin dziś”, po nim „termin minął”
+  const onDay = t.dueKind === "on";
+  if (t.due && !(onDay && dueLeftH(t.due, now) >= 24)) {
     const left = dueLeftH(t.due, now), days = Math.max(0, Math.ceil(left / 24));
     if (left < 0) { d += 2; why.push({ v: 2, txt: "termin minął" }); }
     else if (left < 24) { d += 2; why.push({ v: 2, txt: "termin dziś" }); }
     else if (days <= 2) { d += 1; why.push({ v: 1, txt: "termin w ciągu 2 dni" }); }
     const need = remainCal(t, samples), cal = need !== remainEst(t);
-    if (left >= 0 && need / 60 > days * WORK_HOURS * 0.6) {
+    if (!onDay && left >= 0 && need / 60 > days * WORK_HOURS * 0.6) {
       d += 1; why.push({ v: 1, txt: `zostało ~${fmtMin(need)} pracy${cal ? " (wg Twoich czasów)" : ""} na ${days} ${plural(days, "dzień", "dni", "dni")}` });
     }
   }

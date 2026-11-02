@@ -61,6 +61,13 @@ export function nextDue(due: string, r: Repeat): string {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
+// „w dniu” przed swoim dniem (paczka 40, krok 02 zadania „Dwa rodzaje terminu zadań”): zadanie nie trafia do losowania ani do przeglądu,
+// termin nie podnosi priorytetu i nie robi go pilnym; w swoim dniu jest pilne, po nim przeterminowane. „Zrób do” liczy się jak dotąd.
+export const beforeItsDay = (due: string | null | undefined, kind: DueKind | null | undefined, today: string): boolean =>
+  !!due && kind === "on" && due.slice(0, 10) > today;
+// termin dziś albo po terminie (oba rodzaje): pole „pilne” na kanwie
+export const dueReached = (due: string | null | undefined, today: string): boolean => !!due && due.slice(0, 10) <= today;
+
 // opis terminu dla agenta i podpowiedzi: „zrób do 2026-11-05, co tydzień”
 export function dueText(due: string | null, kind: DueKind | null | undefined, repeat: Repeat | null | undefined): string {
   if (!due) return repeat ? `bez terminu (${repeatLabel(repeat)})` : "bez terminu";

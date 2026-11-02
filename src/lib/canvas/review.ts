@@ -3,6 +3,8 @@
 // (Dzisiaj, Jutro, W tym tygodniu = niedziela tego tygodnia, W przyszłym tygodniu = niedziela następnego, Konkretna data)
 // albo „Na później”: bez terminu i priorytet niższy o jeden. Czyste funkcje: komponent Review tylko rysuje.
 
+import { beforeItsDay, type DueKind } from "../due";
+
 export const REVIEW_ANSWERS = [
   { k: "today", label: "Dzisiaj" },
   { k: "tom", label: "Jutro" },
@@ -14,7 +16,7 @@ export const REVIEW_ANSWERS = [
 export type ReviewAnswer = (typeof REVIEW_ANSWERS)[number]["k"];
 
 // to, czego przegląd potrzebuje z kafelka zadania
-export type ReviewTask = { id: string; state: string; base: number; eff: number; due: { iso: string } | null };
+export type ReviewTask = { id: string; state: string; base: number; eff: number; due: { iso: string; kind?: DueKind } | null };
 
 // dni liczone na datach YYYY-MM-DD (południe UTC, więc zmiana czasu nie przesuwa dnia)
 const d12 = (iso: string) => new Date(iso + "T12:00:00Z");
@@ -23,8 +25,9 @@ export const addDays = (iso: string, n: number) => { const d = d12(iso); d.setUT
 // niedziela tego tygodnia (w niedzielę: dziś)
 export const sundayOf = (iso: string) => addDays(iso, (7 - d12(iso).getUTCDay()) % 7);
 
-// do przeglądu: otwarte zadania bez terminu albo po terminie
-export const inReview = (t: ReviewTask, today: string) => t.state !== "done" && (!t.due || t.due.iso < today);
+// do przeglądu: otwarte zadania bez terminu albo po terminie. „W dniu” przed swoim dniem nigdy (jak każdy przyszły termin),
+// w swoim dniu też nie (to dzień, na który jest zaplanowane), po nim wraca jako przeterminowane.
+export const inReview = (t: ReviewTask, today: string) => t.state !== "done" && (!t.due || (!beforeItsDay(t.due.iso, t.due.kind, today) && t.due.iso < today));
 
 // kolejność: najpierw po terminie (najstarszy termin pierwszy), potem od najwyższego priorytetu
 export function reviewQueue<T extends ReviewTask>(tasks: T[], today: string): T[] {

@@ -25,8 +25,9 @@ export async function aiFor(ownerId: string): Promise<Ai> {
 // pola układają się w macierz 2×2 (src/lib/canvas/layout.ts). Grupy, które przez to zostały puste, znikają; „Cofnij” je odtwarza.
 export async function layoutLanes(ownerId: string): Promise<void> {
   const b = await bundle(ownerId);
+  const today = dayKey(new Date());
   const open = b.scored.filter((s) => !s.task.deletedAt && !isComplete(s.task))
-    .map((s) => ({ id: s.task.id, lane: s.task.lane ?? null, eff: s.score.eff, remainMin: remainEst(s.task), hasSteps: s.task.steps.length > 0, due: s.task.due, waiting: taskWaits(s.task, b.tasks).length > 0 }));
+    .map((s) => ({ id: s.task.id, lane: s.task.lane ?? null, eff: s.score.eff, remainMin: remainEst(s.task), hasSteps: s.task.steps.length > 0, due: s.task.due, today, waiting: taskWaits(s.task, b.tasks).length > 0 }));
   const lanes = assignLanes(open);
   await repo.clearTaskPositions(ownerId);
   let groups = await repo.listGroups(ownerId, null);

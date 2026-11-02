@@ -3,18 +3,23 @@
 // mieści się w tym czasie; ważniejsze wypadają częściej (waga = kwadrat priorytetu efektywnego). Po wyniku jedno ponowne losowanie.
 // Wynik zostaje na ekranie (pamięć przeglądarki), dopóki zadanie nie jest zrobione albo nie przestanie czekać na Piotra.
 
+import { dayKey } from "../clock";
+import { beforeItsDay, type DueKind } from "../due";
+
 export const DRAW_TIMES = [15, 30, 60, 120] as const;
 
 // to, czego losowanie potrzebuje z kafelka zadania
 export type DrawInfo = { min: number; step: string };
-export type DrawTask = { id: string; eff: number; state: string; draw: DrawInfo | null };
+// due: zadanie „w dniu” nie bierze udziału przed swoim dniem
+export type DrawTask = { id: string; eff: number; state: string; draw: DrawInfo | null; due?: { iso: string; kind?: DueKind } | null };
+const notYet = (t: DrawTask, today: string) => beforeItsDay(t.due?.iso, t.due?.kind, today);
 
 // zapamiętany wynik: które zadanie, na jaki czas, czy ponowne losowanie już wykorzystane
 export type DrawSaved = { id: string; limit: number; rerolled: boolean };
 export const DRAW_KEY = "th-draw";
 
-export const drawPool = <T extends DrawTask>(tasks: T[], limit: number, except: string | null = null): T[] =>
-  tasks.filter((t) => t.state !== "done" && t.state !== "blocked" && !!t.draw && t.draw.min <= limit && t.id !== except);
+export const drawPool = <T extends DrawTask>(tasks: T[], limit: number, except: string | null = null, today = dayKey(new Date())): T[] =>
+  tasks.filter((t) => t.state !== "done" && t.state !== "blocked" && !!t.draw && t.draw.min <= limit && t.id !== except && !notYet(t, today));
 
 // rnd w [0, 1): Math.random w aplikacji, stała wartość w testach
 export function drawPick<T extends DrawTask>(pool: T[], rnd: number): T | null {
@@ -26,13 +31,13 @@ export function drawPick<T extends DrawTask>(pool: T[], rnd: number): T | null {
 }
 
 // zapamiętany wynik jest ważny, dopóki zadanie nadal czeka na Piotra (bez względu na czas: zostaje, dopóki go nie zrobi)
-export function drawRestore<T extends DrawTask>(raw: string | null, tasks: T[]): (DrawSaved & { task: T }) | null {
+export function drawRestore<T extends DrawTask>(raw: string | null, tasks: T[], today = dayKey(new Date())): (DrawSaved & { task: T }) | null {
   if (!raw) return null;
   try {
     const s = JSON.parse(raw) as Partial<DrawSaved>;
     if (typeof s.id !== "string" || typeof s.limit !== "number") return null;
     const task = tasks.find((t) => t.id === s.id);
-    if (!task || task.state === "done" || !task.draw) return null;
+    if (!task || task.state === "done" || !task.draw || notYet(task, today)) return null;
     return { id: s.id, limit: s.limit, rerolled: !!s.rerolled, task };
   } catch { return null; }
 }

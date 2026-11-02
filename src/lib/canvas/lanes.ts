@@ -1,6 +1,8 @@
 // Układ kafelków „Pilne i szybkie” (paczka 31, wariant C): cztery pola na głównej kanwie, pilne albo nie × szybkie albo dłuższe.
 // Pole zadania ustala asystent według zasady w bazie (tasks.lane, update_task lane); bez niego liczymy je z priorytetu efektywnego
 // i pozostałej pracy Piotra, tak jak w prototypie. Kolejność pól: od lewej do prawej, od góry do dołu.
+import { dueReached } from "../due";
+
 export const LANES = [
   { key: "pilne-szybkie", name: "Pilne i szybkie", color: 0 },
   { key: "pilne-dluzsze", name: "Pilne, dłuższe", color: 4 },
@@ -16,11 +18,13 @@ export const URGENT_EFF = 4;   // priorytet efektywny (z terminem i ważnością
 export const QUICK_MIN = 30;   // Piotrowi zostało do 30 minut pracy = szybkie
 
 // waiting (paczka 32): zadanie czeka na niezrobione wcześniejsze zadanie z łańcucha, więc nie jest pilne, choćby miało termin albo pole od asystenta
-export type LaneInput = { lane?: string | null; eff: number; remainMin: number; hasSteps: boolean; waiting?: boolean };
+// due + today (paczka 40): termin dziś albo po terminie = pilne, także przy niskim priorytecie; „w dniu” przed swoim dniem nie jest pilne
+// (priorytet efektywny nie dostaje za niego punktów, src/lib/priority.ts)
+export type LaneInput = { lane?: string | null; eff: number; remainMin: number; hasSteps: boolean; waiting?: boolean; due?: string | null; today?: string };
 export function laneOf(t: LaneInput): LaneKey {
   if (t.waiting) return "przy-okazji";
   if (isLane(t.lane)) return t.lane;
-  const urgent = t.eff >= URGENT_EFF, quick = t.hasSteps && t.remainMin <= QUICK_MIN;   // nierozpisane zadanie: nie wiadomo, ile pracy, więc „dłuższe”
+  const urgent = t.eff >= URGENT_EFF || (!!t.today && dueReached(t.due, t.today)), quick = t.hasSteps && t.remainMin <= QUICK_MIN;   // nierozpisane zadanie: nie wiadomo, ile pracy, więc „dłuższe”
   return urgent ? (quick ? "pilne-szybkie" : "pilne-dluzsze") : quick ? "szybkie-poczekaja" : "przy-okazji";
 }
 

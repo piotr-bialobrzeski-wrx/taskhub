@@ -10,7 +10,8 @@ import { doneChat, stepKind } from "./stepcard";
 import { shortTitle } from "./auto";
 import { guessProject } from "./project-guess";
 import { isModelName, MAX_ESCALATION, normalizeLevel } from "./agent/models";
-import { parseDueKind, parseRepeat, type DueKind, type Repeat } from "./due";
+import { nextDue, parseDueKind, parseRepeat, type DueKind, type Repeat } from "./due";
+import { dayKey } from "./clock";
 export { approvalSig, approvalValid, draftOf, draftsOf, isSendable, optionLabel, optionsOf } from "./agent/approval";
 
 type Row = Record<string, unknown>;
@@ -557,6 +558,7 @@ export async function completeStep(ownerId: string, task: Task, step: Step, opts
     patch.logged = true;
   }
   await writeStep(step.id, patch, { sent: true });
+  if (step.status !== "done" && step.repeat) await repeatStep(task.id, step);
   // ostatni krok gotowy: zadanie kończy się samo, chyba że jakaś wiadomość Piotra czeka jeszcze na odpowiedź agenta (zamknie je reply_chat)
   await closeIfDone(ownerId, task.id);
 }
@@ -1062,7 +1064,46 @@ export async function closeIfDone(ownerId: string, taskId: string): Promise<bool
   const [pending] = await sql()`select 1 from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and role = 'user' and answered_at is null limit 1`;
   if (pending) return false;
   const rows = await sql()`update tasks set done_at = now() where id = ${taskId} and owner_id = ${ownerId} and done_at is null returning id`;
+  if (rows.length && t.repeat) await repeatTask(ownerId, t);
   return rows.length > 0;
+}
+
+// Powtarzanie (paczka 40, krok 02 zadania „Cykliczne terminy zadań i kroków”): kolejne wystąpienie powstaje od razu po zakończeniu.
+// Kolejny termin liczy się od poprzedniego terminu według reguły (jak w kalendarzu; bez terminu: od dziś), rodzaj terminu zostaje.
+// Reguła przechodzi na nowe wystąpienie, a stare ją traci: zostaje w archiwum z historią, a ponowne otwarcie i zamknięcie go nie tworzy drugiej kopii.
+const nextOf = (due: string | null, r: Repeat) => nextDue(due ?? dayKey(new Date()), r);
+
+// krok z powtarzaniem: nowy krok tuż za nim w tym samym zadaniu, od nowa (bez kartki, czasu i wyniku), bez zależności
+async function repeatStep(taskId: string, st: Step): Promise<void> {
+  const r = st.repeat!;
+  await sql().begin(async (tx) => {
+    await tx`update steps set position = position + 1 where task_id = ${taskId} and position > ${st.position}`;
+    await tx`insert into steps (task_id, position, title, detail, tool, needs_approval, est_min, link, connection_id, work_level, attachment_ids, due, due_kind, repeat)
+      values (${taskId}, ${st.position + 1}, ${st.title}, ${st.detail}, ${st.tool}, ${st.needsApproval}, ${st.estMin}, ${st.link}, ${st.connectionId}, ${st.workLevel ?? null},
+        ${st.attachmentIds ? pgArr(st.attachmentIds) : null}::uuid[], ${nextOf(st.due ?? null, r)}, ${st.dueKind ?? "by"}, ${tx.json(r)})`;
+    await tx`update steps set repeat = null where id = ${st.id}`;
+  });
+}
+
+// zadanie z powtarzaniem: nowe zadanie z kolejnym terminem i tymi samymi krokami od nowa (te same zależności między krokami);
+// terminy kroków przesuwają się o tyle dni, o ile przesunął się termin zadania
+async function repeatTask(ownerId: string, t: Task): Promise<void> {
+  const r = t.repeat!;
+  const due = nextOf(t.due, r);
+  const shift = t.due ? Math.round((Date.parse(due + "T12:00:00Z") - Date.parse(t.due + "T12:00:00Z")) / 864e5) : 0;
+  const move = (d: string | null | undefined) => (d ? new Date(Date.parse(d + "T12:00:00Z") + shift * 864e5).toISOString().slice(0, 10) : null);
+  const idx = new Map(t.steps.map((x, i) => [x.id, i + 1]));
+  const n = await createTask(ownerId, {
+    title: t.title, summary: t.summary, source: t.source, level: t.level, projectId: t.projectId, due, dueKind: t.dueKind, repeat: r,
+    steps: t.steps.map((x) => ({ title: x.title, detail: x.detail, tool: x.tool, needsApproval: x.needsApproval, estMin: x.estMin, link: x.link ?? undefined,
+      connectionId: x.connectionId, workLevel: x.workLevel ?? null, dependsOn: x.dependsOn.flatMap((d) => (idx.has(d) ? [`n${idx.get(d)}`] : [])) })),
+  });
+  // terminy i powtarzanie kroków (addSteps ich nie zna)
+  for (const [i, x] of t.steps.entries()) {
+    if (!x.due && !x.repeat) continue;
+    await sql()`update steps set due = ${move(x.due)}, due_kind = ${x.dueKind ?? "by"}, repeat = ${x.repeat ? sql().json(x.repeat) : null} where id = ${n.steps[i].id}`;
+  }
+  await sql()`update tasks set repeat = null where id = ${t.id}`;
 }
 // stempel zmian dla pulsu przeglądarki: ostatnia zmiana zadania, kroków, rozmowy i pytań (jednego zadania albo wszystkich)
 // odcisk wszystkiego, z czego liczy się lista pracy (zadania, kroki, zależności, wiadomości, pytania, próbki czasu, ważność projektów, ustawienia):
