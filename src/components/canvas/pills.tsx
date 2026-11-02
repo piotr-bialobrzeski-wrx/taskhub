@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition, type ReactNode } from "reac
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Icon } from "./ui";
+import { PRESETS, type PresetKey } from "@/lib/canvas/presets";
 import { setAgentRunner } from "@/app/actions";
 import { RUNNERS, RUNNER_LABELS, type CodexState, type Runner } from "@/lib/agent/runner";
 
@@ -73,17 +74,61 @@ export function BackPill({ title, onBack, children }: { title?: string; onBack?:
 }
 
 // Kafelek i Grupa: narzędzia kanwy w górnym pasku, zaraz za pigułką powiększenia (paczka 30: róg zakryłaby karta na całą wysokość)
-export function MakePill({ tileTitle, groupTitle, onTile, onGroup }: { tileTitle: string; groupTitle: string; onTile: () => void; onGroup: () => void }) {
+// paczka 40: na głównej kanwie obok nich „Ułóż” z listą gotowych układów (LayoutMenu)
+export function MakePill({ tileTitle, groupTitle, onTile, onGroup, layout }: { tileTitle: string; groupTitle: string; onTile: () => void; onGroup: () => void; layout?: LayoutProps }) {
   return (
     <div className="gpill glass mkpill" role="toolbar" aria-label="Nowe na kanwie">
       <button className="icobtn mk" type="button" title={tileTitle} onClick={onTile}><Icon k="tile" size={18} />Kafelek</button>
       <button className="icobtn mk" type="button" title={groupTitle} onClick={onGroup}><Icon k="group" size={18} />Grupa</button>
+      {layout ? <><span className="mksep" aria-hidden="true" /><LayoutMenu {...layout} /></> : null}
     </div>
   );
 }
 
+// „Ułóż” (paczka 40, wersja A „Lista z opisem”): przycisk rozwija listę gotowych układów; każdy ma krótki opis, ostatnio użyty ma ptaszek.
+// Wybór od razu układa kanwę (bez agenta), poprzednie grupy znikają, a „Cofnij” przez chwilę przywraca stary układ.
+type LayoutProps = { current: PresetKey | null; onPick: (key: PresetKey) => void };
+export function LayoutItems({ current, onPick }: LayoutProps) {
+  return (
+    <>
+      {PRESETS.map((l) => (
+        <button key={l.key} className={"mi lay" + (l.key === current ? " cur" : "")} role="menuitemradio" aria-checked={l.key === current} type="button" onClick={() => onPick(l.key)}>
+          <span><b>{l.name}</b><small>{l.desc}</small></span>{l.key === current ? <Icon k="check" size={14} sw={2} /> : null}
+        </button>
+      ))}
+    </>
+  );
+}
+function LayoutMenu({ current, onPick }: LayoutProps) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ left: 0, top: 0 });
+  const btn = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const r = btn.current?.getBoundingClientRect();
+    if (r) setPos({ left: Math.max(16, Math.min(r.left - 6, window.innerWidth - 316)), top: r.bottom + 10 });
+    const close = (e: Event) => { if (!(e.target as HTMLElement).closest?.(".laymenu, .laybtn")) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", close); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", key); };
+  }, [open]);
+  return (
+    <>
+      <button ref={btn} className={"icobtn mk laybtn" + (open ? " on" : "")} type="button" title="Ułóż kafelki gotowym układem" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <Icon k="layout" size={16} />Ułóż<span className="laychev"><Icon k="chev" size={10} sw={2.2} /></span>
+      </button>
+      {open ? createPortal(
+        <div className="zmenu laymenu glass" role="menu" aria-label="Układy kanwy" style={{ position: "fixed", left: pos.left, top: pos.top }} onPointerDown={(e) => e.stopPropagation()}>
+          <LayoutItems current={current} onPick={(k) => { setOpen(false); onPick(k); }} />
+          <hr />
+          <p className="layhint">Poprzednie grupy znikną. „Cofnij” przywróci stary układ.</p>
+        </div>, document.body) : null}
+    </>
+  );
+}
+
 // telefon: zamiast pigułki Kafelek/Grupa na dole jeden „+” w górnym pasku, rozwijany w dwie pozycje
-export function AddButton({ tileLabel, groupLabel, onTile, onGroup }: { tileLabel: string; groupLabel: string; onTile: () => void; onGroup: () => void }) {
+export function AddButton({ tileLabel, groupLabel, onTile, onGroup, layout }: { tileLabel: string; groupLabel: string; onTile: () => void; onGroup: () => void; layout?: LayoutProps }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ right: 16, top: 0 });
   const btn = useRef<HTMLButtonElement>(null);
@@ -104,6 +149,7 @@ export function AddButton({ tileLabel, groupLabel, onTile, onGroup }: { tileLabe
         <div className="addmenu zmenu glass" role="menu" style={{ position: "fixed", right: pos.right, top: pos.top }} onPointerDown={(e) => e.stopPropagation()}>
           <button className="mi" role="menuitem" type="button" onClick={() => pick(onTile)}><Icon k="tile" size={16} />{tileLabel}</button>
           <button className="mi" role="menuitem" type="button" onClick={() => pick(onGroup)}><Icon k="group" size={16} />{groupLabel}</button>
+          {layout ? <><hr /><p className="layhead">Ułóż</p><LayoutItems current={layout.current} onPick={(k) => pick(() => layout.onPick(k))} /></> : null}
         </div>, document.body) : null}
     </div>
   );

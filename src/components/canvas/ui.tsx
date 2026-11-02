@@ -109,6 +109,7 @@ const PATHS: Record<string, string> = {
   ext: '<path d="M6.5 3.5H4a1.5 1.5 0 0 0-1.5 1.5v7A1.5 1.5 0 0 0 4 13.5h7a1.5 1.5 0 0 0 1.5-1.5V9.5"/><path d="M9.5 2.5h4v4M13.5 2.5 7.5 8.5"/>',
   tile: '<rect x="2" y="3.5" width="12" height="9" rx="2"/><path d="M8 6v4M6 8h4"/>',
   group: '<rect x="1.5" y="2.5" width="13" height="11" rx="2.5" stroke-dasharray="2.2 1.8"/>',
+  layout: '<rect x="1.5" y="2" width="5.5" height="5" rx="1.4"/><rect x="9" y="2" width="5.5" height="5" rx="1.4"/><rect x="1.5" y="9" width="5.5" height="5" rx="1.4"/><rect x="9" y="9" width="5.5" height="5" rx="1.4"/>',
   canvas: '<rect x="2" y="2" width="5" height="5" rx="1.5"/><rect x="9" y="9" width="5" height="5" rx="1.5"/><path d="M7 4.5h2.5A1.5 1.5 0 0 1 11 6v3"/>',
   list: '<rect x="2" y="3" width="12" height="4" rx="1.5"/><rect x="2" y="9" width="12" height="4" rx="1.5"/>',
   review: '<path d="m2 4 1.2 1.2L5.4 3M2 8.5l1.2 1.2 2.2-2.2M2 13l1.2 1.2 2.2-2.2M8 4.2h6M8 8.7h6M8 13.2h6"/>',

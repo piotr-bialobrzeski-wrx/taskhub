@@ -9,7 +9,8 @@ import { SESSION_COOKIE, checkPassword, sessionValue } from "@/lib/auth";
 import { requireOwner } from "@/lib/session";
 import { client, hhmm, mayTry, record } from "@/lib/guard";
 import * as repo from "@/lib/repo";
-import { composeFlow, finishStep, layoutLanes, prepareStep, taskQueue } from "@/lib/services";
+import { composeFlow, finishStep, layoutPreset, prepareStep, taskQueue } from "@/lib/services";
+import { isPreset } from "@/lib/canvas/presets";
 import { Q, roundQ } from "@/lib/time";
 import { nextStepLayout, STEP_SIZE } from "@/lib/canvas/layout";
 import { intake, uploads } from "@/lib/intake";
@@ -549,7 +550,8 @@ export async function saveStepPositions(taskId: string, items: { id: string; x: 
   await repo.setStepPositions(o.id, taskId, items.slice(0, 200));
   refresh(taskId);
 }
-export async function autoLayout(taskId: string | null) {
+// preset (paczka 40): gotowy układ z menu „Ułóż” na głównej kanwie; bez niego „Pilne i szybkie”
+export async function autoLayout(taskId: string | null, preset?: string) {
   const o = await requireOwner();
   if (taskId) {
     // paczka 33: pierwsze „Ułóż” = siatka, kolejne = naturalny układ (wątki w rzędach), potem znowu siatka
@@ -558,11 +560,11 @@ export async function autoLayout(taskId: string | null) {
     if (nat) await repo.setStepPositions(o.id, taskId, Object.entries(nat).map(([id, q]) => ({ id, x: q.x, y: q.y })).slice(0, 200));
     else await repo.clearStepPositions(o.id, taskId);
     for (const g of groups) await repo.updateGroup(o.id, g.id, { auto: true });
-  } else await layoutLanes(o.id);
+  } else await layoutPreset(o.id, isPreset(preset) ? preset : "lanes");
   refresh(taskId);
 }
 // „Cofnij” po „Ułóż”: przywraca zapamiętane położenia kafelków i grupy (prostokąt, czy była automatyczna, skład). Grupa, którą „Ułóż”
-// usunęło, bo została pusta, wraca; pola „Pilne i szybkie”, których przed ułożeniem nie było, znikają.
+// usunęło, wraca; grupy i pola, których przed ułożeniem nie było, znikają.
 type SnapGroup = { id: string; x: number; y: number; w: number; h: number; auto: boolean; name?: string; color?: number; members?: string[]; lane?: string | null };
 export async function restoreLayout(taskId: string | null, items: { id: string; x: number; y: number }[], groups: SnapGroup[]) {
   const o = await requireOwner();
@@ -573,7 +575,8 @@ export async function restoreLayout(taskId: string | null, items: { id: string; 
     if (now.some((x) => x.id === g.id)) await repo.updateGroup(o.id, g.id, { ...rect, auto: g.auto, ...(g.members ? { members: g.members } : {}) });
     else if (g.name) { const c = await repo.createGroup(o.id, taskId, g.name, g.members ?? [], rect, { color: g.color, lane: g.lane ?? undefined }); if (g.auto) await repo.updateGroup(o.id, c.id, { auto: true }); }
   }
-  if (!taskId) for (const g of now) if (g.lane && !snap.some((x) => x.id === g.id)) await repo.deleteGroup(o.id, g.id);
+  // paczka 40: gotowy układ zakłada nowe grupy, więc na głównej kanwie znika każda grupa, której przed ułożeniem nie było
+  if (!taskId) for (const g of now) if (!snap.some((x) => x.id === g.id)) await repo.deleteGroup(o.id, g.id);
   refresh(taskId);
 }
 export async function createGroupAction(taskId: string | null, name: string, members: string[], rect: { x: number; y: number; w: number; h: number }) {

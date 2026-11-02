@@ -6,7 +6,9 @@ import { closingNote, draftStep, reviewReport } from "./agent/notes";
 import { scoreAll, type Scored } from "./agent/context";
 import { calibrationFor, remainEst } from "./time";
 import { assignLanes, LANES } from "./canvas/lanes";
-import { taskWaits } from "./canvas/vm";
+import { stepAsked, taskTile, taskWaits } from "./canvas/vm";
+import { daysBetween, presetGroups, type PresetKey } from "./canvas/presets";
+import { dayKey } from "./clock";
 import { isComplete } from "./priority";
 import { type Step, type Task } from "./schema";
 import { bridgeHold, busyWith, queueWho, type Queue, type Worker } from "./auto";
@@ -35,6 +37,32 @@ export async function layoutLanes(ownerId: string): Promise<void> {
   }
   groups = await repo.listGroups(ownerId, null);
   for (const g of groups) if (g.lane) continue; else if (!g.members.length) await repo.deleteGroup(ownerId, g.id); else await repo.updateGroup(ownerId, g.id, { auto: true });
+}
+
+// Gotowe układy z menu „Ułóż” (paczka 40): liczone od razu na serwerze, bez agenta. Wszystkie grupy kanwy znikają, powstają nowe
+// grupy automatyczne w stałej kolejności, położenia kafelków liczą się od nowa (rozkład w kształcie ekranu robi kanwa).
+// „Pilne i szybkie” to dotychczasowe pola (layoutLanes).
+export async function layoutPreset(ownerId: string, key: PresetKey): Promise<void> {
+  if (key === "lanes") return layoutLanes(ownerId);
+  const b = await bundle(ownerId);
+  const open = b.scored.filter((s) => !s.task.deletedAt && !isComplete(s.task));
+  let look: (s: Scored) => ReturnType<typeof taskTile>["look"] = () => ({ key: "plan-ag", label: "" });
+  if (key === "state") {
+    const [questions, st, stepChat] = await Promise.all([repo.listQuestions(ownerId, { open: true }), repo.bridgeStatus(ownerId, BRIDGE_ALIVE_MS), repo.listPendingStepChat(ownerId)]);
+    const q = new Map<string, number>(); questions.forEach((x) => q.set(x.taskId, (q.get(x.taskId) ?? 0) + 1));
+    const run = liveActivity(st.run), asked = stepAsked(stepChat);
+    look = (s) => taskTile(s, b.tasks, q.get(s.task.id) ?? 0, run, 0, asked).look;
+  }
+  const today = dayKey(new Date());
+  const tasks = open.map((s) => {
+    const l = look(s);
+    return { id: s.task.id, eff: s.score.eff, remainMin: remainEst(s.task), due: s.task.due, projectId: s.task.projectId ?? null,
+      dueDays: s.task.due ? daysBetween(today, s.task.due.slice(0, 10)) : null, look: l.key, mine: !!l.also, hasSteps: s.task.steps.length > 0 };
+  });
+  const groups = presetGroups(key, tasks, b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color, weight: p.weight })));
+  await repo.deleteCanvasGroups(ownerId);
+  await repo.clearTaskPositions(ownerId);
+  for (const g of groups) await repo.createGroup(ownerId, null, g.name, g.ids, undefined, { color: g.color });
 }
 
 export type Bundle = { tasks: Task[]; scored: Scored[]; projects: Awaited<ReturnType<typeof repo.listProjects>>; companies: Awaited<ReturnType<typeof repo.listCompanies>>; connections: Awaited<ReturnType<typeof repo.listConnections>>; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>> };

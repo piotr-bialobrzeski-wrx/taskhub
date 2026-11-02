@@ -3,7 +3,7 @@
 // Rysuje tylko to, co dostanie; co znaczy kafelek i co robią akcje, decyduje rodzic (Board / TaskCanvas).
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { bounds, centerOf, computePositions, groupAt, routeEdges, reassign, type DropChange, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
+import { bounds, centerOf, computePositions, groupAt, LANE_ASPECT, routeEdges, reassign, type DropChange, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
 import { GCOL, Icon } from "./ui";
 
 export type CanvasItem = LItem & { cls: string; done?: boolean; aria: string };
@@ -41,8 +41,9 @@ export type CanvasProps = {
   onUnlink?: (from: string, to: string) => void;
   onGroupChange: (id: string, patch: Partial<CanvasGroup>) => void;
   onGroupCreate: (rect: { x: number; y: number; w: number; h: number }, members: string[]) => void;
-  onAutoLayout: () => void;
+  onAutoLayout?: () => void;                          // bez niego (główna kanwa, paczka 40) „Ułóż” nie siedzi w menu powiększenia, tylko w menu „Ułóż” na pasku
   onUndoLayout?: (() => void) | null;                 // po „Ułóż” ten sam przycisk przez chwilę cofa do poprzedniego układu
+  fitKey?: number;                                    // zmiana = po ułożeniu dopasuj powiększenie (paczka 40), także gdy nowe położenia dojdą chwilę później
   empty?: ReactNode;
   showPorts?: boolean;
 };
@@ -108,8 +109,10 @@ export function Canvas(p: CanvasProps) {
   const commitZoom = (v: string) => { const n = parseInt(v, 10); if (Number.isFinite(n) && n > 0) setZoom(n / 100); setZEdit(null); };
 
   const groups = useMemo(() => p.groups.map((g) => ({ ...g, ...(gOverride[g.id] ?? {}) })), [p.groups, gOverride]);
-  const sLayout = useMemo(() => computePositions(p.items, p.groups, p.size, !!p.origin), [p.items, p.groups, p.size, p.origin]);   // układ wg serwera, bez przeciągania
-  const layout = useMemo(() => (Object.keys(gOverride).length ? computePositions(p.items, groups, p.size, !!p.origin) : sLayout), [p.items, groups, p.size, p.origin, gOverride, sLayout]);
+  // paczka 40: proporcje widocznej kanwy (bez paska u góry), zaokrąglone, żeby drobna zmiana okna nie przestawiała grup; telefon = pionowo
+  const aspect = pad.x && pad.y > 200 ? clamp(Math.round((pad.x / (pad.y - 100)) * 10) / 10, 0.5, 3) : LANE_ASPECT;
+  const sLayout = useMemo(() => computePositions(p.items, p.groups, p.size, !!p.origin, aspect), [p.items, p.groups, p.size, p.origin, aspect]);   // układ wg serwera, bez przeciągania
+  const layout = useMemo(() => (Object.keys(gOverride).length ? computePositions(p.items, groups, p.size, !!p.origin, aspect) : sLayout), [p.items, groups, p.size, p.origin, gOverride, sLayout, aspect]);
   const P = useMemo(() => ({ ...layout.P, ...override }), [layout.P, override]);
   const lg = useMemo(() => layout.groups.map((g) => ({ ...(p.groups.find((x) => x.id === g.id) ?? ({} as CanvasGroup)), ...g, ...(gOverride[g.id] ?? {}) })) as CanvasGroup[], [layout.groups, p.groups, gOverride]);
   const bb = bounds(P, lg, p.size, layout.origin);
@@ -337,6 +340,11 @@ export function Canvas(p: CanvasProps) {
     setZoomState(z);
   };
 
+  // paczka 40: po gotowym układzie kanwa sama robi „Dopasuj”: od razu i jeszcze raz, gdy z serwera dojdą nowe położenia
+  const fitAgain = useRef(0);
+  useEffect(() => { if (!p.fitKey) return; fitAgain.current = Date.now(); fit(); }, [p.fitKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (fitAgain.current && Date.now() - fitAgain.current < 5000) { fitAgain.current = 0; fit(); } }, [sLayout]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // pigułka powiększenia siedzi w górnym pasku ekranu (.zslot), a jej rozwijane menu w portalu (pasek ma backdrop-filter)
   const [zslot, setZslot] = useState<HTMLElement | null>(null);
   useEffect(() => { setZslot(document.querySelector<HTMLElement>(".zslot")); }, []);
@@ -438,7 +446,7 @@ export function Canvas(p: CanvasProps) {
         <div ref={zPill} className="zoom glass gpill">
           <div className="zfull">
             <button className="icobtn" type="button" onClick={() => zoomBy(-0.1)} aria-label="Oddal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10" /></svg></button>
-            <input value={zEdit ?? fmtPct(zoom)} inputMode="numeric" aria-label="Powiększenie w procentach (35–160)" title="Wpisz powiększenie w procentach (35–160) albo wybierz Dopasuj lub Ułóż"
+            <input value={zEdit ?? fmtPct(zoom)} inputMode="numeric" aria-label="Powiększenie w procentach (35–160)" title={p.onAutoLayout ? "Wpisz powiększenie w procentach (35–160) albo wybierz Dopasuj lub Ułóż" : "Wpisz powiększenie w procentach (35–160) albo wybierz Dopasuj"}
           aria-haspopup="menu" aria-expanded={fOpen}
           onFocus={(e) => { zFocus.current = Date.now(); e.currentTarget.select(); setFOpen(true); }} onMouseUp={(e) => { if (Date.now() - zFocus.current < 400) e.preventDefault(); }}   /* klik zaznacza całość i rozwija menu; mouseup nie cofa zaznaczenia */
           onClick={() => setFOpen(true)}
@@ -446,13 +454,13 @@ export function Canvas(p: CanvasProps) {
           onBlur={(e) => { if (zCancel.current) { zCancel.current = false; setZEdit(null); return; } commitZoom(e.currentTarget.value); }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setFOpen(false); e.currentTarget.blur(); } else if (e.key === "Escape") { e.preventDefault(); zCancel.current = true; setFOpen(false); e.currentTarget.blur(); } }} />
             <button className="icobtn" type="button" onClick={() => zoomBy(0.1)} aria-label="Przybliż"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 8h10M8 3v10" /></svg></button>
-            {p.onUndoLayout ? <button className="icobtn txt undo" type="button" onClick={p.onUndoLayout} title="Przywróć układ sprzed ułożenia"><Icon k="undo" size={12} sw={2} />Cofnij</button> : null}
+            {p.onUndoLayout ? <button className="icobtn txt undo" type="button" onClick={p.onUndoLayout} title="Cofnij: przywróć układ sprzed ułożenia" aria-label="Cofnij ułożenie"><Icon k="undo" size={12} sw={2} />Cofnij</button> : null}
           </div>
           {fOpen && fPos.width ? createPortal(
             <div className="zmenu zfmenu glass" role="menu" style={{ position: "fixed", left: fPos.left, top: fPos.top, width: fPos.width }} onPointerDown={(e) => e.stopPropagation()}>
               <button className="mi" role="menuitem" type="button" onClick={() => { setFOpen(false); fit(); }} title="Dopasuj powiększenie, żeby było widać wszystkie kafelki">Dopasuj</button>
               {p.onUndoLayout ? <button className="mi" role="menuitem" type="button" onClick={() => { setFOpen(false); p.onUndoLayout!(); }} title="Przywróć układ sprzed ułożenia">Cofnij ułożenie</button>
-                : <button className="mi" role="menuitem" type="button" onClick={() => { setFOpen(false); p.onAutoLayout(); }} title="Ułóż kafelki automatycznie">Ułóż</button>}
+                : p.onAutoLayout ? <button className="mi" role="menuitem" type="button" onClick={() => { setFOpen(false); p.onAutoLayout!(); }} title="Ułóż kafelki automatycznie">Ułóż</button> : null}
             </div>, document.body) : null}
           <button ref={zBtn} className="icobtn txt zbtn" type="button" aria-haspopup="menu" aria-expanded={zOpen} title="Powiększenie i układ" onClick={() => setZOpen((o) => !o)}><span className="zt">{fmtPct(zoom)}<Icon k="chev" size={10} sw={2.2} /></span><span className="zi"><Icon k="zoom" size={16} sw={1.7} /></span></button>
           {zOpen ? createPortal(
@@ -466,7 +474,7 @@ export function Canvas(p: CanvasProps) {
               <div className="zacts">
                 <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); fit(); }}>Dopasuj do ekranu</button>
                 {p.onUndoLayout ? <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); p.onUndoLayout!(); }}>Cofnij ułożenie</button>
-                  : <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); p.onAutoLayout(); }}>Ułóż kafelki</button>}
+                  : p.onAutoLayout ? <button className="mi" role="menuitem" type="button" onClick={() => { setZOpen(false); p.onAutoLayout!(); }}>Ułóż kafelki</button> : null}
               </div>
             </div>, document.body) : null}
         </div>, zslot) : null}

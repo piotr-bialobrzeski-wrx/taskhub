@@ -308,6 +308,27 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .mkpill, .namer { --mk-b: calc(16px + env(safe-area-inset-bottom, 0px)); }
 .pillbar > .pl > .mkpill { flex: none; }
 @media (min-width: 861px) and (max-width: 1240px) { .mkpill .icobtn.mk { width: 32px; padding: 0; gap: 0; font-size: 0; justify-content: center; } }   /* węższe okno: same ikony, nazwa zadania ma miejsce */
+/* „Ułóż” na pasku głównej kanwy (paczka 40, wersja A „Lista z opisem”): przycisk za kreską w pigułce Kafelek/Grupa, lista układów z opisem */
+.mkpill { gap: 2px; }
+.mksep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; flex: none; }
+.icobtn.mk.laybtn.on { background: var(--accent-soft); }
+.laychev { display: inline-flex; opacity: .7; margin-left: -2px; }
+.zmenu.laymenu { width: 300px; }
+.zmenu .mi.lay { display: flex; align-items: center; gap: 10px; }
+.zmenu .mi.lay > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.zmenu .mi.lay b { font-weight: 600; font-size: 13px; white-space: nowrap; }
+.zmenu .mi.lay small { color: var(--sub); font-size: 11.5px; }
+.zmenu .mi.lay.cur b, .zmenu .mi.lay > svg { color: var(--accent); }
+.zmenu .mi.lay > svg { flex: none; }
+.zmenu hr { border: 0; height: 1px; background: var(--line); margin: 4px 8px; }
+.layhint { margin: 2px 12px 6px; font-size: 11.5px; color: var(--sub); }
+.layhead { margin: 2px 12px 2px; font-size: 11px; font-weight: 600; color: var(--sub); text-transform: uppercase; letter-spacing: .04em; }
+.addmenu.zmenu { width: 280px; }
+@media (min-width: 861px) and (max-width: 1240px) { .mkpill .laychev { display: none; } }
+/* średnie okno: Kafelek i Grupa same ikony (nazwa w dymku), „Ułóż” z napisem, żeby pasek nie wchodził pod przełącznik widoków */
+@media (min-width: 1241px) and (max-width: 1600px) { .mkpill .icobtn.mk:not(.laybtn) { width: 32px; padding: 0; gap: 0; font-size: 0; justify-content: center; } }
+/* do 1600 px „Cofnij” po ułożeniu w pigułce powiększenia to sama strzałka (opis w dymku), inaczej pigułki wchodziły pod przełącznik widoków */
+@media (min-width: 861px) and (max-width: 1600px) { .zoom .icobtn.txt.undo { font-size: 0; gap: 0; padding: 0 8px; } }
 .namer.top { right: auto; bottom: auto; }
 .namer { position: fixed; z-index: 12; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(var(--mk-b) + 52px); display: flex; gap: 6px; align-items: center; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5); border-radius: 999px; width: min(420px, calc(100% - 32px)); }
 .namer input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; padding: 6px 0; }
@@ -1175,6 +1196,10 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
   .zpre .chip { flex: 1; justify-content: center; padding: 9px 0; }
   .zacts, .addmenu { flex-direction: row; gap: 4px; }
   .zacts .mi, .addmenu .mi { flex: 1; justify-content: center; text-align: center; background: var(--accent-soft); }
+  /* paczka 40: pod „Dodaj” lista układów „Ułóż”, każdy w swoim wierszu */
+  .addmenu { flex-wrap: wrap; }
+  .addmenu > hr, .addmenu > .layhead, .addmenu .mi.lay { flex: 0 0 100%; }
+  .addmenu .mi.lay { justify-content: flex-start; text-align: left; background: none; }
 }
 
 /* ---------- paczka 15: nagłówek karty kroku = numer, tytuł, projekt; bez znaczka stanu; rzadkie akcje pod „⋮” ---------- */
