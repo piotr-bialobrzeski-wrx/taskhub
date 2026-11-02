@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Canvas, type CanvasApi, type CanvasGroup, type CanvasItem } from "./Canvas";
 import { GHEAD, GPAD, TASK_SIZE } from "@/lib/canvas/layout";
-import { Icon, LookTag, Lvl, PlanStrip, PrioPill, ToolIcon, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
+import { DueChip, Icon, LookTag, Lvl, PlanStrip, PrioPill, ToolIcon, GCOL, plural, projColor, toolColor, type CompanyRow, type GroupVM, type ProjTask, type ProjectRow, type TaskTile } from "./ui";
 import { AgentFeed, Dock, Namer, PrioPicker, ProjectPicker, TileMenu, Toast, useToast } from "./widgets";
 import { msgCount } from "@/lib/auto";
 import type { FeedItem, WorkBubble } from "@/lib/feed";
@@ -56,7 +56,7 @@ export function TaskTileView({ t }: { t: TaskTile }) {
       </span>
       <span className="t-row">
         <PrioPill base={t.base} eff={t.eff} why={t.why} />
-        {t.due ? <span className={"st due " + t.due.cls} title={"Termin: " + t.due.iso}>{t.due.text}</span> : null}
+        {t.due ? <DueChip due={t.due} /> : null}
         {t.activity ? (
           <span className="t-rt"><Activity text={t.activity.text} detail={t.activity.detail} since={t.activity.since} who="Claude" /></span>
         ) : (
@@ -248,7 +248,7 @@ export function Board(p: BoardProps) {
               <button key={t.id} type="button" className={"lrow lk lk-" + t.look.key} onClick={() => open(t.id)}>
                 <PrioPill base={t.base} eff={t.eff} why={t.why} />
                 <span className="n-title">{t.title}</span>
-                {t.due ? <span className={"st due " + t.due.cls}>{t.due.text}</span> : null}
+                {t.due ? <DueChip due={t.due} /> : null}
                 <LookTag look={t.look} />
                 <span className="n-meta" style={{ margin: 0 }}>{t.progress.done}/{t.progress.all}</span>
               </button>

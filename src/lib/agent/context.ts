@@ -8,6 +8,7 @@ import { rulesFor } from "../repo";
 import { laneName, laneOf } from "../canvas/lanes";
 import { draftOf, isExternalApp, isPromptDraft, isSendable, optionLabel, optionsOf, type Approvable } from "./approval";
 import { fmtDateTime } from "../clock";
+import { dueText } from "../due";
 
 // paczka 37: agent widzi, czy krok w chmurze ruszy sam, czy czeka na „Uruchom w chmurze” (wtedy może go uruchomić przez update_step start)
 const cloudNote = (s: Pick<Step, "tool" | "status" | "cloud">): string => {
@@ -38,7 +39,7 @@ export const taskState = (t: Task): string => {
 
 export function brief(s: Scored): string {
   const t = s.task, p = t.steps.filter((x) => x.status === "done").length;
-  return `- [${t.id}] ${t.title} | priorytet ${t.level}/5${s.score.eff !== t.level ? ` (efektywny ${s.score.eff}: ${whyText(s.score)})` : ""} | ${taskState(t)} | kroki ${p}/${t.steps.length} | Piotrowi zostało ~${fmtMin(remainEst(t))}${taskSpent(t) ? ` | czas Piotra ${fmtMin(taskSpent(t))}` : ""}${taskAgent(t) ? ` | czas Claude'a ${fmtMin(taskAgent(t))}` : ""}${t.due ? ` | termin ${t.due}` : ""}${s.project ? ` | projekt: ${s.project.name}` : " | bez projektu"}${t.dependsOn.length ? ` | po zadaniu: ${t.dependsOn.join(", ")}` : ""} | pole na kanwie: ${laneName(laneOf({ lane: t.lane, eff: s.score.eff, remainMin: remainEst(t), hasSteps: t.steps.length > 0 }))}${t.lane ? "" : " (liczone)"}${t.summary ? " | " + t.summary.slice(0, 140) : ""}`;
+  return `- [${t.id}] ${t.title} | priorytet ${t.level}/5${s.score.eff !== t.level ? ` (efektywny ${s.score.eff}: ${whyText(s.score)})` : ""} | ${taskState(t)} | kroki ${p}/${t.steps.length} | Piotrowi zostało ~${fmtMin(remainEst(t))}${taskSpent(t) ? ` | czas Piotra ${fmtMin(taskSpent(t))}` : ""}${taskAgent(t) ? ` | czas Claude'a ${fmtMin(taskAgent(t))}` : ""}${t.due || t.repeat ? ` | termin: ${dueText(t.due, t.dueKind, t.repeat)}` : ""}${s.project ? ` | projekt: ${s.project.name}` : " | bez projektu"}${t.dependsOn.length ? ` | po zadaniu: ${t.dependsOn.join(", ")}` : ""} | pole na kanwie: ${laneName(laneOf({ lane: t.lane, eff: s.score.eff, remainMin: remainEst(t), hasSteps: t.steps.length > 0 }))}${t.lane ? "" : " (liczone)"}${t.summary ? " | " + t.summary.slice(0, 140) : ""}`;
 }
 
 // Zasady w prompcie w trzech sekcjach: PROFIL (dane o projekcie i narzędziach), ZASADY (zawsze) i PROCEDURY (pełna treść tylko tych, które
@@ -140,11 +141,11 @@ ${open.slice(0, 60).map(brief).join("\n") || "(brak zadań)"}${notesText(c.tasks
   return `${head}
 ${rulesText(c.rules, t.projectId, t.steps.map((s) => s.tool), { topic: ["czat"], text: `${t.title} ${t.summary}`, companyId: cur.project?.companyId ?? null })}
 MIEJSCE: wnętrze zadania [${t.id}] "${t.title}". To jest domyślny kontekst wiadomości.
-OBECNE ZADANIE: priorytet ${t.level}/5 (${LEVELS[cur.score.eff]}${cur.score.why.length ? ", efektywny " + cur.score.eff + ": " + whyText(cur.score) : ""}), stan: ${taskState(t)}${t.due ? `, termin ${t.due}` : ""}${cur.project ? `, projekt ${cur.project.name}${cname(cur.project) ? ` (firma ${cname(cur.project)})` : ""}, sfera ${sphereOf(cur.project, companies) === "private" ? "prywatna" : "zawodowa"}` : ""}
+OBECNE ZADANIE: priorytet ${t.level}/5 (${LEVELS[cur.score.eff]}${cur.score.why.length ? ", efektywny " + cur.score.eff + ": " + whyText(cur.score) : ""}), stan: ${taskState(t)}${t.due || t.repeat ? `, termin: ${dueText(t.due, t.dueKind, t.repeat)}` : ""}${cur.project ? `, projekt ${cur.project.name}${cname(cur.project) ? ` (firma ${cname(cur.project)})` : ""}, sfera ${sphereOf(cur.project, companies) === "private" ? "prywatna" : "zawodowa"}` : ""}
 Podsumowanie: ${t.summary || "-"}
 Jak wpadło: ${capText(t.source) || "-"}
 Kroki:
-${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status}${cloudNote(s)} | po: ${s.dependsOn.join(", ") || "-"}${isOwnerStep(s) ? ` | szacunek ${s.estMin} min` : agentMinOf(s) ? ` | czas Claude'a ${agentMinOf(s)} min` : ""}${s.status === "done" ? ` | zrobił: ${doneByOf(s) === "owner" ? "Piotr" : "Claude"}${consentNote(s)}` : ""}${connLabel(s.connectionId, c.connections)}${s.workLevel && s.tool !== "manual" ? ` | poziom: ${LEVEL_LABELS[normalizeLevel(s.workLevel) ?? "analysis"]}` : ""}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + outputText(s) : ""}`).join("\n") || "(brak kroków)"}
+${t.steps.map((s) => `- [${s.id}] ${s.title} | ${toolKey(s.tool)} | stan: ${s.status}${cloudNote(s)} | po: ${s.dependsOn.join(", ") || "-"}${isOwnerStep(s) ? ` | szacunek ${s.estMin} min` : agentMinOf(s) ? ` | czas Claude'a ${agentMinOf(s)} min` : ""}${s.status === "done" ? ` | zrobił: ${doneByOf(s) === "owner" ? "Piotr" : "Claude"}${consentNote(s)}` : ""}${connLabel(s.connectionId, c.connections)}${s.due || s.repeat ? ` | termin: ${dueText(s.due ?? null, s.dueKind, s.repeat)}` : ""}${s.workLevel && s.tool !== "manual" ? ` | poziom: ${LEVEL_LABELS[normalizeLevel(s.workLevel) ?? "analysis"]}` : ""}${s.detail ? " | " + s.detail.slice(0, 160) : ""}${s.link ? " | link: " + s.link : ""}${s.output ? " | wynik: " + outputText(s) : ""}`).join("\n") || "(brak kroków)"}
 INNE ZADANIA NA GŁÓWNEJ KANWIE (${others.length}):
 ${others.slice(0, 40).map(brief).join("\n") || "(brak)"}${notesText(c.tasks)}`;
 }

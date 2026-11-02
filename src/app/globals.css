@@ -247,6 +247,7 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .st.ready, .st.active { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
 .st.draft { background: var(--warn-soft); color: var(--warn); box-shadow: none; }
 .st.handoff { background: color-mix(in srgb, var(--t-claude) 18%, transparent); color: var(--t-claude); box-shadow: none; }
+.st.due.rep { display: inline-flex; align-items: center; gap: 3px; }
 .st.due.soon { background: var(--warn-soft); color: var(--warn); box-shadow: none; }
 .st.due.late { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); box-shadow: none; }
 .lvl { display: inline-flex; gap: 3px; align-items: center; flex: none; }
@@ -415,6 +416,19 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 .date-in.unset .date-pick { color: var(--sub); font-weight: 500; }
 .date-in .date-clear { all: unset; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 999px; color: var(--sub); }
 .date-in .date-clear:hover { background: var(--line); color: var(--text); }
+.date-in .due-rep { display: inline-flex; align-items: center; gap: 3px; margin-left: var(--s-2); color: var(--sub); font-weight: 500; }
+.duemenu { width: 300px; padding: var(--s-3); display: flex; flex-direction: column; gap: var(--s-2); }
+.duemenu .lbl { margin: var(--s-1) 0 0; }
+.due-kind { display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); align-self: flex-start; }
+.due-kind button { all: unset; cursor: pointer; padding: 5px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600; color: var(--sub); white-space: nowrap; }
+.due-kind button.on { background: var(--accent); color: #fff; }
+.due-kind button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.due-hint { font-size: 12px; color: var(--sub); }
+.duemenu .due-date { width: 100%; }
+.due-rep-opts { display: flex; flex-direction: column; }
+.due-custom { display: flex; align-items: center; gap: var(--s-2); font-size: 12.5px; }
+.due-custom .in.num { width: 64px; }
+.due-unit button { padding: 5px 9px; }
 .date-in input[type="date"] { position: absolute; left: var(--s-4); bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; pointer-events: none; }
 .gal { display: flex; flex-direction: column; gap: var(--s-4); }
 .gal-item { display: grid; grid-template-columns: 96px 1fr; gap: var(--s-4); align-items: start; }
