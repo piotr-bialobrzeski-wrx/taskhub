@@ -52,6 +52,25 @@ export const DraftTarget = z.object({
   url: z.string().max(2000).optional(),    // adres miejsca docelowego (ticket, wątek, kanał, dokument): przycisk „Otwórz w …” jeszcze przed wysyłką
   action: z.enum(["send", "reply", "create", "update", "comment", "commit", "push", "other"]).default("send"),   // commit/push: zmiany w kodzie do opublikowania
 });
+// paczka 42: wiersze szkicu jako arkusz do edycji w miejscu (wpisy czasu i każda inna lista wierszy do wysłania). Kolumna mówi, jak edytować
+// komórkę: text (pole), choice (lista z wyszukiwarką; recent = „Ostatnio używane”), multi (kilka z listy, w komórce po przecinku), date (YYYY-MM-DD,
+// kalendarz z „Dziś” i „Wczoraj”), time (HH:MM), duration (h:mm, suma pod tabelą), toggle (tak/nie). Słowniki (options) przynosi agent z aplikacji
+// docelowej (np. projekty, kategorie i tagi z Pirxey Time), nigdy z kodu; hidden = kolumna domyślnie schowana pod „Kolumny”
+export const SHEET_KINDS = ["text", "choice", "multi", "date", "time", "duration", "toggle"] as const;
+export const SheetOption = z.object({
+  value: z.string().min(1).max(200),
+  color: z.string().regex(/^#[0-9a-fA-F]{3,8}$/).optional(),
+  recent: z.boolean().optional(),
+});
+export const SheetColumn = z.object({
+  kind: z.enum(SHEET_KINDS).default("text"),
+  options: z.array(SheetOption).max(500).optional(),
+  required: z.boolean().optional(),
+  hidden: z.boolean().optional(),
+  on: z.string().max(40).optional(),       // toggle: napis dla „tak” (np. „Rozliczalne”); „nie” zawsze „Nie”
+});
+// z czego zebrano wiersz (np. kilka aktywności przy jednym tickecie zsumowane w jeden wpis): znaczek Σ przy czasie pokazuje listę
+export const SheetPart = z.object({ what: z.string().max(300), app: z.string().max(60).optional(), min: z.number().int().min(0).max(1440).optional() });
 export const DraftBlock = z.object({
   type: z.literal("draft"),
   title: z.string().optional(),
@@ -60,7 +79,9 @@ export const DraftBlock = z.object({
   body: z.string(),
   fields: z.array(Fact).max(12).optional(), // pola, które agent ustawi przy wysyłce (priorytet, lista, sprint)
   columns: z.array(z.string()).max(12).optional(), // wiersze do dopisania (arkusz, tabela): nagłówki i wiersze zamiast body
-  rows: z.array(z.array(z.string())).max(50).optional(),
+  rows: z.array(z.array(z.string().max(2000))).max(100).optional(),
+  sheet: z.array(SheetColumn).max(12).optional(),   // rodzaje kolumn (ta sama kolejność co columns): wiersze stają się arkuszem do edycji w miejscu
+  parts: z.array(z.array(SheetPart).max(20).nullable()).max(100).optional(),   // przy wierszu (ta sama kolejność co rows): z czego go zebrano
   status: z.enum(["proposed", "approved", "sent"]).default("proposed"),
   stale: z.boolean().optional(),           // zakres pracy zmienił się po napisaniu szkicu (nowe kroki przed publikacją); agent przygotuje go od nowa
 });
@@ -160,6 +181,8 @@ export const Block = z.discriminatedUnion("type", [
   TextBlock, FactsBlock, ThreadBlock, DraftBlock, ListBlock, MediaBlock, LinkBlock, QuestionBlock, MailBlock, CommentBlock, TableBlock, FreeBlock, ChangesBlock,
 ]);
 export type Block = z.infer<typeof Block>;
+export type SheetColumn = z.infer<typeof SheetColumn>;
+export type SheetPart = z.infer<typeof SheetPart>;
 export const Blocks = z.array(Block).max(12);
 // klocki kontekstu (to, na czym Piotr pracuje) kontra odpowiedź (blok draft) i pytanie
 export const CONTEXT_BLOCK_TYPES = new Set(["text", "facts", "thread", "list", "media", "link", "mail", "comment", "table", "free", "changes"]);

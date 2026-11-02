@@ -17,7 +17,7 @@ import { intake, uploads } from "@/lib/intake";
 import { shortTitle, type Queue } from "@/lib/auto";
 import { fmtTime } from "@/lib/clock";
 import { connectorIssue, isGitDraft } from "@/lib/bridge";
-import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, shownSig, type Draft } from "@/lib/agent/approval";
+import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, parseSheetRows, shownSig, withRows, type Draft, type SheetRows } from "@/lib/agent/approval";
 import { workSummary } from "@/lib/agent/work";
 import { decisionText, destOf, isDeployStep, isProjectStep, openQuestions, stepKind, stepsAfterDecision } from "@/lib/stepcard";
 import { isAppCodeStep, isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
@@ -236,8 +236,12 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
   const opt = fd?.get("option");
   const option = typeof opt === "string" && /^\d+$/.test(opt) ? Number(opt) : undefined;
   const pick = (s: Step): Draft | null => (option != null ? draftsOf(s)[option] ?? null : draftOf(s));
+  // paczka 42: wiersze arkusza poprawione na karcie (komórki, dopisane i usunięte wiersze) idą w formularzu jak treść z pola
+  const rawRows = fd?.get("rows");
+  const p0 = pick(step);
+  const rows = typeof rawRows === "string" && rawRows && p0?.columns?.length ? parseSheetRows(rawRows, p0.columns.length) : null;
   // podpis szkicu z karty, którą Piotr widział: bez treści, gdy ją poprawił (idzie w formularzu); z treścią, gdy nietknięta (zgoda na bajty agenta)
-  const shown = edited !== null ? fd?.get("seen") : fd?.get("seenFull") ?? fd?.get("seen");
+  const shown = rows ? fd?.get("seenRows") : edited !== null ? fd?.get("seen") : fd?.get("seenFull") ?? fd?.get("seen");
   const seen = typeof shown === "string" && shown ? shown : null;
   if (step.status === "done") { refresh(taskId); return; }
   // opcja z karty, której już nie ma (agent przepisał kartkę z mniejszą liczbą opcji, zanim Piotr kliknął): bez zgody i bez zamykania kroku
@@ -257,9 +261,10 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
   // inaczej zatwierdzenie zamknęłoby krok jako „wysłany”, choć nic nie poleciało
   if (!step.needsApproval && d0 && isExternalApp(d0.target.app)) { await repo.updateStep(stepId, { needsApproval: true }); step.needsApproval = true; }
   if (!step.needsApproval) {
-    const why = approveRefusal(step, { option, body: edited });
+    const why = approveRefusal(step, { option, body: edited, rows });
     if (why) { await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(step.title, 60)}”: ${why}.`, { stepId }); refresh(taskId); return; }
-    if (edited !== null) await writeDraftBody(stepId, step, edited, option);
+    if (rows) await writeDraftRows(stepId, step, rows, option);
+    if (edited !== null) await writeDraftBody(stepId, (await stepOf(o.id, taskId, stepId)).step, edited, option);
     await finishStep(o.id, taskId, stepId, { chosen: option ?? 0 }); refresh(taskId); return;
   }
   // szkic, którego mostek nie wyśle (brak konektora tej aplikacji na Macu, kilka kont, konektor innej firmy): zgoda nic by nie dała, Piotr czyta czemu
@@ -271,7 +276,7 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
       refresh(taskId); return;
     }
   }
-  if (await repo.approveDraft(o.id, stepId, { body: edited, seen, option })) {
+  if (await repo.approveDraft(o.id, stepId, { body: edited, seen, option, rows })) {
     // szkic, który nie wychodzi poza Task Hub (krok Piotra, notatka): zgoda go kończy, nie czeka na bieg wysyłki mostka.
     // Commit wysyła aplikacja na Macu, a zatwierdzony prompt dla agenta wykonuje bieg pracy, więc te czekają
     const s = (await repo.getTask(o.id, taskId))?.steps.find((x) => x.id === stepId);
@@ -283,7 +288,7 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
     const s = (await repo.getTask(o.id, taskId))?.steps.find((x) => x.id === stepId);
     const d = s ? pick(s) : null;
     if (s && s.status !== "done" && !s.sendStartedAt) {
-      const why = seen && d && shownSig(s, d, edited !== null) !== seen ? "szkic zmienił się, zanim go zatwierdziłeś. Sprawdź go jeszcze raz" : approveRefusal(s, { option, body: edited });
+      const why = seen && d && shownSig(s, d, edited !== null, !!rows) !== seen ? "szkic zmienił się, zanim go zatwierdziłeś. Sprawdź go jeszcze raz" : approveRefusal(s, { option, body: edited, rows });
       if (why) await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(s.title, 60)}”: ${why}.`, { stepId });
     }
   }
@@ -313,6 +318,27 @@ export async function saveDraftBody(taskId: string, stepId: string, option: numb
   if (step.status === "done" || step.status === "handoff") return;   // wysłane albo w wysyłce: treść już nie do zmiany
   await writeDraftBody(stepId, step, body, option);
   refresh(taskId);
+}
+// paczka 42: wiersze arkusza (wpisy czasu i inne wiersze do wysłania) po edycji komórki, dopisaniu albo usunięciu wiersza. Zapis od razu, jak treść z pola;
+// zmiana zatwierdzonego szkicu kasuje zgodę jak każda zmiana treści (podpis). Zwraca false, gdy szkicu nie da się już zmienić
+async function writeDraftRows(stepId: string, step: Step, r: SheetRows, option?: number): Promise<boolean> {
+  const ds = draftsOf(step);
+  const d = option != null ? ds[option] : draftOf(step);
+  if (!d || d.status === "sent" || !d.columns?.length) return false;
+  const n = withRows(d, r);
+  if (JSON.stringify(n.rows) === JSON.stringify(d.rows ?? []) && JSON.stringify(n.parts ?? null) === JSON.stringify(d.parts ?? null)) return true;
+  await repo.updateStep(stepId, { blocks: step.blocks!.map((b) => (b === d ? n : b)) });
+  return true;
+}
+export async function saveDraftRows(taskId: string, stepId: string, option: number, rowsJson: string): Promise<boolean> {
+  const o = await requireOwner();
+  const { step } = await stepOf(o.id, taskId, stepId);
+  if (step.status === "done" || step.status === "handoff") return false;
+  const d = draftsOf(step)[option] ?? null;
+  const r = d?.columns?.length ? parseSheetRows(rowsJson, d.columns.length) : null;
+  if (!r || !(await writeDraftRows(stepId, step, r, option))) return false;
+  refresh(taskId);
+  return true;
 }
 export async function saveOutput(fd: FormData) {
   const o = await requireOwner();

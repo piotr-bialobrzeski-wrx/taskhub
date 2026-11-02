@@ -5,7 +5,7 @@ import { sql } from "./db";
 import { type Company, type Connection, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample, appOfLabel, isOwnerStep, normalizeTool, toolLabel } from "./schema";
 import { agentMinOf, elapsedSec, Q, roundQ, spentMin } from "./time";
 import { isHttpUrl, sanitizeBlocks } from "./safeurl";
-import { approvalSig, approvalValid, draftOf, draftsOf, isGitDraft, isSendable, shownSig, type Draft } from "./agent/approval";
+import { approvalSig, approvalValid, draftOf, draftsOf, isGitDraft, isSendable, shownSig, withRows, type Draft, type SheetRows } from "./agent/approval";
 import { doneChat, stepKind } from "./stepcard";
 import { shortTitle } from "./auto";
 import { guessProject } from "./project-guess";
@@ -586,7 +586,7 @@ export async function reopenStep(ownerId: string, taskId: string, step: Step): P
 // razem ze zgodą; stary szkic bez bloku (sama treść w output) dostaje blok. Szkic już wysyłany (bieg wysyłki go wziął) albo wysłany się nie zmienia.
 // seen: podpis szkicu z karty, którą Piotr miał przed oczami (shownSig); inny podpis w bazie = szkic zmienił się po wyświetleniu, zgody nie ma
 // option: numer opcji wśród szkiców kroku (0 = pierwsza); przy jednym szkicu zbędny, przy kilku bez poprawnego numeru zgody nie ma
-export async function approveDraft(ownerId: string, stepId: string, opts: { body?: string | null; seen?: string | null; option?: number } = {}): Promise<boolean> {
+export async function approveDraft(ownerId: string, stepId: string, opts: { body?: string | null; seen?: string | null; option?: number; rows?: SheetRows | null } = {}): Promise<boolean> {
   return sql().begin(async (tx) => {
     const [r] = await tx`select s.* from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId} for update of s`;
     if (!r || r.status === "done" || r.sendStartedAt) return false;
@@ -595,7 +595,8 @@ export async function approveDraft(ownerId: string, stepId: string, opts: { body
     const idx = blocks.map((b, k) => (b.type === "draft" ? k : -1)).filter((k) => k >= 0);
     let i = idx.length > 1 ? idx[opts.option ?? -1] ?? -1 : idx[0] ?? -1;
     if (idx.length > 1 && i < 0) return false;
-    if (i >= 0 && opts.seen && shownSig(step, blocks[i] as Draft, opts.body != null) !== opts.seen) return false;
+    if (i >= 0 && opts.seen && shownSig(step, blocks[i] as Draft, opts.body != null, !!opts.rows) !== opts.seen) return false;
+    if (opts.rows && (i < 0 || !(blocks[i] as Draft).columns?.length)) return false;   // wiersze z formularza tylko do szkicu z kolumnami
     if (i < 0) {
       const body = opts.body ?? step.output;
       if (!body?.trim()) return false;
@@ -606,7 +607,7 @@ export async function approveDraft(ownerId: string, stepId: string, opts: { body
     if (cur.status === "sent") return false;
     // inna opcja tej kartki już poszła: krok już opublikował, a ta zgoda nigdy nie byłaby ważna (draftOf woli wysłaną)
     if (blocks.some((b, k) => k !== i && b.type === "draft" && b.status === "sent")) return false;
-    blocks[i] = { ...cur, ...(opts.body != null ? { body: opts.body } : {}), status: "approved" };
+    blocks[i] = { ...(opts.rows ? withRows(cur, opts.rows) : cur), ...(opts.body != null ? { body: opts.body } : {}), status: "approved" };
     // ostatnie kliknięcie wygrywa: opcja zatwierdzona chwilę wcześniej (drugi przycisk, zanim karta się odświeżyła, albo druga karta) wraca do
     // propozycji, żeby approved_sig zawsze był podpisem szkicu kroku (draftOf) i bieg wysyłki dostał dokładnie jeden szkic.
     // „Nieaktualny” znika z każdej opcji: Piotr widział kartkę i wybrał, a odrzuconej nikt nie szykuje od nowa

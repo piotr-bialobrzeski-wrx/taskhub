@@ -1384,3 +1384,72 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 @media (prefers-reduced-motion: reduce) { .rv-card { animation: none; } .rv-opt, .rv-card { transition: none; } }
 /* cztery pozycje w przełączniku: szukajka ustępuje szerszej środkowej pigułce */
 @media (min-width: 1181px) { .pillbar:has(.vp3) .srchw { width: clamp(160px, calc(50vw - 400px), 440px); } }
+
+/* ---------- paczka 42: arkusz szkicu (wpisy czasu, wariant C): edycja w miejscu, szybki wpis w tym samym układzie kolumn ---------- */
+.sheet { display: flex; flex-direction: column; gap: var(--s-4); min-width: 0; }
+.sh-quick { display: flex; flex-direction: column; gap: var(--s-2); background: var(--surface); border-radius: var(--r-md); padding: var(--s-3) var(--s-4) 0; }
+.sh-qh { display: flex; align-items: center; gap: var(--s-3); min-height: 32px; font-size: 12.5px; }
+.sh-qh .sp, .sh-foot .sp { flex: 1; }
+.sheet .tbwrap { padding-bottom: var(--s-2); }
+table.tb.sh { table-layout: fixed; font-size: 13px; }
+table.tb.sh th, table.tb.sh td { min-width: 0; white-space: nowrap; vertical-align: middle; padding: 2px 2px; }
+table.tb.sh th { padding: 6px 8px; }
+table.tb.sh td:first-child { min-width: 0; }
+table.tb.sh tr.fresh td { animation: sh-hl 1.6s ease-out; }
+@keyframes sh-hl { from { background: color-mix(in srgb, var(--accent) 16%, transparent); } to { background: transparent; } }
+.sh-cell { min-height: 32px; display: flex; align-items: center; gap: var(--s-2); padding: 4px 6px; border-radius: 8px; border: 1px solid transparent; min-width: 0; overflow: hidden; cursor: text; }
+.sh-cell.pick { cursor: pointer; }
+.sh-cell.num { font-variant-numeric: tabular-nums; }
+.sh-cell.dur { font-weight: 700; }
+.sh-cell.sh-empty { color: var(--sub); opacity: .75; font-weight: 500; }
+.sh-cell:not(.inp):is(.pick, .txt):hover, .sh-cell:focus-visible { border-color: var(--line); background: var(--surface); outline: none; }
+.sh-cell.inp { border-color: var(--line); background: var(--surface-2); }
+.sh-cell.inp:focus-within { border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent); }
+.sh-cell input { font: inherit; color: inherit; width: 100%; min-width: 0; border: 0; outline: 0; background: none; padding: 0; }
+.sh-cell input::placeholder { color: var(--sub); opacity: .8; }
+.sh-ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sh-wrap { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.sh-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; background: var(--sub); }
+.sh-tag { display: inline-flex; align-items: center; gap: 4px; margin-right: var(--s-2); }
+.sh-bill { height: 32px; border-radius: 8px; border: 1px solid transparent; background: none; display: inline-flex; align-items: center; gap: var(--s-2); padding: 0 8px; color: var(--sub); font-size: 13px; white-space: nowrap; cursor: pointer; }
+.sh-bill.on { color: var(--p1); font-weight: 600; }
+.sh-bill:not(:disabled):hover { border-color: var(--line); }
+.sh-bill:disabled { cursor: default; opacity: 1; }
+.sh-sum { margin-left: auto; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--accent); font-size: 11.5px; font-weight: 700; cursor: pointer; flex: none; }
+.sh-sum:hover { border-color: var(--accent); }
+.sh-last { text-align: right; }
+.sh-x { width: 32px; height: 32px; border: 0; background: none; border-radius: 999px; color: var(--sub); display: inline-grid; place-items: center; cursor: pointer; }
+.sh-x:hover { background: var(--surface-2); color: var(--text); }
+.sh-none { padding: var(--s-3) 6px; margin: 0; }
+.sh-foot { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; font-size: 13px; padding-inline: var(--s-3); }
+.sh-total { font-variant-numeric: tabular-nums; }
+.sh-pop { overflow: hidden; padding: 0; gap: 0; }
+.sh-srch { display: flex; align-items: center; gap: var(--s-3); padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--sub); }
+.sh-srch input { flex: 1; min-width: 0; font: inherit; color: var(--text); border: 0; outline: 0; background: none; }
+.sh-list { overflow-y: auto; padding: var(--s-2); display: flex; flex-direction: column; gap: 2px; min-height: 0; }
+.sh-list .pp-opt { height: 32px; flex: none; }
+.sh-list .pp-opt.locked { opacity: .6; cursor: default; }
+.sh-sec { font-size: 11.5px; color: var(--sub); padding: var(--s-3) var(--s-3) 2px; }
+.sh-box { width: 16px; height: 16px; border-radius: 5px; border: 1.5px solid var(--sub); display: inline-grid; place-items: center; flex: none; }
+.sh-box.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.sh-req { margin-left: auto; font-size: 11px; color: var(--sub); font-weight: 500; }
+.sh-dp { padding: var(--s-4); display: flex; flex-direction: column; gap: var(--s-3); }
+.sh-dpq { display: flex; gap: var(--s-2); }
+.sh-dpq .chip { height: 32px; padding: 0 12px; font-size: 12.5px; font-weight: 600; }
+.sh-dph { display: flex; align-items: center; justify-content: space-between; font-weight: 650; font-size: 13px; }
+.sh-nav { width: 32px; height: 32px; border: 0; background: none; border-radius: 999px; color: var(--sub); font-size: 16px; cursor: pointer; }
+.sh-nav:hover { background: var(--surface-2); color: var(--text); }
+.sh-dpg { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.sh-wd { font-size: 11px; color: var(--sub); text-align: center; padding: 2px 0; }
+.sh-dpg button { height: 32px; border: 0; background: none; border-radius: 10px; cursor: pointer; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--text); }
+.sh-dpg button:hover { background: var(--surface-2); }
+.sh-dpg button.we { color: var(--sub); }
+.sh-dpg button.td { box-shadow: inset 0 0 0 1px var(--accent); }
+.sh-dpg button.sel { background: var(--accent); color: var(--accent-text); }
+.sh-parts { padding: var(--s-4); display: flex; flex-direction: column; gap: var(--s-3); font-size: 13px; }
+.sh-parts ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.sh-parts li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-4); padding: 6px 0; border-bottom: 1px solid var(--line); }
+.sh-parts li:last-child { border-bottom: 0; }
+.sh-parts li .sub { display: block; font-size: 12px; }
+.sh-parts li b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sh-parts p { margin: 0; }

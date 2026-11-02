@@ -19,7 +19,8 @@ import { Activity } from "@/components/Activity";
 import { CopyButton } from "@/components/CopyButton";
 import { isHttpUrl, isLocalPath, safeHref } from "@/lib/safeurl";
 import type { TileActivity } from "@/components/canvas/ui";
-import { approveStep, backToTodo, markDone, prepare, saveDraftBody } from "@/app/actions";
+import { approveStep, backToTodo, markDone, prepare, saveDraftBody, saveDraftRows } from "@/app/actions";
+import { SheetDraft } from "@/components/SheetDraft";
 import { isExternalApp, optionLabel, optionsOf, shownSig, type Draft } from "@/lib/agent/approval";
 
 export type CardMode = "proposed" | "parked" | "sending" | "sent" | "unsent";
@@ -97,7 +98,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
     const action = di?.target.action ?? "send", where = di?.target.where ?? null, body = di?.body ?? s.output;
     // komentarz: wprost (action comment) albo odpowiedź/wysyłka w aplikacji, gdzie treść ląduje jako komentarz; commit i push to zapis kodu, nie komentarz
     const isCommit = action === "commit" || action === "push";
-    const isRows = !!di?.rows?.length, isComment = action === "comment" || (COMMENT_APPS.has(app) && (action === "reply" || action === "send"));
+    const isRows = !!di?.rows?.length || !!(di?.sheet?.length && di.columns?.length), isComment = action === "comment" || (COMMENT_APPS.has(app) && (action === "reply" || action === "send"));
     // podgląd: jak to będzie wyglądać po drugiej stronie (wiadomość w wątku, e-mail z nadawcą i tematem, komentarz/ticket)
     const who = app === "gmail" ? `Od: ${conn?.account ?? "Twoje konto"} · Do: ${where ?? "adresat z treści"}`
       : isCommit ? `${where ?? changes?.repo ?? name}${changes?.branch && !where?.includes(changes.branch) ? ` · ${changes.branch}` : ""} · ${action === "push" ? "push" : "commit"} · jako ${me}`
@@ -115,7 +116,13 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
     const seen = di ? shownSig(s, di, editable) : null, seenFull = di && editable ? shownSig(s, di, false) : null;
     const seenInput = seen ? <>{multi ? <input type="hidden" name="option" value={i} /> : null}<input type="hidden" name="seen" value={seen} />{seenFull ? <input type="hidden" name="seenFull" value={seenFull} /> : null}</> : null;
     // podgląd według rodzaju odpowiedzi: wiersze do arkusza jako tabela, prompt jako ramka kodu, reszta jako wiadomość „moja”
-    const preview = isRows && di ? (
+    // paczka 42: szkic z rodzajami kolumn (sheet) to arkusz do edycji w miejscu przed decyzją, po decyzji ten sam układ tylko do odczytu
+    const sheetOn = isRows && !!di?.sheet?.length && !!di.columns?.length;
+    const sheetEdit = sheetOn && (mode === "proposed" || mode === "parked") && !sentAlready && di!.status !== "sent";
+    const preview = sheetOn && di ? (
+      <SheetDraft key={s.id + sfx} columns={di.columns!} sheet={di.sheet!} rows={di.rows ?? []} parts={di.parts ?? null} editable={sheetEdit} formId={sheetEdit ? formId : undefined}
+        seenRows={sheetEdit ? shownSig(s, di, false, true) : null} onSave={sheetEdit ? saveDraftRows.bind(null, t.id, s.id, i) : undefined} />
+    ) : isRows && di ? (
       <div className="thread"><div className="msg mine rows"><div className="who">{who}</div><Table columns={di.columns ?? di.rows![0].map((_, k) => `Kolumna ${k + 1}`)} rows={di.rows!} highlightFrom={0} md />{body ? <Markdown text={body} /> : null}</div></div>
     ) : (isPrompt || isCommit) && (di || mode !== "proposed") ? (
       <div className="thread"><div className="msg mine"><div className="who">{who}</div>{di?.subject ? <h4>{di.subject}</h4> : null}<pre className="code">{body || "Brak treści."}</pre></div></div>

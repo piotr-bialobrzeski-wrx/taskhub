@@ -1,7 +1,7 @@
 // Zgoda Piotra na szkic: podpis treści (sha256), który zapisuje tylko jego kliknięcie „Zatwierdź” (repo.approveDraft).
 // Każda zmiana treści szkicu unieważnia zgodę; agent nie ma jak jej podrobić, bo podpis liczy serwer z zapisanej treści.
 import { createHash } from "node:crypto";
-import { appOfLabel, normalizeTool, type Block, type Step } from "../schema";
+import { appOfLabel, normalizeTool, type Block, type SheetPart, type Step } from "../schema";
 import { sanitizeBlocks } from "../safeurl";
 
 export type Draft = Extract<Block, { type: "draft" }>;
@@ -66,7 +66,33 @@ export function approvalSig(step: { id: string; blocks?: Block[] | null }, d: Dr
 
 // podpis szkicu tak, jak go widać na karcie: bez treści, gdy treść idzie w formularzu „Zatwierdź” (Piotr mógł ją poprawić), inaczej z treścią.
 // Karta wysyła go przy zatwierdzeniu; inny podpis w bazie = szkic (miejsce, pola, wiersze, pliki) zmienił się, zanim Piotr kliknął
-export const shownSig = (step: { id: string; blocks?: Block[] | null }, d: Draft, bodyInForm: boolean): string => approvalSig(step, bodyInForm ? { ...d, body: "" } : d);
+// rowsInForm (paczka 42): wiersze arkusza idą w formularzu (Piotr je poprawił), więc podpis karty liczy się bez nich
+export const shownSig = (step: { id: string; blocks?: Block[] | null }, d: Draft, bodyInForm: boolean, rowsInForm = false): string =>
+  approvalSig(step, { ...d, ...(bodyInForm ? { body: "" } : {}), ...(rowsInForm ? { rows: [] } : {}) });
+// wiersze arkusza z formularza albo zapisu komórki: tablica wierszy (komórki jako tekst, tyle co kolumn) i przy każdym parts; null = coś nie tak
+export type SheetRows = { rows: string[][]; parts: (SheetPart[] | null)[] };
+export function parseSheetRows(raw: unknown, ncols: number): SheetRows | null {
+  let v = raw;
+  if (typeof v === "string") { try { v = JSON.parse(v); } catch { return null; } }
+  if (!Array.isArray(v) || v.length > 100) return null;
+  const rows: string[][] = [], parts: SheetRows["parts"] = [];
+  for (const r of v) {
+    const cells = Array.isArray(r) ? r : r && typeof r === "object" && Array.isArray((r as { c?: unknown }).c) ? (r as { c: unknown[] }).c : null;
+    if (!cells || cells.length > ncols) return null;
+    rows.push(Array.from({ length: ncols }, (_, k) => String(cells[k] ?? "").slice(0, 2000)));
+    const p = !Array.isArray(r) ? (r as { p?: unknown }).p : null;
+    parts.push(Array.isArray(p) ? p.slice(0, 20).flatMap((x) => (x && typeof x === "object" && typeof (x as { what?: unknown }).what === "string"
+      ? [{ what: String((x as { what: string }).what).slice(0, 300), ...(typeof (x as { app?: unknown }).app === "string" ? { app: String((x as { app: string }).app).slice(0, 60) } : {}), ...(Number.isInteger((x as { min?: unknown }).min) ? { min: Math.max(0, Math.min(1440, (x as { min: number }).min)) } : {}) }]
+      : [])) : null);
+  }
+  return { rows, parts };
+}
+// szkic z nowymi wierszami: parts zostaje tylko, gdy któryś wiersz go ma
+export const withRows = (d: Draft, r: SheetRows): Draft => {
+  const n: Draft = { ...d, rows: r.rows };
+  if (r.parts.some((p) => p?.length)) n.parts = r.parts; else delete n.parts;
+  return n;
+};
 
 export type Approvable = Pick<Step, "id" | "status" | "blocks"> & Partial<Pick<Step, "approvedAt" | "approvedSig" | "sendStartedAt" | "approval">>;
 // zgoda ważna: krok czeka na wysyłkę, szkic zatwierdzony, podpis zgadza się z obecną treścią (także w trakcie wysyłki), a krok z bazy
@@ -82,13 +108,13 @@ export const isSendable = (s: Approvable): boolean => approvalValid(s) && !s.sen
 // zgoda niemożliwa z innego powodu niż „szkic zmienił się, zanim kliknąłeś” (ten powód sprawdza shownSig): powód po polsku dla Piotra, null = nic
 // nie stoi na przeszkodzie. Lustro odmów repo.approveDraft: brak takiej opcji przy kilku szkicach; inna opcja tej kartki już wysłana (krok już
 // opublikował, a druga zgoda nigdy nie byłaby ważna, bo draftOf woli wysłaną); dwie opcje o tej samej treści (podpis liczony z poprawką z formularza)
-export function approveRefusal(step: { id: string; blocks: Block[] | null }, opts: { option?: number; body?: string | null } = {}): string | null {
+export function approveRefusal(step: { id: string; blocks: Block[] | null }, opts: { option?: number; body?: string | null; rows?: SheetRows | null } = {}): string | null {
   const ds = draftsOf(step);
   const d = ds.length > 1 ? (opts.option != null ? ds[opts.option] : undefined) : ds[0];
   if (ds.length > 1 && !d) return "nie ma takiej opcji na kartce; szkic zmienił się, zanim go zatwierdziłeś";
   if (ds.some((x) => x !== d && x.status === "sent")) return "jedna opcja z tej kartki już poszła, więc drugiej nie wyślę; nową wysyłkę zapisz jako osobny krok";
   if (d) {
-    const picked: Draft = { ...d, ...(opts.body != null ? { body: opts.body } : {}) };
+    const picked: Draft = { ...(opts.rows ? withRows(d, opts.rows) : d), ...(opts.body != null ? { body: opts.body } : {}) };
     const blocks = (step.blocks ?? []).map((b) => (b === d ? picked : b));
     const sig = approvalSig({ id: step.id, blocks }, picked);
     if (blocks.some((b) => b !== picked && b.type === "draft" && approvalSig({ id: step.id, blocks }, b) === sig)) return "dwie opcje mają tę samą treść; popraw jedną albo usuń";
