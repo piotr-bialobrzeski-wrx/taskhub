@@ -395,10 +395,13 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const main = order.length ? orderZone : split.main.length && folds.material ? <div className="zone src main">{undo ? <div className="lbl">{undo}</div> : null}<BlocksView links={cl} blocks={split.main} form={form} indexOf={indexOf} /></div>
     : split.main.length ? <details className="fold"><summary><span className="k">Wynik</span><span className="t">{kindsOf(split.main)}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView links={cl} blocks={split.main} form={form} indexOf={indexOf} /></details> : null;
   const kinds = kindsOf(split.sources);
-  const srcOpen = folds.material && !split.main.length;   // „Skąd” rozwinięte tylko, gdy na karcie nie ma innej treści
+  // paczka 43: szkic-arkusz (np. wpisy czasu) stoi zawsze na całą szerokość, a źródła zwinięte pod nim („Skąd te wpisy”), jak w prototypie;
+  // obok w dwóch kolumnach tabela dostawała pół ekranu i ucinała ostatnie kolumny
+  const sheetCard = !!mode && (s.blocks ?? []).some((b) => b.type === "draft" && !!b.sheet?.length);
+  const srcOpen = folds.material && !split.main.length && !sheetCard;   // „Skąd” rozwinięte tylko, gdy na karcie nie ma innej treści
   const skad = split.sources.length ? (srcOpen
     ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span>{split.main.length ? null : undo}</div><BlocksView links={cl} blocks={split.sources} form={form} indexOf={indexOf} /></div>
-    : <details className="fold"><summary><span className="k">Skąd</span><span className="t">{kinds}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView links={cl} blocks={split.sources} form={form} indexOf={indexOf} /></details>) : null;
+    : <details className="fold"><summary><span className="k">{sheetCard ? "Skąd te wpisy" : "Skąd"}</span><span className="t">{kinds}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView links={cl} blocks={split.sources} form={form} indexOf={indexOf} /></details>) : null;
   // paczka 17, punkt 1: materiał z kroków Claude'a, od których zależy ten krok Piotra, stoi na jego kartce (tylko do odczytu)
   const fromDeps = depCardsFor(t.steps, s).map((d) => (
     <div key={d.id} className="zone src"><div className="lbl">Z kroku {String(d.idx).padStart(2, "0")}<span className="n">{d.title}</span></div><BlocksView blocks={d.blocks} /></div>
