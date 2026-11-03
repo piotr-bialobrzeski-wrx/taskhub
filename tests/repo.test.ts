@@ -324,6 +324,20 @@ describe.skipIf(!DB)("repo", async () => {
     expect(s.doneAt).toBeNull();
   });
 
+  it("paczka 45: krok z wysłanym szkicem nie wraca do zrobienia (karta „Już wysłano”, kafelek nie „Ruszy samo”)", async () => {
+    const t = await repo.createTask(owner, { title: "Wysłane zostaje", steps: [{ title: "Utwórz story", tool: "clickup" }] });
+    const sid = t.steps[0].id;
+    await repo.completeStep(owner, t, t.steps[0], { report: "Utworzono story." });
+    // szkic wysłany: zapis jak po biegu wysyłki (zwykły zapis „sent” od agenta byłby propozycją)
+    await sql()`update steps set blocks = ${sql().json([{ type: "draft", target: { app: "clickup", action: "create" }, body: "Story", status: "sent" }] as never)} where id = ${sid}`;
+    let s = (await repo.getTask(owner, t.id))!.steps[0];
+    expect(s.status).toBe("done");
+    expect(await repo.reopenStep(owner, t.id, s)).toBe(false);
+    s = (await repo.getTask(owner, t.id))!.steps[0];
+    expect(s.status).toBe("done");
+    expect(s.doneAt).toBeTruthy();
+  });
+
   it("żywa kartka: odpowiedź na pytanie z kartki zwraca pytanie, zmiana kartki zostawia poprzednią wersję do cofnięcia", async () => {
     const t = await repo.createTask(owner, { title: "Kartka", steps: [{ title: "Zdecyduj", tool: "manual" }] });
     const sid = t.steps[0].id;

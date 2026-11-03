@@ -14,7 +14,7 @@ import { externalLink } from "@/lib/links";
 import { fileName, isHttpUrl, safeHref, thumbSrc } from "@/lib/safeurl";
 import { bridgeHold, bridgeLabel, busyWith, noStepsWho, queueWho, shortTitle, type Worker } from "@/lib/auto";
 import { BRIDGE_ALIVE_MS, connectorIssue, protocolOf } from "@/lib/bridge";
-import { draftOf, draftsOf, optionsOf } from "@/lib/agent/approval";
+import { draftOf, draftsOf, optionsOf, wasSent } from "@/lib/agent/approval";
 import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
 import { Activity } from "@/components/Activity";
@@ -352,7 +352,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           {s.status === "handoff" ? <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Krok wraca do zrobienia; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form> : null}
           {links.filter((l) => isHttpUrl(l.url)).map((l, i) => <a key={l.url} className={"btn ico" + (done && i === 0 ? " primary" : "")} href={l.url} target="_blank" rel="noopener" title={l.url}>{l.label}<Icon k="ext" size={13} sw={1.6} /></a>)}
           {done && kind === "decision" ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Otwieram…" title="Pytanie wraca na kartkę; nowa odpowiedź zamknie krok od nowa, a Claude poprawi to, co po niej przygotował"><Icon k="undo" size={13} sw={1.9} /> Zmień odpowiedź</PendingButton></form> : null}
-          {done && kind !== "decision" ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Przywróć do zrobienia</PendingButton></form> : null}
+          {done && kind !== "decision" && !wasSent(s) ? <form action={reopen.bind(null, t.id, s.id)}><PendingButton className="btn" title="Otwórz krok ponownie, żeby coś zmienić"><Icon k="undo" size={13} sw={1.9} /> Przywróć do zrobienia</PendingButton></form> : null}
         </div>
       ) : null}
       {s.status === "handoff" && prompt ? (

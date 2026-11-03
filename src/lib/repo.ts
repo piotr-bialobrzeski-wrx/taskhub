@@ -5,7 +5,7 @@ import { sql } from "./db";
 import { type Company, type Connection, Blocks, type Block, type Fact, type Project, type Question, type Rule, type Step, type Task, type TimeSample, appOfLabel, isOwnerStep, normalizeTool, toolLabel } from "./schema";
 import { agentMinOf, elapsedSec, Q, roundQ, spentMin } from "./time";
 import { isHttpUrl, sanitizeBlocks } from "./safeurl";
-import { approvalSig, approvalValid, draftOf, draftsOf, isGitDraft, isSendable, shownSig, withRows, type Draft, type SheetRows } from "./agent/approval";
+import { approvalSig, approvalValid, draftOf, draftsOf, isGitDraft, isSendable, shownSig, wasSent, withRows, type Draft, type SheetRows } from "./agent/approval";
 import { doneChat, stepKind } from "./stepcard";
 import { shortTitle } from "./auto";
 import { guessProject } from "./project-guess";
@@ -562,7 +562,10 @@ export async function completeStep(ownerId: string, task: Task, step: Step, opts
   // ostatni krok gotowy: zadanie kończy się samo, chyba że jakaś wiadomość Piotra czeka jeszcze na odpowiedź agenta (zamknie je reply_chat)
   await closeIfDone(ownerId, task.id);
 }
-export async function reopenStep(ownerId: string, taskId: string, step: Step): Promise<void> {
+// paczka 45: krok, którego szkic już poszedł, nie wraca do zrobienia (false): karta mówiła „Już wysłano”, a kafelek „Ruszy samo”,
+// a ponowne otwarcie kasowało też zapis zgody Piotra. Nowa wysyłka to nowy krok.
+export async function reopenStep(ownerId: string, taskId: string, step: Step): Promise<boolean> {
+  if (wasSent(step)) return false;
   const status = step.prevStatus === "handoff" ? "todo" : step.prevStatus && step.prevStatus !== "done" ? (step.prevStatus as Step["status"]) : step.output ? "draft" : "todo";
   await sql().begin(async (tx) => {
     // ponowne otwarcie nie przywraca zgody: szkic trzeba zatwierdzić od nowa
@@ -579,6 +582,7 @@ export async function reopenStep(ownerId: string, taskId: string, step: Step): P
     await tx`update tasks set done_at = null where id = ${taskId} and owner_id = ${ownerId}`;
   });
   samplesMem.delete(ownerId);
+  return true;
 }
 
 // ---------- zgoda na szkic i wysyłka ----------

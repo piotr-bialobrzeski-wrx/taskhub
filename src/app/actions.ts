@@ -17,7 +17,7 @@ import { intake, uploads } from "@/lib/intake";
 import { shortTitle, type Queue } from "@/lib/auto";
 import { fmtTime } from "@/lib/clock";
 import { connectorIssue, isGitDraft } from "@/lib/bridge";
-import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, parseSheetRows, shownSig, withRows, type Draft, type SheetRows } from "@/lib/agent/approval";
+import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, parseSheetRows, shownSig, wasSent, withRows, type Draft, type SheetRows } from "@/lib/agent/approval";
 import { workSummary } from "@/lib/agent/work";
 import { decisionText, destOf, isDeployStep, isProjectStep, openQuestions, stepKind, stepsAfterDecision } from "@/lib/stepcard";
 import { isAppCodeStep, isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
@@ -101,7 +101,8 @@ export async function addStepQuick(taskId: string, title: string, after: string 
 export async function reopenLast(taskId: string) {
   const o = await requireOwner();
   const task = await repo.getTask(o.id, taskId); if (!task) throw new Error("Nie ma takiego zadania");
-  const last = [...task.steps].reverse().find((s) => s.status === "done");
+  // krok z wysłanym szkicem zostaje zrobiony (paczka 45): wraca ostatni zrobiony bez wysyłki
+  const last = [...task.steps].reverse().find((s) => s.status === "done" && !wasSent(s));
   if (last) await repo.reopenStep(o.id, taskId, last);
   else await repo.updateTask(o.id, taskId, { deletedAt: null });
   refresh(taskId);
@@ -632,7 +633,7 @@ export async function batchTasks(ids: string[], op: { level?: number; projectId?
     if (op.trash) await repo.updateTask(o.id, id, { deletedAt: new Date().toISOString() });
     if (op.done) for (const s of t.steps) if (s.status !== "done") await finishStep(o.id, id, s.id);
     // „Wróć do pracy”: ostatni zrobiony krok wraca do poprzedniego stanu, zadanie przestaje być ukończone
-    if (op.done === false) { const last = [...t.steps].reverse().find((s) => s.status === "done"); if (last) await repo.reopenStep(o.id, id, last); }
+    if (op.done === false) { const last = [...t.steps].reverse().find((s) => s.status === "done" && !wasSent(s)); if (last) await repo.reopenStep(o.id, id, last); }
   }
   refresh();
 }

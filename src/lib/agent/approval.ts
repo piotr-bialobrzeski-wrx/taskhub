@@ -11,6 +11,8 @@ export const draftsOf = (s: HasBlocks): Draft[] => (s.blocks ?? []).filter((b): 
 // szkic kroku: wysłany, inaczej zatwierdzony, inaczej pierwszy. Przy jednym szkicu zawsze on; przy opcjach ta, którą Piotr wybrał
 // (ten pokazuje karta publikacji, ten bierze wysyłka i ten jedynie może mieć zgodę)
 export const draftOf = (s: HasBlocks): Draft | null => { const ds = draftsOf(s); return ds.find((d) => d.status === "sent") ?? ds.find((d) => d.status === "approved") ?? ds[0] ?? null; };
+// szkic kroku już poszedł do aplikacji (albo właśnie idzie): wysłanego nie da się cofnąć, więc krok zostaje zrobiony (paczka 45)
+export const wasSent = (s: HasBlocks & { sendStartedAt?: string | null }): boolean => !!s.sendStartedAt || draftsOf(s).some((d) => d.status === "sent");
 // opcje: wybrana = wysłana, inaczej zatwierdzona; odrzucone = propozycje obok wybranej. Odrzucenie wynika ze stanu, nic nie zapisujemy osobno
 export function optionsOf(s: HasBlocks): { drafts: Draft[]; chosen: Draft | null; rejected: Draft[]; multi: boolean } {
   const drafts = draftsOf(s);

@@ -148,7 +148,7 @@ export async function applyActions(r: ChatResult, deps: ChatDeps & { tasks: Task
         if (draftOf(fresh)?.status === "approved" || fresh.approvedAt) { done.push({ label: "Nie zamknięto: " + s.title, taskId: cur.id, note: `Nie zamknąłem kroku „${s.title}”: jego zatwierdzony szkic wysyła mostek po zatwierdzeniu. Gdy wysyłka przejdzie, krok zamknie się sam; żeby go zatrzymać, użyj „Zatrzymaj” na karcie kroku.` }); continue; }
         await repo.completeStep(deps.ownerId, cur, fresh);
       }
-      if (a.status === "todo" && s.status === "done") await repo.reopenStep(deps.ownerId, cur.id, s);
+      if (a.status === "todo" && s.status === "done" && !(await repo.reopenStep(deps.ownerId, cur.id, s))) { done.push({ label: "Nie otwarto: " + s.title, taskId: cur.id, note: `Nie otworzyłem kroku „${s.title}”: jego szkic już poszedł i wysłanego nie da się cofnąć. Nową wysyłkę zapisz jako osobny krok.` }); continue; }
       done.push({ label: "Zmieniono krok: " + (a.title ?? s.title), taskId: cur.id });
     } else if (a.type === "set_facts" && cur) {
       const s = cur.steps.find((x) => x.id === a.stepId); if (!s) continue;

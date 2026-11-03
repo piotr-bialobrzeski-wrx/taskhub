@@ -127,6 +127,13 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("opcje w bazie: zgoda, wysyłka 
   const repo = await import("@/lib/repo");
   const { sql } = await import("@/lib/db");
   const actions = await import("@/app/actions");
+  // paczka 45: „Przywróć do zrobienia” już nie otwiera kroku z wysłanym szkicem; stary stan (sprzed paczki) odtwarzamy wprost w bazie,
+  // bo kod obok wysłanego szkicu nadal musi go bronić
+  const legacyReopen = async (taskId: string, id: string, status: "todo" | "draft") => {
+    await actions.reopen(taskId, id);
+    expect((await repo.getTask((await repo.ensureOwner()).id, taskId))!.steps.find((x) => x.id === id)!.status).toBe("done");
+    await sql()`update steps set status = ${status}, done_at = null, done_by = null, approved_at = null, approved_sig = null, send_started_at = null, approval = null where id = ${id}`;
+  };
   const mcp = await import("@/app/api/mcp/route");
   const run = await import("@/app/api/bridge/run/route");
   const { composeStep } = await import("@/lib/agent/compose");
@@ -360,7 +367,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("opcje w bazie: zgoda, wysyłka 
     expect(await repo.markSendStarted(owner, sid)).toBe(true);
     expect(await repo.completeSend(owner, sid, { summary: "Poszło na #dev." })).toBe(true);
     expect(draftsOf(await get(taskId, sid)).map((d) => d.status)).toEqual(["proposed", "sent"]);
-    await actions.reopen(taskId, sid);
+    await legacyReopen(taskId, sid, "todo");
     const was = await get(taskId, sid);
     expect(was.status).toBe("todo"); expect(was.approvedAt).toBeNull();
     expect(draftsOf(was).map((d) => d.status)).toEqual(["proposed", "sent"]);
@@ -457,7 +464,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("opcje w bazie: zgoda, wysyłka 
     const fd = new FormData(); fd.set("option", "0");
     await actions.approveStep(taskId, s.id, fd);
     expect((await get(taskId, s.id)).status).toBe("done");
-    await actions.reopen(taskId, s.id);
+    await legacyReopen(taskId, s.id, "draft");
     const was = await get(taskId, s.id);
     expect(was.status).toBe("draft");
     expect(draftsOf(was).map((d) => d.status)).toEqual(["sent", "proposed"]);
@@ -483,7 +490,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("opcje w bazie: zgoda, wysyłka 
     await actions.approveStep(taskId, sid, fd);
     expect(await repo.markSendStarted(owner, sid)).toBe(true);
     expect(await repo.completeSend(owner, sid, { summary: "Poszło na #dev." })).toBe(true);
-    await actions.reopen(taskId, sid);
+    await legacyReopen(taskId, sid, "todo");
     expect((await get(taskId, sid)).status).toBe("todo");
     const r = await call(client, "set_blocks", { stepId: sid, blocks: [A, B] });
     expect(r).toContain("Nie zapisałem"); expect(r).toContain("już poszedł"); expect(r).toContain("add_steps");
