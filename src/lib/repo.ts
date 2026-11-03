@@ -6,7 +6,7 @@ import { type Company, type Connection, Blocks, type Block, type Fact, type Proj
 import { agentMinOf, elapsedSec, Q, roundQ, spentMin } from "./time";
 import { isHttpUrl, sanitizeBlocks } from "./safeurl";
 import { approvalSig, approvalValid, draftOf, draftsOf, isGitDraft, isSendable, shownSig, wasSent, withRows, type Draft, type SheetRows } from "./agent/approval";
-import { doneChat, stepKind } from "./stepcard";
+import { doneChat, leaveChat, stepKind } from "./stepcard";
 import { shortTitle } from "./auto";
 import { guessProject } from "./project-guess";
 import { isModelName, MAX_ESCALATION, normalizeLevel } from "./agent/models";
@@ -653,6 +653,16 @@ export async function clearApproval(ownerId: string, stepId: string, opts: { not
 // notatka po biegu wysyłki, który nie potwierdził wysyłki (bez ponawiania: Piotr sprawdza i zatwierdza ponownie)
 // paczka 20: z nazwą kroku, bo bez niej notatka po nieudanej wysyłce jednego kroku wyglądała jak alarm po udanej wysyłce innego
 export const unconfirmedSendNote = (app: string, title?: string | null) => `Wysyłka${title ? ` „${shortTitle(title, 60)}”` : ""} nie została potwierdzona. Sprawdź w ${toolLabel(app)}, czy poszło, i zatwierdź ponownie, jeśli trzeba.`;
+// paczka 47: bieg nie wywołał żadnego zapisu w aplikacji docelowej (wie to aplikacja na Macu), więc nic nie poszło; mostek próbował już sam kilka razy
+export const notSentNote = (app: string, title?: string | null) => `Wysyłka${title ? ` „${shortTitle(title, 60)}”` : ""} nie ruszyła: nic nie poszło do ${toolLabel(app)}. Mostek próbował ${SEND_TRIES} razy; zatwierdź ponownie.`;
+// paczka 47: bieg wysyłki bez Task Hub w biegu oddał krok (ostatnia linia „WYNIK: oddane”); to samo co leave_step w biegu wysyłki
+export async function leaveSend(ownerId: string, stepId: string, reason: string): Promise<boolean> {
+  const [r] = await sql()`select s.task_id, s.title, s.send_started_at from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId} and s.status <> 'done'`;
+  if (!r || !r.sendStartedAt) return false;   // zgoda nie należy już do tego biegu (Piotr zatrzymał albo zatwierdził od nowa)
+  await clearApproval(ownerId, stepId);
+  await addChat(ownerId, r.taskId as string, "agent", leaveChat(r.title as string, reason, false), { stepId, why: reason });
+  return true;
+}
 // bieg wysyłki bierze szkic: atomowo i najwyżej raz (tylko gdy nikt go jeszcze nie wziął, zgoda jest ważna, a kroki przed nim są zrobione)
 export async function markSendStarted(ownerId: string, stepId: string): Promise<boolean> {
   return sql().begin(async (tx) => {
@@ -1292,13 +1302,24 @@ export async function startBridgeRun(ownerId: string, tokenId: string | null, br
 }
 // po biegu: jego tokeny przestają działać; bieg wysyłki, po którym krok nie jest zrobiony, cofa zgodę, którą wziął, i zostawia notatkę w rozmowie (bez ponawiania).
 // Wysyłkę potwierdzoną przez mostek (completeSend) trzeba zapisać przed zakończeniem biegu.
-async function afterRuns(ownerId: string, runs: Row[]): Promise<void> {
+// Paczka 47: bieg wysyłki, który na pewno niczego nie wysłał (aplikacja widziała, że nie wywołał zapisu w aplikacji docelowej), wraca do wysyłki sam,
+// najwyżej SEND_TRIES biegów na jedną zgodę; dopiero potem zgoda wraca do Piotra z notatką „nic nie poszło”.
+export const SEND_TRIES = 3;
+async function afterRuns(ownerId: string, runs: Row[], opts: { untouched?: boolean } = {}): Promise<void> {
   for (const r of runs) {
     await revokeRunTokens(ownerId, r.id as string);
     if (r.kind !== "send" || !r.stepId) continue;
     const stepId = r.stepId as string;
-    const [s] = await sql()`select task_id, title, status, blocks, send_started_at from steps where id = ${stepId}`;
+    const [s] = await sql()`select task_id, title, status, blocks, send_started_at, approved_at from steps where id = ${stepId}`;
     if (!s || s.status === "done") continue;
+    // samo ponowienie: zgoda zostaje, znika tylko znacznik wysyłki, więc mostek weźmie ten szkic w następnym biegu wysyłki
+    if (opts.untouched && s.sendStartedAt && s.approvedAt && r.outcome !== "stopped") {
+      const [n] = await sql()`select count(*)::int as n from bridge_runs where owner_id = ${ownerId} and kind = 'send' and step_id = ${stepId} and started_at >= ${s.approvedAt as Date}`;
+      if (((n?.n as number) ?? 0) < SEND_TRIES) {
+        await sql()`update steps set send_started_at = null where id = ${stepId} and send_started_at is not null`;
+        continue;
+      }
+    }
     // znacznik wysyłki jest tego biegu (jeden otwarty bieg na właściciela): jego zgoda wraca do Piotra. Bez znacznika Piotr już ją cofnął
     // („Zatrzymaj”) albo zatwierdził szkic od nowa w trakcie biegu: nowej zgody nie ruszamy
     if (s.sendStartedAt) await clearApproval(ownerId, stepId);
@@ -1308,7 +1329,8 @@ async function afterRuns(ownerId: string, runs: Row[]): Promise<void> {
     const blocks = parseBlocks(s.blocks), d = draftOf({ blocks });
     // commit z aplikacji na Macu: aplikacja wie, co się nie udało (np. commit jest, push nie), więc piszemy powód
     const why = d && isGitDraft(d, blocks) && r.outcome === "error" && typeof r.note === "string" && r.note.trim() ? r.note.trim().slice(0, 500).replace(/([^.!?])$/, "$1.") : "";
-    await addChat(ownerId, s.taskId as string, "agent", why ? `Commit nie wyszedł: ${why} Szkic wrócił do zatwierdzenia; zatwierdź go ponownie, gdy to poprawisz.` : unconfirmedSendNote(d?.target.app ?? "aplikacji docelowej", s.title as string), { stepId });
+    const app = d?.target.app ?? "aplikacji docelowej";
+    await addChat(ownerId, s.taskId as string, "agent", why ? `Commit nie wyszedł: ${why} Szkic wrócił do zatwierdzenia; zatwierdź go ponownie, gdy to poprawisz.` : opts.untouched ? notSentNote(app, s.title as string) : unconfirmedSendNote(app, s.title as string), { stepId });
   }
 }
 // bieg, który aplikacja na Macu ma przerwać przy najbliższym sygnale: zatrzymany w Task Hub (stop_at) albo bieg wysyłki, którego zgodę Piotr wycofał
@@ -1376,13 +1398,13 @@ export async function markAgentSteps(ids: string[]): Promise<void> { if (ids.len
 export async function stepOpened(ownerId: string, taskId: string, stepId: string): Promise<void> {
   await sql()`update steps s set opened_at = now() from tasks t where t.id = s.task_id and s.id = ${stepId} and t.id = ${taskId} and t.owner_id = ${ownerId} and s.agent_at > coalesce(s.opened_at, '-infinity'::timestamptz)`;
 }
-export async function endBridgeRun(ownerId: string, id: string, outcome: string, note?: string): Promise<boolean> {
+export async function endBridgeRun(ownerId: string, id: string, outcome: string, note?: string, opts: { untouched?: boolean } = {}): Promise<boolean> {
   const rows = await sql()`update bridge_runs set ended_at = now(), touched_at = now(), outcome = ${outcome.slice(0, 20)}, note = coalesce(${note?.slice(0, 600) ?? null}, note) where id = ${id} and owner_id = ${ownerId} and ended_at is null returning id, started_at, kind, step_id, outcome, note`;
   // „ostatnio: model · wysiłek” na krokach, których bieg dotknął (bieg z modelem od Task Hub)
   if (rows.length) await sql()`update steps s set last_run = jsonb_build_object('model', coalesce(b.model_used, b.model), 'effort', b.effort, 'at', now())
     from bridge_runs b where b.id = ${id} and b.model is not null and (s.id::text in (select jsonb_object_keys(b.steps)) or s.id = b.step_id)`;
   if (rows.length) await requeueChat(ownerId, rows[0].startedAt as Date);   // wiadomości wzięte w tym biegu bez odpowiedzi wracają do kolejki
-  await afterRuns(ownerId, rows);
+  await afterRuns(ownerId, rows, opts);
   return rows.length > 0;
 }
 export async function listBridgeRuns(ownerId: string, limit = 8): Promise<BridgeRun[]> {

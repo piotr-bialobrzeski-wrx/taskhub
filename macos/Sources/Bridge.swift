@@ -468,7 +468,7 @@ final class Bridge: ObservableObject {
         if Task.isCancelled { return .error }
 
         let res: (Int, [String: Any])
-        do { res = try await request("POST", "/api/bridge/run", body: ["bridge": store.cfg.name, "v": 2, "kind": kind.rawValue]) } catch {
+        do { res = try await request("POST", "/api/bridge/run", body: ["bridge": store.cfg.name, "v": 2, "kind": kind.rawValue, "caps": ["send-result"]]) } catch {
             state = .offline
             detail = error.localizedDescription
             return .error
@@ -531,6 +531,8 @@ final class Bridge: ObservableObject {
         }
         let result: ProcessResult
         var sent: [String: Any]? = nil
+        var left: String? = nil          // paczka 47: bieg oddał krok ostatnią linią „WYNIK: oddane | powód”
+        var touched: Bool? = nil         // paczka 47: czy bieg wysyłki wywołał narzędzie zapisu w aplikacji docelowej (false = nic nie poszło)
         var limitUntil: Date? = nil
         let served = viaCodex || !((j["model"] as? String) ?? "").isEmpty   // model dobrał Task Hub (poziom kroku); bieg Codex zawsze od Task Hub
         planFailed = false
@@ -554,6 +556,21 @@ final class Bridge: ObservableObject {
             result = await runCodex(id: id, j: j, maxMin: maxMin)
         } else {
             result = await runClaude(kind, id: id, j: j, probe: pr, bin: bin, maxMin: maxMin)
+            if kind == .send {
+                let servers = ((j["servers"] as? [Any]) ?? []).compactMap { $0 as? String }
+                touched = Policy.touchedTarget(result.tools, servers: servers)
+                if (j["result"] as? String) == "line", result.ok, let r = Policy.sendResult(result.text) {
+                    switch r {
+                    case .sent(let link, let summary):
+                        var s: [String: Any] = ["summary": summary]
+                        if let l = link { s["link"] = l }
+                        sent = s
+                    case .left(let reason):
+                        left = reason
+                    }
+                }
+                if touched == false { Log.write("  bieg wysyłki nie dotknął \(servers.joined(separator: ", ")): nic nie poszło") }
+            }
         }
         keep.cancel()
 
@@ -623,6 +640,8 @@ final class Bridge: ObservableObject {
         if note.isEmpty { note = result.ok ? "zrobione" : "błąd bez komunikatu" }
         var body: [String: Any] = ["outcome": outcome.rawValue, "note": note]
         if outcome == .done, let s = sent { body["sent"] = s }
+        if outcome == .done, sent == nil, let l = left { body["left"] = ["reason": l] }
+        if let t = touched, outcome == .done || outcome == .error { body["touched"] = t }
         if outcome == .limit, let u = limitUntil { body["until"] = ISO8601DateFormatter().string(from: u) }
         await finishRun(id, body)
         isRunningNow = false
@@ -702,7 +721,8 @@ final class Bridge: ObservableObject {
                 plan = try Policy.work(runId: id, prompt: prompt, mcp: mcp, token: token, probe: use, folders: Policy.codeFolders(store.cfg.codeFolders),
                                        files: Policy.codeFolders(store.cfg.fileFolders, what: "folder na pliki"), tools: toolServers(use), model: model, bin: bin)
             } else {
-                plan = try Policy.send(runId: id, prompt: prompt, mcp: mcp, token: token, servers: servers, probe: use, tools: toolServers(use), model: model)
+                plan = try Policy.send(runId: id, prompt: prompt, mcp: mcp, token: token, servers: servers, probe: use, tools: toolServers(use), model: model,
+                                       hub: (j["result"] as? String) != "line")
             }
         } catch {
             planFailed = true

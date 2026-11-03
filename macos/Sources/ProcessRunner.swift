@@ -34,6 +34,7 @@ struct ProcessResult {
     var ok: Bool
     var text: String      // odpowiedź Claude albo opis błędu
     var initInfo: InitInfo? = nil
+    var tools: [String] = []   // pełne nazwy wywołanych narzędzi (np. mcp__slack-widelab__conversations_add_message), w kolejności
 }
 
 final class ProcessRunner {
@@ -60,6 +61,7 @@ final class ProcessRunner {
     private var buf = Data()
     private var finalEvent: [String: Any]? = nil
     private var initInfo: InitInfo? = nil
+    private var toolNames: [String] = []
     private var probeDone = false
     private var killing = false
     private var lastData = Date()
@@ -99,7 +101,8 @@ final class ProcessRunner {
     }
 
     private func launch(onStep: @escaping @Sendable (String) -> Void, done: @escaping (ProcessResult) -> Void) {
-        self.done = done
+        // każdy wynik niesie listę wywołanych narzędzi (paczka 47: mostek wie, czy bieg wysyłki dotknął aplikacji docelowej)
+        self.done = { [unowned self] r in var r = r; r.tools = self.toolNames; done(r) }
         if killedWhy != nil { finish(); return }   // zatrzymany, zanim ruszył
         proc.executableURL = URL(fileURLWithPath: bin)
         proc.arguments = args
@@ -283,7 +286,10 @@ final class ProcessRunner {
                     killTree()
                     continue
                 }
-                for b in content where (b["type"] as? String) == "tool_use" { onStep(ProcessRunner.label(b)) }
+                for b in content where (b["type"] as? String) == "tool_use" {
+                    if let n = b["name"] as? String { toolNames.append(n) }
+                    onStep(ProcessRunner.label(b))
+                }
             } else if type == "result" {
                 finalEvent = ev
             }

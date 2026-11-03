@@ -231,7 +231,8 @@ enum Policy {
 
     // konektor Task Hub z tokenem biegu (nigdy tokenem mostka); plik tylko dla właściciela, token nie trafia do listy procesów
     // extra: serwery z folderów z narzędziami (ToolFolders), obok Task Hub w tym samym pliku
-    static func mcpFile(runId: String, url: String, token: String, extra: [String: Any] = [:]) throws -> URL {
+    static func mcpFile(runId: String, url: String, token: String, extra: [String: Any] = [:], withHub: Bool = true) throws -> URL {
+        if !withHub { return try writeFile(["mcpServers": extra], name: safeId(runId) + "-mcp.json") }   // paczka 47: wysyłka bez Task Hub w biegu
         guard let u = URL(string: url), u.scheme == "https" || u.scheme == "http", u.host != nil else {
             throw PolicyError("Task Hub podał zły adres konektora: \(url)")
         }
@@ -367,7 +368,9 @@ enum Policy {
     }
 
     // tools: serwery z folderów z narzędziami; do pliku MCP wysyłki trafia tylko ten, którym idzie wysyłka
-    static func send(runId: String, prompt: String, mcp: String, token: String, servers: [String], probe: Probe, tools: [ToolFolders.Server] = [], model: ModelChoice) throws -> RunPlan {
+    // hub: false (paczka 47, serwer podał result: "line") = szkic jest w poleceniu, wynik w ostatniej linii; Task Hub w ogóle nie wchodzi do biegu,
+    // bo jego połączenie w biegu wysyłki potrafiło przyjść po 20–30 s i agent poddawał się bez wysyłki
+    static func send(runId: String, prompt: String, mcp: String, token: String, servers: [String], probe: Probe, tools: [ToolFolders.Server] = [], model: ModelChoice, hub useHub: Bool = true) throws -> RunPlan {
         var names: [String] = []
         for s in servers {
             let n = norm(s)
@@ -378,11 +381,11 @@ enum Policy {
         guard names.contains(where: { known.contains($0) }) else {
             throw PolicyError("Na tym Macu Claude Code nie ma konektora: \(servers.joined(separator: ", ")). Dodaj go w Claude Code albo wyślij ręcznie.")
         }
-        let allow = sendHubTools.map { "mcp__\(hub)__\($0)" } + names.map { "mcp__" + $0 }
+        let allow = (useHub ? sendHubTools.map { "mcp__\(hub)__\($0)" } : []) + names.map { "mcp__" + $0 }
         let others = known.subtracting(names).subtracting([hub]).sorted()
         let base = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"]
         // listy zadań sesji: zablokowane, ale bez przerywania biegu, gdy jakaś wersja Claude Code pokaże je mimo to (strażnik i tak odmówi)
-        var deny = base + ["TodoWrite"] + sessionTaskTools + others.map { "mcp__" + $0 } + secretReadRules()
+        var deny = base + ["TodoWrite"] + sessionTaskTools + others.map { "mcp__" + $0 } + (useHub ? [] : ["mcp__" + hub]) + secretReadRules()
         let canary = try pickCanary(probe.info, excluded: allow + deny)
         let builtins = ["Read", "ToolSearch", canary]
         let extra = probe.restricted ? [] : plainExtras(probe.info, keep: builtins, deny: deny)   // jak w biegu „work”
@@ -390,7 +393,7 @@ enum Policy {
         let hk = try hooks(probe)
         let perms: [String: Any] = ["defaultMode": "dontAsk", "allow": allow, "deny": deny + [canary]]
         let settings: [String: Any] = ["permissions": perms, "hooks": hk, "disableAllHooks": false]
-        let mcpF = try mcpFile(runId: runId, url: mcp, token: token, extra: ToolFolders.mcpServers(tools.filter { names.contains($0.name) }))
+        let mcpF = try mcpFile(runId: runId, url: mcp, token: token, extra: ToolFolders.mcpServers(tools.filter { names.contains($0.name) }), withHub: useHub)
         let setF: URL
         do { setF = try writeFile(settings, name: safeId(runId) + "-settings.json") } catch { remove([mcpF]); throw error }
         var args: [String] = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "dontAsk",
@@ -407,6 +410,37 @@ enum Policy {
         env["TASKHUB_ALLOWED_TOOLS"] = guardTools(allow, builtins: builtins, canary: canary)
         let lack = base.filter { probe.info.tools.contains($0) } + probe.info.tools.filter { t in split(t).map { others.contains($0.server) } ?? false } + extra
         return RunPlan(args: args, env: env, files: [mcpF, setF], canary: canary, mustLack: lack, known: Set(probe.info.tools))
+    }
+
+    // ---------- wynik biegu wysyłki (paczka 47) ----------
+    enum SendResult: Equatable { case sent(link: String?, summary: String), left(reason: String) }
+    // ostatnia linia „WYNIK: wysłane | link | zdanie” albo „WYNIK: oddane | powód” (szukamy od końca, bez względu na wielkość liter i gwiazdki Markdown)
+    static func sendResult(_ text: String) -> SendResult? {
+        for raw in text.split(whereSeparator: \.isNewline).reversed() {
+            let line = raw.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "*`_ "))
+            let low = line.lowercased()
+            guard low.hasPrefix("wynik:") else { continue }
+            let parts = line.dropFirst(6).split(separator: "|", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
+            let kind = parts.first?.lowercased() ?? ""
+            if kind.hasPrefix("wysłane") || kind.hasPrefix("wyslane") {
+                let rest = Array(parts.dropFirst())
+                let link = rest.first { $0.hasPrefix("http://") || $0.hasPrefix("https://") }
+                let summary = rest.filter { $0 != link && !$0.isEmpty && $0 != "-" }.joined(separator: " ")
+                return .sent(link: link, summary: summary.isEmpty ? "Wysłane." : summary)
+            }
+            if kind.hasPrefix("oddane") {
+                let reason = parts.dropFirst().filter { !$0.isEmpty }.joined(separator: " | ")
+                return .left(reason: reason.isEmpty ? "Bieg wysyłki oddał krok bez powodu." : reason)
+            }
+            return nil
+        }
+        return nil
+    }
+    // czy bieg wysyłki mógł coś zmienić w aplikacji docelowej: wywołał narzędzie jej konektora, które nie jest tylko do czytania.
+    // false = na pewno nic nie poszło, więc Task Hub może sam ponowić wysyłkę
+    static func touchedTarget(_ called: [String], servers: [String]) -> Bool {
+        let want = Set(servers.map { norm($0) })
+        return called.contains { t in split(t).map { want.contains($0.server) && !isReadOnly($0.tool) } ?? false }
     }
 
     // ---------- kontrola zdarzenia startowego ----------

@@ -6,7 +6,9 @@ import * as repo from "@/lib/repo";
 import { listSendable, type Sendable } from "@/lib/agent/work";
 import type { RunModel } from "@/lib/repo";
 import { isExternalApp, isLocalFile } from "@/lib/agent/approval";
-import { RUN_MAX_MIN, RUN_STALE_MIN, SEND_MAX_MIN, authBridge, bridgePrompt, bridgeWorkPrompt, codexWorkPrompt, connectorProblem, gitSend, isGitDraft, mcpUrl, protocolOf, sendPrompt, sendServers, type BridgeAuth } from "@/lib/bridge";
+import { RUN_MAX_MIN, RUN_STALE_MIN, SEND_MAX_MIN, authBridge, bridgePrompt, bridgeWorkPrompt, codexWorkPrompt, connectorProblem, gitSend, isGitDraft, mcpUrl, protocolOf, SEND_RESULT_CAP, sendPrompt, sendPromptDirect, sendServers, type BridgeAuth } from "@/lib/bridge";
+import { draftsText } from "@/lib/agent/context";
+import type { Connection } from "@/lib/schema";
 import { normalizeTool, toolLabel } from "@/lib/schema";
 import { shortTitle } from "@/lib/auto";
 import { workSummary } from "@/lib/agent/work";
@@ -24,7 +26,7 @@ async function busy(ownerId: string, run?: repo.BridgeRun | null) {
 export async function POST(req: Request) {
   const a = await authBridge(req);
   if (a instanceof Response) return a;
-  const body = (await req.json().catch(() => ({}))) as { bridge?: string; v?: number | string; kind?: string };
+  const body = (await req.json().catch(() => ({}))) as { bridge?: string; v?: number | string; kind?: string; caps?: unknown };
   const bridge = String(body.bridge || a.name || "mostek");
   await repo.expireBridgeRuns(a.ownerId, RUN_STALE_MIN);
   if (protocolOf(body.v) < 2) {
@@ -33,7 +35,9 @@ export async function POST(req: Request) {
     return Response.json({ run, prompt: bridgePrompt(), mcp: mcpUrl(), maxMinutes: RUN_MAX_MIN, staleMinutes: RUN_STALE_MIN });
   }
   const kind = body.kind ?? "work";
-  if (kind === "send") return sendRun(a, bridge);
+  // caps (aplikacja 0.1.22+): „send-result” = szkic w poleceniu, wynik z ostatniej linii biegu, bez serwera Task Hub w biegu wysyłki
+  const caps = Array.isArray(body.caps) ? body.caps.filter((c): c is string => typeof c === "string") : [];
+  if (kind === "send") return sendRun(a, bridge, caps.includes(SEND_RESULT_CAP));
   if (kind !== "work") return Response.json({ error: "kind: work albo send" }, { status: 400 });
   // dobór modelu: grupa pierwszej pozycji listy pracy, której model (albo zapasowy) nie jest w limicie; wszystkie w limicie = 429 z godziną powrotu
   const settings = await repo.userSettings(a.ownerId);
@@ -79,7 +83,7 @@ async function refuse(ownerId: string, s: Sendable, why: string) {
   return Response.json({ error: note, step: { id: s.step.id, taskId: s.taskId } }, { status: 422 });
 }
 
-async function sendRun(a: BridgeAuth, bridge: string): Promise<Response> {
+async function sendRun(a: BridgeAuth, bridge: string, direct = false): Promise<Response> {
   const open = (await repo.bridgeStatus(a.ownerId, 0)).run;
   if (open) return busy(a.ownerId, open);
   // najdawniej zatwierdzony szkic, którego żaden bieg jeszcze nie wziął, z krokami przed nim zrobionymi; szkic, który nie wychodzi
@@ -97,8 +101,10 @@ async function sendRun(a: BridgeAuth, bridge: string): Promise<Response> {
   const git = isGitDraft(d, s.step.blocks) ? gitSend(s.step.blocks, d) : null;
   if (typeof git === "string") return refuse(a.ownerId, s, git);
   let servers: string[] = [];
+  let conns: Connection[] = [];
   if (!git) {
-    const [conns, task, projects] = await Promise.all([repo.listConnections(a.ownerId), repo.getTask(a.ownerId, s.taskId), repo.listProjects(a.ownerId)]);
+    const [cs, task, projects] = await Promise.all([repo.listConnections(a.ownerId), repo.getTask(a.ownerId, s.taskId), repo.listProjects(a.ownerId)]);
+    conns = cs;
     const companyId = projects.find((p) => p.id === task?.projectId)?.companyId ?? null;
     const where = { app: t.app, connectionId: s.step.connectionId, host: bridge, companyId };
     servers = sendServers(conns, where);
@@ -132,6 +138,17 @@ async function sendRun(a: BridgeAuth, bridge: string): Promise<Response> {
   };
   if (git) return Response.json({ ...base, git }, { headers: NO_STORE });
   const token = await repo.createRunToken(a.ownerId, { kind: "send", runId: run.id, stepId: s.step.id, taskId: s.taskId }, SEND_MAX_MIN + 5);
+  if (direct) {
+    // ten sam tekst szkicu, który bieg dostawał z get_task (podpisany szkic tego kroku i połączenie), od razu w poleceniu
+    const st = (await repo.getTask(a.ownerId, s.taskId))?.steps.find((x) => x.id === s.step.id);
+    if (st) {
+      const conn = st.connectionId ? conns.find((c) => c.id === st.connectionId) : null;
+      const draft = [`ZADANIE „${s.taskTitle}”, KROK „${st.title}” (${st.tool})${conn ? ` | połączenie: ${conn.label}${conn.account ? ` (${conn.account})` : ""}` : ""}`,
+        draftsText([st], { send: (x) => x.id === st.id })].join("\n");
+      const prompt = sendPromptDirect({ app: t.app, action: t.action, servers, draft });
+      return Response.json({ ...base, prompt, mcp: mcpUrl(), token, servers, result: "line", ...modelFields(pick) }, { headers: NO_STORE });
+    }
+  }
   const prompt = sendPrompt({ stepId: s.step.id, taskId: s.taskId, app: t.app, action: t.action, servers });
   return Response.json({ ...base, prompt, mcp: mcpUrl(), token, servers, ...modelFields(pick) }, { headers: NO_STORE });
 }

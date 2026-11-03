@@ -17,7 +17,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (a instanceof Response) return a;
   const { id } = await ctx.params;
   if (!UUID.test(id)) return Response.json({ ok: false }, { status: 404 });
-  const body = (await req.json().catch(() => ({}))) as { note?: string; outcome?: string; sent?: { link?: unknown; summary?: unknown } | null; model?: unknown; until?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { note?: string; outcome?: string; sent?: { link?: unknown; summary?: unknown } | null; left?: { reason?: unknown } | null; touched?: unknown; model?: unknown; until?: unknown };
   const note = typeof body.note === "string" ? body.note : undefined;
   if (!body.outcome) {
     // model: pełna nazwa z init Claude Code (aplikacja 0.1.12), do „ostatnio: model · wysiłek” na krokach
@@ -41,6 +41,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       }
     }
   }
+  // paczka 47: bieg wysyłki bez Task Hub w biegu (aplikacja 0.1.22+) oddaje krok ostatnią linią „WYNIK: oddane | powód”, a aplikacja zgłasza to tutaj
+  if (body.outcome === "done" && sent === undefined && body.left && typeof body.left === "object") {
+    const run = await repo.getBridgeRun(a.ownerId, id);
+    const reason = str(body.left.reason, 600);
+    if (run && !run.endedAt && run.kind === "send" && run.stepId && reason) await repo.leaveSend(a.ownerId, run.stepId, reason);
+  }
   // limit modelu biegu: do godziny z aplikacji (until) albo z komunikatu Claude Code; do tej chwili biegi idą na zapasowym, potem same wracają na główny
   if (body.outcome === "limit") {
     const run = await repo.getBridgeRun(a.ownerId, id);
@@ -50,6 +56,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       if (Date.parse(until) > Date.now()) await repo.recordModelLimit(a.ownerId, run.model, until);
     }
   }
-  const ok = await repo.endBridgeRun(a.ownerId, id, body.outcome, note);
+  // touched: false = aplikacja widziała, że bieg wysyłki nie wywołał żadnego narzędzia zapisu w aplikacji docelowej, więc nic nie mogło pójść
+  const ok = await repo.endBridgeRun(a.ownerId, id, body.outcome, note, { untouched: body.touched === false });
   return Response.json(sent === undefined ? { ok } : { ok, sent }, { status: ok ? 200 : 404 });
 }

@@ -347,6 +347,58 @@ describe.skipIf(!DB)("mostek v2 na serwerze", async () => {
     await sql()`delete from tasks where owner_id = ${owner}`;
   });
 
+  // paczka 47: aplikacja 0.1.22 (caps send-result) dostaje szkic w poleceniu i zgłasza wynik sama; bieg, który nie dotknął aplikacji, wraca sam do 3 prób
+  it("paczka 47: szkic w poleceniu, wynik od aplikacji (wysłane, oddane), samo ponowienie, gdy nic nie poszło", async () => {
+    const a = await approved("P47: wiadomość do Kingi", "slack", [draft({ app: "slack", action: "send", where: "DM Kinga" }, "Hej Kinga, nowości")]);
+    const s1 = await (await postRun({ bridge: "mini", v: 2, kind: "send", caps: ["send-result"] })).json();
+    expect(s1).toMatchObject({ kind: "send", step: { id: a.stepId }, result: "line" });
+    expect(s1.prompt).toContain("===SZKIC==="); expect(s1.prompt).toContain("Hej Kinga, nowości"); expect(s1.prompt).toContain("ZATWIERDZONY: wyślij dokładnie tę treść");
+    expect(s1.prompt).toContain("WYNIK: wysłane |"); expect(s1.prompt).not.toContain("mcp__task-hub__get_task");
+    // 1. i 2. bieg bez dotknięcia Slacka: zgoda zostaje, szkic wraca do wysyłki, bez notatki
+    expect((await patch(s1.run.id, { outcome: "done", note: "Pobieranie zadania.", touched: false })).status).toBe(200);
+    let st = await step(a.taskId, a.stepId);
+    expect(repo.isSendable(st)).toBe(true); expect(await chat(a.taskId)).toEqual([]);
+    const s2 = await (await postRun({ bridge: "mini", v: 2, kind: "send", caps: ["send-result"] })).json();
+    expect(s2.step.id).toBe(a.stepId);
+    await patch(s2.run.id, { outcome: "error", note: "Reached maximum number of turns", touched: false });
+    expect(repo.isSendable(await step(a.taskId, a.stepId))).toBe(true);
+    // 3. bieg też nic: zgoda wraca do Piotra z jasną notatką
+    const s3 = await (await postRun({ bridge: "mini", v: 2, kind: "send", caps: ["send-result"] })).json();
+    expect(s3.step.id).toBe(a.stepId);
+    await patch(s3.run.id, { outcome: "done", note: "Pobieranie zadania.", touched: false });
+    st = await step(a.taskId, a.stepId);
+    expect(st).toMatchObject({ status: "draft", approvedAt: null, sendStartedAt: null });
+    expect(await chat(a.taskId)).toEqual([repo.notSentNote("slack", "P47: wiadomość do Kingi")]);
+    expect(repo.notSentNote("slack", "x")).toBe("Wysyłka „x” nie ruszyła: nic nie poszło do Slack. Mostek próbował 3 razy; zatwierdź ponownie.");
+    // bieg, który dotknął Slacka bez wyniku: bez ponawiania, stara notatka „sprawdź, czy poszło”
+    const b = await approved("P47: druga wiadomość", "slack", [draft({ app: "slack", action: "send", where: "#dev" }, "Cześć")]);
+    const t1 = await (await postRun({ bridge: "mini", v: 2, kind: "send", caps: ["send-result"] })).json();
+    expect(t1.step.id).toBe(b.stepId);
+    await patch(t1.run.id, { outcome: "done", note: "coś", touched: true });
+    expect((await step(b.taskId, b.stepId)).approvedAt).toBeNull();
+    expect(await chat(b.taskId)).toEqual([repo.unconfirmedSendNote("slack", "P47: druga wiadomość")]);
+    // wynik „wysłane” z ostatniej linii: aplikacja zgłasza sent, krok zrobiony
+    const c = await approved("P47: trzecia wiadomość", "slack", [draft({ app: "slack", action: "send", where: "#dev" }, "Hej")]);
+    const u1 = await (await postRun({ bridge: "mini", v: 2, kind: "send", caps: ["send-result"] })).json();
+    const r = await (await patch(u1.run.id, { outcome: "done", note: "ok", touched: true, sent: { summary: "Wysłane na #dev.", link: "https://slack.com/archives/C1/p2" } })).json();
+    expect(r).toMatchObject({ ok: true, sent: true });
+    expect((await step(c.taskId, c.stepId)).status).toBe("done");
+    // wynik „oddane”: zgoda wraca z powodem, bez drugiej notatki
+    const d = await approved("P47: czwarta wiadomość", "slack", [draft({ app: "slack", action: "send", where: "#nieistnieje" }, "Hej")]);
+    const v1 = await (await postRun({ bridge: "mini", v: 2, kind: "send", caps: ["send-result"] })).json();
+    await patch(v1.run.id, { outcome: "done", note: "nie ma kanału", touched: false, left: { reason: "Nie ma kanału #nieistnieje na Slacku." } });
+    const sd = await step(d.taskId, d.stepId);
+    expect(sd.approvedAt).toBeNull();
+    const cd = await chat(d.taskId);
+    expect(cd).toHaveLength(1); expect(cd[0]).toContain("Nie zrobiłem kroku „P47: czwarta wiadomość”");   // jak leave_step: pełny powód w why
+    // stara aplikacja bez caps: dawne polecenie z get_task
+    const e = await approved("P47: stara aplikacja", "slack", [draft({ app: "slack", action: "send", where: "#dev" }, "Hej")]);
+    const w1 = await (await postRun({ bridge: "mini", v: 2, kind: "send" })).json();
+    expect(w1.step.id).toBe(e.stepId); expect(w1.result).toBeUndefined(); expect(w1.prompt).toContain("mcp__task-hub__get_task");
+    await patch(w1.run.id, { outcome: "stopped" });
+    await sql()`delete from tasks where owner_id = ${owner}`;
+  });
+
   it("v2 wysyłka konektorem: Claude Code zamyka krok tokenem wysyłki, koniec biegu nic nie cofa", async () => {
     const a = await approved("Mostek v2: wiadomość do zespołu", "slack", [draft({ app: "slack", action: "send", where: "#dev" }, "Cześć")]);
     const s = await (await postRun({ bridge: "mini", v: 2, kind: "send" })).json();
