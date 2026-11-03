@@ -73,18 +73,27 @@ final class GitSend {
         }
         guard !folders.isEmpty else { return GitResult(ok: false, text: "Na tym Macu nie ma folderów z kodem. Dodaj folder repozytorium w Ustawieniach aplikacji Task Hub i zatwierdź szkic ponownie.") }
 
-        // folder: ten, którego origin wskazuje na repozytorium; awaryjnie folder o tej nazwie bez żadnego origin
+        // folder: ten, którego origin wskazuje na repozytorium; awaryjnie folder o tej nazwie bez żadnego origin,
+        // a potem jedyny folder, którego origin ma tę samą nazwę repozytorium u innego właściciela (agent pomylił
+        // właściciela, np. „shiftwow/shiftwow-ui” zamiast „simpleroseinc/shiftwow-ui”; diffy i tak sprawdzamy niżej)
         let name = String(want.split(separator: "/").last ?? "")
         var folder: String? = nil
         var remote = ""
         var byName: String? = nil
+        var sameName: [(String, String)] = []
         for f in folders {
             let r = await git(f, ["remote", "get-url", "origin"], seconds: 20)
             if cancelled { return GitResult(ok: false, text: "zatrzymany przez Ciebie") }
             if r.ok && GitSend.remoteMatches(r.text, want) { folder = f; remote = r.text; break }
             if !r.ok && byName == nil && (f as NSString).lastPathComponent.lowercased() == name { byName = f }
+            if r.ok && GitSend.repoName(r.text) == name { sameName.append((f, r.text)) }
         }
         if folder == nil { folder = byName }
+        if folder == nil && sameName.count == 1 {
+            folder = sameName[0].0
+            remote = sameName[0].1
+            Log.write("git: szkic podaje \(job.repo), a origin w \(sameName[0].0) to \(GitSend.repoKey(sameName[0].1)); biorę ten folder (jedyny z tą nazwą)")
+        }
         guard let dir = folder else {
             return GitResult(ok: false, text: "Nie znalazłem repozytorium \(job.repo) w folderach z kodem na tym Macu. Dodaj jego folder w Ustawieniach aplikacji Task Hub.")
         }
@@ -333,6 +342,12 @@ final class GitSend {
         if k.hasSuffix(".git") { k.removeLast(4) }
         while k.hasPrefix("/") { k.removeFirst() }
         return k
+    }
+
+    // sama nazwa repozytorium z adresu origin (git@github.com:wlasciciel/nazwa.git → nazwa)
+    static func repoName(_ url: String) -> String {
+        let k = repoKey(url)
+        return String(k.split(whereSeparator: { $0 == "/" || $0 == ":" }).last ?? "")
     }
 
     static func remoteMatches(_ url: String, _ want: String) -> Bool {
