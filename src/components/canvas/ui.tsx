@@ -125,6 +125,7 @@ const PATHS: Record<string, string> = {
   dice: '<rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M5.6 5.6h.01M10.4 10.4h.01M8 8h.01M10.4 5.6h.01M5.6 10.4h.01" stroke-width="2.2"/>',
   send: '<path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/>',
   chev: '<path d="m4 6 4 4 4-4"/>',
+  cols: '<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M6 2.5v11M10 2.5v11"/>',
   chevL: '<path d="m10 4-4 4 4 4"/>',
   chevR: '<path d="m6 4 4 4-4 4"/>',
   check: '<path d="M4 8.5l2.6 2.5L12 5.5"/>',

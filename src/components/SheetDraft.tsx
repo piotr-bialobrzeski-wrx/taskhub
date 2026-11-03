@@ -3,7 +3,7 @@
 // (projekty, kategorie, tagi) przynosi agent z aplikacji docelowej w polu sheet szkicu, więc nic tu nie zna Pirxey Time.
 // Klik w komórkę zamienia ją w pole (tekst, godzina, czas trwania) albo otwiera listę (wybór z wyszukiwarką i „Ostatnio używane”, kilka z listy,
 // kalendarz z „Dziś” i „Wczoraj”); przełącznik zmienia się jednym kliknięciem. Każda zmiana zapisuje się od razu, a formularz „Zatwierdź” niesie
-// wiersze, które Piotr widzi (zgoda obejmuje dokładnie je). Szybki wpis nad tabelą ma ten sam układ kolumn; „Kolumny” chowa i pokazuje kolumny
+// wiersze, które Piotr widzi (zgoda obejmuje dokładnie je). Szybki wpis to pierwszy wiersz tej samej tabeli (paczka 44); „Kolumny” chowa i pokazuje kolumny
 // nieobowiązkowe w obu naraz (wybór zostaje w przeglądarce).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -130,9 +130,10 @@ function DatePick({ value, onPick }: { value: string; onPick: (iso: string) => v
 }
 
 // ---------- arkusz ----------
-export function SheetDraft({ columns, sheet, rows, parts, editable, formId, seenRows, onSave, cols0 }: {
+export function SheetDraft({ columns, sheet, rows, parts, editable, formId, seenRows, onSave, cols0, actions }: {
   columns: string[]; sheet: SheetColumn[]; rows: string[][]; parts?: (SheetPart[] | null)[] | null;
   editable: boolean; formId?: string; seenRows?: string | null; onSave?: (rowsJson: string) => Promise<boolean>; cols0?: string;
+  actions?: ReactNode;   // paczka 44: przyciski zgody w stopce arkusza, po lewej; po prawej liczba wpisów i suma
 }) {
   const cols: Col[] = useMemo(() => columns.map((label, i) => ({ i, label, spec: sheet[i] ?? { kind: "text" } })), [columns, sheet]);
   const n = columns.length;
@@ -156,7 +157,6 @@ export function SheetDraft({ columns, sheet, rows, parts, editable, formId, seen
 
   const durCol = cols.find((c) => c.spec.kind === "duration") ?? null;
   const timeCols = cols.filter((c) => c.spec.kind === "time");
-  const dateCol = cols.find((c) => c.spec.kind === "date") ?? null;
   // od i do (dwie kolumny godzin) liczą czas trwania, gdy obie są wpisane
   const withDerived = (c: string[]): string[] => {
     if (!durCol || timeCols.length !== 2) return c;
@@ -262,28 +262,31 @@ export function SheetDraft({ columns, sheet, rows, parts, editable, formId, seen
       <span className={"sh-cell" + (kind === "text" ? "" : " num") + (kind === "duration" ? " dur" : "") + (v ? "" : " sh-empty") + (quick ? " inp" : "") + (ro ? "" : kind === "choice" || kind === "multi" || kind === "date" ? " pick" : " txt")}
         role={ro ? undefined : "button"} tabIndex={ro ? undefined : 0} title={ro ? undefined : `${c.label}: kliknij, aby zmienić`}
         onClick={open} onKeyDown={(e) => { if (!ro && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(e as unknown as React.MouseEvent<HTMLElement>); } }}>
-        {content ?? (ro ? "" : quick ? c.label : "dodaj")}
-        {p?.length ? <button type="button" className="sh-sum" title="Z czego zebrano ten wpis" onClick={(e) => { e.stopPropagation(); setPop({ el: e.currentTarget, row, col: c.i, what: "parts" }); }}>Σ {p.length}</button> : null}
+        {content ?? (ro ? "" : quick || kind === "choice" || kind === "multi" ? c.label : "")}
+        {p && p.length > 1 ? <button type="button" className="sh-sum" title="Z czego zebrano ten wpis" onClick={(e) => { e.stopPropagation(); setPop({ el: e.currentTarget, row, col: c.i, what: "parts" }); }}>Σ {p.length}</button> : null}
       </span>
     );
   };
 
-  const table = (body: Row[] | "q", ro: boolean) => {
-    const minW = vis.reduce((a, c, k) => a + (widthOf(c, k === 0) ?? 240), 0) + (ro ? 0 : LAST_W);
+  // paczka 44: jedna tabela; szybki wpis to jej pierwszy wiersz, więc kolumny mają dokładnie tę samą szerokość, a „Kolumny” to ikona w nagłówku
+  const table = (body: Row[], ro: boolean) => {
+    const last = !ro || optional.length > 0;
+    const minW = vis.reduce((a, c, k) => a + (widthOf(c, k === 0) ?? 240), 0) + (last ? LAST_W : 0);
     return (
       <div className="tbwrap sh-wrap0">
         <table className={"tb sh" + (ro ? " ro" : "")} style={{ minWidth: minW }}>
-          <colgroup>{vis.map((c, k) => { const w = widthOf(c, k === 0); return <col key={c.i} style={w ? { width: w } : undefined} />; })}{ro ? null : <col style={{ width: LAST_W }} />}</colgroup>
-          <thead><tr>{vis.map((c) => <th key={c.i}>{c.label}</th>)}{ro ? null : <th aria-label="Akcje" />}</tr></thead>
+          <colgroup>{vis.map((c, k) => { const w = widthOf(c, k === 0); return <col key={c.i} style={w ? { width: w } : undefined} />; })}{last ? <col style={{ width: LAST_W }} /> : null}</colgroup>
+          <thead><tr>{vis.map((c) => <th key={c.i}>{c.label}</th>)}{last ? <th className="sh-last" aria-label="Kolumny">{optional.length ? (
+            <button type="button" className="sh-colsbtn" title={`Pokaż albo schowaj kolumny${hiddenN ? ` (schowane: ${hiddenN})` : ""}`} aria-label="Kolumny" aria-haspopup="dialog"
+              onClick={(e) => setPop({ el: e.currentTarget, row: "q", col: 0, what: "cols" })}><Icon k="cols" size={14} sw={1.5} /></button>) : null}</th> : null}</tr></thead>
           <tbody>
-            {body === "q" ? (
-              <tr>{vis.map((c) => <td key={c.i}>{cell("q", c, false)}</td>)}<td className="sh-last"><button type="button" className="btn primary sm" onClick={addQuick}><Icon k="plus" size={12} sw={2} />Dodaj</button></td></tr>
-            ) : body.length ? body.map((r) => (
+            {ro ? null : <tr className="sh-qrow">{vis.map((c) => <td key={c.i}>{cell("q", c, false)}</td>)}<td className="sh-last"><button type="button" className="btn primary sm" onClick={addQuick}><Icon k="plus" size={12} sw={2} />Dodaj</button></td></tr>}
+            {body.length ? body.map((r) => (
               <tr key={r.k} className={fresh === r.k ? "fresh" : undefined}>
                 {vis.map((c) => <td key={c.i}>{cell(r.k, c, ro)}</td>)}
-                {ro ? null : <td className="sh-last"><button type="button" className="sh-x" title="Usuń wiersz ze szkicu" aria-label="Usuń wiersz ze szkicu" onClick={() => removeRow(r.k)}><Icon k="x" size={12} sw={2} /></button></td>}
+                {ro ? (last ? <td /> : null) : <td className="sh-last"><button type="button" className="sh-x" title="Usuń wiersz ze szkicu" aria-label="Usuń wiersz ze szkicu" onClick={() => removeRow(r.k)}><Icon k="x" size={12} sw={2} /></button></td>}
               </tr>
-            )) : <tr><td colSpan={vis.length + (ro ? 0 : 1)}><p className="sub sh-none">{ro ? "Brak wierszy." : "Brak wierszy. Dopisz pierwszy szybkim wpisem."}</p></td></tr>}
+            )) : <tr><td colSpan={vis.length + (last ? 1 : 0)}><p className="sub sh-none">{ro ? "Brak wierszy." : "Brak wierszy. Dopisz pierwszy w wierszu nad tą linią."}</p></td></tr>}
           </tbody>
         </table>
       </div>
@@ -298,22 +301,13 @@ export function SheetDraft({ columns, sheet, rows, parts, editable, formId, seen
 
   return (
     <div className="sheet">
-      {editable ? (
-        <div className="sh-quick">
-          <div className="sh-qh">
-            <b>Szybki wpis{dateCol ? " do dowolnego dnia" : ""}</b><span className="sp" />
-            {optional.length ? <button type="button" className="btn sm" onClick={(e) => setPop({ el: e.currentTarget, row: "q", col: 0, what: "cols" })} aria-haspopup="dialog">
-              Kolumny{hiddenN ? ` · ukryte ${hiddenN}` : ""}</button> : null}
-          </div>
-          {table("q", false)}
-          {qaErr ? <p className="note warn">{qaErr}</p> : null}
-        </div>
-      ) : null}
       {table(list, !editable)}
+      {qaErr ? <p className="note warn">{qaErr}</p> : null}
       <div className="sh-foot">
-        {!editable && optional.length ? <button type="button" className="btn sm" onClick={(e) => setPop({ el: e.currentTarget, row: "q", col: 0, what: "cols" })}>Kolumny{hiddenN ? ` · ukryte ${hiddenN}` : ""}</button> : null}
+        {actions}
         {saving ? <span className="sub">Zapisuję…</span> : err ? <span className="note warn">{err}</span> : null}
         <span className="sp" />
+        <span className="sub">{list.length} {list.length === 1 ? "wpis" : list.length % 10 >= 2 && list.length % 10 <= 4 && (list.length % 100 < 10 || list.length % 100 >= 20) ? "wpisy" : "wpisów"}{total != null ? " ·" : ""}</span>
         {total != null ? <><span className="sub">Razem</span><b className="sh-total">{longDuration(total)}</b></> : null}
       </div>
       {/* zgoda obejmuje wiersze z tej karty: poprawione idą w formularzu „Zatwierdź”, a podpis karty liczy się wtedy bez nich */}

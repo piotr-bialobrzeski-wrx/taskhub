@@ -923,6 +923,12 @@ table.tb tr.new td { background: var(--accent-soft); }
   .detail > .d-body > .now:has(.cmp:not(.msg *, details:not([open]) *)) { --wi: calc(var(--cw) - 2 * var(--s-5)); padding-inline: calc((var(--cw) - var(--tw)) / 2 + var(--s-5)); }
   .detail > .d-body > .now:has(.tbwrap:not(.msg *, details:not([open]) *)) { --wi: calc(var(--ww) - 2 * var(--s-5)); padding-inline: calc((var(--ww) - var(--tw)) / 2 + var(--s-5)); }
   .detail > .d-body .block:has(.tbwrap):not(.cmp *, .zones.two *, .msg *) { margin-inline: calc((100% - var(--wi)) / 2); }
+  /* paczka 44: karta arkusza (wpisy czasu) na całą szerokość --ww, jedna oś: bez wcięcia do 760, nagłówki i tabela od tej samej krawędzi */
+  .detail > .d-body > .now.sheetc.sheetc { --wi: 100%; max-width: var(--ww); padding-inline: var(--s-5); }
+  .detail > .d-body:has(> .now.sheetc) > :not(.now) { max-width: var(--ww); }
+  .detail > .d-body > .md { --wi: 100%; max-width: var(--ww) !important; padding-inline: 0 !important; }   /* wygrywa z regułą „sekcja z tabelą” wyżej */
+  .detail > .d-body:has(> .md) > * { max-width: var(--ww); }   /* zadanie miesiąca: cały panel na jednej szerokiej osi, od tej samej krawędzi */
+  .detail > .d-body > .md .now.sheetc { --wi: 100%; }
   .detail > .d-body .cmp:not(.cmp *, .zones.two *, .msg *) { margin-inline: calc((100% - min(var(--wi), var(--cw))) / 2); }
   /* porównanie: kolumny po 660 px, wyśrodkowane; węższy ekran sam układa je jedna pod drugą */
   .detail > .d-body .cmp:not(.msg *) { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 660px)); justify-content: center; }
@@ -1387,9 +1393,27 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 
 /* ---------- paczka 42: arkusz szkicu (wpisy czasu, wariant C): edycja w miejscu, szybki wpis w tym samym układzie kolumn ---------- */
 .sheet { display: flex; flex-direction: column; gap: var(--s-4); min-width: 0; }
-.sh-quick { display: flex; flex-direction: column; gap: var(--s-2); background: var(--surface); border-radius: var(--r-md); padding: var(--s-3) var(--s-4) 0; }
-.sh-qh { display: flex; align-items: center; gap: var(--s-3); min-height: 32px; font-size: 12.5px; }
-.sh-qh .sp, .sh-foot .sp { flex: 1; }
+.sh-foot .sp { flex: 1; }
+/* paczka 44: szybki wpis jako pierwszy wiersz tabeli (te same kolumny), „Kolumny” jako ikona w nagłówku, biała karta arkusza */
+table.tb.sh tr.sh-qrow td { background: var(--surface-2); border-bottom: 2px solid var(--line); padding-block: 6px; }
+table.tb.sh tr.sh-qrow td:first-child { border-radius: 12px 0 0 12px; }
+table.tb.sh tr.sh-qrow td:last-child { border-radius: 0 12px 12px 0; }
+table.tb.sh tr.sh-qrow .sh-cell.inp { background: var(--surface); }
+.sh-colsbtn { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--sub); display: inline-grid; place-items: center; cursor: pointer; padding: 0; }
+.sh-colsbtn:hover { color: var(--accent); border-color: var(--accent); }
+.sh-cell.sh-empty.txt:hover::after { content: "dodaj"; color: var(--sub); font-weight: 500; }
+.now.sheetc { background: var(--surface); }
+/* karta dnia pod kalendarzem: stan mówi nagłówek dnia, więc bez powtórzonej linii stanu i samej nazwy narzędzia */
+.md-dayc .now.sheetc > .now-h, .md-dayc .pub.unsent > .pub-h { display: none; }
+.pub.sheetpub { gap: 0; }
+.sh-foot .actions, .sh-foot form { display: contents; }
+.md-dayc { display: flex; flex-direction: column; gap: var(--s-4); margin-top: var(--s-4); }
+.md-dh { display: flex; flex-direction: column; gap: 2px; }
+.md-dt { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+.md-dt h3 { margin: 0; font-size: 17px; }
+.md-dt .sp { flex: 1; }
+button.md-day { cursor: pointer; }
+.md-day.on { box-shadow: 0 0 0 2px var(--accent); }
 .sheet .tbwrap { padding-bottom: var(--s-2); }
 table.tb.sh { table-layout: fixed; font-size: 13px; }
 table.tb.sh th, table.tb.sh td { min-width: 0; white-space: nowrap; vertical-align: middle; padding: 2px 2px; }

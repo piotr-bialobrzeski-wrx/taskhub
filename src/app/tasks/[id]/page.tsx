@@ -127,11 +127,13 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   // ---------- panel zadania ----------
   // paczka 42: zadanie miesiąca z krokami-arkuszami (wpisy czasu) dostaje kalendarz dni z ich stanem
   const month = monthView(t, dayKey(new Date()));
+  // panele kroków powstają niżej; kalendarz miesiąca pokazuje pod sobą kartę wybranego dnia (paczka 44), więc dostaje ten sam obiekt
+  const panels: Record<string, React.ReactNode> = {}, dayCards: Record<string, React.ReactNode> = {};
   const taskBar = <><span className="d-title" title={t.title}>{t.title}</span><PrioPicker base={cur.score.base} eff={cur.score.eff} why={cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; ")} cls="head" onPick={setLevel.bind(null, t.id)} /><span className="chip">{t.steps.filter((s) => s.status === "done").length}/{t.steps.length} kroków</span></>;
   const taskBody = (
     <>
       {t.summary ? <p>{t.summary}</p> : null}
-      {month ? <MonthDays taskId={t.id} view={month} /> : null}
+      {month ? <MonthDays taskId={t.id} view={month} cards={dayCards} /> : null}
       <div className="time-row">
         <div><div className="lbl">Projekt</div><ProjectPicker projects={b.projects.map((p) => ({ id: p.id, name: p.name, color: p.color }))} value={t.projectId} cls="boxed" onPick={setProject.bind(null, t.id)} /></div>
         <div><div className="lbl">Termin</div><DueControl value={{ due: t.due, kind: t.dueKind ?? "by", repeat: t.repeat ?? null }} min={todayISO()} onChange={setTaskDue.bind(null, t.id)} /></div>
@@ -193,7 +195,6 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 
   // ---------- panele kroków ----------
-  const panels: Record<string, React.ReactNode> = {};
   // połączenia do wyboru w kroku: tylko z tej sfery co zadanie (zadanie prywatne nie dostaje Slacka firmy); nazwa firmy do etykiety
   const sphere = sphereOf(cur.project, b.companies);
   const connections = b.connections.filter((c) => c.sphere === sphere).map((c) => ({ id: c.id, label: c.label, app: c.app, account: c.account, company: c.companyId ? b.companies.find((x) => x.id === c.companyId)?.name ?? null : null, sphere: c.sphere, active: c.state === "active" }));
@@ -206,6 +207,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     return connectorIssue(b.connections, b.companies, { app: raw, connectionId: s.connectionId, companyId: cur.project?.companyId ?? null });
   };
   t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} runId={w.run?.stoppable ? w.run.runId ?? null : null} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} project={cur.project?.name ?? null} prev={prevBlocks.get(s.id) ?? null} />; });
+  month?.cells.forEach((c) => { if (c.step) dayCards[c.step.id] = panels[c.step.id]; });
 
   return (
     <>
@@ -307,9 +309,13 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const took = whoDid(s) === "Ty" ? spentMin(s) : agentMin;
   const meta = done && s.filePath ? `Zapisano na Macu · ${fileName(s.filePath)}` : done ? `${whoDid(s)}${took ? ` · ${fmtMin(took)}` : ""}` : state === "ready" && !mode ? (own ? `Ty · ~${fmtMin(estOf(s))}` : `${toolLabel(s.tool)} · Claude`) : null;
 
+  // paczka 43: szkic-arkusz (np. wpisy czasu) stoi zawsze na całą szerokość, a źródła zwinięte pod nim („Skąd te wpisy”), jak w prototypie;
+  // paczka 44: przed decyzją biała karta bez linii „Szkic do zatwierdzenia” (stan dnia mówi nagłówek dnia i przycisk zgody)
+  const sheetCard = !!mode && (s.blocks ?? []).some((b) => b.type === "draft" && !!b.sheet?.length);
+  const sheetOpen = sheetCard && (mode === "proposed" || mode === "parked");
   const now = (
-    <div className={"zone ans now " + head.cls}>
-      <div className="now-h">
+    <div className={"zone ans now " + head.cls + (sheetCard ? " sheetc" : "")}>
+      {sheetOpen ? null : <div className="now-h">
         {(s.status === "handoff" || (s.status === "todo" && activity)) && !mode ? (activity ? <Activity text={activity.text} detail={activity.detail} since={activity.since} who="Claude" big />
           : <span className="working" title={s.cloud ? "Claude w chmurze robi ten krok; wynik pojawi się tutaj" : prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />{s.cloud ? "Claude w chmurze pracuje" : "Claude pracuje"}{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>)
           : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
@@ -319,7 +325,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         {addFolder ? <><span className="sp" /><a className="btn ico" href={addFolder.href} title={`Otwiera aplikację Task Hub na Macu i pyta, czy dodać ${addFolder.path} (${addFolder.section})`}>Dodaj folder</a></> : null}
         {target && isHttpUrl(target.url) ? <>{(proto && !shortDecision) || addFolder ? null : <span className="sp" />}<a className="btn ico" href={target.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${target.url}`}>{target.label}<Icon k="ext" size={13} sw={1.6} /></a></> : null}
         {done && s.filePath ? <><span className="sp" /><CopyButton text={s.filePath} label="Kopiuj ścieżkę" /></> : null}
-      </div>
+      </div>}
       {s.tool === "file" && s.status === "todo" && oldMac ? <div className="note">Ten krok zapisze plik aplikacja Task Hub na Macu od wersji 0.1.7. Zaktualizuj ją w menu aplikacji.</div> : null}
       {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} issue={issue}
         waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} /> : null}
@@ -395,9 +401,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const main = order.length ? orderZone : split.main.length && folds.material ? <div className="zone src main">{undo ? <div className="lbl">{undo}</div> : null}<BlocksView links={cl} blocks={split.main} form={form} indexOf={indexOf} /></div>
     : split.main.length ? <details className="fold"><summary><span className="k">Wynik</span><span className="t">{kindsOf(split.main)}</span><Icon k="chev" size={10} sw={2.2} /></summary><BlocksView links={cl} blocks={split.main} form={form} indexOf={indexOf} /></details> : null;
   const kinds = kindsOf(split.sources);
-  // paczka 43: szkic-arkusz (np. wpisy czasu) stoi zawsze na całą szerokość, a źródła zwinięte pod nim („Skąd te wpisy”), jak w prototypie;
-  // obok w dwóch kolumnach tabela dostawała pół ekranu i ucinała ostatnie kolumny
-  const sheetCard = !!mode && (s.blocks ?? []).some((b) => b.type === "draft" && !!b.sheet?.length);
+  // obok w dwóch kolumnach tabela dostawała pół ekranu i ucinała ostatnie kolumny (paczka 43)
   const srcOpen = folds.material && !split.main.length && !sheetCard;   // „Skąd” rozwinięte tylko, gdy na karcie nie ma innej treści
   const skad = split.sources.length ? (srcOpen
     ? <div className="zone src"><div className="lbl">Skąd<span className="n">{kinds}</span>{split.main.length ? null : undo}</div><BlocksView links={cl} blocks={split.sources} form={form} indexOf={indexOf} /></div>

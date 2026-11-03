@@ -117,11 +117,22 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
     const seenInput = seen ? <>{multi ? <input type="hidden" name="option" value={i} /> : null}<input type="hidden" name="seen" value={seen} />{seenFull ? <input type="hidden" name="seenFull" value={seenFull} /> : null}</> : null;
     // podgląd według rodzaju odpowiedzi: wiersze do arkusza jako tabela, prompt jako ramka kodu, reszta jako wiadomość „moja”
     // paczka 42: szkic z rodzajami kolumn (sheet) to arkusz do edycji w miejscu przed decyzją, po decyzji ten sam układ tylko do odczytu
+    const approve = (text: string) => (
+      <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} disabled={!!issue} title={issue ?? (stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dd?.kind === "send" ? " " + dd.in : ""}`)}>{text}</PendingButton></form>
+    );
     const sheetOn = isRows && !!di?.sheet?.length && !!di.columns?.length;
     const sheetEdit = sheetOn && (mode === "proposed" || mode === "parked") && !sentAlready && di!.status !== "sent";
+    // paczka 44: przy arkuszu (jeden szkic) przyciski zgody stoją w stopce arkusza, obok liczby wpisów i sumy, a nie pod kartą
+    const nRows = di?.rows?.length ?? 0;
+    const sheetActs = sheetEdit && !multi ? <>
+      {approve(stays ? "Zatwierdź" : `Zatwierdź i wyślij ${nRows} ${nRows === 1 ? "wpis" : nRows % 10 >= 2 && nRows % 10 <= 4 && (nRows % 100 < 10 || nRows % 100 >= 20) ? "wpisy" : "wpisów"}`)}
+      {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
+      {mode === "proposed" ? <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Szkic zostaje, krok wraca do zrobienia">Odłóż</PendingButton></form>
+        : <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn" title="Zamknij krok bez wysyłania">Zamknij bez wysyłki</PendingButton></form>}
+    </> : null;
     const preview = sheetOn && di ? (
       <SheetDraft key={s.id + sfx} columns={di.columns!} sheet={di.sheet!} rows={di.rows ?? []} parts={di.parts ?? null} editable={sheetEdit} formId={sheetEdit ? formId : undefined}
-        seenRows={sheetEdit ? shownSig(s, di, false, true) : null} onSave={sheetEdit ? saveDraftRows.bind(null, t.id, s.id, i) : undefined} />
+        seenRows={sheetEdit ? shownSig(s, di, false, true) : null} onSave={sheetEdit ? saveDraftRows.bind(null, t.id, s.id, i) : undefined} actions={sheetActs} />
     ) : isRows && di ? (
       <div className="thread"><div className="msg mine rows"><div className="who">{who}</div><Table columns={di.columns ?? di.rows![0].map((_, k) => `Kolumna ${k + 1}`)} rows={di.rows!} highlightFrom={0} md />{body ? <Markdown text={body} /> : null}</div></div>
     ) : (isPrompt || isCommit) && (di || mode !== "proposed") ? (
@@ -144,10 +155,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
         {di?.fields?.length ? <Facts facts={di.fields} /> : null}
       </div></div>
     );
-    const approve = (text: string) => (
-      <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} disabled={!!issue} title={issue ?? (stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dd?.kind === "send" ? " " + dd.in : ""}`)}>{text}</PendingButton></form>
-    );
-    return { preview, approve, isRows };
+    return { preview, approve, isRows, sheetActs: !!sheetActs };
   };
   const one = view(d, 0);
   const mainLabel = approveLabel(dest, { stays, rows: one.isRows });
@@ -185,8 +193,9 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   ) : null;
 
   return (
-    <div className={"block pub " + mode}>
-      <div className="pub-h">
+    <div className={"block pub " + mode + (one.sheetActs ? " sheetpub" : "")}>
+      {/* paczka 44: arkusz przed decyzją bez linii nagłówka (stan i dokąd mówi nagłówek dnia i przycisk w stopce) */}
+      {one.sheetActs ? null : <div className="pub-h">
         <span className="tool-dot" style={{ ["--c" as string]: toolColor(app) }} />
         <span className="pub-t">{pick && !stays ? <b>{dest?.name ?? name}</b> : head}</span>
         <span className="sp" />
@@ -195,7 +204,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
         {openBtn(tl)}
         {mode === "sent" && sentHref ? <a className="btn ico" href={sentHref} target="_blank" rel="noopener" title={sentHref}>{openLabel(normalizeTool(app))}<Icon k="ext" size={13} sw={1.6} /></a> : null}
         {mode === "sent" && s.filePath ? <CopyButton text={s.filePath} label="Kopiuj ścieżkę" /> : null}
-      </div>
+      </div>}
       {stale ? <div className="note warn">Szkic sprzed zmiany zakresu: przed tym krokiem weszły nowe kroki, Claude przygotuje go od nowa, gdy je zrobi.</div> : null}
       {changes ? (
         <div className="actions">
@@ -214,7 +223,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
           <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn" title="Zamknij krok bez wysyłania">Zamknij bez wysyłki</PendingButton></form>
           <div className="note">Ten szkic już poszedł; nową wysyłkę zapisz jako osobny krok.</div>
         </div>
-      ) : mode === "proposed" ? (
+      ) : one.sheetActs ? (issue ? <div className="note warn">{issue}</div> : null) : mode === "proposed" ? (
         <div className="actions">
           {pick ? null : one.approve(mainLabel)}
           {aiOn ? <form action={prepare.bind(null, t.id, s.id)}><PendingButton className="btn" busy="Agent poprawia…">Przygotuj od nowa</PendingButton></form> : null}
