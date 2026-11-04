@@ -275,6 +275,29 @@ final class Updater: ObservableObject {
         try await fetch(pkg, to: file)
         status = "Otwieram instalator (poprosi o hasło)."
         NSWorkspace.shared.open(file)
+        watchInstalled(version)
+    }
+
+    // paczka 48: po instalatorze nowa wersja leży na dysku, a działa stara, aż ktoś ją zamknie (do następnego sprawdzenia nawet 6 h;
+    // 2026-11-04 wysyłki szły dalej starą 0.1.21). Patrzymy co 10 s przez 30 min, czy instalator skończył, i wtedy uruchamiamy ponownie
+    private var watching = false
+    private func watchInstalled(_ version: String) {
+        guard !watching else { return }
+        watching = true
+        Task { @MainActor [weak self] in
+            defer { self?.watching = false }
+            for _ in 0..<180 {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                guard let self = self else { return }
+                if let onDisk = self.installedVersion(), !Updater.isNewer(version, than: onDisk) {
+                    self.ready = onDisk
+                    self.status = "Wersja \(onDisk) zainstalowana, uruchamiam ponownie."
+                    Log.write("aktualizacja: instalator zainstalował \(onDisk), uruchamiam ponownie")
+                    self.maybeRelaunch(onDisk)
+                    return
+                }
+            }
+        }
     }
 
     private func maybeRelaunch(_ version: String) {
