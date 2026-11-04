@@ -10,6 +10,7 @@ import type { Queue } from "@/lib/auto";
 import { workFoot, type FeedItem, type WorkBubble } from "@/lib/feed";
 import { Activity, useMinutes } from "@/components/Activity";
 import { draftKeyOf, readDraft, sendKeepingDraft, writeDraft, type Sent } from "@/lib/chat-draft";
+import { fitTextarea, refitOnWidth } from "@/components/GrowTextarea";
 import { Icon, Lvl, projColor, type ProjectVM } from "./ui";
 import { DUE_KIND_HINTS, DUE_KIND_LABELS, DUE_KINDS, presetOf, REPEAT_PRESETS, REPEAT_UNITS, repeatLabel, unitForm, type DueValue } from "@/lib/due";
 
@@ -283,7 +284,9 @@ function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone
   const { pending } = useFormStatus();
   const ta = useRef<HTMLTextAreaElement>(null);
   const pick = useRef<HTMLInputElement>(null);
-  const grow = () => { const el = ta.current; if (!el) return; el.style.height = "34px"; el.style.height = Math.min(168, el.scrollHeight) + "px"; };
+  // wysokość od 34 do 168 px (min-height i max-height w CSS); pomiar bez paska przewijania, tekst od lewej krawędzi
+  const grow = () => { if (ta.current) fitTextarea(ta.current); };
+  useEffect(() => { const el = ta.current; return el ? refitOnWidth(el, grow) : undefined; }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   // inne miejsce czatu: pole pokazuje jego szkic (tekst poprzedniego miejsca jest już zapisany przy każdym wpisaniu)
   useEffect(() => { if (ta.current) { ta.current.value = readDraft(draftKey); grow(); } }, [draftKey]);
   // wysłanie: pole puste od razu (szkic znika już w sendKeepingDraft); gdy się nie uda, tekst i załączniki wracają
