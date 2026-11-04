@@ -1,12 +1,12 @@
 "use client";
 // Edycja w miejscu: pole kroku zmienia się tam, gdzie je widać (tytuł, szczegóły, narzędzie, szacunek, czas, zgoda, zależności, link), bez osobnego formularza.
 // Klik otwiera pole, Enter albo zejście z pola zapisuje, Esc cofa. Szczegóły: Ctrl/Cmd+Enter zapisuje (Enter robi nową linię).
-import { useState, useTransition, type KeyboardEvent } from "react";
+import { useLayoutEffect, useRef, useState, useTransition, type KeyboardEvent } from "react";
 import { doneWithTime, linkSteps, patchStep } from "@/app/actions";
 import { DueControl, Picker } from "@/components/canvas/widgets";
 import type { DueValue } from "@/lib/due";
 import { dayKey } from "@/lib/clock";
-import { GrowTextarea } from "@/components/GrowTextarea";
+import { GrowTextarea, refitOnWidth } from "@/components/GrowTextarea";
 import { Icon } from "@/components/canvas/ui";
 import { DECISION_TITLE_RE, isGoogleApp, TOOL_LABELS } from "@/lib/schema";
 import { Q, SPENT_CHIPS, fmtHM, fmtMin, parseSpent } from "@/lib/time";
@@ -14,9 +14,45 @@ import { Q, SPENT_CHIPS, fmtHM, fmtMin, parseSpent } from "@/lib/time";
 type Patch = Parameters<typeof patchStep>[2];
 type Field = "title" | "detail" | "link";
 
+// Nazwa kroku albo zadania w nagłówku karty (lewy górny róg). Pole edycji dostaje dokładnie szerokość i wysokość, jaką
+// nazwa zajmowała przed kliknięciem (cała nazwa albo całe dostępne miejsce, gdy długa nazwa była zwężona), i zawija się
+// jak ona, więc nic się nie ucina i układ nie skacze (paczka 49). Enter albo zejście z pola zapisuje, Esc cofa.
+// wysokość jak nazwa przed kliknięciem (co do ułamka piksela); więcej tylko, gdy nowa treść naprawdę zajmuje więcej linii
+function fitTitle(el: HTMLTextAreaElement, box: { h: number } | null) {
+  el.style.height = "0";
+  const h = el.scrollHeight;
+  el.style.height = (box && h <= Math.ceil(box.h) ? box.h : h) + "px";
+  el.scrollLeft = 0;
+}
+export function HeadTitle({ value, placeholder, save }: { value: string; placeholder: string; save: (v: string) => Promise<unknown> }) {
+  const [edit, setEdit] = useState(false);
+  const [box, setBox] = useState<{ w: number; h: number } | null>(null);
+  const [pending, start] = useTransition();
+  const shownRef = useRef<HTMLHeadingElement>(null);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const open = () => { const r = shownRef.current?.getBoundingClientRect(); setBox(r ? { w: r.width, h: r.height } : null); setEdit(true); };
+  const done = (v: string | null) => { setEdit(false); if (v == null) return; const n = v.trim(); if (!n || n === value.trim()) return; start(async () => { await save(n); }); };
+  useLayoutEffect(() => {
+    const el = ref.current; if (!edit || !el) return;
+    const fit = () => fitTitle(el, box);
+    fit(); el.focus(); el.select();
+    return refitOnWidth(el, fit);
+  }, [edit, box]);
+  if (edit) {
+    return <textarea ref={ref} className="in ttl" rows={1} defaultValue={value} placeholder={placeholder} aria-label={placeholder} spellCheck={false}
+      style={box ? { width: box.w, flex: "0 1 auto" } : undefined}
+      onInput={(e) => fitTitle(e.currentTarget, box)}
+      onBlur={(e) => done(e.currentTarget.value)}
+      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); done(null); } else if (e.key === "Enter") { e.preventDefault(); done(e.currentTarget.value); } }} />;
+  }
+  return <h3 ref={shownRef} className={"il ttl" + (value ? "" : " blank") + (pending ? " busy" : "")} title="Kliknij, aby zmienić" onClick={open}>
+    <span className="il-t">{value || placeholder}</span><Icon k="pen" size={12} sw={1.8} /></h3>;
+}
+
 export function InlineText({ taskId, stepId, field, value, as, placeholder, shown }: { taskId: string; stepId: string; field: Field; value: string; as: "h3" | "bar" | "p" | "small"; placeholder: string; shown?: string }) {
   const [edit, setEdit] = useState(false);
   const [pending, start] = useTransition();
+  if (as === "bar") return <HeadTitle value={value} placeholder={placeholder} save={(n) => patchStep(taskId, stepId, { [field]: n } as Patch)} />;
   const save = (v: string) => { setEdit(false); const n = v.trim(); if (n === value.trim() || (!n && field === "title")) return; start(() => patchStep(taskId, stepId, { [field]: n } as Patch)); };
   const key = (e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (e.key === "Escape") { e.preventDefault(); setEdit(false); }
@@ -25,11 +61,11 @@ export function InlineText({ taskId, stepId, field, value, as, placeholder, show
   if (edit) {
     return as === "p"
       ? <GrowTextarea className="in" minRows={2} defaultValue={value} placeholder={placeholder} aria-label={placeholder} autoFocus onBlur={(e) => save(e.currentTarget.value)} onKeyDown={key} />
-      : <input className={"in" + (as === "h3" ? " h3" : as === "bar" ? " ttl" : "")} defaultValue={value} placeholder={placeholder} aria-label={placeholder} autoFocus onFocus={(e) => e.currentTarget.select()} onBlur={(e) => save(e.currentTarget.value)} onKeyDown={key} />;
+      : <input className={"in" + (as === "h3" ? " h3" : "")} defaultValue={value} placeholder={placeholder} aria-label={placeholder} autoFocus onFocus={(e) => e.currentTarget.select()} onBlur={(e) => save(e.currentTarget.value)} onKeyDown={key} />;
   }
-  const cls = "il " + (as === "bar" ? "ttl" : as) + (value ? "" : " blank") + (pending ? " busy" : "");   // „ttl”, nie „bar”: .bar to pasek postępu kafelka
+  const cls = "il " + as + (value ? "" : " blank") + (pending ? " busy" : "");
   const body = <><span className="il-t">{value ? shown ?? value : placeholder}</span><Icon k="pen" size={12} sw={1.8} /></>;
-  if (as === "h3" || as === "bar") return <h3 className={cls} title="Kliknij, aby zmienić" onClick={() => setEdit(true)}>{body}</h3>;
+  if (as === "h3") return <h3 className={cls} title="Kliknij, aby zmienić" onClick={() => setEdit(true)}>{body}</h3>;
   return <p className={cls} title="Kliknij, aby zmienić" onClick={() => setEdit(true)}>{body}</p>;
 }
 

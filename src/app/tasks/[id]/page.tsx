@@ -31,7 +31,7 @@ import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
 import { GrowTextarea } from "@/components/GrowTextarea";
-import { DoneAsk, InlineText, PromptBox, StepMeta, type StepConnection, type StepModelInfo } from "@/components/StepFields";
+import { DoneAsk, HeadTitle, InlineText, PromptBox, StepMeta, type StepConnection, type StepModelInfo } from "@/components/StepFields";
 import { choiceOf, LEVEL_LABELS, modelConfig, modelLabel, runLabel, stepLevel } from "@/lib/agent/models";
 import { indexFrom } from "@/lib/search";
 import { codexStateOf, runnerOf } from "@/lib/agent/runner";
@@ -42,7 +42,7 @@ import { PublishCard, cardModeOf } from "@/components/PublishCard";
 import { MonthDays } from "@/components/MonthDays";
 import { monthView } from "@/lib/sheet-month";
 import { dayKey } from "@/lib/clock";
-import { answerQuestionForm, restoreBlocksForm, backToTodo, cancelCloudRun, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, reopen, runInCloud, saveReport, stopWorkForm, setTaskDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
+import { answerQuestionForm, restoreBlocksForm, backToTodo, cancelCloudRun, compose, dismissQuestion, factPref, handoff, linkTasks, markDone, prepare, renameTask, reopen, runInCloud, saveReport, stopWorkForm, setTaskDue, setLevel, setProject, trashTask, updateTaskForm } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -129,7 +129,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const month = monthView(t, dayKey(new Date()));
   // panele kroków powstają niżej; kalendarz miesiąca pokazuje pod sobą kartę wybranego dnia (paczka 44), więc dostaje ten sam obiekt
   const panels: Record<string, React.ReactNode> = {}, dayCards: Record<string, React.ReactNode> = {};
-  const taskBar = <><span className="d-title" title={t.title}>{t.title}</span><PrioPicker base={cur.score.base} eff={cur.score.eff} why={cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; ")} cls="head" onPick={setLevel.bind(null, t.id)} /><span className="chip">{t.steps.filter((s) => s.status === "done").length}/{t.steps.length} kroków</span></>;
+  const taskBar = <><HeadTitle value={t.title} placeholder="Nazwa zadania" save={renameTask.bind(null, t.id)} /><PrioPicker base={cur.score.base} eff={cur.score.eff} why={cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; ")} cls="head" onPick={setLevel.bind(null, t.id)} /><span className="chip">{t.steps.filter((s) => s.status === "done").length}/{t.steps.length} kroków</span></>;
   const taskBody = (
     <>
       {t.summary ? <p>{t.summary}</p> : null}
