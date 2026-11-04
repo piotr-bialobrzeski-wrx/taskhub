@@ -26,7 +26,7 @@ import { ProtoFrame } from "@/components/ProtoFrame";
 import { embedMode, isOwnPreview } from "@/lib/embed";
 import { agentFeed, stepWaits, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
-import { decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
+import { beforeOf, decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -256,7 +256,9 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // sekcje (paczka 2, punkt 8; paczka 15): „Teraz” = stan i jedyny wyróżniony blok (akcje, czynność Claude, karta publikacji albo wynik),
   // pod nim główna treść, potem „Skąd” = materiały; wynik kroku (blok zmian w kodzie) idzie do „Teraz”, nie między materiały
   const { result, material: material0 } = splitBlocks(blocks);
-  const material = open.length ? material0.filter((b) => !(open as Block[]).includes(b)) : material0;   // otwarte pytania decyzji stoją w „Teraz”, nie między materiałami
+  // paczka 49, punkt 3: obecna treść rzeczy, którą zmienia szkic, stoi w karcie publikacji obok nowej wersji, nie w „Skąd”
+  const before = mode ? beforeOf(s) : null;
+  const material = material0.filter((b) => b !== before && !(open as Block[]).includes(b));   // otwarte pytania decyzji stoją w „Teraz”, nie między materiałami
   const form = s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined;
   const folds = foldsFor(state as CardState, mode, readingResult(s, material), kind === "decision");
   const cmp = hasComparison(material);   // kartka porównania (paczka 10, punkt 1): porównywane elementy u góry na całą szerokość, pod nimi karta publikacji
@@ -328,7 +330,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       </div>}
       {s.tool === "file" && s.status === "todo" && oldMac ? <div className="note">Ten krok zapisze plik aplikacja Task Hub na Macu od wersji 0.1.7. Zaktualizuj ją w menu aplikacji.</div> : null}
       {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} issue={issue}
-        waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} /> : null}
+        waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} before={before} /> : null}
       {consent && !mode ? <div className="note">{consent}</div> : null}
       {cloudNote && !mode ? <div className="note">{cloudNote}</div> : null}
       {addFolder ? <div className="note">Claude potrzebuje folderu {addFolder.path} w Ustawieniach aplikacji na Macu ({addFolder.section}). „Dodaj folder” otworzy aplikację i zapyta o zgodę; potem krok ruszy sam.</div> : null}
@@ -427,7 +429,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   ) : null;
   return (
     <>
-      {why ? <>{now}{why}</> : mode && skad && srcOpen ? (cmp ? <>{skad}{now}</> : <div className="zones two">{now}{skad}</div>) : <>{now}{main}{skad}</>}
+      {/* paczka 49: porównanie „było / będzie” na górze w dwóch kolumnach, tabela zmian i fakty pod nim, każde na swojej szerokości */}
+      {why ? <>{now}{why}</> : mode && skad && srcOpen ? (before ? <>{now}{skad}</> : cmp ? <>{skad}{now}</> : <div className="zones two">{now}{skad}</div>) : <>{now}{main}{skad}</>}
       {bare ? <div className="zone">{brief}</div> : null}
       {why ? null : fromDeps}
       <details className="edit tech">

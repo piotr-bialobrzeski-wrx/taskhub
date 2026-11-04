@@ -170,7 +170,8 @@ describe("porównanie obok siebie: groupBlocks i hasComparison", () => {
     expect(isSourceBlock({ type: "thread", source: { app: "slack", url: "https://x.slack.com/archives/C1/p2" }, messages: [{ author: "A", text: "x" }] })).toBe(true);
     expect(isSourceBlock({ type: "mail", source: { app: "gmail", url: "https://mail.google.com/mail/u/0/#inbox/1" }, messages: [{ from: "J", text: "x" }] })).toBe(true);
     expect(isSourceBlock({ type: "comment", source: { app: "figma", url: "https://www.figma.com/file/x" }, author: "O", text: "y" })).toBe(true);
-    expect(isSourceBlock({ type: "table", source: { app: "clickup", url: "https://app.clickup.com/t/1" }, columns: ["a"], rows: [["1"]] })).toBe(true);
+    // paczka 49, punkt 3: tabela idzie na całą szerokość, nie w parze
+    expect(isSourceBlock({ type: "table", source: { app: "clickup", url: "https://app.clickup.com/t/1" }, columns: ["a"], rows: [["1"]] })).toBe(false);
     expect(isSourceBlock({ type: "free", title: "n", source: { app: "clickup", ref: "869x" }, markdown: "x" })).toBe(false);
     expect(isSourceBlock({ type: "free", source: { app: "clickup", url: "taskhub://connect?url=https://zly.example" }, markdown: "x" })).toBe(false);
     expect(isSourceBlock({ type: "facts", source: { app: "clickup", url: "https://app.clickup.com/t/1" }, facts: [{ label: "a", value: "b" }] } as Block)).toBe(false);
