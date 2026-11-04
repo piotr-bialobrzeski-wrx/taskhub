@@ -1,7 +1,8 @@
 // Paczka 48: wspólny zapis wzmianki osoby w szkicu `<@aplikacja:id|Imię Nazwisko>`: odczyt, znacznik na kartce, ostrzeżenie o wzmiance bez id.
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { bareMentions, mentionAt, mentionToken, mentionWarning, mentionsToPlain, parseMentions, replaceMentions } from "@/lib/mention";
+import { publishFormat } from "@/lib/format";
+import { bareMentions, mentionsFor, mentionAt, mentionToken, mentionWarning, mentionsToPlain, parseMentions, replaceMentions } from "@/lib/mention";
 import { Markdown } from "@/lib/markdown";
 
 describe("zapis wzmianki", () => {
@@ -45,5 +46,33 @@ describe("znacznik osoby na kartce", () => {
     expect(html).toContain('<span class="mention-tag" title="slack · U1" data-app="slack" data-id="U1">@Jan Kowalski</span>');
     expect(html).toContain("<b>ważne</b>");
     expect(html).not.toContain("&lt;@slack");
+  });
+});
+
+describe("zamiana wzmianek przy wysyłce", () => {
+  const md = "Cześć <@slack:U09HEQ6BFE3|Kinga Nowak>, <@clickup:81234567|Gustaw Janyk> sprawdzi. `<@slack:U1|Kod>`";
+  it("Slack: <@U…>, osoba z innej aplikacji jako imię i nazwisko, kod bez zmian", () => {
+    const f = publishFormat("slack", md)!;
+    expect(f.text).toBe("Cześć <@U09HEQ6BFE3>, Gustaw Janyk sprawdzi. `<@slack:U1|Kod>`");
+    expect(f.how).toContain("formacie Slacka");
+  });
+  it("ClickUp: link wzmianki po id", () => {
+    expect(publishFormat("clickup", "Hej <@clickup:81234567|Gustaw Janyk>")!.text).toBe("Hej [@Gustaw Janyk](#user_mention#81234567)");
+  });
+  it("WhatsApp po numerze, GitHub po loginie", () => {
+    expect(mentionsFor("whatsapp", "<@whatsapp:+48600100200|Ania> hej")).toBe("@48600100200 hej");
+    expect(mentionsFor("github", "<@github:piotr-bialobrzeski-wrx|Piotr>")).toBe("@piotr-bialobrzeski-wrx");
+  });
+  it("mail: samo imię i nazwisko w HTML i w tekście", () => {
+    const f = publishFormat("gmail", "Cześć <@slack:U1|Kinga Nowak>")!;
+    expect(f.text).toBe("<p>Cześć Kinga Nowak</p>\n--- (body, bez znaczników) ---\nCześć Kinga Nowak");
+    expect(f.how).toContain("samo imię i nazwisko");
+  });
+  it("aplikacja bez reguły dostaje wersję z imieniem i nazwiskiem tylko, gdy są wzmianki", () => {
+    expect(publishFormat("figma", "Uwaga <@figma:123|Ola>")!.text).toBe("Uwaga Ola");
+    expect(publishFormat("figma", "Bez wzmianek")).toBeNull();
+  });
+  it("nieprawidłowe id w aplikacji docelowej: imię i nazwisko", () => {
+    expect(mentionsFor("clickup", "<@clickup:abc|Ola>")).toBe("Ola");
   });
 });

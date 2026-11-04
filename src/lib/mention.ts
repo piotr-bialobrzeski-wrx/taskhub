@@ -55,3 +55,30 @@ export function mentionWarning(bodies: (string | undefined)[]): string | null {
   const list = bare.slice(0, 6).map((b) => `„${b}”`).join(", ") + (bare.length > 6 ? ` i ${bare.length - 6} innych` : "");
   return `Uwaga: wzmianka bez id (${list}) poleci jako zwykły tekst, bez oznaczenia osoby. Jeśli to osoba w aplikacji docelowej, znajdź jej id konektorem tej aplikacji i zapisz wzmiankę jako <@aplikacja:id|Imię Nazwisko> (np. <@slack:U0123ABC|Jan Kowalski>), potem zapisz kartkę ponownie.`;
 }
+
+// ---------- zamiana przy wysyłce ----------
+// Jedna reguła na aplikację: z wzmianki tej aplikacji robi jej format. Wzmianka innej aplikacji (np. osoba ze Slacka w mailu) i aplikacja bez
+// wzmianek (mail) dostają samo „Imię Nazwisko”. Nowa aplikacja = nowy wpis tutaj, bez zmian w UI.
+type Rule = { names: string[]; to: (m: Mention) => string | null; how: string };
+const RULES: Rule[] = [
+  { names: ["slack"], to: (m) => (/^[UW][A-Z0-9]{2,}$/.test(m.id) ? `<@${m.id}>` : null), how: "wzmianki osób są już w formacie Slacka <@U…>: zostaw je, jak są" },
+  { names: ["clickup"], to: (m) => (/^\d+$/.test(m.id) ? `[@${m.name}](#user_mention#${m.id})` : null), how: "wzmianki osób są już w formacie ClickUpa [@Imię](#user_mention#id) (komentarz i opis w Markdown): zostaw je, jak są" },
+  { names: ["whatsapp"], to: (m) => { const d = m.id.replace(/[^\d]/g, ""); return d.length >= 6 ? `@${d}` : null; }, how: "wzmianki osób są już w formacie WhatsAppa @numer (numer telefonu bez plusa i spacji): zostaw je, jak są" },
+  { names: ["github"], to: (m) => (/^[A-Za-z\d](?:[A-Za-z\d-]{0,38})$/.test(m.id) ? `@${m.id}` : null), how: "wzmianki osób są już w formacie GitHuba @login: zostaw je, jak są" },
+];
+const ruleOf = (app: string) => RULES.find((r) => r.names.includes(app.toLowerCase()));
+
+// treść z wzmiankami w formacie aplikacji docelowej; wzmianka, której ta aplikacja nie oznaczy, to samo „Imię Nazwisko”
+export function mentionsFor(app: string, md: string): string {
+  const r = ruleOf(app), a = app.toLowerCase();
+  return replaceMentions(md, (m) => (r && m.app === a ? r.to(m) : null) ?? m.name);
+}
+// zdanie do wskazówki wysyłki, gdy treść ma wzmianki; null bez wzmianek
+export function mentionHow(app: string, md: string): string | null {
+  const ms = parseMentions(md);
+  if (!ms.length) return null;
+  const r = ruleOf(app), a = app.toLowerCase();
+  const tagged = r ? ms.filter((m) => m.app === a && r.to(m) !== null) : [];
+  if (!tagged.length) return "wzmianki osób zamienione na samo imię i nazwisko (ta aplikacja ich nie oznacza)";
+  return r!.how + (tagged.length < ms.length ? "; wzmianki bez id w tej aplikacji to samo imię i nazwisko" : "");
+}
