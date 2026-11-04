@@ -399,6 +399,48 @@ describe.skipIf(!DB)("mostek v2 na serwerze", async () => {
     await sql()`delete from tasks where owner_id = ${owner}`;
   });
 
+  // paczka 50: czynność bez API (np. odpięcie od parenta w ClickUpie) wraca do Piotra z instrukcją; druga wysyłka dostaje ten sam powód
+  it("paczka 50: „RĘCZNIE:” robi krok Piotra z instrukcją, druga wysyłka bez wyniku dostaje powód zamiast „nie została potwierdzona”", async () => {
+    const t = await repo.createTask(owner, { title: "P50: odpięcie bugów", steps: [{ title: "Odepnij bug A", tool: "clickup", needsApproval: true }, { title: "Odepnij bug B", tool: "clickup", needsApproval: true }, { title: "Odepnij bug C", tool: "clickup", needsApproval: true }] });
+    const [A, B, C] = t.steps.map((x) => x.id);
+    for (const [id, n] of [[A, "869fdtwtu"], [B, "869fe92gt"], [C, "869fxxxxx"]] as const) {
+      await repo.updateStep(id, { status: "draft", link: `https://app.clickup.com/t/${n}`, blocks: [{ type: "facts", facts: [{ label: "Ticket", value: n }] }, draft({ app: "clickup", action: "update", where: `ticket ${n}` }, "Remove the parent task.")] });
+    }
+    expect(await repo.approveDraft(owner, A)).toBe(true);
+    await sql()`update steps set approved_at = now() - interval '2 minutes' where id = ${A}`;
+    expect(await repo.approveDraft(owner, B)).toBe(true);
+    const r1 = await (await postRun({ bridge: "mini", v: 2, kind: "send", caps: ["send-result"] })).json();
+    expect(r1.step.id).toBe(A);
+    expect(r1.prompt).toContain("RĘCZNIE:"); expect(r1.prompt).toContain("removing a parent is not supported");
+    await patch(r1.run.id, { outcome: "done", note: "x", touched: true, left: { reason: "RĘCZNIE: Otwórz ticket w ClickUpie i w menu ⋯ wybierz „Remove from parent”. | https://app.clickup.com/t/869fdtwtu" } });
+    const a = await step(t.id, A);
+    expect(a).toMatchObject({ tool: "manual", status: "todo", approvedAt: null, sendStartedAt: null, needsApproval: false, link: "https://app.clickup.com/t/869fdtwtu" });
+    expect(a.blocks?.[0]).toEqual({ type: "text", title: "Zrób to ręcznie", body: "Otwórz ticket w ClickUpie i w menu ⋯ wybierz „Remove from parent”." });
+    expect(a.blocks?.some((b) => b.type === "draft")).toBe(false); expect(a.blocks?.some((b) => b.type === "facts")).toBe(true);
+    expect(await chat(t.id)).toEqual(["Krok „Odepnij bug A” wrócił do Ciebie: ClickUp nie pozwala zrobić tego przez konektor. Co kliknąć, jest na kartce kroku."]);
+    // druga wysyłka kończy się bez linii wyniku i bez powodu: ten sam powód co przy pierwszej, nie „nie została potwierdzona”
+    const r2 = await (await postRun({ bridge: "mini", v: 2, kind: "send", caps: ["send-result"] })).json();
+    expect(r2.step.id).toBe(B);
+    await patch(r2.run.id, { outcome: "done", note: "zrobione", touched: true });
+    const b = await step(t.id, B);
+    expect(b).toMatchObject({ tool: "clickup", status: "draft", approvedAt: null });
+    const [m] = await sql()`select text, actions from chat_messages where task_id = ${t.id} and role = 'agent' and actions->>'stepId' = ${B}`;
+    expect(m.text).toBe("Nie zrobiłem kroku „Odepnij bug B”. Potrzebuję, abyś coś zrobił.");
+    expect(m.actions.why).toBe("Ten sam powód co przy kroku „Odepnij bug A”: ClickUp nie pozwala zrobić tego przez konektor, więc trzeba to zrobić ręcznie w ClickUp.");
+    expect((await chat(t.id)).some((x) => x.includes("nie została potwierdzona"))).toBe(false);
+    // bieg bez linii wyniku, ale z ostatnim zdaniem: ono jest powodem
+    expect(await repo.approveDraft(owner, C)).toBe(true);
+    const r3 = await (await postRun({ bridge: "mini", v: 2, kind: "send", caps: ["send-result"] })).json();
+    await patch(r3.run.id, { outcome: "done", note: "API ClickUp nie wspiera usunięcia parenta przez update_task.", touched: true });
+    const [m3] = await sql()`select actions from chat_messages where task_id = ${t.id} and role = 'agent' and actions->>'stepId' = ${C}`;
+    expect(m3.actions.why).toBe("API ClickUp nie wspiera usunięcia parenta przez update_task.");
+    // leave_step z „RĘCZNIE:” (konektor, bieg pracy) robi to samo
+    const done = await callTool(client, "leave_step", { stepId: C, reason: "Ręcznie: w ClickUpie otwórz ticket i kliknij „Remove from parent”." });
+    expect(done.text).toBe("Krok wrócił do Piotra z instrukcją.");
+    expect(await step(t.id, C)).toMatchObject({ tool: "manual", status: "todo", link: "https://app.clickup.com/t/869fxxxxx" });
+    await sql()`delete from tasks where owner_id = ${owner}`;
+  });
+
   it("v2 wysyłka konektorem: Claude Code zamyka krok tokenem wysyłki, koniec biegu nic nie cofa", async () => {
     const a = await approved("Mostek v2: wiadomość do zespołu", "slack", [draft({ app: "slack", action: "send", where: "#dev" }, "Cześć")]);
     const s = await (await postRun({ bridge: "mini", v: 2, kind: "send" })).json();

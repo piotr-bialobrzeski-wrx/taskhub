@@ -6,7 +6,7 @@ import { type Company, type Connection, Blocks, type Block, type Fact, type Proj
 import { agentMinOf, elapsedSec, Q, roundQ, spentMin } from "./time";
 import { isHttpUrl, sanitizeBlocks } from "./safeurl";
 import { approvalSig, approvalValid, draftOf, draftsOf, isGitDraft, isSendable, shownSig, wasSent, withRows, type Draft, type SheetRows } from "./agent/approval";
-import { doneChat, leaveChat, stepKind } from "./stepcard";
+import { doneChat, leaveChat, manualChat, manualOf, stepKind } from "./stepcard";
 import { shortTitle } from "./auto";
 import { guessProject } from "./project-guess";
 import { isModelName, MAX_ESCALATION, normalizeLevel } from "./agent/models";
@@ -659,8 +659,31 @@ export const notSentNote = (app: string, title?: string | null) => `Wysyłka${ti
 export async function leaveSend(ownerId: string, stepId: string, reason: string): Promise<boolean> {
   const [r] = await sql()`select s.task_id, s.title, s.send_started_at from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId} and s.status <> 'done'`;
   if (!r || !r.sendStartedAt) return false;   // zgoda nie należy już do tego biegu (Piotr zatrzymał albo zatwierdził od nowa)
+  if (manualOf(reason)) return handToOwner(ownerId, stepId, reason);
   await clearApproval(ownerId, stepId);
   await addChat(ownerId, r.taskId as string, "agent", leaveChat(r.title as string, reason, false), { stepId, why: reason });
+  return true;
+}
+// paczka 50: aplikacja nie pozwala na czynność przez API (powód „RĘCZNIE: …”): krok wraca do Piotra jako jego krok (narzędzie Ty) z instrukcją
+// na górze kartki i linkiem do miejsca pracy. Szkic znika z kartki (zostaje w poprzedniej wersji kartki), bo nie ma go już komu wysłać;
+// Piotr robi to sam w aplikacji i klika „Zrobione”. Zwraca false, gdy krok jest już zrobiony albo powód nie ma instrukcji
+export async function handToOwner(ownerId: string, stepId: string, reason: string): Promise<boolean> {
+  const m = manualOf(reason);
+  if (!m) return false;
+  const [r] = await sql()`select s.* from steps s join tasks t on t.id = s.task_id where s.id = ${stepId} and t.owner_id = ${ownerId} and s.status <> 'done'`;
+  if (!r) return false;
+  const blocks = parseBlocks(r.blocks) ?? [];
+  const app = draftOf({ blocks })?.target.app ?? (r.tool as string);
+  const label = app && app !== "manual" ? toolLabel(normalizeTool(app)) : null;
+  await clearApproval(ownerId, stepId);
+  const head: Block = { type: "text", title: "Zrób to ręcznie", body: m.text };
+  const next: Block[] = [head, ...blocks.filter((b) => b.type !== "draft")].slice(0, 12);
+  await updateStep(stepId, {
+    tool: "manual", status: "todo", prevStatus: null, handoffAt: null, needsApproval: false, blocks: next,
+    ...(m.link && !isHttpUrl(r.link as string | null) ? { link: m.link } : {}),
+  });
+  await sql()`update steps set wait_for = null, cloud = null where id = ${stepId}`;
+  await addChat(ownerId, r.taskId as string, "agent", manualChat(r.title as string, label), { stepId, why: reason.trim().slice(0, 600), ...(app && app !== "manual" ? { app: normalizeTool(app) } : {}) });
   return true;
 }
 // bieg wysyłki bierze szkic: atomowo i najwyżej raz (tylko gdy nikt go jeszcze nie wziął, zgoda jest ważna, a kroki przed nim są zrobione)
@@ -1330,8 +1353,37 @@ async function afterRuns(ownerId: string, runs: Row[], opts: { untouched?: boole
     // commit z aplikacji na Macu: aplikacja wie, co się nie udało (np. commit jest, push nie), więc piszemy powód
     const why = d && isGitDraft(d, blocks) && r.outcome === "error" && typeof r.note === "string" && r.note.trim() ? r.note.trim().slice(0, 500).replace(/([^.!?])$/, "$1.") : "";
     const app = d?.target.app ?? "aplikacji docelowej";
-    await addChat(ownerId, s.taskId as string, "agent", why ? `Commit nie wyszedł: ${why} Szkic wrócił do zatwierdzenia; zatwierdź go ponownie, gdy to poprawisz.` : opts.untouched ? notSentNote(app, s.title as string) : unconfirmedSendNote(app, s.title as string), { stepId });
+    if (why) { await addChat(ownerId, s.taskId as string, "agent", `Commit nie wyszedł: ${why} Szkic wrócił do zatwierdzenia; zatwierdź go ponownie, gdy to poprawisz.`, { stepId }); continue; }
+    if (opts.untouched) { await addChat(ownerId, s.taskId as string, "agent", notSentNote(app, s.title as string), { stepId }); continue; }
+    // paczka 50: bieg skończył się bez linii wyniku, ale powiedział, czemu nie wysłał (ostatnie zdanie biegu), albo inna wysyłka tego zadania
+    // do tej samej aplikacji chwilę wcześniej oddała krok z powodem: Piotr dostaje ten powód zamiast „nie została potwierdzona”
+    const reason = r.outcome === "done" ? runReason(r.note) : null;
+    if (reason && manualOf(reason) && (await handToOwner(ownerId, stepId, reason))) continue;
+    const known = reason ?? (r.outcome === "stopped" ? null : await siblingReason(ownerId, s.taskId as string, stepId, app));
+    if (known) { await addChat(ownerId, s.taskId as string, "agent", leaveChat(s.title as string, known, false), { stepId, why: known }); continue; }
+    await addChat(ownerId, s.taskId as string, "agent", unconfirmedSendNote(app, s.title as string), { stepId });
   }
+}
+// ostatnie zdanie biegu wysyłki (aplikacja na Macu wysyła je jako note), gdy to prawdziwy powód, a nie zastępczy napis aplikacji
+const RUN_FILLERS = new Set(["zrobione", "błąd bez komunikatu", "ok", "done"]);
+export function runReason(note: unknown): string | null {
+  if (typeof note !== "string") return null;
+  const t = note.replace(/\s+/g, " ").trim().slice(0, 600);
+  return t.length >= 12 && !RUN_FILLERS.has(t.toLowerCase().replace(/[.!]+$/, "")) ? t : null;
+}
+// powód, z którym inna wysyłka tego zadania do tej samej aplikacji oddała krok w ostatnich 2 godzinach (np. dwa odpięcia w ClickUpie po kolei)
+async function siblingReason(ownerId: string, taskId: string, stepId: string, app: string): Promise<string | null> {
+  const rows = await sql()`select m.actions->>'why' as why, m.actions->>'app' as app, s.title, s.blocks from chat_messages m join steps s on s.id::text = m.actions->>'stepId'
+    where m.owner_id = ${ownerId} and m.task_id = ${taskId} and m.role = 'agent' and m.created_at > now() - interval '2 hours'
+      and coalesce(m.actions->>'why', '') <> '' and m.actions->>'stepId' <> ${stepId} order by m.created_at desc limit 5`;
+  const want = normalizeTool(app);
+  for (const x of rows) {
+    const other = (x.app as string | null) ?? draftOf({ blocks: parseBlocks(x.blocks) })?.target.app ?? null;
+    if (!other || normalizeTool(other) !== want) continue;
+    const why = x.why as string, label = toolLabel(want);
+    return `Ten sam powód co przy kroku „${shortTitle(x.title as string, 60)}”: ${manualOf(why) ? `${label} nie pozwala zrobić tego przez konektor, więc trzeba to zrobić ręcznie w ${label}.` : why}`;
+  }
+  return null;
 }
 // bieg, który aplikacja na Macu ma przerwać przy najbliższym sygnale: zatrzymany w Task Hub (stop_at) albo bieg wysyłki, którego zgodę Piotr wycofał
 // („Zatrzymaj” na karcie kasuje znacznik wysyłki) lub który sam oddał krok (stara aplikacja bez tego doczeka do końca, a krok i tak się nie zamknie)

@@ -317,6 +317,22 @@ export function leaveChat(title: string, reason: string, waits: boolean): string
   if (waits || /^[\s„"'(]*czeka(m|my|ją)?(?=[\s,:;.]|$)/i.test(reason)) return `Krok ${q} czeka na inny krok. Nic nie musisz robić.`;
   return `Nie zrobiłem kroku ${q}. Potrzebuję, abyś coś zrobił.`;
 }
+// paczka 50: czynność, której aplikacja nie udostępnia przez API (np. odpięcie subtaska od parenta w ClickUpie). Agent albo bieg wysyłki
+// oddaje krok z powodem „RĘCZNIE: co kliknąć i gdzie | link”, a krok wraca do Piotra jako jego krok z tą instrukcją (decyzja Piotra 2026-11-04)
+export const MANUAL_MARK = "RĘCZNIE:";
+const MANUAL_RE = /^[\s„"'*`(]*r[ęe]cznie\s*:\s*/i;
+export function manualOf(reason: string | null | undefined): { text: string; link: string | null } | null {
+  if (!reason || !MANUAL_RE.test(reason)) return null;
+  const rest = reason.replace(MANUAL_RE, "").trim();
+  const link = /https?:\/\/[^\s|)\]]+/.exec(rest)?.[0]?.replace(/[.,;:]+$/, "") ?? null;
+  // link idzie do linku kroku, w instrukcji zostaje sam tekst (bez „|” z linii wyniku)
+  const text = (link ? rest.replace(link, "") : rest).split("|").map((x) => x.trim()).filter(Boolean).join(" ").replace(/\s+([.,;:])/g, "$1").replace(/\s{2,}/g, " ").trim();
+  return text ? { text, link } : null;
+}
+// dymek, gdy krok wraca do Piotra z instrukcją; instrukcja jest na kartce kroku, pełny powód w why
+export function manualChat(title: string, app: string | null): string {
+  return `Krok „${shortTitle(title, 70)}” wrócił do Ciebie: ${app ? `${app} nie pozwala` : "aplikacja nie pozwala"} zrobić tego przez konektor. Co kliknąć, jest na kartce kroku.`;
+}
 // pełny powód przy krótkim dymku (zapisany w actions wpisu rozmowy)
 export const whyOf = (m: { actions?: unknown }): string | null => {
   const w = (m.actions as { why?: unknown } | null | undefined)?.why;

@@ -13,7 +13,7 @@ import { BRIDGE_ALIVE_MS, ago, connectorProblem, knownApp } from "@/lib/bridge";
 import { finishStep } from "@/lib/services";
 import { composeStatic } from "@/lib/agent/compose";
 import { appName, Blocks, ChangedFile, Fact, isAppProject, isOwnerStep, normalizeTool, SPHERES, sphereOf, type Block, type Step } from "@/lib/schema";
-import { destOf, doneChat, isDeployStep, isProjectStep, PROJECT_RE, stepKind, keepOwnerAnswers, leaveChat, whyOf, projectPrompt, READ_RE, sameTarget } from "@/lib/stepcard";
+import { destOf, doneChat, isDeployStep, isProjectStep, PROJECT_RE, stepKind, keepOwnerAnswers, leaveChat, manualOf, MANUAL_MARK, whyOf, projectPrompt, READ_RE, sameTarget } from "@/lib/stepcard";
 import { shortTitle } from "@/lib/auto";
 import { sql } from "@/lib/db";
 import { originOf, wwwAuthenticate } from "@/lib/oauth";
@@ -574,12 +574,20 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("leave_step", {
-      title: "Oddaję krok", description: "Gdy kroku nie da się zrobić (brak narzędzia, dostępu albo danych): krok wraca do zrobienia, a Piotr widzi powód w zadaniu. Gdy krok tylko czeka (na inny krok, bieg albo projekt w chmurze), zacznij powód od „czeka na …” i podaj waitFor = id kroku, na który czeka: wtedy poziom kroku nie rośnie, a krok wraca na listę dopiero, gdy tamten jest zrobiony. Nie używaj do pytań, od tego jest ask_question, ani do kroków zbędnych, od tego jest skip_step. Gdy brakuje folderu na Macu (kod, pliki, narzędzia), podaj needFolder = rodzaj z Ustawień aplikacji (code: Foldery z kodem, files: Foldery na pliki, tools: Foldery z narzędziami) i pełną ścieżkę folderu (z zasad projektu): karta kroku dostanie przycisk „Dodaj folder”. Gdy krok blokuje coś, czego mocniejszy model nie zmieni (brak dostępu, narzędzia albo danych, które musi dać Piotr), podaj blocked: true. Taki krok (i z needFolder) nie wraca do agentów, dopóki Piotr czegoś nie zmieni (wiadomość, odpowiedź na pytanie, foldery w aplikacji na Macu); inny oddany krok spróbuje jeszcze mocniejszy model.",
+      title: "Oddaję krok", description: `Gdy kroku nie da się zrobić (brak narzędzia, dostępu albo danych): krok wraca do zrobienia, a Piotr widzi powód w zadaniu. Gdy krok tylko czeka (na inny krok, bieg albo projekt w chmurze), zacznij powód od „czeka na …” i podaj waitFor = id kroku, na który czeka: wtedy poziom kroku nie rośnie, a krok wraca na listę dopiero, gdy tamten jest zrobiony. Nie używaj do pytań, od tego jest ask_question, ani do kroków zbędnych, od tego jest skip_step. Gdy brakuje folderu na Macu (kod, pliki, narzędzia), podaj needFolder = rodzaj z Ustawień aplikacji (code: Foldery z kodem, files: Foldery na pliki, tools: Foldery z narzędziami) i pełną ścieżkę folderu (z zasad projektu): karta kroku dostanie przycisk „Dodaj folder”. Gdy krok blokuje coś, czego mocniejszy model nie zmieni (brak dostępu, narzędzia albo danych, które musi dać Piotr), podaj blocked: true. Taki krok (i z needFolder) nie wraca do agentów, dopóki Piotr czegoś nie zmieni (wiadomość, odpowiedź na pytanie, foldery w aplikacji na Macu); inny oddany krok spróbuje jeszcze mocniejszy model. Gdy aplikacja w ogóle nie pozwala na tę czynność przez konektor (narzędzie odpowiada, że to nieobsługiwane, np. „removing a parent is not supported”), zacznij powód od „${MANUAL_MARK}”, a dalej po polsku, krótko, co Piotr ma kliknąć i gdzie w tej aplikacji, i link do elementu: krok wraca do Piotra jako jego krok z tą instrukcją.`,
       inputSchema: z.object({ stepId: z.string(), reason: z.string().max(600), waitFor: z.string().optional(), needFolder: z.object({ kind: z.enum(["code", "files", "tools"]), path: z.string().min(2).max(400) }).optional(), blocked: z.boolean().optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId); if (!taskId) return text("Nie ma takiego kroku.");
       const st = (await repo.getTask(ownerId, taskId))?.steps.find((x) => x.id === a.stepId); if (!st) return text("Nie ma takiego kroku.");
       if (st.status === "done") return text("Ten krok jest już zrobiony.");
+      // paczka 50: czynność bez API (powód „RĘCZNIE: …”): krok wraca do Piotra jako jego krok z instrukcją. Stary bieg wysyłki (zgoda już nie jego) nic nie zmienia
+      if (manualOf(a.reason) && !(scope?.kind === "send" && !st.sendStartedAt)) {
+        await repo.addAgentTime(st.id, await agentSecFor(st, { runClock: false }));
+        await repo.handToOwner(ownerId, st.id, a.reason);
+        await mark(st.id, "oddał krok Piotrowi");
+        await markRun();
+        return text("Krok wrócił do Piotra z instrukcją.");
+      }
       // oddany krok z zatwierdzonym szkicem (np. bieg wysyłki nie znalazł kanału) wraca do zatwierdzenia: bez ponawiania, Piotr decyduje.
       // Bieg wysyłki bez send_started_at to stary bieg (Piotr zatrzymał i zatwierdził od nowa): nowej zgody nie rusza, zostaje tylko notka
       const stale = scope?.kind === "send" && !st.sendStartedAt;
