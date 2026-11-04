@@ -115,7 +115,9 @@ export function readingResult(s: Pick<Step, "status" | "tool" | "doneBy" | "bloc
 }
 // kartka porównania (paczka 10, punkt 1): 2+ kolejne klocki źródłowe (ticket, wątek, mail, komentarz, tabela z adresem http(s)) stoją obok siebie
 // w siatce .cmp; pytanie albo notatka między nimi przerywa ciąg (celowo: agent stawia pytanie przed porównywanymi elementami). Czysta logika, bez React
-export const COMPARE_TYPES = new Set(["free", "comment", "thread", "mail", "table"]);
+// paczka 49, punkt 3: tabela nie staje w parze (tabele idą na całą szerokość, „Wspólna oś” z 2026-11-02); obok siebie stały „Obecny opis
+// ticketu” i tabela „Co się zmienia”, a nowa wersja wypadała osobno na dole. Porównanie obecnej i nowej wersji składa beforeOf niżej
+export const COMPARE_TYPES = new Set(["free", "comment", "thread", "mail"]);
 export const isSourceBlock = (b: Block): boolean => COMPARE_TYPES.has(b.type) && isHttpUrl((b as { source?: { url?: string } }).source?.url);
 export function groupBlocks(blocks: Block[]): (Block | Block[])[] {
   const out: (Block | Block[])[] = [];
@@ -126,6 +128,20 @@ export function groupBlocks(blocks: Block[]): (Block | Block[])[] {
   return out;
 }
 export const hasComparison = (blocks: Block[]): boolean => groupBlocks(blocks).some(Array.isArray);
+// „było / będzie” (paczka 49, punkt 3): szkic, który zmienia istniejącą rzecz (action update), i klocek free z jej obecną treścią, którego
+// źródło ma ten sam adres co miejsce szkicu, to jedno porównanie: obecna wersja po lewej, nowa ze szkicu po prawej, zmiany podświetlone.
+// Znacznikiem jest sam adres (agent kładzie obecną treść jako free z source.url = target.url szkicu), bez kodu pod konkretną aplikację.
+// Przy kilku opcjach szkicu porównania nie ma (opcje stoją obok siebie same); dwa klocki z tym adresem: pierwszy
+export function beforeOf(s: Pick<Step, "tool" | "title" | "blocks">): Extract<Block, { type: "free" }> | null {
+  const ds = draftsOf(s);
+  if (ds.length !== 1) return null;
+  const d = ds[0];
+  if ((d.target.action ?? "send") !== "update" || d.rows?.length || d.sheet?.length) return null;
+  const url = targetLink(s, s.blocks, d)?.url;
+  if (!url) return null;
+  const u = normUrl(url);
+  return (s.blocks ?? []).find((b): b is Extract<Block, { type: "free" }> => b.type === "free" && isHttpUrl(b.source?.url) && normUrl(b.source!.url!) === u) ?? null;
+}
 
 const norm = (x: string) => x.replace(/\s+/g, " ").trim();
 // raport bez powtórki: to, co już stoi w streszczeniu bloku zmian albo w treści szkicu, nie pokazuje się drugi raz; „Do potwierdzenia: …” wychodzi jako osobna linia

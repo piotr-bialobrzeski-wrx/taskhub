@@ -38,7 +38,7 @@ export function SrcHead({ s, title, meta, open, hide }: { s?: Provenance; title?
 }
 // karta źródła tylko do odczytu (paczka 10, punkt 2): klocek free z adresem http(s) wygląda jak karta szkicu (nagłówek z aplikacją,
 // tytuł, linia metadanych, treść na białym polu), ale bez paska formatowania; Piotr czyta ticket albo dokument, poprawia go w aplikacji źródłowej
-function SourceDoc({ b, href, hide }: { b: Extract<Block, { type: "free" }>; href: string; hide?: string[] }) {
+export function SourceDoc({ b, href, hide }: { b: Extract<Block, { type: "free" }>; href: string; hide?: string[] }) {
   const app = b.source?.app ?? "", key = normalizeTool(app);   // openLabel oczekuje klucza: „ClickUp” od agenta -> „Otwórz w ClickUpie”
   return (
     <div className="block kctx srcdoc">

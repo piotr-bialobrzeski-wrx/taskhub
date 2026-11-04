@@ -974,6 +974,14 @@ details.fold[open] > summary svg { transform: rotate(180deg); }
 /* 2+ kolejne klocki źródłowe obok siebie: kolumny min 340 px, więc w wąskim panelu (treść 560 px) same układają się jedna pod drugą, w szerokim obok siebie; bez container query */
 .cmp { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: var(--s-4); align-items: start; min-width: 0; }
 .cmp > * { min-width: 0; }
+/* paczka 49, punkt 3: „było / będzie” w karcie publikacji: obecna wersja po lewej, nowa po prawej (każda do 660 px, na telefonie jedna pod drugą);
+   słowa, które znikają, przekreślone po lewej, te, które dochodzą, podświetlone po prawej (CSS Custom Highlight API, src/components/ComparePair.tsx) */
+.cmp.pair { margin-top: var(--s-3); }
+.cmp-side { display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; }
+.cmp-lbl { font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--sub); }
+.cmp-side.before > .block.srcdoc { margin: 0; }
+::highlight(th-ins) { background-color: var(--ok-soft); color: var(--text); }
+::highlight(th-del) { background-color: rgba(217, 59, 79, 0.10); text-decoration: line-through; color: var(--sub); }
 /* opcje (punkt 3b/4): każda w białej karcie w siatce .cmp pod wspólnym nagłówkiem karty publikacji (nadpisuje przezroczyste .now .block.pub);
    stan opcji w kolorze decyzji tylko przed wyborem; pole z formatowaniem i podgląd na białej karcie dostają krawędź; odrzucone wersje przygaszone */
 .now .cmp .block.pub.opt { background: var(--surface); padding: var(--s-4) var(--s-5); border-radius: var(--r-sm); }

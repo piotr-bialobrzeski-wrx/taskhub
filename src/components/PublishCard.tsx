@@ -4,13 +4,14 @@
 // z własnym formularzem, linią miejsca i przyciskiem „Zatwierdź: Opcja X”; po wyborze karta pokazuje wybraną jak jeden szkic, a resztę zwija pod „Odrzucone wersje”.
 import type { Block, Step, Task } from "@/lib/schema";
 import { normalizeTool, openLabel, toolLabel } from "@/lib/schema";
-import { ACTION, approveLabel, destHint, destOf, targetLink, type Dest } from "@/lib/stepcard";
+import { ACTION, approveLabel, destHint, destOf, normUrl, targetLink, type Dest } from "@/lib/stepcard";
 import { fileName } from "@/lib/safeurl";
 import { fmtTime } from "@/lib/canvas/vm";
 import { fmtDateTime } from "@/lib/clock";
 import { toolColor } from "@/components/canvas/ui";
 import { Icon } from "@/components/canvas/ui";
-import { Facts, Table } from "@/components/BlockRenderer";
+import { Facts, SourceDoc, Table } from "@/components/BlockRenderer";
+import { ComparePair, CompareSide } from "@/components/ComparePair";
 import { PendingButton } from "@/components/Pending";
 import { RichField } from "@/components/RichField";
 import { Markdown } from "@/lib/markdown";
@@ -55,8 +56,10 @@ const openBtn = (l: { label: string; url: string } | null) => l && isHttpUrl(l.u
   ? <a className="btn ico" href={l.url} target="_blank" rel="noopener" title={`Tu trafi wynik kroku: ${l.url}`}>{l.label}<Icon k="ext" size={13} sw={1.6} /></a> : null;
 
 // issue: czemu mostek nie wyśle tego szkicu (brak konektora na Macu, kilka kont, konektor innej firmy); karta ostrzega, przycisk zgody nie działa
-export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, company, activity, waitsOn = [], issue = null }: {
+// before: obecna treść rzeczy, którą szkic zmienia (stepcard.beforeOf); wtedy obecna i nowa wersja stoją obok siebie ze zmianami podświetlonymi
+export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, company, activity, waitsOn = [], issue = null, before = null }: {
   t: Task; s: Step; mode: CardMode; aiOn: boolean; ownerName: string; link: string | null; connections: StepConnection[]; company: string | null; activity?: TileActivity | null; waitsOn?: string[]; issue?: string | null;
+  before?: Extract<Block, { type: "free" }> | null;
 }) {
   const { drafts, chosen, rejected, multi } = optionsOf(s);
   // szkic kroku: wybrana opcja, inaczej pierwsza (przy jednym szkicu zawsze on); z niego nagłówek, miejsce i podpowiedź pod przyciskiem, bo te są na krok
@@ -155,9 +158,17 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
         {di?.fields?.length ? <Facts facts={di.fields} /> : null}
       </div></div>
     );
-    return { preview, approve, isRows, sheetActs: !!sheetActs };
+    return { preview, approve, isRows, sheetActs: !!sheetActs, editable };
   };
   const one = view(d, 0);
+  // paczka 49, punkt 3: „było / będzie” w dwóch kolumnach; przycisk „Otwórz w …” zostaje raz, w nagłówku karty
+  const beforeUrl = before?.source?.url && isHttpUrl(before.source.url) ? before.source.url.trim() : null;
+  const pair = before && beforeUrl && !multi && !one.isRows ? (
+    <ComparePair>
+      <CompareSide side="before" label="Obecna wersja" sel=".msg.doc"><SourceDoc b={before} href={beforeUrl} hide={[normUrl(beforeUrl)]} /></CompareSide>
+      <CompareSide side="after" label={one.editable ? "Nowa wersja · możesz poprawić" : "Nowa wersja"} sel=".rf-doc, .msg.mine > :not(.who, h4, .facts)">{one.preview}</CompareSide>
+    </ComparePair>
+  ) : null;
   const mainLabel = approveLabel(dest, { stays, rows: one.isRows });
   const list = multi && !chosen && !pick;   // zamknięty albo w toku bez wybranej: opcje tylko do odczytu
   // przycisk celu w nagłówku karty przed wysyłką (po wysyłce link do wyniku; krok zamknięty bez wysyłki ma miejsce w rzędzie akcji strony); przy opcjach każda ma własny
@@ -213,7 +224,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
           {previewPath && mode !== "sent" && mode !== "unsent" ? <span className="sub" title="Podgląd leży na Macu: otwórz go w Finderze albo w przeglądarce">Podgląd: <code>{previewPath}</code> <CopyButton text={previewPath} label="Kopiuj ścieżkę" /></span> : null}
         </div>
       ) : null}
-      {pick || list ? <div className="cmp">{drafts.map((di, i) => optionCard(di, i, list))}</div> : one.preview}
+      {pick || list ? <div className="cmp">{drafts.map((di, i) => optionCard(di, i, list))}</div> : pair ?? one.preview}
       {rej}
       {mode === "sent" || mode === "sending" ? (() => { const n = approvalNote(s, s.needsApproval && isExternalApp(app)); return n ? <p className={n.warn ? "note warn" : "pub-dest"}>{n.text}</p> : null; })() : null}
       {sentAlready && (mode === "proposed" || mode === "parked") ? (
