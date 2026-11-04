@@ -34,3 +34,23 @@ describe("obieg treści przez edytor", () => {
     expect(out.startsWith("|")).toBe(true);
   });
 });
+
+describe("wzmianka osoby w polu z formatowaniem", () => {
+  it.each([
+    "Cześć <@slack:U09HEQ6BFE3|Piotr Białobrzeski>, zerknij.",
+    "- <@clickup:81234567|Kinga Nowak> i <@slack:U1|Jan_Kowalski>\n- **Pilne:** <@whatsapp:+48600100200|Ania>",
+    "Bez id: @Jan Kowalski oraz <@U07DWN21HJQ>",
+    "Kod `<@slack:U1|Jan>` zostaje",
+  ])("%j wraca bajt w bajt", (md) => {
+    expect(roundTrip(md)).toBe(md);
+  });
+  it("w polu wzmianka jest jednym znacznikiem z nazwą osoby", () => {
+    const e = new Editor({ extensions: richExtensions(), content: toEditorMd("Hej <@slack:U1|Jan Kowalski>!"), contentType: "markdown" });
+    try {
+      const nodes: string[] = [];
+      e.state.doc.descendants((n) => { if (n.type.name === "mention") nodes.push(`${n.attrs.app}/${n.attrs.id}/${n.attrs.name}`); });
+      expect(nodes).toEqual(["slack/U1/Jan Kowalski"]);
+      expect(e.getText()).toBe("Hej @Jan Kowalski!");
+    } finally { e.destroy(); }
+  });
+});

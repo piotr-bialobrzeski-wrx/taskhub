@@ -4,6 +4,7 @@
 import type { ReactNode } from "react";
 import { isMediaUrl, safeHref } from "./safeurl";
 import { decodeEntities } from "./format";
+import { MENTION_SRC } from "./mention";
 
 // adresy przez wspólne sito (safeurl.ts): link to http(s), plik Task Hub albo kotwica, obrazek http(s) albo plik Task Hub; reszta zostaje tekstem
 export const safeUrl = (u: string) => safeHref(u) ?? null;
@@ -12,7 +13,8 @@ const imgUrl = (u: string) => (isMediaUrl(u) ? u.trim() : null);
 function inline(text: string, key = 0): ReactNode[] {
   const out: ReactNode[] = [];
   // ucieczka (\* daje gwiazdkę), obrazek, link, pogrubienie, kursywa, kod, przekreślenie; kolejność ważna: ![..](..) przed [..](..)
-  const re = /\\([\\`*_\[\]~|#<>&])|!\[([^\]]*)\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`|~~([^~]+)~~/g;
+  // na końcu wzmianka osoby `<@aplikacja:id|Imię Nazwisko>` (src/lib/mention.ts): znacznik osoby zamiast surowego zapisu
+  const re = new RegExp(String.raw`\\([\\\`*_\[\]~|#<>&])|!\[([^\]]*)\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*|\`([^\`]+)\`|~~([^~]+)~~|` + MENTION_SRC, "g");
   let last = 0, m: RegExpExecArray | null, i = 0;
   const txt = (t: string) => { if (t) out.push(decodeEntities(t)); };   // starsze szkice z „&amp;” pokazują „&”
   while ((m = re.exec(text))) {
@@ -25,11 +27,16 @@ function inline(text: string, key = 0): ReactNode[] {
     else if (m[7] !== undefined) out.push(<i key={k}>{decodeEntities(m[7])}</i>);
     else if (m[8] !== undefined) out.push(<code key={k}>{m[8]}</code>);
     else if (m[9] !== undefined) out.push(<s key={k}>{decodeEntities(m[9])}</s>);
+    else if (m[10] !== undefined) out.push(<MentionChip key={k} app={m[10]} id={m[11]} name={m[12].trim()} />);
     last = m.index + m[0].length;
   }
   if (last < text.length) txt(text.slice(last));
   return out;
 }
+
+// znacznik osoby: „@Imię Nazwisko”, w podpowiedzi aplikacja i id (te same w polu z formatowaniem: src/lib/richtext.ts)
+export const MentionChip = ({ app, id, name }: { app: string; id: string; name: string }) =>
+  <span className="mention-tag" title={`${app} · ${id}`} data-app={app} data-id={id}>@{decodeEntities(name)}</span>;
 
 // tabela GFM: linia „| a | b |” i pod nią „| --- | --- |”; komórki dzieli nieucieczkowana kreska
 const TROW = /^\s*\|.*\|\s*$/, TSEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;

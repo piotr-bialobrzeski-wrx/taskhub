@@ -9,6 +9,7 @@ import { GrowTextarea } from "@/components/GrowTextarea";
 import { CopyButton } from "@/components/CopyButton";
 import { isHttpUrl, isLocalPath, isMediaUrl, safeHref, thumbSrc } from "@/lib/safeurl";
 import { groupBlocks, normUrl } from "@/lib/stepcard";
+import { mentionsToPlain } from "@/lib/mention";
 
 // gdzie blok pytania ma zapisać odpowiedź (panel kroku); bez tego pytanie jest tylko do odczytu
 export type BlockForm = { taskId: string; stepId: string };
@@ -149,7 +150,7 @@ export function BlockView({ b, form, index, links: L }: { b: Block; form?: Block
         <div className="block draft">
           <div className="target"><span className="tool-dot" style={{ ["--c" as string]: toolColor(b.target.app) }} /> {b.status === "sent" ? "Wysłano" : b.status === "approved" ? "Zatwierdzone, poleci" : "Szkic, poleci"} do {toolLabel(b.target.app)}{b.target.where ? ` · ${b.target.where}` : ""} ({b.target.action})</div>
           {b.subject ? <h4>{b.subject}</h4> : null}
-          <p>{b.body}</p>
+          <p>{mentionsToPlain(b.body)}</p>
           {b.fields?.length ? <div style={{ marginTop: 10 }}><div className="lbl">Pola przy wysyłce</div><Facts facts={b.fields} /></div> : null}
         </div>
       );
