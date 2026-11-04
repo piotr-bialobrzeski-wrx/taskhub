@@ -3,6 +3,8 @@
 // Celowo mały parser liniowy, ten sam zakres co edytor: nagłówki, akapity, listy (z wcięciem), pogrubienie, kursywa, przekreślenie, kod, linki.
 // Starsze szkice mają po edycji w polu encje („&amp;”, „&lt;”): przed wysyłką wracają do zwykłych znaków, ale nigdy w kodzie.
 
+import { mentionHow, mentionsFor } from "./mention";
+
 // ---------- kod zostaje bajt w bajt ----------
 // zamiana tylko poza kodem: ogrodzenia (``` albo ~~~) i `kod` w linii zostają, jakie są; fn dostaje sam zwykły tekst
 export function outsideCode(md: string, fn: (text: string) => string): string {
@@ -134,13 +136,18 @@ export function mdToPlain(md: string): string {
 // czy treść w ogóle ma formatowanie (bez niego nie ma po co dawać agentowi drugiej wersji)
 export const hasMarkdown = (md: string) => /(^|\n)\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|```)|\*\*|~~|\[[^\]]+\]\(https?:|(^|[^*\w])\*[^*\s][^*]*\*/.test(md);
 
-// jak wysłać szkic do danej aplikacji: wskazówka dla agenta i, gdy trzeba, gotowa treść w jej formacie
+// jak wysłać szkic do danej aplikacji: wskazówka dla agenta i, gdy trzeba, gotowa treść w jej formacie;
+// wzmianki osób `<@aplikacja:id|Imię Nazwisko>` (src/lib/mention.ts) idą w formacie aplikacji docelowej albo jako samo imię i nazwisko
 export function publishFormat(app: string, md: string): { how: string; text: string | null; label: string } | null {
   if (!md.trim()) return null;
   const a = app.toLowerCase();
-  const md2 = decodeLegacy(md);   // starszy szkic z encjami: agent dostaje wersję ze zwykłymi znakami
-  if (a === "clickup") return { label: "Markdown", how: "ClickUp przyjmuje Markdown: opis zadania przez markdown_description (create/update), komentarz w Markdown; nie wklejaj treści do zwykłego pola description.", text: md2 !== md ? md2 : null };
-  if (a === "slack") return { label: "Markdown", how: "Slack (konektor claude.ai Slack) przyjmuje zwykły Markdown: wyślij treść wprost, bez zamiany na mrkdwn; wzmianki <@U…> i kanały <#C…> zostaw, jak są.", text: md2 !== md ? md2 : null };
-  if (a === "gmail" || a === "mail" || a === "email" || a === "outlook") return { label: "HTML", how: "Mail: htmlBody = wersja HTML poniżej, body = wersja bez znaczników (bez Markdown).", text: hasMarkdown(md2) || md2 !== md ? `${mdToHtml(md)}\n--- (body, bez znaczników) ---\n${mdToPlain(md2)}` : null };
+  const md2 = mentionsFor(a, decodeLegacy(md));   // starszy szkic z encjami: agent dostaje wersję ze zwykłymi znakami
+  const who = mentionHow(a, md);
+  const plus = (how: string) => (who ? `${how} ${who[0].toUpperCase()}${who.slice(1)}.` : how);
+  if (a === "clickup") return { label: "Markdown", how: plus("ClickUp przyjmuje Markdown: opis zadania przez markdown_description (create/update), komentarz w Markdown; nie wklejaj treści do zwykłego pola description."), text: md2 !== md ? md2 : null };
+  if (a === "slack") return { label: "Markdown", how: plus("Slack (konektor claude.ai Slack) przyjmuje zwykły Markdown: wyślij treść wprost, bez zamiany na mrkdwn; wzmianki <@U…> i kanały <#C…> zostaw, jak są."), text: md2 !== md ? md2 : null };
+  if (a === "gmail" || a === "mail" || a === "email" || a === "outlook") return { label: "HTML", how: plus("Mail: htmlBody = wersja HTML poniżej, body = wersja bez znaczników (bez Markdown)."), text: hasMarkdown(md2) || md2 !== md ? `${mdToHtml(mentionsFor(a, md))}\n--- (body, bez znaczników) ---\n${mdToPlain(md2)}` : null };
+  // inna aplikacja: druga wersja tylko wtedy, gdy treść ma wzmianki osób
+  if (who) return { label: "tekst", how: plus("Wyślij wersję poniżej."), text: md2 };
   return null;
 }
