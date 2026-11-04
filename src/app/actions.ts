@@ -661,6 +661,13 @@ export async function loadChat(taskId: string | null, before: string | null): Pr
   });
   return { msgs, queue };
 }
+// nazwa zadania z nagłówka karty zadania (edycja w miejscu, ten sam komponent co nazwa kroku)
+export async function renameTask(taskId: string, title: string) {
+  const o = await requireOwner();
+  const n = title.trim().slice(0, 300); if (!n) return;
+  await repo.updateTask(o.id, taskId, { title: n });
+  refresh(taskId);
+}
 export async function setTaskField(taskId: string, patch: { due?: string | null; level?: number; projectId?: string | null }) {
   const o = await requireOwner();
   await repo.updateTask(o.id, taskId, { ...patch, level: patch.level ? Math.min(5, Math.max(1, patch.level)) : undefined });
