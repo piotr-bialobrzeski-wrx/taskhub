@@ -175,18 +175,18 @@ export function pageLinks(s: Pick<Step, "tool">, changes: Pick<Changes, "preview
 }
 
 // ---------- dokąd idzie szkic: jedno źródło dla przycisku, linii pod nim, nagłówka po wysyłce, kafelka, listy i rozmowy ----------
-export type DestKind = "send" | "file" | "commit" | "push" | "prompt" | "internal";
+export type DestKind = "send" | "file" | "commit" | "push" | "publish" | "prompt" | "internal";
 export type Dest = { kind: DestKind; app: string; name: string; in: string; where: string | null; action: string; subject: string | null };
-export const ACTION: Record<string, string> = { send: "wyśle", reply: "odpowie", create: "utworzy", update: "zaktualizuje", comment: "skomentuje", commit: "zapisze commit", push: "wypchnie", other: "wykona" };
+export const ACTION: Record<string, string> = { send: "wyśle", reply: "odpowie", create: "utworzy", update: "zaktualizuje", comment: "skomentuje", commit: "zapisze commit", push: "wypchnie", publish: "opublikuje prototyp", other: "wykona" };
 // czasownik na przycisku: mówi, co się stanie po zatwierdzeniu
-export const VERB: Record<string, string> = { send: "wyślij", reply: "wyślij", create: "utwórz", update: "zaktualizuj", comment: "dodaj komentarz", commit: "zapisz commit", push: "opublikuj", other: "wykonaj" };
+export const VERB: Record<string, string> = { send: "wyślij", reply: "wyślij", create: "utwórz", update: "zaktualizuj", comment: "dodaj komentarz", commit: "zapisz commit", push: "opublikuj", publish: "opublikuj prototyp", other: "wykonaj" };
 const PAST: Record<string, string> = { send: "Wysłałem", reply: "Wysłałem", create: "Utworzyłem", update: "Zaktualizowałem", comment: "Dodałem komentarz" };
 // z tych samych pól szkicu, które wchodzą do podpisu zgody; bez szkicu tylko plik na Macu ma cel
 export function destOf(s: Pick<Step, "tool" | "blocks"> & { filePath?: string | null }): Dest | null {
   const d = draftOf(s);
   if (!d) return s.tool === "file" || s.filePath ? { kind: "file", app: "file", name: toolLabel("file"), in: inApp("file"), where: null, action: "create", subject: null } : null;
   const app = normalizeTool(d.target.app, s.tool), action = d.target.action ?? "send";
-  const kind: DestKind = isGitDraft(d, s.blocks) ? (action === "push" ? "push" : "commit") : isLocalFile(app) ? "file" : isPromptDraft(d, s.blocks) ? "prompt" : isExternalApp(app) ? "send" : "internal";
+  const kind: DestKind = isGitDraft(d, s.blocks) ? (action === "publish" ? "publish" : action === "push" ? "push" : "commit") : isLocalFile(app) ? "file" : isPromptDraft(d, s.blocks) ? "prompt" : isExternalApp(app) ? "send" : "internal";
   const name = appName(d.target.app) || toolLabel(app);
   return { kind, app, name, in: TOOL_LABELS[app] ? inApp(app) : `· ${name}`, where: d.target.where?.trim() || null, action, subject: d.subject?.trim() || null };
 }
@@ -195,12 +195,13 @@ export function approveLabel(d: Dest | null, o: { stays: boolean; rows: boolean 
   if (d.kind === "prompt") return "Zatwierdź i uruchom";
   if (d.kind === "commit") return "Zatwierdź i zapisz commit";
   if (d.kind === "push") return "Zatwierdź i opublikuj na GitHubie";
+  if (d.kind === "publish") return "Zatwierdź i opublikuj prototyp";
   return `Zatwierdź i ${o.rows && d.action !== "create" ? "dopisz" : VERB[d.action] ?? "wyślij"} ${d.in}`;
 }
 // linia pod przyciskiem: miejsce i co dokładnie się stanie
 export function destHint(d: Dest | null): string | null {
   if (!d || d.kind === "internal" || d.kind === "file") return null;
-  const hint = d.kind === "commit" ? "commit na Macu, bez pusha" : d.kind === "push" ? "commit i push gałęzi" : d.kind === "prompt" ? "uruchomi ten prompt na Macu"
+  const hint = d.kind === "commit" ? "commit na Macu, bez pusha" : d.kind === "push" ? "commit i push gałęzi" : d.kind === "publish" ? "commit, push gałęzi i publikacja prototypu" : d.kind === "prompt" ? "uruchomi ten prompt na Macu"
     : d.action === "create" ? (d.app === "clickup" ? "utworzy nowy ticket" : d.app === "calendar" ? "utworzy wydarzenie" : "utworzy")
     : d.action === "update" ? (d.app === "clickup" ? "zmieni ticket" : "zaktualizuje")
     : d.action === "comment" ? "doda komentarz" : d.action === "reply" ? "odpowie w wątku"
@@ -214,6 +215,7 @@ export function sentWord(d: Dest): string {
     case "file": return "Zapisano na Macu";
     case "commit": return "Zapisano commit na Macu";
     case "push": return "Wypchnięto na GitHub";
+    case "publish": return "Opublikowano prototyp";
     case "prompt": return "Wykonano";
     default: return "Zatwierdzone";
   }
@@ -231,11 +233,12 @@ export function tileDest(d: Dest | null, s: Pick<Step, "status" | "doneAt" | "bl
     if (d.kind === "send") return [cap(d.in), d.where ? lastSeg(d.where) : null, t].filter(Boolean).join(" · ");
     if (d.kind === "commit") return ["Commit na Macu", t].filter(Boolean).join(" · ");
     if (d.kind === "push") return ["Na GitHubie", d.where, t].filter(Boolean).join(" · ");
+    if (d.kind === "publish") return ["Prototyp opublikowany", t].filter(Boolean).join(" · ");
     return null;
   }
   if (draft?.status !== "proposed") return null;
   // 2+ opcje bez wyboru: ile ich jest, nie dokąd idzie pierwsza (każda może iść gdzie indziej); wybór pokazuje karta
-  const n = draftsOf(s).length, what = d.kind === "commit" ? "Commit" : d.name;
+  const n = draftsOf(s).length, what = d.kind === "commit" ? "Commit" : d.kind === "publish" ? "Publikacja prototypu" : d.name;
   if (n > 1) return `${what} · ${n} ${n <= 4 ? "opcje" : "opcji"}`;
   return `${what}${d.where ? " · " + d.where : ""}`;
 }
@@ -322,6 +325,7 @@ export function doneChat(s: Pick<Step, "title" | "tool" | "blocks"> & { filePath
   if (d?.kind === "file") return `Zapisałem plik na Macu: ${s.filePath ? fileName(s.filePath) : q(s.title)}.${tail}`;
   if (d?.kind === "commit") return `Zapisałem commit na Macu: ${q(s.title)}.${tail}`;
   if (d?.kind === "push") return `Wypchnąłem na GitHub: ${q(s.title)}.${tail}`;
+  if (d?.kind === "publish") return `Opublikowałem prototyp: ${q(s.title)}.${tail}`;
   return `Zrobione: ${q(s.title)}.${tail}`;
 }
 

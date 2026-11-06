@@ -13,6 +13,7 @@ struct GitJob {
     var files: [String]     // ścieżki względem katalogu repozytorium
     var push: Bool
     var diffs: [String: String]   // zatwierdzony diff każdego pliku (git diff HEAD -- plik)
+    var publish: String? = nil     // paczka 53: skrypt publikacji z repozytorium (np. scripts/prototype/publish.mjs), uruchamiany po pushu
 
     init?(_ j: [String: Any]) {
         guard let repo = j["repo"] as? String, let branch = j["branch"] as? String, let message = j["message"] as? String,
@@ -23,6 +24,10 @@ struct GitJob {
         self.files = files.compactMap { $0 as? String }
         self.push = (j["push"] as? Bool) ?? false
         self.diffs = (j["diffs"] as? [String: Any])?.compactMapValues { $0 as? String } ?? [:]
+        if let p = (j["publish"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty {
+            self.publish = p
+            self.push = true   // publikacja zawsze z wypchniętej gałęzi (wdrożony kod == kod na origin)
+        }
     }
 }
 
@@ -70,6 +75,12 @@ final class GitSend {
         if let bad = job.files.first(where: { !GitSend.validFile($0) }) { return GitResult(ok: false, text: "Nieprawidłowa ścieżka pliku w szkicu: \(bad)") }
         if let f = job.files.first(where: { job.diffs[$0] == nil }) {
             return GitResult(ok: false, text: "Task Hub nie podał zatwierdzonego diffu pliku \(f), więc nie sprawdzę, co pójdzie do commita. Zaktualizuj serwer Task Hub i zatwierdź szkic ponownie.")
+        }
+        if let script = job.publish {
+            guard GitSend.validScript(script) else { return GitResult(ok: false, text: "Skrypt publikacji w szkicu (\(script)) nie jest plikiem .mjs/.js w repozytorium.") }
+            guard !GitSend.sharedBranches.contains(job.branch.lowercased()) else {
+                return GitResult(ok: false, text: "Prototypu nie publikuję z gałęzi wspólnej \(job.branch). Pracuj na gałęzi prototypu (np. imie-nazwisko/prototype/nazwa).")
+            }
         }
         guard !folders.isEmpty else { return GitResult(ok: false, text: "Na tym Macu nie ma folderów z kodem. Dodaj folder repozytorium w Ustawieniach aplikacji Task Hub i zatwierdź szkic ponownie.") }
 
@@ -169,8 +180,118 @@ final class GitSend {
             guard p.ok else { return GitResult(ok: false, text: "\(summary) jest zrobiony na tym Macu, ale push się nie udał: \(p.text)") }
             summary += ", wypchnięty do origin"
         }
+        if let script = job.publish {
+            return await publish(dir, job: job, script: script, summary: summary, remote: remote, sha: sha)
+        }
         Log.write("git: \(summary) (\(dir))")
         return GitResult(ok: true, text: summary, link: GitSend.githubLink(remote, sha))
+    }
+
+    // ---------- paczka 53: publikacja prototypu po pushu ----------
+    // Skrypt z repozytorium (np. scripts/prototype/publish.mjs z procedury /prototype-publish w shiftwow-ui) robi build i wdrożenie
+    // (Cloudflare Pages) z kluczy w .env repozytorium. Uruchamiamy tylko plik, który jest w gicie i nie ma zmian na dysku (agent nie mógł go
+    // podmienić przed zgodą). Potem adresy trafiają do PROTOTYPE.md (gdy ten plik jest i nie ma w nim innych zmian), osobnym commitem z pushem.
+    static let sharedBranches: Set<String> = ["main", "master", "develop", "dev", "prototypes", "staging", "qa", "production"]
+
+    static func validScript(_ s: String) -> Bool {
+        validFile(s) && [".mjs", ".js", ".cjs"].contains(where: { s.lowercased().hasSuffix($0) })
+    }
+
+    // node z PATH aplikacji albo z menedżerów wersji (nvm, volta, fnm, asdf), najnowszy
+    static func nodeBin() -> String? {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+        var dirs = [home + "/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", home + "/.volta/bin", home + "/.asdf/shims", "/usr/bin"]
+        for root in [home + "/.nvm/versions/node", home + "/.local/share/fnm/node-versions", home + "/Library/Application Support/fnm/node-versions"] {
+            let vs = ((try? fm.contentsOfDirectory(atPath: root)) ?? []).sorted { $0.compare($1, options: .numeric) == .orderedDescending }
+            for v in vs { dirs.append(root + "/" + v + "/bin"); dirs.append(root + "/" + v + "/installation/bin") }
+        }
+        return dirs.map { $0 + "/node" }.first { fm.isExecutableFile(atPath: $0) }
+    }
+
+    // adresy z wyjścia skryptu: „Prototyp: https://…” i „Lista: https://…”; bez nich pierwszy adres https
+    static func publishUrls(_ out: String) -> (proto: String?, list: String?) {
+        let plain = out.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+        func url(_ s: Substring) -> String? {
+            guard let r = s.range(of: "https?://[^\\s'\"<>)]+", options: .regularExpression) else { return nil }
+            return String(s[r])
+        }
+        var proto: String? = nil, list: String? = nil, first: String? = nil
+        for line in plain.split(whereSeparator: \.isNewline) {
+            guard let u = url(line) else { continue }
+            if first == nil { first = u }
+            let l = line.lowercased()
+            if l.contains("lista") || l.contains("list:") { list = u }
+            else if l.contains("prototyp") || l.contains("prototype") { proto = u }
+        }
+        return (proto ?? (first != list ? first : nil), list)
+    }
+
+    private func publish(_ dir: String, job: GitJob, script: String, summary: String, remote: String, sha: String) async -> GitResult {
+        var summary = summary
+        let tracked = await git(dir, ["ls-files", "--error-unmatch", "--", script], seconds: 20)
+        let st = await git(dir, ["status", "--porcelain", "--", script], seconds: 20)
+        guard tracked.ok, st.ok, st.text.isEmpty else {
+            return GitResult(ok: false, text: "\(summary), ale prototypu nie opublikowałem: skrypt \(script) nie jest w repozytorium albo ma zmiany na dysku. Sprawdź go i zatwierdź szkic ponownie.")
+        }
+        guard let node = GitSend.nodeBin() else {
+            return GitResult(ok: false, text: "\(summary), ale prototypu nie opublikowałem: na tym Macu nie znalazłem programu node. Zainstaluj Node.js i zatwierdź szkic ponownie.")
+        }
+        if cancelled { return GitResult(ok: false, text: "\(summary); publikację zatrzymałeś") }
+        var env = ClaudeCLI.env()
+        env["PATH"] = ((node as NSString).deletingLastPathComponent) + ":" + (env["PATH"] ?? "/usr/bin:/bin")
+        env["CI"] = "1"   // bez pytań narzędzi (wrangler, npx)
+        Log.write("git: publikacja prototypu \(script) w \(dir)")
+        let r = ProcessRunner(bin: node, args: [script], cwd: dir, env: env, maxSeconds: 20 * 60, stallSeconds: 10 * 60, json: false, maxText: 20_000)
+        current = r
+        let res = await r.run { _ in }
+        current = nil
+        guard res.ok else {
+            return GitResult(ok: false, text: "\(summary), ale skrypt publikacji się nie udał: \(String(res.text.suffix(600)))")
+        }
+        let urls = GitSend.publishUrls(res.text)
+        guard let proto = urls.proto else {
+            return GitResult(ok: false, text: "\(summary), skrypt publikacji skończył się bez błędu, ale nie podał adresu prototypu: \(String(res.text.suffix(400)))")
+        }
+        summary += ", prototyp opublikowany: \(proto)" + (urls.list.map { " (lista: \($0))" } ?? "")
+        // adresy w PROTOTYPE.md: osobny commit i push (procedura kończy się czystą, wypchniętą gałęzią)
+        let doc = "PROTOTYPE.md"
+        let path = dir + "/" + doc
+        if FileManager.default.fileExists(atPath: path) {
+            let clean = await git(dir, ["status", "--porcelain", "--", doc], seconds: 20)
+            if clean.ok && clean.text.isEmpty, var text = try? String(contentsOfFile: path, encoding: .utf8) {
+                let name = text.range(of: "\\*\\*Nazwa:\\*\\*\\s*(.+)", options: .regularExpression).map { String(text[$0]).replacingOccurrences(of: "**Nazwa:**", with: "").trimmingCharacters(in: .whitespaces) }
+                    ?? String(job.branch.split(separator: "/").last ?? "prototyp")
+                let day = ISO8601DateFormatter.string(from: Date(), timeZone: TimeZone(identifier: "Europe/Warsaw") ?? .current, formatOptions: [.withFullDate])
+                if !text.hasSuffix("\n") { text += "\n" }
+                text += "\n## Publikacja\n\n- \(day): opublikowano na Cloudflare: \(proto)\n" + (urls.list.map { "- Lista: \($0)\n" } ?? "")
+                do { try text.write(toFile: path, atomically: true, encoding: .utf8) } catch {
+                    return GitResult(ok: true, text: summary + "; adresów nie dopisałem do \(doc): \(error.localizedDescription)", link: proto)
+                }
+                var c = await git(dir, ["add", "--", doc])
+                if c.ok { c = await git(dir, ["commit", "-m", "docs: \(name) published URLs", "--", doc]) }
+                var rev = c
+                if c.ok { rev = await git(dir, ["rev-parse", "--verify", "-q", "HEAD"], seconds: 20) }
+                if c.ok, rev.ok, !rev.text.isEmpty {
+                    var made = GitSend.loadMade()
+                    made.append(rev.text)
+                    GitSend.saveMade(made)
+                    let range = await rangeProblem(dir, job.branch, rev.text, made)
+                    if range == nil {
+                        let p = await git(dir, ["-c", "push.recurseSubmodules=no", "push", "origin", rev.text + ":refs/heads/" + job.branch], seconds: 180)
+                        summary += p.ok ? "; adresy dopisane do \(doc) i wypchnięte" : "; adresy dopisane do \(doc), ale push się nie udał: \(p.text)"
+                    } else {
+                        summary += "; adresy dopisane do \(doc) (commit na Macu, bez pusha)"
+                    }
+                } else {
+                    summary += "; adresów nie zacommitowałem w \(doc): \(c.ok ? rev.text : c.text)"
+                }
+            } else {
+                summary += "; \(doc) ma niezapisane zmiany, więc adresów do niego nie dopisałem"
+            }
+        }
+        Log.write("git: \(summary) (\(dir))")
+        return GitResult(ok: true, text: summary, link: proto)
     }
 
     static let diffFlags = ["--no-color", "--no-ext-diff", "--no-textconv", "--no-renames"]

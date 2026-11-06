@@ -43,12 +43,12 @@ const VIA_DRIVE = new Set(["sheets", "docs"]);
 export const appKey = (s: string | null | undefined): string => { const k = appOfLabel(normalizeTool(s ?? "", "")); return VIA_DRIVE.has(k) ? "drive" : k; };
 // commit robi aplikacja na Macu (bez modelu): czynność commit albo push, albo szkic do GitHuba z blokiem zmian (komentarz czy issue to zwykła wysyłka konektorem)
 export function isGitDraft(d: Draft, blocks: Block[] | null | undefined): boolean {
-  if (d.target.action === "commit" || d.target.action === "push") return true;
+  if (d.target.action === "commit" || d.target.action === "push" || d.target.action === "publish") return true;
   return appKey(d.target.app) === "github" && !["comment", "reply", "create", "update"].includes(d.target.action) && !!(blocks ?? []).some((b) => b.type === "changes");
 }
 // szkic commita (commit, push albo GitHub, także „git”): po zgodzie aplikacja na Macu commituje pliki z bloku zmian, więc ten blok też jest
 // częścią zgody; ten sam klucz aplikacji co isGitDraft, żeby każdy szkic, który idzie do commita, miał blok zmian w podpisie
-const isGitish = (d: Draft) => d.target.action === "commit" || d.target.action === "push" || /github/i.test(d.target.app) || appKey(d.target.app) === "github";
+const isGitish = (d: Draft) => d.target.action === "commit" || d.target.action === "push" || d.target.action === "publish" || /github/i.test(d.target.app) || appKey(d.target.app) === "github";
 const changesCore = (blocks: Block[] | null | undefined) => {
   const ch = (blocks ?? []).find((b): b is Changes => b.type === "changes");
   if (!ch) return undefined;

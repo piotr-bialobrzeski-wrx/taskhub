@@ -80,7 +80,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   const stays = !s.needsApproval && mode !== "sent";   // szkic bez zgody nigdzie nie leci: zatwierdzenie kończy krok
   const me = ownerName;
   const act = d?.target.action ?? "send";
-  const isPrompt = PROMPT_APPS.has(app), isCommit0 = act === "commit" || act === "push";
+  const isPrompt = PROMPT_APPS.has(app), isCommit0 = act === "commit" || act === "push" || act === "publish";
   const stale = drafts.some((x) => !!x.stale);
   const body0 = d?.body ?? s.output;
   // dokąd idzie szkic (jedno źródło dla przycisku, linii pod nim i nagłówka po wysyłce); stary szkic bez bloku (sama treść) liczy się jak przy zgodzie
@@ -100,11 +100,11 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   const view = (di: Draft | null, i: number, dd: Dest | null = dest) => {
     const action = di?.target.action ?? "send", where = di?.target.where ?? null, body = di?.body ?? s.output;
     // komentarz: wprost (action comment) albo odpowiedź/wysyłka w aplikacji, gdzie treść ląduje jako komentarz; commit i push to zapis kodu, nie komentarz
-    const isCommit = action === "commit" || action === "push";
+    const isCommit = action === "commit" || action === "push" || action === "publish";
     const isRows = !!di?.rows?.length || !!(di?.sheet?.length && di.columns?.length), isComment = action === "comment" || (COMMENT_APPS.has(app) && (action === "reply" || action === "send"));
     // podgląd: jak to będzie wyglądać po drugiej stronie (wiadomość w wątku, e-mail z nadawcą i tematem, komentarz/ticket)
     const who = app === "gmail" ? `Od: ${conn?.account ?? "Twoje konto"} · Do: ${where ?? "adresat z treści"}`
-      : isCommit ? `${where ?? changes?.repo ?? name}${changes?.branch && !where?.includes(changes.branch) ? ` · ${changes.branch}` : ""} · ${action === "push" ? "push" : "commit"} · jako ${me}`
+      : isCommit ? `${where ?? changes?.repo ?? name}${changes?.branch && !where?.includes(changes.branch) ? ` · ${changes.branch}` : ""} · ${action === "publish" ? "push i publikacja prototypu" : action === "push" ? "push" : "commit"} · jako ${me}`
       : isComment ? `Komentarz w: ${where ?? name} · jako ${me}`
       : app === "clickup" ? `${where ?? "ClickUp"} · ${action === "update" ? "zmiana" : "nowe zadanie"} · jako ${me}`
       : app === "slack" || app === "whatsapp" ? `${me} · ${mode === "sent" || di?.status === "sent" ? "wysłano" : "teraz"}`

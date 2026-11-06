@@ -50,7 +50,7 @@ export const DraftTarget = z.object({
   app: z.string(),                         // gdzie poleci
   where: z.string().optional(),            // '#dev', 'anna@firma.pl', 'lista Backlog'
   url: z.string().max(2000).optional(),    // adres miejsca docelowego (ticket, wątek, kanał, dokument): przycisk „Otwórz w …” jeszcze przed wysyłką
-  action: z.enum(["send", "reply", "create", "update", "comment", "commit", "push", "other"]).default("send"),   // commit/push: zmiany w kodzie do opublikowania
+  action: z.enum(["send", "reply", "create", "update", "comment", "commit", "push", "publish", "other"]).default("send"),   // commit/push: zmiany w kodzie do opublikowania; publish (paczka 53): commit, push i skrypt publikacji prototypu
 });
 // paczka 42: wiersze szkicu jako arkusz do edycji w miejscu (wpisy czasu i każda inna lista wierszy do wysłania). Kolumna mówi, jak edytować
 // komórkę: text (pole), choice (lista z wyszukiwarką; recent = „Ostatnio używane”), multi (kilka z listy, w komórce po przecinku), date (YYYY-MM-DD,

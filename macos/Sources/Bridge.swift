@@ -509,7 +509,7 @@ final class Bridge: ObservableObject {
         let label: String
         let modelText = (j["modelLabel"] as? String) ?? ""   // „Opus · wysoki” albo „limit Fable do 01:00, pracuję na Opusie”
         if kind == .work { label = (viaCodex ? "GPT" : "Claude") + " pracuje nad zadaniami" + (modelText.isEmpty ? "" : " (\(modelText))") }
-        else if git != nil { label = "Commit: " + (title.isEmpty ? "zatwierdzony szkic" : title) }
+        else if let g = git { label = (g["publish"] is String ? "Publikacja prototypu: " : "Commit: ") + (title.isEmpty ? "zatwierdzony szkic" : title) }
         else { label = "Wysyłka" + (app.isEmpty ? "" : " do \(app)") + (title.isEmpty ? "" : ": \(title)") }
 
         state = .running
