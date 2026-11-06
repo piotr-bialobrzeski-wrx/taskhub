@@ -228,7 +228,8 @@ export function TaskCanvas(p: TaskCanvasProps) {
         queue={<QueuePanel queue={p.agentQueue} taskId={t.id} onToast={show} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} events={p.feed} onStep={openStep} />}
         onQueueNext={(key) => run(async () => show(await queueNext(key, t.id)))} onWithdraw={() => run(async () => show(await withdrawMessages(t.id)))} />
 
-      <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
+      {/* paczka 52: w widoku kroku czat stoi po lewej na całą wysokość obok kartki; widok zadania (kanwa, karta zadania) bez zmian */}
+      <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} side={!!cur} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
         queue={ctxGlobal ? null : p.queue} version={`${p.feed.at(-1)?.id ?? ""}|${p.queue?.n ?? 0}|${p.queue?.kind ?? ""}|${p.queue?.activity?.text ?? ""}`}
         placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : "Napisz, co dalej"} />
       <Toast text={toast} />

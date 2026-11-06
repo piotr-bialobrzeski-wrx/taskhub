@@ -11,6 +11,7 @@ import { workFoot, type FeedItem, type WorkBubble } from "@/lib/feed";
 import { Activity, useMinutes } from "@/components/Activity";
 import { draftKeyOf, readDraft, sendKeepingDraft, writeDraft, type Sent } from "@/lib/chat-draft";
 import { fitTextarea, refitOnWidth } from "@/components/GrowTextarea";
+import { CHAT_SIDE_MIN_VW, CHAT_W_DEFAULT, clampChatW, readChatSide, writeChatSide } from "@/lib/chat-side";
 import { Icon, Lvl, projColor, type ProjectVM } from "./ui";
 import { DUE_KIND_HINTS, DUE_KIND_LABELS, DUE_KINDS, presetOf, REPEAT_PRESETS, REPEAT_UNITS, repeatLabel, unitForm, type DueValue } from "@/lib/due";
 
@@ -170,7 +171,8 @@ const timeOf = (iso: string) => fmtTime(iso);
 
 // zamykanie: X u góry, ikona w doku (ta sama, która otworzyła), klik obok kolumny, Esc.
 // version: zmienia się, gdy serwer ma nową odpowiedź albo inny stan kolejki (puls strony) → historia dociąga najnowsze wpisy bez zamykania
-export function ChatHistory({ taskId, title, onClose, queue = null, version = "" }: { taskId: string | null; title: string; onClose: () => void; queue?: Queue | null; version?: string }) {
+// inline (paczka 52): historia w panelu czatu po lewej w widoku kroku: bez szkła na cały ekran, bez zamykania klikiem obok i Esc (Esc zamyka krok)
+export function ChatHistory({ taskId, title, onClose, queue = null, version = "", inline = false }: { taskId: string | null; title: string; onClose: () => void; queue?: Queue | null; version?: string; inline?: boolean }) {
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
   const [q, setQ] = useState<Queue | null>(queue);
   const [more, setMore] = useState(false);
@@ -220,11 +222,13 @@ export function ChatHistory({ taskId, title, onClose, queue = null, version = ""
     const label = q.n === 1 ? q.short : q.text;
     return q.activity ? <span className="hm-s wait"><Activity text={q.activity.text} detail={q.activity.detail} since={q.activity.since} who={label + " ·"} /></span> : <span className="hm-s wait"><i className="pulse" aria-hidden="true" />{label}</span>;
   };
-  useEffect(() => { const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key); }, [onClose]);
+  useEffect(() => { if (inline) return; const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key); }, [onClose, inline]);
   return (
-    <div className="hist glass" role="dialog" aria-label={title} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className={inline ? "hist inline" : "hist glass"} role={inline ? "region" : "dialog"} aria-label={title} onPointerDown={(e) => e.stopPropagation()} onClick={inline ? undefined : (e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="hist-col">
-        <div className="hist-h"><b>{title}</b><span className="sp" /><button className="icobtn" type="button" aria-label="Zamknij historię" title="Zamknij (Esc)" onClick={onClose}><Icon k="x" size={13} sw={2} /></button></div>
+        <div className="hist-h"><b>{title}</b><span className="sp" />{inline
+          ? <button className="icobtn" type="button" aria-label="Schowaj historię" title="Schowaj historię" onClick={onClose}><Icon k="x" size={13} sw={2} /></button>
+          : <button className="icobtn" type="button" aria-label="Zamknij historię" title="Zamknij (Esc)" onClick={onClose}><Icon k="x" size={13} sw={2} /></button>}</div>
         <div ref={list} className="hist-b">
           <div className="hist-list">
             {msgs === null ? <p className="sub" style={{ textAlign: "center" }}>Wczytuję…</p> : !msgs.length ? <p className="sub" style={{ textAlign: "center" }}>Jeszcze nie było tu rozmowy.</p> : (
@@ -280,7 +284,7 @@ function ImageView({ items, current, onPick, onClose, onRemove }: { items: Att[]
     </div>, document.body);
 }
 
-function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone, onFailed, hist, onHistory, draftKey, sent }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void; onFailed: () => void; hist: boolean; onHistory: () => void; draftKey: string; sent: { current: Sent | null } }) {
+function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone, onFailed, hist, onHistory, draftKey, sent, side = false }: { placeholder: string; busyText: string; atts: Att[]; err: string | null; onFiles: (files: File[]) => void; onRemove: (key: string) => void; onDone: () => void; onFailed: () => void; hist: boolean; onHistory: () => void; draftKey: string; sent: { current: Sent | null }; side?: boolean }) {
   const { pending } = useFormStatus();
   const ta = useRef<HTMLTextAreaElement>(null);
   const pick = useRef<HTMLInputElement>(null);
@@ -326,15 +330,67 @@ function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone
         <textarea ref={ta} name="text" rows={1} placeholder={pending ? busyText : placeholder} aria-label="Wiadomość" disabled={pending} onInput={(e) => { grow(); writeDraft(draftKey, e.currentTarget.value); }}
           onPaste={(e) => { const files = [...e.clipboardData.files]; if (!files.length) return; if (!e.clipboardData.getData("text/plain")) e.preventDefault(); onFiles(files); }}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (canSend()) e.currentTarget.form?.requestSubmit(); } }} />
-        <button className={"icobtn" + (hist ? " on" : "")} type="button" aria-label={hist ? "Zamknij historię" : "Historia rozmowy"} title={hist ? "Zamknij historię" : "Historia rozmowy"} aria-pressed={hist} onClick={onHistory}><Icon k={hist ? "x" : "history"} size={hist ? 13 : 15} sw={hist ? 2 : 1.7} /></button>
+        {side
+          ? <button className={"icobtn" + (hist ? " on" : "")} type="button" aria-label={hist ? "Schowaj historię" : "Pokaż historię"} title={hist ? "Schowaj historię" : "Pokaż historię"} aria-pressed={hist} onClick={onHistory}><Icon k="history" size={15} sw={1.7} /></button>
+          : <button className={"icobtn" + (hist ? " on" : "")} type="button" aria-label={hist ? "Zamknij historię" : "Historia rozmowy"} title={hist ? "Zamknij historię" : "Historia rozmowy"} aria-pressed={hist} onClick={onHistory}><Icon k={hist ? "x" : "history"} size={hist ? 13 : 15} sw={hist ? 2 : 1.7} /></button>}
         <button className="send" type="submit" aria-label="Wyślij" disabled={pending}><Icon k="send" size={14} sw={1.9} /></button>
       </div>
     </>
   );
 }
-export function Dock({ action, taskId, stepId = null, placeholder, busyText, context, historyTitle, queue = null, version = "" }: { action: (fd: FormData) => Promise<void>; taskId: string | null; stepId?: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string; queue?: Queue | null; version?: string }) {
+// szeroki ekran (od 861 px): tylko tam czat w widoku kroku staje po lewej; na telefonie zostaje warstwą nad szufladą kroku
+function useWide(): boolean {
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${CHAT_SIDE_MIN_VW}px)`);
+    const set = () => setWide(mq.matches); set();
+    mq.addEventListener("change", set); return () => mq.removeEventListener("change", set);
+  }, []);
+  return wide;
+}
+
+// side (paczka 52): widok kroku. Na szerokim ekranie czat to panel po lewej na całą wysokość obok kartki: historia u góry, pole na dole.
+// Ikona historii w polu chowa i pokazuje historię (schowana = zostaje samo pole w lewym dolnym rogu, kartka wraca na całą szerokość).
+// Prawą krawędź panelu da się przeciągnąć (podwójny klik wraca do 380 px); szerokość i stan pokazany/schowany zapamiętuje przeglądarka.
+// Klasy chat-side / chat-dock i --chat-w trafiają na .app, żeby kartka (.detail) i dymki ustawiły się obok panelu.
+export function Dock({ action, taskId, stepId = null, placeholder, busyText, context, historyTitle, queue = null, version = "", side: sideAsked = false }: { action: (fd: FormData) => Promise<void>; taskId: string | null; stepId?: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string; queue?: Queue | null; version?: string; side?: boolean }) {
   const form = useRef<HTMLFormElement>(null);
-  const [hist, setHist] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const wide = useWide();
+  const side = sideAsked && wide;
+  const [overlay, setOverlay] = useState(false);   // historia jako szkło na cały ekran (kanwa, telefon)
+  const [sideOpen, setSideOpen] = useState(true);  // historia w panelu po lewej (widok kroku)
+  const [chatW, setChatW] = useState(CHAT_W_DEFAULT);
+  useEffect(() => { const v = readChatSide(); setSideOpen(v.open); setChatW(clampChatW(v.w, window.innerWidth)); }, []);
+  useEffect(() => { setOverlay(false); }, [side]);   // historia ze szkłem nie wraca sama po zamknięciu kroku
+  const hist = side ? sideOpen : overlay;
+  const setHist = (f: (h: boolean) => boolean) => {
+    if (!side) { setOverlay(f); return; }
+    setSideOpen((h) => { const n = f(h); writeChatSide({ open: n }); return n; });
+  };
+  // panel po lewej: klasa i szerokość na .app (kartka odsuwa się o --chat-w); przy zmianie okna szerokość wraca w granice
+  useEffect(() => {
+    const app = wrap.current?.closest<HTMLElement>(".app"); if (!app) return;
+    app.classList.toggle("chat-side", side && sideOpen);
+    app.classList.toggle("chat-dock", side && !sideOpen);
+    app.style.setProperty("--chat-w", chatW + "px");
+    return () => { app.classList.remove("chat-side", "chat-dock"); };
+  }, [side, sideOpen, chatW]);
+  useEffect(() => {
+    if (!side) return;
+    const fit = () => setChatW((w) => clampChatW(w, window.innerWidth));
+    window.addEventListener("resize", fit); return () => window.removeEventListener("resize", fit);
+  }, [side]);
+  // przeciąganie prawej krawędzi panelu: szerokość na żywo, zapis po puszczeniu
+  const drag = useRef<{ x: number; w: number } | null>(null);
+  const onGripDown = (e: React.PointerEvent<HTMLDivElement>) => { e.stopPropagation(); e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, w: chatW }; };
+  const onGripMove = (e: React.PointerEvent<HTMLDivElement>) => { const d = drag.current; if (d) setChatW(clampChatW(d.w + e.clientX - d.x, window.innerWidth)); };
+  const onGripUp = () => { if (!drag.current) return; drag.current = null; setChatW((w) => { writeChatSide({ w }); return w; }); };
+  const onGripKey = (e: React.KeyboardEvent) => {
+    const d = e.key === "ArrowLeft" ? -20 : e.key === "ArrowRight" ? 20 : 0; if (!d) return;
+    e.preventDefault(); setChatW((w) => { const n = clampChatW(w + d, window.innerWidth); writeChatSide({ w: n }); return n; });
+  };
+  const resetW = () => { const n = clampChatW(CHAT_W_DEFAULT, window.innerWidth); setChatW(n); writeChatSide({ w: n }); };
   const filesIn = useRef<HTMLInputElement>(null);
   const [atts, setAtts] = useState<Att[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -370,15 +426,17 @@ export function Dock({ action, taskId, stepId = null, placeholder, busyText, con
   };
   // historia jest rodzeństwem formularza w tym samym kontekście warstw: szkło pod dokiem, dok nad nim (pole dalej działa)
   return (
-    <div className={"dockwrap" + (hist ? " hist-on" : "")}>
-      {hist ? <ChatHistory taskId={taskId} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(false)} queue={queue} version={version} /> : null}
+    <div ref={wrap} className={"dockwrap" + (side ? " side" + (hist ? " open" : "") : hist ? " hist-on" : "")}>
+      {hist ? <ChatHistory taskId={taskId} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(() => false)} queue={queue} version={version} inline={side} /> : null}
+      {side && hist ? <div className="chat-grip" role="separator" aria-orientation="vertical" aria-label="Szerokość czatu" aria-valuenow={chatW} tabIndex={0} title="Przeciągnij, żeby zmienić szerokość (podwójny klik: 380 px)"
+        onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp} onPointerCancel={onGripUp} onDoubleClick={resetW} onKeyDown={onGripKey} /> : null}
       <form ref={form} className={"dock glass" + (over ? " drop" : "")} action={send} autoComplete="off"
         onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setOver(true); } }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); void addFiles([...e.dataTransfer.files]); }}>
         <input type="hidden" name="taskId" value={taskId ?? ""} /><input type="hidden" name="stepId" value={stepId ?? ""} />
         <input ref={filesIn} type="file" name="files" multiple tabIndex={-1} aria-hidden="true" />
         {context ? <div className="ctxrow">{context}</div> : null}
-        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} onFailed={() => setAtts((prev) => [...prev])} hist={hist} onHistory={() => setHist((h) => !h)} draftKey={draftKeyOf(taskId, stepId)} sent={sent} />
+        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} onFailed={() => setAtts((prev) => [...prev])} hist={hist} onHistory={() => setHist((h) => !h)} draftKey={draftKeyOf(taskId, stepId)} sent={sent} side={side} />
       </form>
     </div>
   );
@@ -524,9 +582,18 @@ export function AgentFeed({ work = null, onStop, onStep, queue = null, onQueueNe
   const { off, hide } = useFeedOff();
   // dymek „wysłane” zamyka się X (klucz po wiadomości); dymek „Claude pracuje” nie powtarza pigułki kolejki (paczka 31, wariant A)
   const card = work && work.kind === "sent" && off && !off.has("w:" + work.id) ? work : null;
-  if (!card && !queue) return null;
+  // wysokość dymków trafia do --feed-h na .app: historia w panelu czatu po lewej (paczka 52) kończy się nad nimi
+  const box = useRef<HTMLDivElement>(null);
+  const shown = !!(card || queue);
+  useEffect(() => {
+    const el = box.current, app = el?.closest<HTMLElement>(".app"); if (!el || !app) return;
+    const set = () => app.style.setProperty("--feed-h", el.offsetHeight + 12 + "px");
+    set(); const ro = new ResizeObserver(set); ro.observe(el);
+    return () => { ro.disconnect(); app.style.removeProperty("--feed-h"); };
+  }, [shown]);
+  if (!shown) return null;
   return (
-    <div className={"feed " + className} style={style} role="log" aria-live="polite" aria-label="Claude: wiadomość i kolejka">
+    <div ref={box} className={"feed " + className} style={style} role="log" aria-live="polite" aria-label="Claude: wiadomość i kolejka">
       {card ? <WorkCard b={card} onStop={onStop} onStep={onStep} onQueueNext={onQueueNext} onWithdraw={onWithdraw} onClose={() => { if (card.kind === "sent") hide(["w:" + card.id]); }} /> : null}
       {queue}
     </div>
