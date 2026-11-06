@@ -133,15 +133,31 @@ function buildHandler(auth: repo.TokenAuth) {
   const runOf = async () => { const id = await runIdOf(); return id ? repo.getBridgeRun(ownerId, id) : null; };
   const markRun = async () => { const id = await runIdOf(); if (id) await repo.markBridgeRun(ownerId, id); };
   const clampSec = (ms: number) => Math.max(0, Math.min(AGENT_MAX_SEC, Math.round(ms / 1000)));
-  // sekundy Claude'a na krok: bieg wysyłki od wzięcia szkicu; inaczej od start_step (nigdy sprzed startu tego biegu); bez start_step w biegu
-  // od ostatniego znacznika biegu (albo jego startu); bez biegu i bez startu czas podany przez agenta (spentMin) albo 0
-  const agentSecFor = async (s: Step, o: { fallbackMin?: number; runClock?: boolean } = {}): Promise<number> => {
+  // sekundy Claude'a na krok (paczka 55, decyzja w zadaniu „Weryfikuj czas pracy agenta”): w biegu mostka od startu próby albo od ostatniego
+  // zamknięcia kroku w tej próbie, także dla szkicu pisanego bez start_step, więc kroki zamykane po kolei się nie dublują. Sesja w chmurze (bez biegu):
+  // od wzięcia kroku, ale nie sprzed ostatniego zamknięcia kroku wziętego w chmurze (kroki jednej sesji dzielą jej czas). Bieg wysyłki: od wzięcia szkicu.
+  // started: true = liczy się tylko krok rozpoczęty (oddanie kroku, którego nie zaczęto, to 0). Bez biegu i bez startu czas podany przez agenta (spentMin)
+  const agentSecFor = async (s: Step, o: { fallbackMin?: number; started?: boolean } = {}): Promise<number> => {
     if (scope?.kind === "send") return elapsedSec(s.sendStartedAt);
     const run = await runOf(), now = Date.now();
-    const floor = run ? new Date(run.startedAt).getTime() : 0;
-    if (s.agentStartedAt) return clampSec(now - Math.max(new Date(s.agentStartedAt).getTime(), floor));
-    if (run && o.runClock !== false) return clampSec(now - new Date(run.markAt ?? run.startedAt).getTime());
+    if (run) return o.started && !s.agentStartedAt ? 0 : clampSec(now - new Date(run.closeAt ?? run.startedAt).getTime());
+    if (s.agentStartedAt) {
+      const cloud = s.cloud?.state === "working" ? await repo.cloudCloseAt(ownerId) : null;
+      return clampSec(now - Math.max(new Date(s.agentStartedAt).getTime(), cloud ? new Date(cloud).getTime() : 0));
+    }
     return o.fallbackMin ? Math.max(0, Math.round(o.fallbackMin * 60)) : 0;
+  };
+  // czas zapisany na krok kończy etap: następny krok tej próby (albo tej sesji w chmurze) liczy się od teraz
+  const closeClock = async (s: Step | null | undefined) => {
+    if (scope?.kind === "send" || !s) return;
+    const id = await runIdOf();
+    if (id) await repo.markRunClose(ownerId, id); else if (s.cloud?.state === "working") await repo.markCloudClose(ownerId);
+  };
+  // czas na krok i znacznik zamknięcia razem (wszystkie miejsca, które dopisują czas Claude'a do kroku)
+  const takeAgentSec = async (s: Step, o: { fallbackMin?: number; started?: boolean } = {}): Promise<number> => {
+    const sec = await agentSecFor(s, o);
+    if (sec > 0 || !o.started) await closeClock(s);
+    return sec;
   };
   // ---------- ślad biegu (paczka 7, punkt 3): krok „teraz”, kroki, których bieg dotknął, kropka na zmienionym kroku ----------
   const NOW_STEP = new Set(["start_step", "set_blocks", "update_step", "add_facts", "add_snapshot"]);
@@ -297,7 +313,7 @@ function buildHandler(auth: repo.TokenAuth) {
       const steps = await repo.addSteps(t.id, await Promise.all(a.steps.map(async ({ done: _d, needsClick: _c, attachments, ...s }) => ({ ...s, tool: cloudTool(s.title, s.tool), link: externalLink(s.link), estMin: s.est, connectionId: await connectionIdOf(s.connection), attachmentIds: attachments ? [...new Set(attachments)] : null }))), { before: bef?.id ?? null });
       // praca zrobiona przy rozpisaniu: kroki od razu zamknięte przez Claude, z czasem biegu od ostatniego znacznika podzielonym po równo
       const doneSteps = steps.filter((_, i) => a.steps[i]?.done !== undefined);
-      const each = doneSteps.length ? Math.round((await agentSecFor(doneSteps[0])) / doneSteps.length) : 0;
+      const each = doneSteps.length ? Math.round((await takeAgentSec(doneSteps[0])) / doneSteps.length) : 0;
       for (const [i, s] of steps.entries()) if (a.steps[i]?.done !== undefined) await finishStep(ownerId, t.id, s.id, { report: a.steps[i].done, by: "agent", addAgentSec: each });
       // przed krokiem ze szkicem (czekającym na zgodę albo już zatwierdzonym) weszła nowa praca: szkic jest nieaktualny, zgoda przepada,
       // krok wraca do zrobienia i dostanie nowy szkic po nowych krokach (same kroki już zrobione niczego nie zmieniają: szkic zostaje)
@@ -455,16 +471,18 @@ function buildHandler(auth: repo.TokenAuth) {
         const raise = !st.needsApproval && st.tool !== "manual" && isExternalApp(fresh.target.app);
         await repo.updateStep(st.id, { status: "draft", prevStatus: st.status === "handoff" ? st.prevStatus : st.status, handoffAt: null, ...(raise ? { needsApproval: true } : {}) });
         // przygotowanie szkicu to praca Claude'a: liczy się do czasu kroku, choć krok czeka jeszcze na zgodę
-        await repo.addAgentTime(st.id, await agentSecFor(st));
+        await repo.addAgentTime(st.id, await takeAgentSec(st));
         await repo.addChat(ownerId, taskId, "agent", `Szkic do zatwierdzenia: „${shortTitle(st.title, 70)}”.`, { stepId: st.id });
         await markRun();
         return text(withWarn("Panel zapisany, krok czeka na zatwierdzenie Piotra. Nie wywołuj complete_step dla tego kroku, dopóki Piotr nie zatwierdzi i nie wyślesz treści."));
       }
+      // poprawka szkicu, który już czeka na zgodę (paczka 55): to też praca Claude'a nad krokiem, liczona od startu próby albo poprzedniego zamknięcia
+      if (st && st.status === "draft" && fresh?.status === "proposed" && od && approvalSig(was, od) !== approvalSig(st, fresh)) await repo.addAgentTime(st.id, await takeAgentSec(st));
       return text(withWarn("Panel zapisany."));
     });
 
     server.registerTool("complete_step", {
-      title: "Krok gotowy", description: "Zgłasza wynik kroku: summary = efekt kroku według zasad pisania do Piotra (Piotr czyta je w raporcie kroku; w rozmowie zobaczy tylko „Zrobione: tytuł kroku”), link do wyniku; spentMin tylko, gdy zamykasz krok Piotra (manual) z jego słów; czas Claude'a liczy się sam od start_step. Krok z kodem: changes = zmienione pliki (path, status, diff, note), repo, branch, preview = adres podglądu (http albo file://); trafiają na kartkę kroku jako blok zmian. Gdy to ostatni krok, zadanie się kończy i agent pisze notatkę końcową. Krok „Plik na Macu” (tool file): file = pełna ścieżka zapisanego pliku (np. ~/Documents/…/2026-10-20-us-podglad-rol.md), nie w link.",
+      title: "Krok gotowy", description: "Zgłasza wynik kroku: summary = efekt kroku według zasad pisania do Piotra (Piotr czyta je w raporcie kroku; w rozmowie zobaczy tylko „Zrobione: tytuł kroku”), link do wyniku; spentMin tylko, gdy zamykasz krok Piotra (manual) z jego słów; czas Claude'a liczy się sam (od startu próby albo od zamknięcia poprzedniego kroku). Krok z kodem: changes = zmienione pliki (path, status, diff, note), repo, branch, preview = adres podglądu (http albo file://); trafiają na kartkę kroku jako blok zmian. Gdy to ostatni krok, zadanie się kończy i agent pisze notatkę końcową. Krok „Plik na Macu” (tool file): file = pełna ścieżka zapisanego pliku (np. ~/Documents/…/2026-10-20-us-podglad-rol.md), nie w link.",
       inputSchema: z.object({ stepId: z.string(), summary: z.string().max(4000), link: z.string().optional(), spentMin: z.number().int().optional(), repo: z.string().max(200).optional(), branch: z.string().max(200).optional(), preview: z.string().max(1000).optional(), changes: z.array(ChangedFile).max(60).optional(), file: z.string().max(500).optional() }),
     }, async (a) => {
       const taskId = await ownedStep(ownerId, a.stepId);
@@ -487,7 +505,7 @@ function buildHandler(auth: repo.TokenAuth) {
         return text("Nie zamknąłem kroku: wymaga zgody Piotra, bo zmienia coś w aplikacji zewnętrznej. Przygotuj szkic przez set_blocks (blok draft, status proposed); po zatwierdzeniu wyśle go mostek Task Hub. Jeśli krok stał się zbędny, zamknij go przez skip_step z powodem.");
       // krok Piotra: jego czas (spentMin) i on jako wykonawca; krok Claude'a: czas liczony sam (spentMin tylko, gdy nie ma z czego liczyć)
       const own = !!cur && isOwnerStep(cur);
-      const addAgentSec = cur && !own ? await agentSecFor(cur, { fallbackMin: a.spentMin }) : 0;
+      const addAgentSec = cur && !own ? await takeAgentSec(cur, { fallbackMin: a.spentMin }) : 0;
       const r = await finishStep(ownerId, taskId, a.stepId, { report: a.summary, link: externalLink(a.link), by: own ? "owner" : "agent", addSpentSec: own && a.spentMin ? a.spentMin * 60 : 0, addAgentSec });
       const st = r.task.steps.find((x) => x.id === a.stepId);
       if (st && a.file) await repo.updateStep(st.id, { filePath: a.file });
@@ -553,7 +571,7 @@ function buildHandler(auth: repo.TokenAuth) {
       if (st.sendStartedAt) return text("Nie zamknąłem: zatwierdzony szkic tego kroku właśnie wysyła mostek. Gdy wysyłka się skończy, sprawdź krok ponownie.");
       // zatwierdzony, ale niewysłany szkic wraca do stanu propozycji: kartka nie może potem udawać, że coś poszło
       await repo.clearApproval(ownerId, st.id);
-      const r = await finishStep(ownerId, taskId, st.id, { report: `Zbędny: ${a.reason}`, by: "agent", addAgentSec: elapsedSec(st.agentStartedAt) });
+      const r = await finishStep(ownerId, taskId, st.id, { report: `Zbędny: ${a.reason}`, by: "agent", addAgentSec: await takeAgentSec(st) });
       await repo.addChat(ownerId, taskId, "agent", `Zamknąłem jako zbędny: „${shortTitle(st.title, 60)}”. ${a.reason}`, { stepId: st.id });
       await mark(st.id, "zamknął jako zbędny");
       await markRun();
@@ -586,7 +604,7 @@ function buildHandler(auth: repo.TokenAuth) {
       if (st.status === "done") return text("Ten krok jest już zrobiony.");
       // paczka 50: czynność bez API (powód „RĘCZNIE: …”): krok wraca do Piotra jako jego krok z instrukcją. Stary bieg wysyłki (zgoda już nie jego) nic nie zmienia
       if (manualOf(a.reason) && !(scope?.kind === "send" && !st.sendStartedAt)) {
-        await repo.addAgentTime(st.id, await agentSecFor(st, { runClock: false }));
+        await repo.addAgentTime(st.id, await takeAgentSec(st, { started: true }));
         await repo.handToOwner(ownerId, st.id, a.reason);
         await mark(st.id, "oddał krok Piotrowi");
         await markRun();
@@ -599,7 +617,7 @@ function buildHandler(auth: repo.TokenAuth) {
       else if (st.approvedAt || st.sendStartedAt || draftOf(st)?.status === "approved") await repo.clearApproval(ownerId, st.id);
       else if (st.status === "handoff") await repo.updateStep(st.id, { status: st.prevStatus === "draft" ? "draft" : "todo", prevStatus: null, handoffAt: null });
       // czas od start_step liczy się mimo oddania (Claude próbował); bez start_step nic, bo oddany krok mógł nie być nawet zaczęty
-      await repo.addAgentTime(st.id, await agentSecFor(st, { runClock: false }));
+      await repo.addAgentTime(st.id, await takeAgentSec(st, { started: true }));
       // na jaki krok czeka (paczka 14, punkt 1): waitFor albo krok wskazany w powodzie czekania; każde oddanie zapisuje to od nowa
       const all = (await repo.listTasks(ownerId)).flatMap((t) => t.steps.map((x) => ({ id: x.id, taskId: t.id, title: x.title })));
       const waitFor = a.waitFor && a.waitFor !== st.id && all.some((x) => x.id === a.waitFor) ? a.waitFor : waitTarget(a.reason, { id: st.id, taskId, title: st.title }, all);

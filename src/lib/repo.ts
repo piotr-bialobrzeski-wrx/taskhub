@@ -1289,8 +1289,8 @@ export type RunKind = "work" | "send";
 export type RunStep = { first: string; at: string; what: string };
 // model, effort: co bieg dostał; focus: grupa pracy „model|wysiłek” (list_work biegu pokazuje tylko ją); modelUsed: pełna nazwa z Claude Code
 export type RunModel = { model: string; effort: string; focus: string; fallback: string };
-export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null; kind?: RunKind; markAt?: string | null; steps?: Record<string, RunStep>; stopAt?: string | null; stoppable?: boolean; model?: string | null; effort?: string | null; focus?: string | null; fallback?: string | null; modelUsed?: string | null };
-const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null, kind: r.kind === "send" ? "send" : "work", markAt: iso(r.markAt), steps: (r.steps as Record<string, RunStep>) ?? {}, stopAt: iso(r.stopAt), stoppable: r.stoppable === true,
+export type BridgeRun = { id: string; bridge: string; startedAt: string; touchedAt: string; endedAt: string | null; outcome: string | null; note: string | null; taskId: string | null; stepId: string | null; kind?: RunKind; markAt?: string | null; closeAt?: string | null; steps?: Record<string, RunStep>; stopAt?: string | null; stoppable?: boolean; model?: string | null; effort?: string | null; focus?: string | null; fallback?: string | null; modelUsed?: string | null };
+const rowToRun = (r: Row): BridgeRun => ({ id: r.id as string, bridge: r.bridge as string, startedAt: iso(r.startedAt) as string, touchedAt: iso(r.touchedAt) as string, endedAt: iso(r.endedAt), outcome: (r.outcome as string) ?? null, note: (r.note as string) ?? null, taskId: (r.taskId as string) ?? null, stepId: (r.stepId as string) ?? null, kind: r.kind === "send" ? "send" : "work", markAt: iso(r.markAt), closeAt: iso(r.closeAt), steps: (r.steps as Record<string, RunStep>) ?? {}, stopAt: iso(r.stopAt), stoppable: r.stoppable === true,
   model: (r.model as string) ?? null, effort: (r.effort as string) ?? null, focus: (r.focus as string) ?? null, fallback: (r.fallback as string) ?? null, modelUsed: (r.modelUsed as string) ?? null });
 // pause: Piotr zatrzymał bieg w Task Hub („Zatrzymaj” w dymku pracy): mostek nie bierze nowej pracy do tej chwili, chyba że Piotr napisze wcześniej
 export type BridgeStatus = { alive: boolean; seenAt: string | null; name: string | null; meta: Record<string, unknown>; run: BridgeRun | null; pause: string | null };
@@ -1465,6 +1465,11 @@ export async function listBridgeRuns(ownerId: string, limit = 8): Promise<Bridge
 }
 // --- mostek v2 (punkty wejścia /api/bridge): bieg po id i bieg wysyłki, który nic nie zaczął ---
 export async function markBridgeRun(ownerId: string, id: string): Promise<void> { await sql()`update bridge_runs set mark_at = now() where id = ${id} and owner_id = ${ownerId} and ended_at is null`; }
+// zamknięcie albo oddanie kroku w biegu (paczka 55): od tej chwili liczy się czas następnego kroku tej próby
+export async function markRunClose(ownerId: string, id: string): Promise<void> { await sql()`update bridge_runs set close_at = now() where id = ${id} and owner_id = ${ownerId} and ended_at is null`; }
+// sesja w chmurze nie ma biegu: ostatnie zamknięcie kroku wziętego w chmurze (paczka 55); kroki jednej sesji dzielą jej czas
+export async function cloudCloseAt(ownerId: string): Promise<string | null> { const [r] = await sql()`select cloud_close_at from users where id = ${ownerId}`; return iso(r?.cloudCloseAt) ?? null; }
+export async function markCloudClose(ownerId: string): Promise<void> { await sql()`update users set cloud_close_at = now() where id = ${ownerId}`; }
 export async function getBridgeRun(ownerId: string, id: string): Promise<BridgeRun | null> {
   const [r] = await sql()`select * from bridge_runs where id = ${id} and owner_id = ${ownerId}`;
   return r ? rowToRun(r) : null;

@@ -55,36 +55,37 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("czas Claude'a i czas Piotra", a
     expect(await call(b.token, "complete_step", { stepId: code, summary: "ok" })).toContain("Krok zapisany");
     const c = await step(t.id, code);
     expect(c).toMatchObject({ status: "done", doneBy: "agent", agentStartedAt: null, spentSec: 0 });
-    expect(c.agentSec).toBeGreaterThanOrEqual(235); expect(c.agentSec).toBeLessThanOrEqual(245);
+    // paczka 55: od startu próby, nie od start_step (czytanie przed startem kroku też jest pracą nad nim)
+    expect(c.agentSec).toBeGreaterThanOrEqual(295); expect(c.agentSec).toBeLessThanOrEqual(305);
     expect((await repo.getBridgeRun(owner, b.run.id))?.markAt).not.toBeNull();
+    expect((await repo.getBridgeRun(owner, b.run.id))?.closeAt).not.toBeNull();
     expect(await call(b.token, "complete_step", { stepId: manual, summary: "zadzwoniłem", spentMin: 20 })).toContain("Krok zapisany");
     expect(await step(t.id, manual)).toMatchObject({ status: "done", doneBy: "owner", spentSec: 1200, agentSec: 0 });
     expect((await repo.listSamples(owner)).find((x) => x.tool === "manual")).toMatchObject({ spentMin: 20, who: "owner" });
     await endRun(b.run.id);
   });
-  it("bez start_step: od znacznika biegu; start sprzed biegu liczy się od startu biegu; oddanie liczy tylko od start_step", async () => {
+  it("bez start_step: od startu biegu; potem od ostatniego zamknięcia; start sprzed biegu się nie liczy; oddanie liczy tylko rozpoczęty krok", async () => {
     const t = await repo.createTask(owner, { title: "Znacznik biegu", steps: [{ title: "A", tool: "code" }, { title: "B", tool: "code" }, { title: "C", tool: "code" }, { title: "D", tool: "code" }] });
     const [a, bb, c, d] = t.steps.map((s) => s.id);
     const b = await workRun();
-    await ago("mark_at", "bridge_runs", b.run.id, 6);
+    await ago("started_at", "bridge_runs", b.run.id, 6);
     expect(await call(b.token, "complete_step", { stepId: a, summary: "ok" })).toContain("Krok zapisany");
     const sa = await step(t.id, a);
     expect(sa.agentSec).toBeGreaterThanOrEqual(355); expect(sa.agentSec).toBeLessThanOrEqual(365);
-    // start_step sprzed tego biegu (zostawiony krok z poprzedniego biegu): liczy się od startu biegu, nie od tamtego startu
+    // start_step sprzed tego biegu (zostawiony krok z poprzedniego biegu): liczy się od zamknięcia kroku a, nie od tamtego startu
     await ago("agent_started_at", "steps", bb, 120);
-    await ago("started_at", "bridge_runs", b.run.id, 3);
+    await ago("close_at", "bridge_runs", b.run.id, 3);
     expect(await call(b.token, "complete_step", { stepId: bb, summary: "ok" })).toContain("Krok zapisany");
     const sb = await step(t.id, bb);
     expect(sb.agentSec).toBeGreaterThanOrEqual(175); expect(sb.agentSec).toBeLessThanOrEqual(185);
     // leave_step: od start_step tak, od znacznika biegu nie
     expect(await call(b.token, "start_step", { stepId: c })).toBe("Krok w toku.");
-    await ago("agent_started_at", "steps", c, 2);
-    await ago("mark_at", "bridge_runs", b.run.id, 9);
+    await ago("close_at", "bridge_runs", b.run.id, 2);
     expect(await call(b.token, "leave_step", { stepId: c, reason: "brak dostępu" })).toBe("Krok oddany.");
     const sc = await step(t.id, c);
     expect(sc.status).toBe("todo"); expect(sc.agentStartedAt).toBeNull();
     expect(sc.agentSec).toBeGreaterThanOrEqual(115); expect(sc.agentSec).toBeLessThanOrEqual(125);
-    await ago("mark_at", "bridge_runs", b.run.id, 9);
+    await ago("close_at", "bridge_runs", b.run.id, 9);
     expect(await call(b.token, "leave_step", { stepId: d, reason: "brak narzędzia" })).toBe("Krok oddany.");
     expect((await step(t.id, d)).agentSec).toBe(0);
     await endRun(b.run.id);
@@ -93,7 +94,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("czas Claude'a i czas Piotra", a
     const t = await repo.createTask(owner, { title: "Szkic i wysyłka", steps: [{ title: "Napisz na #dev", tool: "slack", needsApproval: true }] });
     const sid = t.steps[0].id;
     const b = await workRun();
-    await ago("mark_at", "bridge_runs", b.run.id, 3);
+    await ago("started_at", "bridge_runs", b.run.id, 3);
     const draft: Block = { type: "draft", target: { app: "slack", where: "#dev", action: "send" }, body: "Hej", status: "proposed" };
     expect(await call(b.token, "set_blocks", { stepId: sid, blocks: [draft] })).toContain("czeka na zatwierdzenie");
     let s = await step(t.id, sid);
@@ -180,7 +181,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("czas Claude'a i czas Piotra", a
   it("add_steps z done: krok od razu zrobiony przez Claude z czasem biegu; done z manual, file albo needsApproval odmawia; uwaga przy „Przeczytaj …” dla Piotra", async () => {
     const t = await repo.createTask(owner, { title: "Rozpisanie z done" });
     const b = await workRun();
-    await ago("mark_at", "bridge_runs", b.run.id, 5);
+    await ago("started_at", "bridge_runs", b.run.id, 5);
     expect(await call(b.token, "add_steps", { taskId: t.id, steps: [{ title: "Przeczytaj wątek #dev", tool: "slack", done: "W wątku są 3 wymagania." }, { title: "Zdecyduj o zakresie", tool: "manual" }] })).toContain("\"done\": true");
     const ts = (await repo.getTask(owner, t.id))!;
     expect(ts.steps[0]).toMatchObject({ status: "done", doneBy: "agent", report: "W wątku są 3 wymagania." });
