@@ -12,6 +12,7 @@ import { guessProject } from "./project-guess";
 import { isModelName, MAX_ESCALATION, normalizeLevel } from "./agent/models";
 import { nextDue, parseDueKind, parseRepeat, type DueKind, type Repeat } from "./due";
 import { dayKey } from "./clock";
+import { queryWords, rankHits, stem, type HistoryHit } from "./agent/history";
 export { approvalSig, approvalValid, draftOf, draftsOf, isSendable, optionLabel, optionsOf } from "./agent/approval";
 
 type Row = Record<string, unknown>;
@@ -1091,6 +1092,35 @@ export async function listChatThreads(ownerId: string, taskId: string): Promise<
     from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and actions->>'stepId' is not null
     group by 1 order by max(created_at) desc`;
   return rows.map((r) => ({ stepId: r.stepId as string, n: Number(r.n), lastAt: iso(r.lastAt) as string, pending: Number(r.pending) }));
+}
+// paczka 57, krok 03: wspólna pamięć rozmów. Wiadomości Piotra i odpowiedzi na kartkach decyzji z innych zadań (z nazwą zadania i numerem kroku):
+// agent sprawdza, czy nowa prośba nie kłóci się z wcześniejszą decyzją. Bez słów: najświeższe decyzje (np. w tym samym projekcie).
+export async function searchHistory(ownerId: string, q: string, o: { excludeTaskId?: string | null; projectId?: string | null; limit?: number; days?: number } = {}): Promise<HistoryHit[]> {
+  const words = queryWords(q), limit = Math.min(Math.max(o.limit ?? 15, 1), 40);
+  if (q.trim() && !words.length) return [];   // same znaki albo krótkie słowa: nie ma czego szukać (pusty tekst = najświeższe)
+  const pat = (w: string) => "%" + stem(w).replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+  const pats = words.map(pat);
+  const any = (col: ReturnType<typeof threadSql>) => (pats.length ? sql()`and ${col} ilike any(array(select jsonb_array_elements_text(${sql().json(pats)})))` : sql()``);
+  const scope = sql()`t.owner_id = ${ownerId} and t.deleted_at is null ${o.excludeTaskId ? sql()`and t.id <> ${o.excludeTaskId}` : sql()``} ${o.projectId ? sql()`and t.project_id = ${o.projectId}` : sql()``}
+    ${o.days ? sql()`and t.updated_at > now() - make_interval(days => ${o.days})` : sql()``}`;
+  const no = sql()`(select count(*)::int from steps s2 where s2.task_id = s.task_id and (s2.position, s2.created_at) <= (s.position, s.created_at))`;
+  const hay = sql()`(t.title || ' ' || coalesce(s.title, '') || ' ' || c.text)`;
+  const [chat, dec] = await Promise.all([
+    sql()`select c.text, c.created_at as at, t.id as task_id, t.title as task_title, (t.done_at is not null) as task_done, s.id as step_id, s.title as step_title, case when s.id is null then null else ${no} end as step_no
+      from chat_messages c join tasks t on t.id = c.task_id left join steps s on s.id::text = c.actions->>'stepId'
+      where c.role = 'user' and ${scope} ${any(hay)} order by c.created_at desc limit 200`,
+    sql()`select q.b as block, s.output, s.updated_at as at, t.id as task_id, t.title as task_title, (t.done_at is not null) as task_done, s.id as step_id, s.title as step_title, ${no} as step_no
+      from steps s join tasks t on t.id = s.task_id cross join lateral jsonb_array_elements(case when jsonb_typeof(s.blocks) = 'array' then s.blocks else '[]'::jsonb end) q(b)
+      where ${scope} and q.b->>'type' = 'question' and coalesce(q.b->>'answer', '') <> ''
+        ${any(sql()`(t.title || ' ' || s.title || ' ' || (q.b->>'text') || ' ' || (q.b->>'answer') || ' ' || s.output)`)} order by s.updated_at desc limit 200`,
+  ]);
+  const hits: HistoryHit[] = [
+    ...chat.map((r) => ({ kind: "chat" as const, taskId: r.taskId as string, taskTitle: r.taskTitle as string, taskDone: !!r.taskDone, stepId: (r.stepId as string) ?? null, stepTitle: (r.stepTitle as string) ?? null, stepNo: r.stepNo == null ? null : Number(r.stepNo), at: iso(r.at) as string, text: r.text as string })),
+    ...dec.map((r) => { const b = r.block as { text?: string; answer?: string }; const out = String(r.output ?? "").trim();
+      return { kind: "decision" as const, taskId: r.taskId as string, taskTitle: r.taskTitle as string, taskDone: !!r.taskDone, stepId: r.stepId as string, stepTitle: r.stepTitle as string, stepNo: Number(r.stepNo), at: iso(r.at) as string,
+        text: `${b.text ?? ""} → ${b.answer ?? ""}${out && out !== b.answer ? ` (${out.slice(0, 300)})` : ""}` }; }),
+  ];
+  return rankHits(hits, words, limit);
 }
 // paczka 32: wiadomości bez odpowiedzi napisane przy kroku (kanwa główna: kafelek zadania liczy stan z kroków, krok z prośbą czeka na agenta)
 export async function listPendingStepChat(ownerId: string): Promise<{ actions: unknown; createdAt: string }[]> {
