@@ -562,6 +562,19 @@ export async function completeStep(ownerId: string, task: Task, step: Step, opts
   // ostatni krok gotowy: zadanie kończy się samo, chyba że jakaś wiadomość Piotra czeka jeszcze na odpowiedź agenta (zamknie je reply_chat)
   await closeIfDone(ownerId, task.id);
 }
+// paczka 56: czas Piotra wybrany po zamknięciu kroku („Ile czasu to zajęło?” na dole kartki). sec = null to „Pomiń”: zostaje czas zmierzony
+// przez kartkę, a pytanie znika. Próbka do kalibracji tylko dla kroku Piotra: dopisana, gdy zamknięcie jej nie zapisało, albo poprawiona
+export async function setOwnSpent(ownerId: string, task: Task, step: Step, sec: number | null): Promise<void> {
+  const patch: StepPatch = { spentManual: true };
+  if (sec != null) patch.spentSec = Math.max(0, Math.round(sec));
+  const own = isOwnerStep(step), sm = spentMin({ spentSec: sec ?? step.spentSec });
+  if (own && step.status === "done" && sm > 0) {
+    if (step.logged) await sql()`update time_samples set spent_min = ${sm} where owner_id = ${ownerId} and step_id = ${step.id} and who = 'owner'`;
+    else { await sql()`insert into time_samples (owner_id, step_id, tool, project_id, est_min, spent_min, who) values (${ownerId}, ${step.id}, ${step.tool}, ${task.projectId}, ${step.estMin}, ${sm}, 'owner')`; patch.logged = true; }
+    samplesMem.delete(ownerId);
+  }
+  await writeStep(step.id, patch);
+}
 // paczka 45: krok, którego szkic już poszedł, nie wraca do zrobienia (false): karta mówiła „Już wysłano”, a kafelek „Ruszy samo”,
 // a ponowne otwarcie kasowało też zapis zgody Piotra. Nowa wysyłka to nowy krok.
 export async function reopenStep(ownerId: string, taskId: string, step: Step): Promise<boolean> {
