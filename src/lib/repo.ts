@@ -1037,7 +1037,7 @@ export async function takeCloudStep(ownerId: string, stepId: string): Promise<bo
 export type ChatMessage = { id: string; role: "user" | "agent"; text: string; actions: unknown; createdAt: string; seenAt: string | null; answeredAt: string | null };
 const rowToChat = (r: Row): ChatMessage => ({ id: r.id as string, role: r.role as "user" | "agent", text: r.text as string, actions: r.actions, createdAt: iso(r.createdAt) as string, seenAt: iso(r.seenAt), answeredAt: iso(r.answeredAt) });
 // before: kursor (created_at) do wczytywania starszych wpisów w historii rozmowy
-// wątek rozmowy w zadaniu (paczka 56): undefined = cała rozmowa (kontekst agenta), null = wątek samego zadania (wiadomości bez kroku), id = wątek kroku
+// wątek rozmowy w zadaniu (paczka 57): undefined = cała rozmowa (kontekst agenta), null = wątek samego zadania (wiadomości bez kroku), id = wątek kroku
 export type ChatThread = string | null | undefined;
 const threadSql = (t: ChatThread) => (t === undefined ? sql()`` : t === null ? sql()`and (actions->>'stepId') is null` : sql()`and actions->>'stepId' = ${t}`);
 export async function listChat(ownerId: string, taskId: string | null, limit = 20, before: string | null = null, thread?: ChatThread): Promise<ChatMessage[]> {
@@ -1077,13 +1077,13 @@ export async function listPendingChat(ownerId: string, taskId: string | null, th
   const rows = await sql()`select * from chat_messages where owner_id = ${ownerId} and ${taskId ? sql()`task_id = ${taskId}` : sql()`task_id is null`} ${taskId ? threadSql(thread) : sql()``} and role = 'user' and answered_at is null order by created_at`;
   return rows.map(rowToChat);
 }
-// paczka 56: wspólny krok wiadomości (wątek, do którego należą); null, gdy są bez kroku albo z różnych kroków
+// paczka 57: wspólny krok wiadomości (wątek, do którego należą); null, gdy są bez kroku albo z różnych kroków
 export async function chatStepOf(ownerId: string, taskId: string, ids: string[]): Promise<string | null> {
   if (!ids.length) return null;
   const rows = await sql()`select distinct actions->>'stepId' as step_id from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and id in ${sql()(ids)}`;
   return rows.length === 1 && rows[0].stepId ? (rows[0].stepId as string) : null;
 }
-// paczka 56: wątki kroków w rozmowie zadania (skróty w historii widoku zadania): ile wpisów, ostatni wpis, ile wiadomości Piotra czeka; najświeższe pierwsze
+// paczka 57: wątki kroków w rozmowie zadania (skróty w historii widoku zadania): ile wpisów, ostatni wpis, ile wiadomości Piotra czeka; najświeższe pierwsze
 export type ChatThreadInfo = { stepId: string; n: number; lastAt: string; pending: number };
 export async function listChatThreads(ownerId: string, taskId: string): Promise<ChatThreadInfo[]> {
   const rows = await sql()`select actions->>'stepId' as step_id, count(*)::int as n, max(created_at) as last_at,

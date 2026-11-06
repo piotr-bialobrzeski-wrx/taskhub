@@ -1,4 +1,4 @@
-// Paczka 56: każdy krok ma własny wątek rozmowy. Wiadomość należy do kroku (actions.stepId) albo do samego zadania.
+// Paczka 57: każdy krok ma własny wątek rozmowy. Wiadomość należy do kroku (actions.stepId) albo do samego zadania.
 // W karcie kroku historia pokazuje tylko wątek kroku (z kolejką „Czeka na mostek” tego wątku), w widoku zadania wątek zadania i skróty do wątków kroków.
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 
