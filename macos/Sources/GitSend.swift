@@ -105,8 +105,15 @@ final class GitSend {
             remote = sameName[0].1
             Log.write("git: szkic podaje \(job.repo), a origin w \(sameName[0].0) to \(GitSend.repoKey(sameName[0].1)); biorę ten folder (jedyny z tą nazwą)")
         }
-        guard let dir = folder else {
+        guard var dir = folder else {
             return GitResult(ok: false, text: "Nie znalazłem repozytorium \(job.repo) w folderach z kodem na tym Macu. Dodaj jego folder w Ustawieniach aplikacji Task Hub.")
+        }
+        // paczka 54: osobny katalog roboczy (git worktree) tego repozytorium z gałęzią szkicu, np. drugi prototyp obok pierwszego,
+        // którego zmiany czekają na zgodę w głównym folderze; tylko w katalogu domowym
+        let cur = await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"], seconds: 20)
+        if cur.ok && cur.text != job.branch, let wt = await worktree(dir, branch: job.branch) {
+            Log.write("git: gałąź \(job.branch) jest w osobnym katalogu roboczym \(wt)")
+            dir = wt
         }
 
         if let why = await repoProblem(dir) { return GitResult(ok: false, text: why) }
@@ -295,6 +302,26 @@ final class GitSend {
     }
 
     static let diffFlags = ["--no-color", "--no-ext-diff", "--no-textconv", "--no-renames"]
+
+    // katalog roboczy (git worktree list) z tą gałęzią, w katalogu domowym; nil = nie ma
+    private func worktree(_ dir: String, branch: String) async -> String? {
+        let r = await git(dir, ["worktree", "list", "--porcelain"], seconds: 20, maxText: 200_000)
+        guard r.ok else { return nil }
+        return GitSend.worktreePath(r.text, branch: branch, home: FileManager.default.homeDirectoryForCurrentUser.path)
+    }
+
+    static func worktreePath(_ list: String, branch: String, home: String) -> String? {
+        var path: String? = nil
+        for line in list.components(separatedBy: "\n") {
+            if line.hasPrefix("worktree ") { path = String(line.dropFirst(9)) }
+            else if line == "branch refs/heads/" + branch, let p = path {
+                let h = home.hasSuffix("/") ? home : home + "/"
+                return p.hasPrefix(h) && !p.contains("/../") ? p : nil
+            }
+            else if line.isEmpty { path = nil }
+        }
+        return nil
+    }
 
     // diff pliku z gita (bez zewnętrznych programów) ma te same zmiany co zatwierdzony; nil = zgadza się
     private func diffProblem(_ dir: String, _ f: String, _ approved: String, _ args: [String]) async -> String? {
