@@ -224,7 +224,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
 
       {p.questions && !n && !group ? <div className="answer glass" aria-live="polite">{p.questions}</div> : null}
       {/* odpowiedzi agenta (to, co jest w historii rozmowy) w lewym dolnym rogu ekranu */}
-      <AgentFeed items={p.feed} work={p.work} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} className={panel ? "withpanel" : ""}
+      <AgentFeed items={cur ? p.feed.filter((f) => f.stepId === cur.id) : p.feed} work={p.work} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} className={panel ? "withpanel" : ""}
         stepLabel={(id) => (byId.has(id) ? pad(byId.get(id)!.idx) : null)} onStep={openStep}
         queue={chatOpen ? null : <QueuePanel queue={p.agentQueue} taskId={t.id} onToast={show} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} events={p.feed} onStep={openStep} />}
         status={cur ? <StepQueueStatus queue={p.agentQueue} stepId={cur.id} taskId={t.id} onNext={(key) => run(async () => show(await queueNext(key, t.id)))} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} /> : null}
@@ -232,8 +232,11 @@ export function TaskCanvas(p: TaskCanvasProps) {
 
       {/* paczka 52: w widoku kroku czat stoi po lewej na całą wysokość obok kartki; widok zadania (kanwa, karta zadania) bez zmian */}
       {/* krok 04: przy otwartym czacie kolejka Claude to licznik w nagłówku czatu, a status tego kroku stoi nad polem (wyżej, w AgentFeed) */}
+      {/* paczka 57: każdy krok ma własny wątek rozmowy; w widoku zadania wątek zadania i skróty do wątków kroków */}
       <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} side={!!cur} onSideOpen={setChatOpen}
         head={<QueuePanel variant="head" queue={p.agentQueue} taskId={t.id} onToast={show} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} events={p.feed} onStep={openStep} />} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
+        historyTitle={ctxStep ? `Rozmowa w kroku ${pad(ctxStep.idx)}` : undefined} onStep={openStep}
+        stepName={(id) => { const s = byId.get(id); return s ? { label: pad(s.idx), title: s.title } : null; }}
         queue={ctxGlobal ? null : p.queue} version={`${p.feed.at(-1)?.id ?? ""}|${p.queue?.n ?? 0}|${p.queue?.kind ?? ""}|${p.queue?.activity?.text ?? ""}`}
         placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : "Napisz, co dalej"} />
       <Toast text={toast} />

@@ -5,14 +5,14 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode 
 import { dayKey, fmtDateLong, fmtTime } from "@/lib/clock";
 import { createPortal, useFormStatus } from "react-dom";
 import { LEVELS } from "@/lib/priority";
-import { loadChat, type ChatVM } from "@/app/actions";
+import { loadChat, type ChatThreadVM, type ChatVM } from "@/app/actions";
 import type { Queue } from "@/lib/auto";
 import { workFoot, type FeedItem, type WorkBubble } from "@/lib/feed";
 import { Activity, useMinutes } from "@/components/Activity";
 import { draftKeyOf, readDraft, sendKeepingDraft, writeDraft, type Sent } from "@/lib/chat-draft";
 import { fitTextarea, refitOnWidth } from "@/components/GrowTextarea";
 import { CHAT_SIDE_MIN_VW, CHAT_W_DEFAULT, clampChatW, readChatSide, writeChatSide } from "@/lib/chat-side";
-import { Icon, Lvl, projColor, type ProjectVM } from "./ui";
+import { Icon, Lvl, plural, projColor, type ProjectVM } from "./ui";
 import { DUE_KIND_HINTS, DUE_KIND_LABELS, DUE_KINDS, presetOf, REPEAT_PRESETS, REPEAT_UNITS, repeatLabel, unitForm, type DueValue } from "@/lib/due";
 
 // ---------- menu wyboru przy przycisku ----------
@@ -172,8 +172,11 @@ const timeOf = (iso: string) => fmtTime(iso);
 // zamykanie: X u góry, ikona w doku (ta sama, która otworzyła), klik obok kolumny, Esc.
 // version: zmienia się, gdy serwer ma nową odpowiedź albo inny stan kolejki (puls strony) → historia dociąga najnowsze wpisy bez zamykania
 // inline (paczka 52): historia w panelu czatu po lewej w widoku kroku: bez szkła na cały ekran, bez zamykania klikiem obok i Esc (Esc zamyka krok)
-export function ChatHistory({ taskId, title, onClose, queue = null, version = "", inline = false, head = null }: { taskId: string | null; title: string; onClose: () => void; queue?: Queue | null; version?: string; inline?: boolean; head?: ReactNode }) {
+// stepId (paczka 57): wątek kroku (id) albo samego zadania (null); w wątku zadania nad wpisami stoją skróty do wątków kroków (stepName: numer i nazwa, onStep: otwiera krok)
+export type StepName = (id: string) => { label: string; title: string } | null;
+export function ChatHistory({ taskId, stepId, title, onClose, queue = null, version = "", inline = false, head = null, stepName, onStep }: { taskId: string | null; stepId?: string | null; title: string; onClose: () => void; queue?: Queue | null; version?: string; inline?: boolean; head?: ReactNode; stepName?: StepName; onStep?: (id: string) => void }) {
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
+  const [threads, setThreads] = useState<ChatThreadVM[]>([]);
   const [q, setQ] = useState<Queue | null>(queue);
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -190,9 +193,10 @@ export function ChatHistory({ taskId, title, onClose, queue = null, version = ""
     setBusy(true);
     try {
       const el = list.current, keep = before && el ? el.scrollHeight - el.scrollTop : null;
-      const r = await loadChat(taskId, before);
+      const r = await loadChat(taskId, before, stepId);
       pend.current = { keep };
       setMsgs((m) => (before ? [...r.msgs, ...(m ?? [])] : r.msgs)); setMore(r.msgs.length >= CHAT_PAGE); setQ(r.queue);
+      if (r.threads) setThreads(r.threads);
     } finally { setBusy(false); }
   };
   // nowe wpisy bez zamykania historii: najnowsza strona zastępuje końcówkę listy; przewinięcie zostaje, chyba że Piotr był na dole
@@ -200,12 +204,14 @@ export function ChatHistory({ taskId, title, onClose, queue = null, version = ""
     const el = list.current;
     const atBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     const keep = el && !atBottom ? el.scrollHeight - el.scrollTop : null;
-    const r = await loadChat(taskId, null);
+    const r = await loadChat(taskId, null, stepId);
     pend.current = { keep };
     setMsgs((m) => { const first = r.msgs[0]?.createdAt ?? ""; return [...(m ?? []).filter((x) => x.createdAt < first), ...r.msgs]; }); setQ(r.queue);
+    if (r.threads) setThreads(r.threads);
   };
   const first = useRef(true);
-  useEffect(() => { void load(null); }, [taskId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // inny wątek (otwarty inny krok albo powrót do zadania): lista od nowa
+  useEffect(() => { setMsgs(null); setThreads([]); void load(null); }, [taskId, stepId]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (first.current) { first.current = false; return; } void refresh(); }, [version]);   // eslint-disable-line react-hooks/exhaustive-deps
   const flash = (id: string) => { const el = document.getElementById("hm-" + id); if (!el) return; el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); };
   // odpowiedź na wiadomość Piotra: ta, która ją wymienia w swoich answers, inaczej pierwsza odpowiedź agenta po chwili załatwienia
@@ -229,9 +235,24 @@ export function ChatHistory({ taskId, title, onClose, queue = null, version = ""
         <div className="hist-h"><b>{title}</b><span className="sp" />{head}{inline
           ? <button className="icobtn" type="button" aria-label="Schowaj historię" title="Schowaj historię" onClick={onClose}><Icon k="x" size={13} sw={2} /></button>
           : <button className="icobtn" type="button" aria-label="Zamknij historię" title="Zamknij (Esc)" onClick={onClose}><Icon k="x" size={13} sw={2} /></button>}</div>
+        {(() => {
+          // skróty do wątków kroków (tylko w wątku zadania): numer kroku, ile wpisów, kropka, gdy wiadomość Piotra czeka; klik otwiera krok z jego wątkiem
+          const known = stepId === null && stepName && onStep ? threads.map((x) => ({ ...x, name: stepName(x.stepId) })).filter((x) => x.name) : [];
+          if (!known.length) return null;
+          return (
+            <div className="hist-threads" role="group" aria-label="Rozmowy w krokach">
+              <span className="ht-l">W krokach</span>
+              {known.map((x) => (
+                <button key={x.stepId} type="button" className={"ht" + (x.pending ? " wait" : "")} title={`${x.name!.label} ${x.name!.title} · ${x.n} ${plural(x.n, "wpis", "wpisy", "wpisów")} · ostatni ${dayLabel(x.lastAt) === "Dziś" ? timeOf(x.lastAt) : dayLabel(x.lastAt)}`} onClick={() => onStep!(x.stepId)}>
+                  {x.pending ? <i className="pulse" aria-hidden="true" /> : null}<b>{x.name!.label}</b><span className="ht-t">{x.name!.title}</span><span className="ht-n">{x.n}</span>
+                </button>
+              ))}
+            </div>
+          );
+        })()}
         <div ref={list} className="hist-b">
           <div className="hist-list">
-            {msgs === null ? <p className="sub" style={{ textAlign: "center" }}>Wczytuję…</p> : !msgs.length ? <p className="sub" style={{ textAlign: "center" }}>Jeszcze nie było tu rozmowy.</p> : (
+            {msgs === null ? <p className="sub" style={{ textAlign: "center" }}>Wczytuję…</p> : !msgs.length ? <p className="sub" style={{ textAlign: "center" }}>{stepId ? "Jeszcze nie było rozmowy o tym kroku." : "Jeszcze nie było tu rozmowy."}</p> : (
               <>
                 {more ? <button className="btn" type="button" style={{ alignSelf: "center" }} disabled={busy} onClick={() => load(msgs[0].createdAt)}>{busy ? "Wczytuję…" : "Starsze wpisy"}</button> : null}
                 {(() => { const pendingIds = msgs.filter((m) => m.role === "user" && !m.answeredAt).map((m) => m.id); const lastPending = pendingIds[pendingIds.length - 1] ?? null; return msgs.map((m, i) => (
@@ -354,7 +375,7 @@ function useWide(): boolean {
 // Prawą krawędź panelu da się przeciągnąć (podwójny klik wraca do 380 px); szerokość i stan pokazany/schowany zapamiętuje przeglądarka.
 // Klasy chat-side / chat-dock i --chat-w trafiają na .app, żeby kartka (.detail) i dymki ustawiły się obok panelu.
 // head (krok 04): licznik kolejki Claude w nagłówku czatu po lewej; onSideOpen mówi stronie, czy panel z historią jest otwarty (wtedy pigułka kolejki z rogu znika)
-export function Dock({ action, taskId, stepId = null, placeholder, busyText, context, historyTitle, queue = null, version = "", side: sideAsked = false, head = null, onSideOpen }: { action: (fd: FormData) => Promise<void>; taskId: string | null; stepId?: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string; queue?: Queue | null; version?: string; side?: boolean; head?: ReactNode; onSideOpen?: (open: boolean) => void }) {
+export function Dock({ action, taskId, stepId = null, placeholder, busyText, context, historyTitle, queue = null, version = "", side: sideAsked = false, head = null, onSideOpen, stepName, onStep }: { action: (fd: FormData) => Promise<void>; taskId: string | null; stepId?: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string; queue?: Queue | null; version?: string; side?: boolean; head?: ReactNode; onSideOpen?: (open: boolean) => void; stepName?: StepName; onStep?: (id: string) => void }) {
   const form = useRef<HTMLFormElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const wide = useWide();
@@ -429,7 +450,7 @@ export function Dock({ action, taskId, stepId = null, placeholder, busyText, con
   // historia jest rodzeństwem formularza w tym samym kontekście warstw: szkło pod dokiem, dok nad nim (pole dalej działa)
   return (
     <div ref={wrap} className={"dockwrap" + (side ? " side" + (hist ? " open" : "") : hist ? " hist-on" : "")}>
-      {hist ? <ChatHistory taskId={taskId} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(() => false)} queue={queue} version={version} inline={side} head={side ? head : null} /> : null}
+      {hist ? <ChatHistory taskId={taskId} stepId={taskId ? stepId : undefined} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(() => false)} queue={queue} version={version} inline={side} head={side ? head : null} stepName={stepName} onStep={onStep} /> : null}
       {side && hist ? <div className="chat-grip" role="separator" aria-orientation="vertical" aria-label="Szerokość czatu" aria-valuenow={chatW} tabIndex={0} title="Przeciągnij, żeby zmienić szerokość (podwójny klik: 380 px)"
         onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp} onPointerCancel={onGripUp} onDoubleClick={resetW} onKeyDown={onGripKey} /> : null}
       <form ref={form} className={"dock glass" + (over ? " drop" : "")} action={send} autoComplete="off"
