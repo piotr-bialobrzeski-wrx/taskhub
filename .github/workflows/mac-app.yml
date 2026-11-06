@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15   # macos-14 wycofany przez GitHub (2026-11)
     steps:
       - uses: actions/checkout@v4
 
