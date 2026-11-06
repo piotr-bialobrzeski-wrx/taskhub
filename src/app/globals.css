@@ -1521,3 +1521,10 @@ a.md-day:hover, button.md-day:hover { box-shadow: 0 0 0 2px var(--accent-soft); 
 .md-leg i.sent { background: var(--ok); } .md-leg i.approved { background: var(--accent); } .md-leg i.draft { background: var(--warn); }
 .md-leg i.missing { border: 1px dashed var(--warn); box-sizing: border-box; }
 @media (max-width: 560px) { .md-day { min-height: 44px; padding: 4px; } .md-day .md-s, .md-day b { display: none; } }
+
+/* paczka 51: prośba Piotra z czatu kroku na kartce: czeka na Claude'a albo Claude ją wprowadza; szkic sprzed prośby przygaszony */
+.redo { display: flex; flex-direction: column; gap: var(--s-2); }
+.redo .working.wait { background: var(--surface-2); color: var(--sub); }
+.redo-q { margin: 0; font-size: 13px; color: var(--text); }
+.redo-q b { font-weight: 600; }
+.pub.old > :not(.pub-h):not(.note):not(.actions) { opacity: .6; }

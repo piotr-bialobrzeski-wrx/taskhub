@@ -26,7 +26,7 @@ import { ProtoFrame } from "@/components/ProtoFrame";
 import { embedMode, isOwnPreview } from "@/lib/embed";
 import { agentFeed, stepWaits, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
-import { beforeOf, decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
+import { beforeOf, decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, redoOf, type CardState, type Redo } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -206,7 +206,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     if (!raw || !s.needsApproval || (m !== "proposed" && m !== "parked") || destOf(s)?.kind !== "send") return null;
     return connectorIssue(b.connections, b.companies, { app: raw, connectionId: s.connectionId, companyId: cur.project?.companyId ?? null });
   };
-  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} runId={w.run?.stoppable ? w.run.runId ?? null : null} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} project={cur.project?.name ?? null} prev={prevBlocks.get(s.id) ?? null} />; });
+  t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} runId={w.run?.stoppable ? w.run.runId ?? null : null} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} project={cur.project?.name ?? null} prev={prevBlocks.get(s.id) ?? null} redo={redoOf(pending, t.id, s.id, w.run)} />; });
   month?.cells.forEach((c) => { if (c.step) dayCards[c.step.id] = panels[c.step.id]; });
 
   return (
@@ -226,11 +226,11 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   );
 }
 
-function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, runId, oldMac, macAlive, issue, model, project, prev }: {
+function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, origin, waits, companyId, company, connections, ctx, ownerName, activity, runId, oldMac, macAlive, issue, model, project, prev, redo }: {
   t: Task; s: Step; state: string; facts: Awaited<ReturnType<typeof repo.listFacts>>; attachments: Awaited<ReturnType<typeof repo.listAttachments>>;
   aiOn: boolean; rules: Awaited<ReturnType<typeof repo.listRules>>; samples: Awaited<ReturnType<typeof repo.listSamples>>; origin: string; waits: boolean; companyId: string | null; company: string | null;
   connections: StepConnection[]; ctx: { color: string; text: string }; ownerName: string; activity: TileActivity | null; runId: string | null; oldMac: boolean; macAlive: boolean; issue: string | null;
-  model: (StepModelInfo & { now: string }) | null; project: string | null; prev: Block[] | null;
+  model: (StepModelInfo & { now: string }) | null; project: string | null; prev: Block[] | null; redo: Redo | null;
 }) {
   // grafiki kroku (paczka 27): tylko przypisane przy rozpisaniu; krok sprzed przypisywania pokazuje tylko swoje (podgląd prototypu),
   // a wszystkie grafiki zadania są w opisie zadania
@@ -267,10 +267,12 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // krok z kodem w projekcie Task Hub (paczka 14, punkt 1) też: mostek go nie zrobi, więc zamiast „Przygotuj” / „Uruchom” jest „Uruchom w chmurze”
   const inProject = (kind === "offline" || kind === "agent") && isProjectStep(s, project);
   const head0 = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined, draftsOf(s).length, optionsOf(s).chosen?.status === "sent", draftsOf(s).some((x) => !!x.stale));
+  // paczka 51: prośba Piotra w czacie kroku przejmuje nagłówek „Teraz” (czeka na agenta albo agent ją wprowadza); kartka nie czeka na odświeżenie wyniku
+  const redoOn = !!redo && !done && mode !== "sending";
   // „Uruchom w chmurze” (paczka 13, punkt 3): kliknięte czeka, aż mostek na Macu odpali chmurę (queued), potem aż chmura weźmie krok (rung)
   const cloud = s.status === "todo" && inProject ? s.cloud ?? null : null;
   const cloudTitle = cloud?.state === "rung" ? "Chmura rusza" : cloud ? "Czeka na chmurę" : "Do zrobienia w projekcie w chmurze";
-  const head = inProject && state === "ready" && !mode ? { ...head0, title: cloudTitle } : head0;
+  const head = redoOn ? { title: "", cls: redo!.state === "working" ? "handoff" : "blocked" } : inProject && state === "ready" && !mode ? { ...head0, title: cloudTitle } : head0;
   // paczka 22: zgoda przeszła z decyzji Piotra; linia zostaje też, gdy chmura już pracuje
   const fromIx = s.cloud?.from ? t.steps.findIndex((x) => x.id === s.cloud!.from) : -1;
   const fromStep = fromIx >= 0 ? t.steps[fromIx] : null;
@@ -317,7 +319,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const sheetOpen = sheetCard && (mode === "proposed" || mode === "parked");
   const now = (
     <div className={"zone ans now " + head.cls + (sheetCard ? " sheetc" : "")}>
-      {sheetOpen ? null : <div className="now-h">
+      {redoOn ? <RedoHead redo={redo!} /> : null}
+      {sheetOpen || redoOn ? null : <div className="now-h">
         {(s.status === "handoff" || (s.status === "todo" && activity)) && !mode ? (activity ? <Activity text={activity.text} detail={activity.detail} since={activity.since} who="Claude" big />
           : <span className="working" title={s.cloud ? "Claude w chmurze robi ten krok; wynik pojawi się tutaj" : prompt ? "Claude robi ten krok przez konektor; wynik pojawi się tutaj" : undefined}><span className="pulse" />{s.cloud ? "Claude w chmurze pracuje" : "Claude pracuje"}{s.handoffAt ? ` od ${fmtTime(s.handoffAt)}` : ""}</span>)
           : <span>{head.title}{done && s.doneAt ? ` ${fmtTime(s.doneAt)}` : ""}</span>}
@@ -329,7 +332,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         {done && s.filePath ? <><span className="sp" /><CopyButton text={s.filePath} label="Kopiuj ścieżkę" /></> : null}
       </div>}
       {s.tool === "file" && s.status === "todo" && oldMac ? <div className="note">Ten krok zapisze plik aplikacja Task Hub na Macu od wersji 0.1.7. Zaktualizuj ją w menu aplikacji.</div> : null}
-      {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} issue={issue}
+      {mode ? <PublishCard t={t} s={s} mode={mode} aiOn={aiOn} ownerName={ownerName} link={link ?? null} connections={connections} company={company} activity={activity} issue={issue} redo={redoOn}
         waitsOn={t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${x.title}”`)} before={before} /> : null}
       {consent && !mode ? <div className="note">{consent}</div> : null}
       {cloudNote && !mode ? <div className="note">{cloudNote}</div> : null}
@@ -462,5 +465,22 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         </details>
       ) : null}
     </>
+  );
+}
+
+// paczka 51: nagłówek kartki, gdy przy kroku czeka prośba Piotra z czatu: najpierw „czeka na Claude'a”, potem „Claude wprowadza Twoje zmiany”
+// z bieżącą czynnością (gdy mostek ją zgłasza; bez zmyślonego postępu), pod spodem sama prośba
+function RedoHead({ redo }: { redo: Redo }) {
+  const more = redo.count > 1 ? ` (i ${redo.count - 1} wcześniejsz${redo.count - 1 === 1 ? "a" : "e"})` : "";
+  return (
+    <div className="redo">
+      <div className="now-h">
+        {redo.state === "working"
+          ? <span className="working"><span className="pulse" />Claude wprowadza Twoje zmiany</span>
+          : <span className="working wait"><span className="pulse" />Twoja prośba czeka na Claude'a</span>}
+        {redo.state === "working" && redo.activity ? <Activity text={redo.activity.text} detail={redo.activity.detail} since={redo.activity.since} /> : <small>· od {fmtTime(redo.at)}</small>}
+      </div>
+      <p className="redo-q"><b>Twoja prośba{more}:</b> „{redo.text}”</p>
+    </div>
   );
 }

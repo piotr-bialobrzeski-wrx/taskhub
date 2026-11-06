@@ -4,7 +4,7 @@
 // z własnym formularzem, linią miejsca i przyciskiem „Zatwierdź: Opcja X”; po wyborze karta pokazuje wybraną jak jeden szkic, a resztę zwija pod „Odrzucone wersje”.
 import type { Block, Step, Task } from "@/lib/schema";
 import { normalizeTool, openLabel, toolLabel } from "@/lib/schema";
-import { ACTION, approveLabel, destHint, destOf, normUrl, targetLink, type Dest } from "@/lib/stepcard";
+import { ACTION, approveLabel, destHint, destOf, normUrl, REDO_STALE, targetLink, type Dest } from "@/lib/stepcard";
 import { fileName } from "@/lib/safeurl";
 import { fmtTime } from "@/lib/canvas/vm";
 import { fmtDateTime } from "@/lib/clock";
@@ -57,9 +57,10 @@ const openBtn = (l: { label: string; url: string } | null) => l && isHttpUrl(l.u
 
 // issue: czemu mostek nie wyśle tego szkicu (brak konektora na Macu, kilka kont, konektor innej firmy); karta ostrzega, przycisk zgody nie działa
 // before: obecna treść rzeczy, którą szkic zmienia (stepcard.beforeOf); wtedy obecna i nowa wersja stoją obok siebie ze zmianami podświetlonymi
-export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, company, activity, waitsOn = [], issue = null, before = null }: {
+// redo (paczka 51): przy kroku czeka prośba Piotra z czatu, więc szkic jest nieaktualny i przycisk zgody nie działa, aż agent przygotuje nową wersję
+export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, company, activity, waitsOn = [], issue = null, before = null, redo = false }: {
   t: Task; s: Step; mode: CardMode; aiOn: boolean; ownerName: string; link: string | null; connections: StepConnection[]; company: string | null; activity?: TileActivity | null; waitsOn?: string[]; issue?: string | null;
-  before?: Extract<Block, { type: "free" }> | null;
+  before?: Extract<Block, { type: "free" }> | null; redo?: boolean;
 }) {
   const { drafts, chosen, rejected, multi } = optionsOf(s);
   // szkic kroku: wybrana opcja, inaczej pierwsza (przy jednym szkicu zawsze on); z niego nagłówek, miejsce i podpowiedź pod przyciskiem, bo te są na krok
@@ -82,6 +83,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   const act = d?.target.action ?? "send";
   const isPrompt = PROMPT_APPS.has(app), isCommit0 = act === "commit" || act === "push";
   const stale = drafts.some((x) => !!x.stale);
+  const old = redo && (mode === "proposed" || mode === "parked");   // szkic sprzed prośby Piotra: tylko do wglądu
   const body0 = d?.body ?? s.output;
   // dokąd idzie szkic (jedno źródło dla przycisku, linii pod nim i nagłówka po wysyłce); stary szkic bez bloku (sama treść) liczy się jak przy zgodzie
   const dest = destOf(s) ?? (body0?.trim() ? destOf({ ...s, blocks: [...(s.blocks ?? []), { type: "draft", target: { app: s.tool, action: "send" }, body: body0, status: "proposed" }] }) : null);
@@ -121,7 +123,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
     // podgląd według rodzaju odpowiedzi: wiersze do arkusza jako tabela, prompt jako ramka kodu, reszta jako wiadomość „moja”
     // paczka 42: szkic z rodzajami kolumn (sheet) to arkusz do edycji w miejscu przed decyzją, po decyzji ten sam układ tylko do odczytu
     const approve = (text: string) => (
-      <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} disabled={!!issue} title={issue ?? (stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dd?.kind === "send" ? " " + dd.in : ""}`)}>{text}</PendingButton></form>
+      <form id={formId} action={approveStep.bind(null, t.id, s.id)}>{seenInput}<PendingButton className="btn primary" busy={stays ? "Zapisuję…" : "Przekazuję agentowi…"} disabled={!!issue || old} title={old ? "Nieaktualny: " + REDO_STALE : issue ?? (stays ? "Szkic jest dobry, krok zrobiony" : `Claude ${isPrompt ? "uruchomi" : ACTION[action] ?? "wyśle"} dokładnie tę treść${dd?.kind === "send" ? " " + dd.in : ""}`)}>{text}</PendingButton></form>
     );
     const sheetOn = isRows && !!di?.sheet?.length && !!di.columns?.length;
     const sheetEdit = sheetOn && (mode === "proposed" || mode === "parked") && !sentAlready && di!.status !== "sent";
@@ -185,7 +187,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
       <div key={i} className="block pub opt">
         <div className="pub-h">
           {/* paczka 30: stan („Wybierz opcję”, „Odłożony szkic”) mówi nagłówek „Teraz”, karta opcji niesie samą nazwę */}
-          <span className="pub-t"><b>{optionLabel(di, i)}</b>{!ro && di.stale ? " · nieaktualna" : ""}</span>
+          <span className="pub-t"><b>{optionLabel(di, i)}</b>{!ro && (di.stale || old) ? " · nieaktualna" : ""}</span>
           <span className="sp" />
           {ro ? null : openBtn(targetLink(s, s.blocks, di))}
         </div>
@@ -204,7 +206,7 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
   ) : null;
 
   return (
-    <div className={"block pub " + mode + (one.sheetActs ? " sheetpub" : "")}>
+    <div className={"block pub " + mode + (one.sheetActs ? " sheetpub" : "") + (old ? " old" : "")}>
       {/* paczka 44: arkusz przed decyzją bez linii nagłówka (stan i dokąd mówi nagłówek dnia i przycisk w stopce) */}
       {one.sheetActs ? null : <div className="pub-h">
         <span className="tool-dot" style={{ ["--c" as string]: toolColor(app) }} />
@@ -216,7 +218,8 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
         {mode === "sent" && sentHref ? <a className="btn ico" href={sentHref} target="_blank" rel="noopener" title={sentHref}>{openLabel(normalizeTool(app))}<Icon k="ext" size={13} sw={1.6} /></a> : null}
         {mode === "sent" && s.filePath ? <CopyButton text={s.filePath} label="Kopiuj ścieżkę" /> : null}
       </div>}
-      {stale ? <div className="note warn">Szkic sprzed zmiany zakresu: przed tym krokiem weszły nowe kroki, Claude przygotuje go od nowa, gdy je zrobi.</div> : null}
+      {old ? <div className="note warn">Szkic sprzed Twojej prośby o zmiany. Zatwierdzisz nową wersję, gdy Claude ją przygotuje.</div> : null}
+      {stale && !old ? <div className="note warn">Szkic sprzed zmiany zakresu: przed tym krokiem weszły nowe kroki, Claude przygotuje go od nowa, gdy je zrobi.</div> : null}
       {changes ? (
         <div className="actions">
           <a className="btn" href={"#zm-" + s.id} title="Pliki i diffy na kartce kroku">Zobacz zmiany ({changes.files.length})</a>

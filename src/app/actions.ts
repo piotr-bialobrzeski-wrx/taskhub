@@ -19,7 +19,7 @@ import { fmtTime } from "@/lib/clock";
 import { connectorIssue, isGitDraft } from "@/lib/bridge";
 import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, parseSheetRows, shownSig, wasSent, withRows, type Draft, type SheetRows } from "@/lib/agent/approval";
 import { workSummary } from "@/lib/agent/work";
-import { decisionText, destOf, isDeployStep, isProjectStep, openQuestions, stepKind, stepsAfterDecision } from "@/lib/stepcard";
+import { decisionText, destOf, isDeployStep, isProjectStep, openQuestions, REDO_STALE, stepKind, stepsAfterDecision } from "@/lib/stepcard";
 import { isAppCodeStep, isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
 import { cleanDue, type DueValue } from "@/lib/due";
 
@@ -245,6 +245,11 @@ export async function approveStep(taskId: string, stepId: string, fd?: FormData)
   const shown = rows ? fd?.get("seenRows") : edited !== null ? fd?.get("seen") : fd?.get("seenFull") ?? fd?.get("seen");
   const seen = typeof shown === "string" && shown ? shown : null;
   if (step.status === "done") { refresh(taskId); return; }
+  // paczka 51: przy kroku czeka prośba Piotra z czatu, więc szkic jest sprzed niej; karta wyłącza przycisk, a to łapie kliknięcie sprzed odświeżenia
+  if ((await repo.listPendingChat(o.id, taskId)).some((m) => (m.actions as { stepId?: string } | null)?.stepId === stepId)) {
+    await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(step.title, 60)}”: ${REDO_STALE}.`, { stepId });
+    refresh(taskId); return;
+  }
   // opcja z karty, której już nie ma (agent przepisał kartkę z mniejszą liczbą opcji, zanim Piotr kliknął): bez zgody i bez zamykania kroku
   if (option != null && draftsOf(step).length && !pick(step)) {
     await repo.addChat(o.id, taskId, "agent", `Nie zatwierdziłem „${shortTitle(step.title, 60)}”: szkic zmienił się, zanim go zatwierdziłeś. Sprawdź go jeszcze raz.`, { stepId });
