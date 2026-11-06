@@ -64,9 +64,11 @@ ${hist.length ? "OSTATNIA ROZMOWA W TYM MIEJSCU:\n" + hist.map((m) => `${m.role 
 ${text}`;
   const result = await deps.ai.json({ system: SYSTEM, prompt, schema: ChatResult, images: deps.images, effort: "medium" });
   const done = await applyActions(result, { ...deps, tasks });
-  await repo.addChat(deps.ownerId, deps.taskId, "user", text, undefined, { seen: true });
-  await repo.addChat(deps.ownerId, deps.taskId, "agent", result.reply, result.actions);
-  for (const d of done) if (d.note) await repo.addChat(deps.ownerId, d.taskId ?? deps.taskId, "agent", d.note);
+  // paczka 56: wiadomość przy otwartym kroku i odpowiedź na nią należą do wątku tego kroku
+  const at = deps.taskId && deps.stepId ? { stepId: deps.stepId } : null;
+  await repo.addChat(deps.ownerId, deps.taskId, "user", text, at ?? undefined, { seen: true });
+  await repo.addChat(deps.ownerId, deps.taskId, "agent", result.reply, at ? { ...at, ops: result.actions } : result.actions);
+  for (const d of done) if (d.note) await repo.addChat(deps.ownerId, d.taskId ?? deps.taskId, "agent", d.note, at && (d.taskId ?? deps.taskId) === deps.taskId ? at : undefined);
   return { reply: result.reply, done, result };
 }
 

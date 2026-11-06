@@ -713,12 +713,14 @@ function buildHandler(auth: repo.TokenAuth) {
     });
 
     server.registerTool("reply_chat", {
-      title: "Odpowiedz w rozmowie zadania", description: "Odpowiada Piotrowi w rozmowie zadania (pokazuje się jako dymek; długość i język według zasad z get_rules; bez raportu z postępu, szczegóły na kartce kroku). messageIds: id wiadomości Piotra, które ta odpowiedź załatwia (z get_task, przy NOWE); bez nich załatwia wszystkie dotychczasowe w zadaniu. Odpowiadaj osobno po każdej załatwionej prośbie, żeby Piotr widział, co już jest zrobione. stepId: krok, którego odpowiedź dotyczy (karta w rozmowie dostanie „Otwórz krok”); link: adres wyniku w zewnętrznej aplikacji. Gdy wszystkie kroki są zrobione i nic już nie czeka na odpowiedź, zadanie kończy się samo. Kroki, których dotknąłeś w tym biegu w tym zadaniu, dostaną w dymku przyciski „Otwórz krok” same; stepId wskazuje główny.",
+      title: "Odpowiedz w rozmowie zadania", description: "Odpowiada Piotrowi w rozmowie zadania (pokazuje się jako dymek; długość i język według zasad z get_rules; bez raportu z postępu, szczegóły na kartce kroku). messageIds: id wiadomości Piotra, które ta odpowiedź załatwia (z get_task, przy NOWE); bez nich załatwia wszystkie dotychczasowe w zadaniu. Odpowiadaj osobno po każdej załatwionej prośbie, żeby Piotr widział, co już jest zrobione. stepId: krok, którego odpowiedź dotyczy (trafia do wątku rozmowy tego kroku, karta w rozmowie dostanie „Otwórz krok”; bez stepId odpowiedź idzie do wątku kroku, z którego są wszystkie messageIds, inaczej do wątku zadania); link: adres wyniku w zewnętrznej aplikacji. Gdy wszystkie kroki są zrobione i nic już nie czeka na odpowiedź, zadanie kończy się samo. Kroki, których dotknąłeś w tym biegu w tym zadaniu, dostaną w dymku przyciski „Otwórz krok” same; stepId wskazuje główny.",
       inputSchema: z.object({ taskId: z.string(), text: z.string().min(1).max(1200), messageIds: z.array(z.string()).max(50).optional(), stepId: z.string().optional(), link: z.string().optional() }),
     }, async (a) => {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
-      const stepId = a.stepId && t.steps.some((s) => s.id === a.stepId) ? a.stepId : undefined;
+      const asked = a.stepId && t.steps.some((s) => s.id === a.stepId) ? a.stepId : undefined;
       const answers = await repo.markChatAnswered(ownerId, t.id, a.messageIds);
+      // paczka 56: odpowiedź trafia do wątku kroku; bez stepId dziedziczy krok, gdy wszystkie załatwione wiadomości są z jednego kroku
+      const stepId = asked ?? (await repo.chatStepOf(ownerId, t.id, answers)) ?? undefined;
       // inne kroki tego zadania, których bieg dotknął: dymek dostaje do nich małe przyciski (najwyżej dwa, w kolejności kroków)
       const runId = await runIdOf();
       const touched = runId ? await repo.runSteps(ownerId, runId) : {};

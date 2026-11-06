@@ -705,6 +705,17 @@ body:has(> main.page) { background: radial-gradient(560px 380px at 8% -8%, var(-
 .hist-h { display: flex; align-items: center; gap: var(--s-3); padding: 0 0 var(--s-3); font-size: 14px; flex: none; }
 .hist-h .sp { flex: 1; }
 .hist-b { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+/* paczka 56: skróty do wątków kroków w rozmowie zadania; jeden rząd chipów bez zawijania, przewijany w bok */
+.hist-threads { display: flex; align-items: center; gap: var(--s-2); padding: 0 0 var(--s-3); overflow-x: auto; flex: none; scrollbar-width: none; }
+.hist-threads::-webkit-scrollbar { display: none; }
+.hist-threads .ht-l { flex: none; font-size: 11px; color: var(--sub); }
+.hist-threads .ht { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; max-width: 240px; padding: 0 12px; border-radius: 999px; border: 0; box-shadow: inset 0 0 0 1px var(--line); background: transparent; color: var(--text); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.hist-threads .ht:hover, .hist-threads .ht:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); outline: none; }
+.hist-threads .ht b { font-weight: 600; color: var(--sub); }
+.hist-threads .ht-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hist-threads .ht-n { flex: none; color: var(--sub); font-variant-numeric: tabular-nums; }
+.hist-threads .ht.wait { color: var(--t-claude); }
+.hist-threads .ht .pulse { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
 .hist-list { margin-top: auto; display: flex; flex-direction: column; gap: var(--s-3); padding: 0 2px var(--s-2); }   /* margin-top: auto = dosunięcie do dołu bez blokowania przewijania */
 .dock .icobtn.on { color: var(--accent); background: var(--accent-soft); }
 .hm { display: flex; flex-direction: column; gap: 3px; max-width: 85%; align-self: flex-start; }

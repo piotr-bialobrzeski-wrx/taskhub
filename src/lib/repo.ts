@@ -1024,10 +1024,13 @@ export async function takeCloudStep(ownerId: string, stepId: string): Promise<bo
 export type ChatMessage = { id: string; role: "user" | "agent"; text: string; actions: unknown; createdAt: string; seenAt: string | null; answeredAt: string | null };
 const rowToChat = (r: Row): ChatMessage => ({ id: r.id as string, role: r.role as "user" | "agent", text: r.text as string, actions: r.actions, createdAt: iso(r.createdAt) as string, seenAt: iso(r.seenAt), answeredAt: iso(r.answeredAt) });
 // before: kursor (created_at) do wczytywania starszych wpisów w historii rozmowy
-export async function listChat(ownerId: string, taskId: string | null, limit = 20, before: string | null = null): Promise<ChatMessage[]> {
+// wątek rozmowy w zadaniu (paczka 56): undefined = cała rozmowa (kontekst agenta), null = wątek samego zadania (wiadomości bez kroku), id = wątek kroku
+export type ChatThread = string | null | undefined;
+const threadSql = (t: ChatThread) => (t === undefined ? sql()`` : t === null ? sql()`and (actions->>'stepId') is null` : sql()`and actions->>'stepId' = ${t}`);
+export async function listChat(ownerId: string, taskId: string | null, limit = 20, before: string | null = null, thread?: ChatThread): Promise<ChatMessage[]> {
   const cut = before ?? "9999-12-31T00:00:00Z";
   const rows = taskId
-    ? await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and created_at < ${cut} order by created_at desc limit ${limit}`
+    ? await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} ${threadSql(thread)} and created_at < ${cut} order by created_at desc limit ${limit}`
     : await sql()`select * from chat_messages where owner_id = ${ownerId} and task_id is null and created_at < ${cut} order by created_at desc limit ${limit}`;
   return rows.reverse().map(rowToChat);
 }
@@ -1057,9 +1060,24 @@ export async function listUnseenChat(ownerId: string, limit = 30, staleMin = CHA
 }
 // wiadomości Piotra bez odpowiedzi w jednym zadaniu (linia stanu pod dymkiem, karta nad dokiem, pasek nad kanwą, blokada samozamknięcia)
 // taskId null = główna kanwa
-export async function listPendingChat(ownerId: string, taskId: string | null): Promise<ChatMessage[]> {
-  const rows = await sql()`select * from chat_messages where owner_id = ${ownerId} and ${taskId ? sql()`task_id = ${taskId}` : sql()`task_id is null`} and role = 'user' and answered_at is null order by created_at`;
+export async function listPendingChat(ownerId: string, taskId: string | null, thread?: ChatThread): Promise<ChatMessage[]> {
+  const rows = await sql()`select * from chat_messages where owner_id = ${ownerId} and ${taskId ? sql()`task_id = ${taskId}` : sql()`task_id is null`} ${taskId ? threadSql(thread) : sql()``} and role = 'user' and answered_at is null order by created_at`;
   return rows.map(rowToChat);
+}
+// paczka 56: wspólny krok wiadomości (wątek, do którego należą); null, gdy są bez kroku albo z różnych kroków
+export async function chatStepOf(ownerId: string, taskId: string, ids: string[]): Promise<string | null> {
+  if (!ids.length) return null;
+  const rows = await sql()`select distinct actions->>'stepId' as step_id from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and id in ${sql()(ids)}`;
+  return rows.length === 1 && rows[0].stepId ? (rows[0].stepId as string) : null;
+}
+// paczka 56: wątki kroków w rozmowie zadania (skróty w historii widoku zadania): ile wpisów, ostatni wpis, ile wiadomości Piotra czeka; najświeższe pierwsze
+export type ChatThreadInfo = { stepId: string; n: number; lastAt: string; pending: number };
+export async function listChatThreads(ownerId: string, taskId: string): Promise<ChatThreadInfo[]> {
+  const rows = await sql()`select actions->>'stepId' as step_id, count(*)::int as n, max(created_at) as last_at,
+      count(*) filter (where role = 'user' and answered_at is null)::int as pending
+    from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and actions->>'stepId' is not null
+    group by 1 order by max(created_at) desc`;
+  return rows.map((r) => ({ stepId: r.stepId as string, n: Number(r.n), lastAt: iso(r.lastAt) as string, pending: Number(r.pending) }));
 }
 // paczka 32: wiadomości bez odpowiedzi napisane przy kroku (kanwa główna: kafelek zadania liczy stan z kroków, krok z prośbą czeka na agenta)
 export async function listPendingStepChat(ownerId: string): Promise<{ actions: unknown; createdAt: string }[]> {

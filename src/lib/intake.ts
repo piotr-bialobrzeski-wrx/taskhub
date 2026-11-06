@@ -61,9 +61,10 @@ export async function intake(ownerId: string, m: { typed: string; files: File[];
     if (target) await attachFiles(target, files, result.attachments ?? []);
     return { goTo: !taskId && created?.taskId ? created.taskId : null, note: null };
   } catch (e) {
-    await repo.addChat(ownerId, taskId, "user", text);
+    const at = taskId && stepId ? { stepId } : undefined;   // paczka 56: wątek otwartego kroku
+    await repo.addChat(ownerId, taskId, "user", text, at);
     const note = "Agent nie odpowiedział: " + fail(e);
-    await repo.addChat(ownerId, taskId, "agent", note);
+    await repo.addChat(ownerId, taskId, "agent", note, at);
     return { goTo: null, note };
   }
 }

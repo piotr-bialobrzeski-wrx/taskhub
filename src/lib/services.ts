@@ -74,8 +74,9 @@ export async function bundle(ownerId: string, full: string | null = null): Promi
 }
 
 // kolejka wiadomości Piotra w zadaniu: ile czeka bez odpowiedzi i kto się nimi zajmie (historia rozmowy, karta nad dokiem); null, gdy nic nie czeka
-export async function taskQueue(ownerId: string, taskId: string): Promise<Queue | null> {
-  const [pending, st, tasks] = await Promise.all([repo.listPendingChat(ownerId, taskId), repo.bridgeStatus(ownerId, BRIDGE_ALIVE_MS), repo.listTasks(ownerId)]);
+// thread (paczka 56): kolejka jednego wątku (krok albo samo zadanie); bez niego całe zadanie
+export async function taskQueue(ownerId: string, taskId: string, thread?: repo.ChatThread): Promise<Queue | null> {
+  const [pending, st, tasks] = await Promise.all([repo.listPendingChat(ownerId, taskId, thread), repo.bridgeStatus(ownerId, BRIDGE_ALIVE_MS), repo.listTasks(ownerId)]);
   if (!pending.length) return null;
   const w: Worker = { alive: st.alive, name: st.name, run: liveActivity(st.run), hold: bridgeHold(st.meta, st.pause) };
   return queueWho(w, taskId, pending.length, busyWith(w.run, tasks));
