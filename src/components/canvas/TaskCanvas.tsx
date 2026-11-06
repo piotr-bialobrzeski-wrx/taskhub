@@ -14,7 +14,7 @@ import type { SearchItem } from "@/lib/search-core";
 import { AgentFeed, Dock, MoreMenu, Namer, TileMenu, Toast, useToast } from "./widgets";
 import type { FeedItem, WorkBubble } from "@/lib/feed";
 import type { AgentQueue } from "@/lib/agent/work";
-import { QueuePanel } from "./Queue";
+import { QueuePanel, StepQueueStatus } from "./Queue";
 import { InlineText } from "@/components/StepFields";
 import { Activity } from "@/components/Activity";
 import { useOwnClock } from "@/components/OwnClock";
@@ -49,6 +49,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const [selGroup, setSelGroup] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [panel, setPanel] = useState<string | null>(() => (p.focus && p.steps.some((s) => s.id === p.focus) ? p.focus : null));
+  const [chatOpen, setChatOpen] = useState(false);   // czat po lewej z historią (widok kroku): kolejka przechodzi do jego nagłówka
   const [confirm, setConfirm] = useState(false);
   const [tmenu, setTmenu] = useState<{ id: string | null; x: number; y: number } | null>(null);   // menu kafelka (prawy klik); null = kafelek zadania
   const [namer, setNamer] = useState<"tile" | "group" | null>(null);
@@ -225,11 +226,14 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {/* odpowiedzi agenta (to, co jest w historii rozmowy) w lewym dolnym rogu ekranu */}
       <AgentFeed items={p.feed} work={p.work} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} className={panel ? "withpanel" : ""}
         stepLabel={(id) => (byId.has(id) ? pad(byId.get(id)!.idx) : null)} onStep={openStep}
-        queue={<QueuePanel queue={p.agentQueue} taskId={t.id} onToast={show} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} events={p.feed} onStep={openStep} />}
+        queue={chatOpen ? null : <QueuePanel queue={p.agentQueue} taskId={t.id} onToast={show} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} events={p.feed} onStep={openStep} />}
+        status={cur ? <StepQueueStatus queue={p.agentQueue} stepId={cur.id} taskId={t.id} onNext={(key) => run(async () => show(await queueNext(key, t.id)))} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} /> : null}
         onQueueNext={(key) => run(async () => show(await queueNext(key, t.id)))} onWithdraw={() => run(async () => show(await withdrawMessages(t.id)))} />
 
       {/* paczka 52: w widoku kroku czat stoi po lewej na całą wysokość obok kartki; widok zadania (kanwa, karta zadania) bez zmian */}
-      <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} side={!!cur} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
+      {/* krok 04: przy otwartym czacie kolejka Claude to licznik w nagłówku czatu, a status tego kroku stoi nad polem (wyżej, w AgentFeed) */}
+      <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} side={!!cur} onSideOpen={setChatOpen}
+        head={<QueuePanel variant="head" queue={p.agentQueue} taskId={t.id} onToast={show} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} events={p.feed} onStep={openStep} />} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
         queue={ctxGlobal ? null : p.queue} version={`${p.feed.at(-1)?.id ?? ""}|${p.queue?.n ?? 0}|${p.queue?.kind ?? ""}|${p.queue?.activity?.text ?? ""}`}
         placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : "Napisz, co dalej"} />
       <Toast text={toast} />

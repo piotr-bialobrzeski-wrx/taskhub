@@ -278,7 +278,7 @@ export const PLAIN_LANG = "JAK PISAĆ DO PIOTRA (kartka kroku, summary, powód o
 // paczka 31 (wariant A „Jedna pigułka”): bieżącą pracę pokazuje tylko pigułka na dole, więc now niesie też to, co Claude robi (what),
 // i bieg do „Zatrzymaj” (runId, stoppable); kolejka nie powtarza bieżącej pozycji (krok biegu, a bez kroku rozpisanie i tytuł jego zadania)
 export type QueueEntry = { key: string; kind: string; taskId: string; taskTitle: string; stepId: string | null; label: string };
-export type QueueNow = { taskId: string | null; taskTitle: string; label: string | null; since: string; what: string; runId: string | null; stoppable: boolean };
+export type QueueNow = { taskId: string | null; stepId?: string | null; taskTitle: string; label: string | null; since: string; what: string; runId: string | null; stoppable: boolean };
 export type AgentQueue = { now: QueueNow | null; items: QueueEntry[] };
 export type QueueRun = { taskId: string | null; stepId: string | null; since: string; kind?: string; text?: string; runId?: string; stoppable?: boolean };
 // czy pozycja kolejki to praca, którą bieg właśnie robi
@@ -291,7 +291,7 @@ export async function agentQueue(ownerId: string, run: QueueRun | null, preloade
   const t = run?.taskId ? tasks.find((x) => x.id === run.taskId) : null;
   const sIdx = t && run?.stepId ? t.steps.findIndex((s) => s.id === run.stepId) : -1;
   const what = !run ? "" : run.kind === "send" ? "wysyła" : t && !t.steps.length ? "rozpisuje kroki" : nowText({ text: run.text ?? "pracuje" }, sIdx >= 0 ? sIdx + 1 : null);
-  const now: QueueNow | null = run ? { taskId: run.taskId, taskTitle: t?.title ?? (run.kind === "send" ? "Wysyłka" : "Praca w tle"), label: sIdx >= 0 ? `Krok ${String(sIdx + 1).padStart(2, "0")}: ${t!.steps[sIdx].title}` : null, since: run.since,
+  const now: QueueNow | null = run ? { taskId: run.taskId, stepId: run.stepId ?? null, taskTitle: t?.title ?? (run.kind === "send" ? "Wysyłka" : "Praca w tle"), label: sIdx >= 0 ? `Krok ${String(sIdx + 1).padStart(2, "0")}: ${t!.steps[sIdx].title}` : null, since: run.since,
     what, runId: run.runId ?? null, stoppable: !!run.stoppable && run.kind !== "send" } : null;
   const items = (w.items ?? []).filter((x) => !isRunItem(x, run))
     .map((x) => ({ key: x.key, kind: QUEUE_KINDS[x.kind], taskId: x.taskId, taskTitle: x.taskTitle, stepId: x.stepId, label: x.label }));
