@@ -1522,3 +1522,31 @@ a.md-day:hover, button.md-day:hover { box-shadow: 0 0 0 2px var(--accent-soft); 
 .md-leg i.sent { background: var(--ok); } .md-leg i.approved { background: var(--accent); } .md-leg i.draft { background: var(--warn); }
 .md-leg i.missing { border: 1px dashed var(--warn); box-sizing: border-box; }
 @media (max-width: 560px) { .md-day { min-height: 44px; padding: 4px; } .md-day .md-s, .md-day b { display: none; } }
+
+/* ---------- paczka 52: czat po lewej w widoku kroku ----------
+   Szeroki ekran: panel czatu na całą wysokość przy lewej krawędzi (historia u góry, pole na dole), kartka kroku obok, od --chat-w do prawej.
+   Historia schowana: zostaje samo pole w lewym dolnym rogu, kartka wraca na cały ekran. Prawa krawędź panelu przeciąga szerokość.
+   Dymki i kolejka Claude stoją nad polem w kolumnie panelu; odpowiedzi agenta przy pokazanej historii nie dublują się w dymkach.
+   Telefon (do 860 px): bez zmian, czat zostaje warstwą nad szufladą kroku. Widok zadania (kanwa, karta zadania): bez zmian. */
+@media (min-width: 861px) {
+  .dockwrap.side { left: 0; right: auto; width: var(--chat-w, 380px); padding: 0 16px; box-sizing: border-box; }
+  .dockwrap.side > .dock { width: 100%; }
+  .dockwrap.side.open { top: 0; bottom: 0; flex-direction: column; justify-content: flex-end; gap: var(--s-3); pointer-events: auto;
+    padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    background: var(--surface); box-shadow: 1px 0 0 var(--line), 8px 0 28px var(--shadow); }
+  .dockwrap.side.open > .dock { position: relative; z-index: 1; flex: none; }
+  .hist.inline { position: relative; inset: auto; z-index: 0; flex: 1; min-height: 0; background: transparent; pointer-events: auto; }
+  .hist.inline .hist-col { width: 100%; padding: calc(18px + env(safe-area-inset-top, 0px)) 0 0; }
+  .hist.inline .hist-list { padding-bottom: calc(var(--feed-h, 0px) + var(--s-2)); }   /* najnowsze wpisy nad dymkiem pracy i kolejką */
+  .hist.inline .hm { max-width: 92%; }
+  .chat-grip { position: absolute; z-index: 2; top: 0; bottom: 0; right: -5px; width: 10px; cursor: col-resize; touch-action: none; outline: none; }
+  .chat-grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; transition: background .12s; }
+  .chat-grip:hover::after, .chat-grip:focus-visible::after, .chat-grip:active::after { background: var(--accent); }
+  .app.chat-side .detail { left: var(--chat-w, 380px); }
+  .app:is(.chat-side, .chat-dock) .feed { left: max(16px, env(safe-area-inset-left, 0px)); width: calc(var(--chat-w, 380px) - 32px);
+    bottom: calc(var(--dock-h, 46px) + 28px + env(safe-area-inset-bottom, 0px)); max-height: calc(100% - var(--dock-h, 46px) - 120px); }
+  .app.chat-side .feed { z-index: 13; }   /* nad tłem panelu (ten sam poziom co pole, ale panel jest później w drzewie) */
+  .app.chat-side .feed .fb:not(.work) { display: none; }   /* odpowiedź jest już w historii obok */
+  .app.chat-side .answer { left: calc(var(--chat-w, 380px) + (100% - var(--chat-w, 380px)) / 2); width: min(720px, calc(100% - var(--chat-w, 380px) - 64px)); }
+  .app.chat-side .toast, .app.chat-side .selbar { left: calc(var(--chat-w, 380px) + (100% - var(--chat-w, 380px)) / 2); }
+}
