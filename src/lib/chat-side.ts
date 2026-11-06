@@ -1,5 +1,6 @@
 // Panel czatu po lewej w widoku kroku (paczka 52): szerokość i stan pokazany/schowany zapamiętane w przeglądarce.
 // Tylko na szerokim ekranie (od 861 px); na telefonie czat zostaje warstwą nad kartką (szuflada kroku).
+import type { AgentQueue } from "./agent/work";
 
 export const CHAT_W_DEFAULT = 380;   // standardowa szerokość panelu
 export const CHAT_W_MIN = 300;
@@ -32,4 +33,12 @@ export function writeChatSide(v: { w?: number; open?: boolean }, s: Store | null
     if (v.w != null) s?.setItem(KEY_W, String(Math.round(v.w)));
     if (v.open != null) s?.setItem(KEY_OPEN, v.open ? "1" : "0");
   } catch { /* bez zapisu: panel działa, tylko nie pamięta */ }
+}
+
+// Status otwartego kroku w czacie (krok 04 paczki 52): Claude go robi, czeka w kolejce (miejsce i klucz do „Następne”) albo nic.
+export type StepQueueState = { kind: "working" } | { kind: "wait"; pos: number; of: number; key: string } | null;
+export function stepQueueState(q: AgentQueue, stepId: string): StepQueueState {
+  if (q.now && q.now.stepId === stepId) return { kind: "working" };
+  const i = q.items.findIndex((x) => x.stepId === stepId);
+  return i < 0 ? null : { kind: "wait", pos: i + 1, of: q.items.length, key: q.items[i].key };
 }

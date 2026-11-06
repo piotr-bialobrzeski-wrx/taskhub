@@ -172,7 +172,7 @@ const timeOf = (iso: string) => fmtTime(iso);
 // zamykanie: X u góry, ikona w doku (ta sama, która otworzyła), klik obok kolumny, Esc.
 // version: zmienia się, gdy serwer ma nową odpowiedź albo inny stan kolejki (puls strony) → historia dociąga najnowsze wpisy bez zamykania
 // inline (paczka 52): historia w panelu czatu po lewej w widoku kroku: bez szkła na cały ekran, bez zamykania klikiem obok i Esc (Esc zamyka krok)
-export function ChatHistory({ taskId, title, onClose, queue = null, version = "", inline = false }: { taskId: string | null; title: string; onClose: () => void; queue?: Queue | null; version?: string; inline?: boolean }) {
+export function ChatHistory({ taskId, title, onClose, queue = null, version = "", inline = false, head = null }: { taskId: string | null; title: string; onClose: () => void; queue?: Queue | null; version?: string; inline?: boolean; head?: ReactNode }) {
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
   const [q, setQ] = useState<Queue | null>(queue);
   const [more, setMore] = useState(false);
@@ -226,7 +226,7 @@ export function ChatHistory({ taskId, title, onClose, queue = null, version = ""
   return (
     <div className={inline ? "hist inline" : "hist glass"} role={inline ? "region" : "dialog"} aria-label={title} onPointerDown={(e) => e.stopPropagation()} onClick={inline ? undefined : (e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="hist-col">
-        <div className="hist-h"><b>{title}</b><span className="sp" />{inline
+        <div className="hist-h"><b>{title}</b><span className="sp" />{head}{inline
           ? <button className="icobtn" type="button" aria-label="Schowaj historię" title="Schowaj historię" onClick={onClose}><Icon k="x" size={13} sw={2} /></button>
           : <button className="icobtn" type="button" aria-label="Zamknij historię" title="Zamknij (Esc)" onClick={onClose}><Icon k="x" size={13} sw={2} /></button>}</div>
         <div ref={list} className="hist-b">
@@ -353,7 +353,8 @@ function useWide(): boolean {
 // Ikona historii w polu chowa i pokazuje historię (schowana = zostaje samo pole w lewym dolnym rogu, kartka wraca na całą szerokość).
 // Prawą krawędź panelu da się przeciągnąć (podwójny klik wraca do 380 px); szerokość i stan pokazany/schowany zapamiętuje przeglądarka.
 // Klasy chat-side / chat-dock i --chat-w trafiają na .app, żeby kartka (.detail) i dymki ustawiły się obok panelu.
-export function Dock({ action, taskId, stepId = null, placeholder, busyText, context, historyTitle, queue = null, version = "", side: sideAsked = false }: { action: (fd: FormData) => Promise<void>; taskId: string | null; stepId?: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string; queue?: Queue | null; version?: string; side?: boolean }) {
+// head (krok 04): licznik kolejki Claude w nagłówku czatu po lewej; onSideOpen mówi stronie, czy panel z historią jest otwarty (wtedy pigułka kolejki z rogu znika)
+export function Dock({ action, taskId, stepId = null, placeholder, busyText, context, historyTitle, queue = null, version = "", side: sideAsked = false, head = null, onSideOpen }: { action: (fd: FormData) => Promise<void>; taskId: string | null; stepId?: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string; queue?: Queue | null; version?: string; side?: boolean; head?: ReactNode; onSideOpen?: (open: boolean) => void }) {
   const form = useRef<HTMLFormElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const wide = useWide();
@@ -364,6 +365,7 @@ export function Dock({ action, taskId, stepId = null, placeholder, busyText, con
   useEffect(() => { const v = readChatSide(); setSideOpen(v.open); setChatW(clampChatW(v.w, window.innerWidth)); }, []);
   useEffect(() => { setOverlay(false); }, [side]);   // historia ze szkłem nie wraca sama po zamknięciu kroku
   const hist = side ? sideOpen : overlay;
+  useEffect(() => { onSideOpen?.(side && sideOpen); }, [side, sideOpen]);   // eslint-disable-line react-hooks/exhaustive-deps
   const setHist = (f: (h: boolean) => boolean) => {
     if (!side) { setOverlay(f); return; }
     setSideOpen((h) => { const n = f(h); writeChatSide({ open: n }); return n; });
@@ -427,7 +429,7 @@ export function Dock({ action, taskId, stepId = null, placeholder, busyText, con
   // historia jest rodzeństwem formularza w tym samym kontekście warstw: szkło pod dokiem, dok nad nim (pole dalej działa)
   return (
     <div ref={wrap} className={"dockwrap" + (side ? " side" + (hist ? " open" : "") : hist ? " hist-on" : "")}>
-      {hist ? <ChatHistory taskId={taskId} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(() => false)} queue={queue} version={version} inline={side} /> : null}
+      {hist ? <ChatHistory taskId={taskId} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(() => false)} queue={queue} version={version} inline={side} head={side ? head : null} /> : null}
       {side && hist ? <div className="chat-grip" role="separator" aria-orientation="vertical" aria-label="Szerokość czatu" aria-valuenow={chatW} tabIndex={0} title="Przeciągnij, żeby zmienić szerokość (podwójny klik: 380 px)"
         onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp} onPointerCancel={onGripUp} onDoubleClick={resetW} onKeyDown={onGripKey} /> : null}
       <form ref={form} className={"dock glass" + (over ? " drop" : "")} action={send} autoComplete="off"
@@ -575,26 +577,28 @@ export function InlineName({ name, label, onRename }: { name: string; label: str
 // Lewy dolny róg: dymek wysłanej wiadomości (czeka na Claude, z „Następne” i „Wycofaj”) nad pigułką kolejki (paczka 18).
 // Paczka 31 (wariant C dymków): odpowiedzi agenta nie stoją już stosem dymków z X; są na liście „Co się stało” w panelu kolejki
 // (QueuePanel, events), a pigułka pokazuje ich licznik. items zostaje dla zgodności, ale nic tu nie rysuje.
-export function AgentFeed({ work = null, onStop, onStep, queue = null, onQueueNext, onWithdraw, className = "", style }: {
+// status (paczka 52, krok 04): status otwartego kroku w kolejce, tuż nad polem czatu
+export function AgentFeed({ work = null, onStop, onStep, queue = null, status = null, onQueueNext, onWithdraw, className = "", style }: {
   items?: FeedItem[]; work?: WorkBubble | null; onStop?: (runId: string) => Promise<unknown> | void; stepLabel?: (stepId: string) => string | null; onStep?: (stepId: string) => void;
-  queue?: ReactNode; onQueueNext?: (key: string) => Promise<unknown> | void; onWithdraw?: () => Promise<unknown> | void; className?: string; style?: React.CSSProperties;
+  queue?: ReactNode; status?: ReactNode; onQueueNext?: (key: string) => Promise<unknown> | void; onWithdraw?: () => Promise<unknown> | void; className?: string; style?: React.CSSProperties;
 }) {
   const { off, hide } = useFeedOff();
   // dymek „wysłane” zamyka się X (klucz po wiadomości); dymek „Claude pracuje” nie powtarza pigułki kolejki (paczka 31, wariant A)
   const card = work && work.kind === "sent" && off && !off.has("w:" + work.id) ? work : null;
   // wysokość dymków trafia do --feed-h na .app: historia w panelu czatu po lewej (paczka 52) kończy się nad nimi
   const box = useRef<HTMLDivElement>(null);
-  const shown = !!(card || queue);
+  const shown = !!(card || queue || status);
   useEffect(() => {
     const el = box.current, app = el?.closest<HTMLElement>(".app"); if (!el || !app) return;
     const set = () => app.style.setProperty("--feed-h", el.offsetHeight + 12 + "px");
     set(); const ro = new ResizeObserver(set); ro.observe(el);
     return () => { ro.disconnect(); app.style.removeProperty("--feed-h"); };
   }, [shown]);
-  if (!shown) return null;
+  if (!shown) return null;   // status i kolejka to elementy, które mogą same nic nie narysować; wtedy kolumna jest pusta (bez tła)
   return (
     <div ref={box} className={"feed " + className} style={style} role="log" aria-live="polite" aria-label="Claude: wiadomość i kolejka">
       {card ? <WorkCard b={card} onStop={onStop} onStep={onStep} onQueueNext={onQueueNext} onWithdraw={onWithdraw} onClose={() => { if (card.kind === "sent") hide(["w:" + card.id]); }} /> : null}
+      {status}
       {queue}
     </div>
   );
