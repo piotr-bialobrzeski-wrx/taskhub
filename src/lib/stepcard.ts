@@ -246,6 +246,15 @@ export function tileDest(d: Dest | null, s: Pick<Step, "status" | "doneAt" | "bl
 export const tileDestHref = (d: Dest | null, s: Pick<Step, "status" | "link">): string | null => (d?.kind === "send" && s.status === "done" ? safeHref(s.link) ?? null : null);
 // kto zamknął krok: Piotr („Ty”) albo Claude; kroki sprzed paczki 7 wg narzędzia
 export const whoDid = (s: Pick<Step, "tool" | "doneBy">): "Ty" | "Claude" => (doneByOf(s) === "owner" ? "Ty" : "Claude");
+// paczka 56: „Ile czasu to zajęło?” na dole kartki. Krok zamyka się od razu („Zrobione”, decyzja, „Przeczytane”), a pytanie o czas zostaje,
+// dopóki Piotr nie wybierze albo nie pominie (spentManual). Tak samo po jego „Zatwierdź” przy szkicu: czas czytania i poprawek jest jego.
+// saved = czas już zapisany: sekcja pokazuje go z „Zmień”; null = krok bez udziału Piotra albo pominięty bez zmierzonego czasu
+export function timeAskOf(s: Pick<Step, "status" | "tool" | "doneBy" | "spentManual" | "spentSec" | "approval">): "ask" | "saved" | null {
+  const piotr = s.approval?.source === "click" || (s.status === "done" && doneByOf(s) === "owner");
+  if (!piotr) return null;
+  if (!s.spentManual) return "ask";
+  return s.spentSec >= 60 ? "saved" : null;
+}
 
 // ---------- rodzaj kroku: jeden zestaw przycisków na rodzaj (paczka 7, punkt 1) ----------
 // approval = szkic do zatwierdzenia (karta publikacji); agent = krok Claude'a (Przygotuj / Uruchom); decision = krok Piotra z pytaniem na kartce

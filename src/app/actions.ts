@@ -416,6 +416,15 @@ export async function doneWithTime(taskId: string, stepId: string, min: number |
   refresh(taskId);
 }
 
+// paczka 56: „Ile czasu to zajęło?” na dole kartki po zamknięciu kroku albo po zgodzie na szkic; min = null to „Pomiń”
+export async function setDoneTime(taskId: string, stepId: string, min: number | null) {
+  const o = await requireOwner();
+  const { task, step } = await stepOf(o.id, taskId, stepId);
+  if (min != null && !(Number.isFinite(min) && min > 0 && min < 60 * 24)) return;
+  await repo.setOwnSpent(o.id, task, step, min == null ? null : Math.round(min * 60));
+  refresh(taskId);
+}
+
 // ---------- fakty ----------
 export async function factPref(taskId: string, factId: string, pref: { pinned?: boolean; hidden?: boolean }) {
   await requireOwner();

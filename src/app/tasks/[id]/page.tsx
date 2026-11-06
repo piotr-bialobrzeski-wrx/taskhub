@@ -26,12 +26,12 @@ import { ProtoFrame } from "@/components/ProtoFrame";
 import { embedMode, isOwnPreview } from "@/lib/embed";
 import { agentFeed, stepWaits, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
-import { beforeOf, decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
+import { beforeOf, decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, timeAskOf, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
 import { GrowTextarea } from "@/components/GrowTextarea";
-import { DoneAsk, HeadTitle, InlineText, PromptBox, StepMeta, type StepConnection, type StepModelInfo } from "@/components/StepFields";
+import { DoneAsk, HeadTitle, InlineText, PromptBox, StepMeta, TimeAsk, type StepConnection, type StepModelInfo } from "@/components/StepFields";
 import { choiceOf, LEVEL_LABELS, modelConfig, modelLabel, runLabel, stepLevel } from "@/lib/agent/models";
 import { indexFrom } from "@/lib/search";
 import { codexStateOf, runnerOf } from "@/lib/agent/runner";
@@ -307,7 +307,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const shortDecision = kind === "decision" && open.length > 0 && !done && !mode;
   const addFolder = !done ? folderLink(s) : null;   // paczka 22: krok oddany z braku folderu na Macu, przycisk otwiera aplikację Task Hub z pytaniem
   const deps = s.dependsOn.length;
-  const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
+  const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, own ? null : s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
   const took = whoDid(s) === "Ty" ? spentMin(s) : agentMin;
   const meta = done && s.filePath ? `Zapisano na Macu · ${fileName(s.filePath)}` : done ? `${whoDid(s)}${took ? ` · ${fmtMin(took)}` : ""}` : state === "ready" && !mode ? (own ? `Ty · ~${fmtMin(estOf(s))}` : `${toolLabel(s.tool)} · Claude`) : null;
 
@@ -354,7 +354,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
           {s.status === "todo" && inProject && !cloud && state === "ready" ? <form action={runInCloud.bind(null, t.id, s.id)}><PendingButton className="btn primary" title="Claude w chmurze weźmie ten krok (odpala go aplikacja Task Hub na Macu) i zamknie go z wynikiem" busy="Zlecam…"><Icon k="play" size={12} sw={2} /> Uruchom w chmurze</PendingButton></form> : null}
           {cloud ? <form action={cancelCloudRun.bind(null, t.id, s.id)}><PendingButton className="btn" title={cloud.state === "auto" ? "Krok nie ruszy sam; uruchomisz go przyciskiem, gdy będzie gotowy" : "Chmura nie weźmie tego kroku; możesz zlecić go jeszcze raz"} busy="Wycofuję…"><Icon k="stop" size={11} sw={2} /> Wycofaj</PendingButton></form> : null}
           {s.status === "todo" && inProject ? <CopyButton className="btn" text={projectPrompt(t, s, origin)} label="Kopiuj polecenie" title="Awaryjnie: polecenie dla wątku w projekcie Claude w chmurze; wklej je tam, a wątek przeczyta zadanie i zamknie ten krok" /> : null}
-          {s.status === "todo" && kind === "offline" && !cloud ? <DoneAsk taskId={t.id} stepId={s.id} est={estOf(s)} title={s.title} primary={!inProject} /> : null}
+          {s.status === "todo" && kind === "offline" && !cloud ? <DoneAsk taskId={t.id} stepId={s.id} title={s.title} primary={!inProject} /> : null}
           {s.status === "todo" && kind === "reading" ? <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Zapisuję…">Przeczytane</PendingButton></form> : null}
           {s.status === "todo" && kind === "decision" && !open.length ? <form action={markDone.bind(null, t.id, s.id)}><PendingButton className="btn primary" busy="Zapisuję…" title="Odpowiedzi już są; krok sprzed paczki 7 zamyka ten przycisk">Zrobione</PendingButton></form> : null}
           {s.status === "handoff" ? <form action={backToTodo.bind(null, t.id, s.id)}><PendingButton className="btn" title="Krok wraca do zrobienia; Claude odłoży ten krok" busy="Zatrzymuję…"><Icon k="stop" size={11} sw={2} /> Zatrzymaj</PendingButton></form> : null}
@@ -393,6 +393,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // paczka 19 (wariant A): zrobiony krok ma pod wynikiem sekcję „Zlecenie” z klockami sprzed zamknięcia, każdy z ptaszkiem; pytanie pokazuje
   // wybraną odpowiedź. Bez zmian: karta publikacji (wysłany szkic jest zleceniem) i zrobiony odczyt Claude'a (materiał jest jego wynikiem)
   const order = done && !mode && !readingResult(s, material) ? doneOrder(s, split.main, prev) : [];
+  const ask = timeAskOf(s);
   const tick = <span className="tick" aria-hidden="true"><Icon k="check" size={11} sw={2.6} /></span>;
   const orderZone = order.length ? (
     <div className="zone order">
@@ -433,6 +434,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {why ? <>{now}{why}</> : mode && skad && srcOpen ? (before ? <>{now}{skad}</> : cmp ? <>{skad}{now}</> : <div className="zones two">{now}{skad}</div>) : <>{now}{main}{skad}</>}
       {bare ? <div className="zone">{brief}</div> : null}
       {why ? null : fromDeps}
+      {/* paczka 56: „Ile czasu to zajęło?” na dole kartki, pod treścią, nad szczegółami technicznymi */}
+      {ask ? <TimeAsk key={s.id} taskId={t.id} stepId={s.id} est={own ? estOf(s) : 0} spent={spentMin(s)} saved={ask === "saved"} approval={!own && !!s.approval} /> : null}
       <details className="edit tech">
         <summary><span className="k">Szczegóły techniczne</span> · {tech}</summary>
         <div className="stack">

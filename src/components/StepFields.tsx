@@ -2,7 +2,7 @@
 // Edycja w miejscu: pole kroku zmienia się tam, gdzie je widać (tytuł, szczegóły, narzędzie, szacunek, czas, zgoda, zależności, link), bez osobnego formularza.
 // Klik otwiera pole, Enter albo zejście z pola zapisuje, Esc cofa. Szczegóły: Ctrl/Cmd+Enter zapisuje (Enter robi nową linię).
 import { useLayoutEffect, useRef, useState, useTransition, type KeyboardEvent } from "react";
-import { doneWithTime, linkSteps, patchStep } from "@/app/actions";
+import { doneWithTime, linkSteps, patchStep, setDoneTime } from "@/app/actions";
 import { DueControl, Picker } from "@/components/canvas/widgets";
 import type { DueValue } from "@/lib/due";
 import { dayKey } from "@/lib/clock";
@@ -123,20 +123,26 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
   return (
     <>
       <div className="time-row">
-        <div><div className="lbl">Narzędzie</div>
-          <Picker cls="boxed" title="Narzędzie kroku" trigger={<span className="pp-t">{TOOL_LABELS[step.tool] ?? step.tool}</span>} onPick={(k) => patch({ tool: k })}
+        {/* paczka 56: „Kto robi” (dawne Narzędzie): jedyny przełącznik, którym Piotr oddaje krok agentowi albo go przejmuje */}
+        <div><div className="lbl">Kto robi</div>
+          <Picker cls="boxed" title="Kto robi ten krok: Ty albo agent" trigger={<span className="pp-t">{TOOL_LABELS[step.tool] ?? step.tool}</span>} onPick={(k) => patch({ tool: k })}
             options={tools.map(([k, v]) => ({ key: k, on: k === step.tool, node: <span>{v}</span> }))} /></div>
         {step.own ? <>
           <div><div className="lbl">Szacunek{step.estHint ? <span className="hint"> {step.estHint}</span> : null}</div><NumChip value={step.estMin} stepBy={Q} min={Q} label="Szacunek w minutach" onSave={(v) => patch({ estMin: v })} /></div>
-          <div><div className="lbl">Twój czas</div><NumChip value={step.spentMin} stepBy={5} min={0} label="Twój czas" hm onSave={(v) => patch({ spentMin: v })} /></div>
-        </> : <div><div className="lbl">Czas Claude'a</div><span className="pp boxed" title="Liczy się sam: od chwili, gdy Claude zaczął krok, do jego zamknięcia"><span className="pp-t">{step.agentMin ? fmtMin(step.agentMin) : "jeszcze nic"}</span></span></div>}
+          {/* paczka 56: tylko do odczytu; czas ustawia się przy zamykaniu kroku, pomyłkę poprawia „Zmień” na dole kartki */}
+          <div><div className="lbl">Twój czas</div><span className="pp boxed" title="Ustawia się przy zamykaniu kroku"><span className="pp-t">{step.spentMin ? fmtMin(step.spentMin) : "przy zamykaniu"}</span></span></div>
+        </> : <>
+          <div><div className="lbl">Czas Claude'a</div><span className="pp boxed" title="Liczy się sam: od chwili, gdy Claude zaczął krok, do jego zamknięcia"><span className="pp-t">{step.agentMin ? fmtMin(step.agentMin) : "jeszcze nic"}</span></span></div>
+          {step.spentMin ? <div><div className="lbl">Twój czas</div><span className="pp boxed" title="Twój czas przy zatwierdzeniu"><span className="pp-t">{fmtMin(step.spentMin)}</span></span></div> : null}
+        </>}
         {step.due ? <div><div className="lbl">Termin</div><DueControl of="kroku" value={step.due} min={dayKey(new Date())} onChange={(v) => patch({ due: v })} /></div> : null}
         {model ? <div><div className="lbl">Model{model.last ? <span className="hint"> ostatnio: {model.last}</span> : null}</div>
           <Picker cls="boxed" title="Którym modelem Claude ma zrobić ten krok: auto dobiera model i wysiłek do poziomu kroku (Ustawienia → Agent)" trigger={<span className="pp-t">{model.pick ? model.choices.find((c) => c.key === model.pick)?.label ?? model.pick : `auto · ${model.auto}`}</span>} onPick={(k) => patch({ modelPick: k || null })}
             options={[{ key: "", on: !model.pick, node: <span>auto · {model.auto}</span> }, ...model.choices.map((c) => ({ key: c.key, on: c.key === model.pick, node: <span>{c.label}</span> }))]} /></div> : null}
-        <div><div className="lbl">Zgoda</div>
+        {/* paczka 56: przy kroku Piotra Zgoda nic nie zmienia (agent i tak go nie robi); wraca po oddaniu kroku agentowi */}
+        {step.own ? null : <div><div className="lbl">Zgoda</div>
           <Picker cls="boxed" title="Czy krok wysyła coś na zewnątrz i czeka na Twoją zgodę" trigger={<span className="pp-t">{step.needsApproval ? "wymaga zgody" : "bez zgody"}</span>} onPick={(k) => patch({ needsApproval: k === "1" })}
-            options={[{ key: "1", on: step.needsApproval, node: <span>wymaga zgody: wysyła coś na zewnątrz</span> }, { key: "0", on: !step.needsApproval, node: <span>bez zgody: Claude robi od razu</span> }]} /></div>
+            options={[{ key: "1", on: step.needsApproval, node: <span>wymaga zgody: wysyła coś na zewnątrz</span> }, { key: "0", on: !step.needsApproval, node: <span>bez zgody: Claude robi od razu</span> }]} /></div>}
         {showConnection && conns.length ? <div><div className="lbl">Połączenie</div>
           <Picker cls="boxed" title="Którym kontem zrobić ten krok (z rejestru połączeń w ustawieniach)" trigger={<span className="pp-t">{cur ? `${cur.label}${cur.company ? ` · ${cur.company}` : cur.sphere === "private" ? " · prywatne" : ""}` : "agent wybierze"}</span>} onPick={(k) => patch({ connectionId: k || null })}
             options={[{ key: "", on: !step.connectionId, node: <span>agent wybierze (według firmy zadania)</span> }, ...conns.map((c) => ({ key: c.id, on: c.id === step.connectionId, node: <span>{c.label}{c.account ? ` (${c.account})` : ""}{c.company ? ` · ${c.company}` : c.sphere === "private" ? " · prywatne" : ""}{c.active ? "" : " · nie działa"}</span> }))]} /></div> : null}
@@ -156,33 +162,64 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
   );
 }
 
-// „Zrobione” kroku Piotra poza aplikacją: po kliknięciu pyta, ile to zajęło, a wybór zamyka krok z tym czasem. Zamiast stopera: Piotr i tak robi
-// takie kroki poza aplikacją. Paczka 32: przyciski co 15 minut (15 min … 2 h, wyróżniony najbliższy szacunkowi), pole „g:mm” na dowolny czas
-// (np. 2:15, zapis w minutach, Enter albo „Zapisz”) i „Pomiń”.
-// Krok-wybór bez pytania na kartce („Wybierz…”, „Zdecyduj…”) pyta też, co Piotr wybrał: wpis idzie do wyniku kroku, żeby agent go widział (paczka 9)
-export function DoneAsk({ taskId, stepId, est, title = "", primary = true }: { taskId: string; stepId: string; est: number; title?: string; primary?: boolean }) {
+// „Zrobione” kroku Piotra poza aplikacją. Paczka 56: krok zamyka się od razu (kroki po nim ruszają), a „Ile czasu to zajęło?” stoi potem na dole
+// kartki (TimeAsk). Krok-wybór bez pytania na kartce („Wybierz…”, „Zdecyduj…”) pyta najpierw, co Piotr wybrał: wpis idzie do wyniku kroku,
+// żeby agent go widział (paczka 9)
+export function DoneAsk({ taskId, stepId, title = "", primary = true }: { taskId: string; stepId: string; title?: string; primary?: boolean }) {
   const [ask, setAsk] = useState(false);
-  const [picked, setPicked] = useState<number | null | undefined>(undefined);
   const [result, setResult] = useState("");
-  const [typed, setTyped] = useState("");
   const [pending, start] = useTransition();
   const decision = DECISION_TITLE_RE.test(title.trim());
-  const finish = (min: number | null) => { setPicked(min); start(() => doneWithTime(taskId, stepId, min, decision ? result : undefined)); };
-  if (!ask) return <button type="button" className={primary ? "btn primary" : "btn"} onClick={() => setAsk(true)}>Zrobione</button>;
-  const near = SPENT_CHIPS.reduce((a, c) => (Math.abs(c.min - est) < Math.abs(a.min - est) ? c : a)).min;
+  const finish = () => start(() => doneWithTime(taskId, stepId, null, decision ? result : undefined));
+  if (!decision || !ask) return <button type="button" className={primary ? "btn primary" : "btn"} disabled={pending} onClick={() => (decision ? setAsk(true) : finish())}>{pending ? "Zapisuję…" : "Zrobione"}</button>;
+  return (
+    <div className="actions ask-time" role="group" aria-label="Co wybrałeś?">
+      <GrowTextarea className="in" minRows={1} placeholder="Co wybrałeś? (agent zobaczy to w wyniku kroku)" value={result} onChange={(e) => setResult(e.target.value)} disabled={pending} aria-label="Co wybrałeś?" style={{ width: "100%" }} autoFocus />
+      <button type="button" className="btn primary" disabled={pending} onClick={finish}>{pending ? "Zapisuję…" : "Zrobione"}</button>
+      <button type="button" className="btn" disabled={pending} onClick={() => setAsk(false)}>Anuluj</button>
+    </div>
+  );
+}
+
+// paczka 56 (zadanie „Czas pracy przy zamykaniu kroku”): sekcja na dole kartki po zamknięciu kroku Piotra albo po jego zgodzie na szkic.
+// Przyciski co 15 minut (wyróżniony najbliższy szacunkowi), licznik +/- 15 min, pole „g:mm” i „Pomiń”. Zapisany czas: jedna linia z „Zmień”.
+export function TimeAsk({ taskId, stepId, est, spent, saved, approval = false }: { taskId: string; stepId: string; est: number; spent: number; saved: boolean; approval?: boolean }) {
+  const [edit, setEdit] = useState(false);
+  const near = SPENT_CHIPS.reduce((a, c) => (Math.abs(c.min - (est || 15)) < Math.abs(a.min - (est || 15)) ? c : a)).min;
+  const [step, setStep] = useState(Math.max(15, near));
+  const [picked, setPicked] = useState<number | null | undefined>(undefined);
+  const [typed, setTyped] = useState("");
+  const [pending, start] = useTransition();
+  if (saved && !edit) return (
+    <div className="time-ask saved" role="group" aria-label="Twój czas">
+      <div className="ta-h">Twój czas: {fmtMin(spent)}<small>zapisany przy zamknięciu kroku</small></div>
+      <div className="actions"><button type="button" className="btn" onClick={() => setEdit(true)}>Zmień</button></div>
+    </div>
+  );
+  const finish = (min: number | null) => { setPicked(min); start(async () => { await setDoneTime(taskId, stepId, min); setEdit(false); }); };
   const p = parseSpent(typed), own = p && p < 24 * 60 ? p : null, bad = !!typed.trim() && own === null;   // 0 i doba lub więcej: nie zapisujemy
   const label = (m: number | null, txt: string) => (pending && picked === m ? "Zapisuję…" : txt);
+  const what = approval ? "Ile zajęło Ci przeczytanie i zatwierdzenie?" : "Ile czasu to zajęło?";
+  const sub = [est ? `szacunek ~${fmtMin(est)}` : null, spent ? `zmierzone na kartce ${fmtMin(spent)}` : null].filter(Boolean).join(", ");
   return (
-    <div className="actions ask-time" role="group" aria-label="Ile to zajęło?">
-      {decision ? <GrowTextarea className="in" minRows={1} placeholder="Co wybrałeś? (agent zobaczy to w wyniku kroku)" value={result} onChange={(e) => setResult(e.target.value)} disabled={pending} aria-label="Co wybrałeś?" style={{ width: "100%" }} /> : null}
-      <span className="lbl">Ile to zajęło?</span>
-      {SPENT_CHIPS.map((c) => <button key={c.min} type="button" className={"btn" + (c.min === near ? " primary" : "")} disabled={pending} onClick={() => finish(c.min)}>{label(c.min, c.label)}</button>)}
-      <span className="ask-own">
-        <input className={"in" + (bad ? " bad" : "")} type="text" inputMode="numeric" placeholder="g:mm" value={typed} disabled={pending} aria-label="Własny czas (godziny:minuty, np. 2:15)" title="Własny czas: godziny:minuty, np. 2:15"
-          aria-invalid={bad || undefined} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && own !== null) { e.preventDefault(); finish(own); } }} />
-        {own !== null ? <button type="button" className="btn" disabled={pending} onClick={() => finish(own)}>{label(own, `Zapisz ${fmtMin(own)}`)}</button> : null}
-      </span>
-      <button type="button" className="btn" disabled={pending} title="Zamknij krok bez zapisu czasu" onClick={() => finish(null)}>{label(null, "Pomiń")}</button>
+    <div className="time-ask" role="group" aria-label={what}>
+      <div className="ta-h">{what}{sub ? <small>{sub}</small> : null}</div>
+      <div className="actions">{SPENT_CHIPS.map((c) => <button key={c.min} type="button" className={"btn" + (c.min === near ? " primary" : "")} disabled={pending} onClick={() => finish(c.min)}>{label(c.min, c.label)}</button>)}</div>
+      <div className="actions">
+        <span className="ta-step" title="Co 15 minut">
+          <button type="button" aria-label="Mniej o 15 minut" disabled={pending || step <= 15} onClick={() => setStep(Math.max(15, step - 15))}>−</button>
+          <span>{fmtMin(step)}</span>
+          <button type="button" aria-label="Więcej o 15 minut" disabled={pending || step >= 600} onClick={() => setStep(Math.min(600, step + 15))}>+</button>
+        </span>
+        <button type="button" className="btn" disabled={pending} onClick={() => finish(step)}>{label(step, `Zapisz ${fmtMin(step)}`)}</button>
+        <span className="ask-own">
+          <input className={"in" + (bad ? " bad" : "")} type="text" inputMode="numeric" placeholder="g:mm" value={typed} disabled={pending} aria-label="Własny czas (godziny:minuty, np. 2:15)" title="Własny czas: godziny:minuty, np. 2:15"
+            aria-invalid={bad || undefined} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && own !== null) { e.preventDefault(); finish(own); } }} />
+          {own !== null ? <button type="button" className="btn" disabled={pending} onClick={() => finish(own)}>{label(own, `Zapisz ${fmtMin(own)}`)}</button> : null}
+        </span>
+        {edit ? <button type="button" className="btn" disabled={pending} onClick={() => setEdit(false)}>Anuluj</button>
+          : <button type="button" className="btn" disabled={pending} title={spent ? "Zostaje czas zmierzony na kartce" : "Krok zostaje bez Twojego czasu"} onClick={() => finish(null)}>{label(null, "Pomiń")}</button>}
+      </div>
     </div>
   );
 }
