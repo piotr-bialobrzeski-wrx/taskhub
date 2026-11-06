@@ -172,7 +172,7 @@ const timeOf = (iso: string) => fmtTime(iso);
 // zamykanie: X u góry, ikona w doku (ta sama, która otworzyła), klik obok kolumny, Esc.
 // version: zmienia się, gdy serwer ma nową odpowiedź albo inny stan kolejki (puls strony) → historia dociąga najnowsze wpisy bez zamykania
 // inline (paczka 52): historia w panelu czatu po lewej w widoku kroku: bez szkła na cały ekran, bez zamykania klikiem obok i Esc (Esc zamyka krok)
-// stepId (paczka 56): wątek kroku (id) albo samego zadania (null); w wątku zadania nad wpisami stoją skróty do wątków kroków (stepName: numer i nazwa, onStep: otwiera krok)
+// stepId (paczka 57): wątek kroku (id) albo samego zadania (null); w wątku zadania nad wpisami stoją skróty do wątków kroków (stepName: numer i nazwa, onStep: otwiera krok)
 export type StepName = (id: string) => { label: string; title: string } | null;
 export function ChatHistory({ taskId, stepId, title, onClose, queue = null, version = "", inline = false, stepName, onStep }: { taskId: string | null; stepId?: string | null; title: string; onClose: () => void; queue?: Queue | null; version?: string; inline?: boolean; stepName?: StepName; onStep?: (id: string) => void }) {
   const [msgs, setMsgs] = useState<Msg[] | null>(null);

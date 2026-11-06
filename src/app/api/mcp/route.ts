@@ -719,7 +719,7 @@ function buildHandler(auth: repo.TokenAuth) {
       const t = await repo.getTask(ownerId, a.taskId); if (!t) return text("Nie ma takiego zadania.");
       const asked = a.stepId && t.steps.some((s) => s.id === a.stepId) ? a.stepId : undefined;
       const answers = await repo.markChatAnswered(ownerId, t.id, a.messageIds);
-      // paczka 56: odpowiedź trafia do wątku kroku; bez stepId dziedziczy krok, gdy wszystkie załatwione wiadomości są z jednego kroku
+      // paczka 57: odpowiedź trafia do wątku kroku; bez stepId dziedziczy krok, gdy wszystkie załatwione wiadomości są z jednego kroku
       const stepId = asked ?? (await repo.chatStepOf(ownerId, t.id, answers)) ?? undefined;
       // inne kroki tego zadania, których bieg dotknął: dymek dostaje do nich małe przyciski (najwyżej dwa, w kolejności kroków)
       const runId = await runIdOf();

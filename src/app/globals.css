@@ -705,7 +705,7 @@ body:has(> main.page) { background: radial-gradient(560px 380px at 8% -8%, var(-
 .hist-h { display: flex; align-items: center; gap: var(--s-3); padding: 0 0 var(--s-3); font-size: 14px; flex: none; }
 .hist-h .sp { flex: 1; }
 .hist-b { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
-/* paczka 56: skróty do wątków kroków w rozmowie zadania; jeden rząd chipów bez zawijania, przewijany w bok */
+/* paczka 57: skróty do wątków kroków w rozmowie zadania; jeden rząd chipów bez zawijania, przewijany w bok */
 .hist-threads { display: flex; align-items: center; gap: var(--s-2); padding: 0 0 var(--s-3); overflow-x: auto; flex: none; scrollbar-width: none; }
 .hist-threads::-webkit-scrollbar { display: none; }
 .hist-threads .ht-l { flex: none; font-size: 11px; color: var(--sub); }

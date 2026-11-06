@@ -652,7 +652,7 @@ export async function batchSteps(taskId: string, ids: string[], op: { done?: boo
 // Wiadomość Piotra niesie swój stan (wzięta, odpowiedziano), odpowiedź agenta listę wiadomości, które załatwia; queue = stan kolejki zadania (null, gdy nic nie czeka)
 const CHAT_PAGE = 50;
 export type ChatVM = { id: string; role: "user" | "agent"; text: string; createdAt: string; seenAt: string | null; answeredAt: string | null; answers: string[] | null; stepId: string | null; link: string | null; why: string | null; withdrawn?: boolean };
-// paczka 56: każdy krok ma własny wątek. stepId = id → wątek kroku; null → wątek zadania (wiadomości bez kroku) i skróty do wątków kroków (threads);
+// paczka 57: każdy krok ma własny wątek. stepId = id → wątek kroku; null → wątek zadania (wiadomości bez kroku) i skróty do wątków kroków (threads);
 // undefined → cała rozmowa. Kolejka („Czeka na mostek”) liczy tylko wiadomości tego wątku
 export type ChatThreadVM = repo.ChatThreadInfo;
 export async function loadChat(taskId: string | null, before: string | null, stepId?: string | null): Promise<{ msgs: ChatVM[]; queue: Queue | null; threads?: ChatThreadVM[] }> {

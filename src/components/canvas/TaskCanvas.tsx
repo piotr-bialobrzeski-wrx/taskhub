@@ -229,7 +229,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
         onQueueNext={(key) => run(async () => show(await queueNext(key, t.id)))} onWithdraw={() => run(async () => show(await withdrawMessages(t.id)))} />
 
       {/* paczka 52: w widoku kroku czat stoi po lewej na całą wysokość obok kartki; widok zadania (kanwa, karta zadania) bez zmian */}
-      {/* paczka 56: każdy krok ma własny wątek rozmowy; w widoku zadania wątek zadania i skróty do wątków kroków */}
+      {/* paczka 57: każdy krok ma własny wątek rozmowy; w widoku zadania wątek zadania i skróty do wątków kroków */}
       <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} side={!!cur} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
         historyTitle={ctxStep ? `Rozmowa w kroku ${pad(ctxStep.idx)}` : undefined} onStep={openStep}
         stepName={(id) => { const s = byId.get(id); return s ? { label: pad(s.idx), title: s.title } : null; }}
