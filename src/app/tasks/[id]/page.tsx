@@ -26,7 +26,7 @@ import { ProtoFrame } from "@/components/ProtoFrame";
 import { embedMode, isOwnPreview } from "@/lib/embed";
 import { agentFeed, stepWaits, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
-import { beforeOf, decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitMain, stepKind, targetLink, timeAskOf, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
+import { beforeOf, decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitDecision, splitMain, stepKind, targetLink, timeAskOf, whoDid, isProjectStep, projectPrompt, type CardState } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -302,8 +302,8 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const target = target0 && plan.keep(target0.url) ? target0 : null;
   const links = (done0 ? [done0] : found).filter((l) => plan.keep(l.url));
   const cl: CardLinks = { hide: plan.hide, hideLinks: plan.linkHide(), proto: qProto && proto0 ? { url: proto0, on: em === "link" } : null };
-  // paczka 31, krótsza kartka decyzji (wariant A „Pytanie na górze, reszta zwinięta”): otwarta decyzja ma na wierzchu tylko pytanie z opcjami
-  // (opis każdej przy jej przycisku) i prototyp pod pytaniem; notatki, tabele, listy i materiał ze źródłem zwijają się pod „Skąd to wiemy”
+  // paczka 31, krótsza kartka decyzji: otwarta decyzja ma na wierzchu pytanie z opcjami (opis każdej przy jej przycisku) i prototyp pod pytaniem;
+  // paczka 58: pod nimi materiał wyboru (tabele, listy, treści), a fakty i źródła zwijają się pod „Skąd to wiemy”
   const shortDecision = kind === "decision" && open.length > 0 && !done && !mode;
   const addFolder = !done ? folderLink(s) : null;   // paczka 22: krok oddany z braku folderu na Macu, przycisk otwiera aplikację Task Hub z pytaniem
   const deps = s.dependsOn.length;
@@ -415,17 +415,22 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   ));
   // krok bez żadnej treści od agenta: opis zostaje na wierzchu, inaczej karta byłaby pusta
   const bare = !material.length && !result.length && !mode && !order.length;
-  // krótsza kartka decyzji: całe tło (główna treść, „Skąd”, materiał z kroków przed decyzją) w jednym zwiniętym „Skąd to wiemy”
+  // krótsza kartka decyzji (paczka 31), paczka 58 wariant C: materiał wyboru (tabele, listy, treści, notatki) stoi rozwinięty zaraz pod pytaniem,
+  // a w zwiniętym „Skąd to wiemy” zostaje tylko tło: fakty, wątki, maile, komentarze, pliki, linki i materiał z kroków przed decyzją
+  const dec = splitDecision([...split.main, ...split.sources]);
   const why = shortDecision && (material.length || fromDeps.length) ? (
     <>
       {undo ? <div className="undo-row">{undo}</div> : null}
-      <details className="fold why-fold"><summary><span className="k">Skąd to wiemy</span><span className="t">{kindsOf([...split.main, ...split.sources])}</span><Icon k="chev" size={10} sw={2.2} /></summary>
-        <div className="stack">
-          {/* paczka 42: jedna lista klocków, żeby sąsiednie źródła (np. obecna i nowa story) złożyły się w porównanie obok siebie */}
-          {split.main.length || split.sources.length ? <BlocksView links={cl} blocks={[...split.main, ...split.sources]} form={form} indexOf={indexOf} /> : null}
-          {fromDeps}
-        </div>
-      </details>
+      {/* paczka 42: jedna lista klocków, żeby sąsiednie treści ze źródłem (np. obecna i nowa story) złożyły się w porównanie obok siebie */}
+      {dec.choice.length ? <div className="zone src choice"><BlocksView links={cl} blocks={dec.choice} form={form} indexOf={indexOf} /></div> : null}
+      {dec.background.length || fromDeps.length ? (
+        <details className="fold why-fold"><summary><span className="k">Skąd to wiemy</span><span className="t">{[kindsOf(dec.background), ...depCardsFor(t.steps, s).map((d) => `krok ${String(d.idx).padStart(2, "0")}`)].filter(Boolean).join(", ")}</span><Icon k="chev" size={10} sw={2.2} /></summary>
+          <div className="stack">
+            {dec.background.length ? <BlocksView links={cl} blocks={dec.background} form={form} indexOf={indexOf} /> : null}
+            {fromDeps}
+          </div>
+        </details>
+      ) : null}
     </>
   ) : null;
   return (

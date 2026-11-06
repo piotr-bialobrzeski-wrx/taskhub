@@ -93,6 +93,15 @@ export function splitMain(material: Block[]): { main: Block[]; sources: Block[] 
   return main.length ? { main, sources: material.filter(isSourced) } : { main: [], sources: material };
 }
 
+// paczka 58, wariant C „Podział po rodzaju klocka” (decyzja Piotra 2026-11-06): na otwartej kartce decyzji tabele, listy, treści (free, także
+// porównania ze źródłem) i notatki stoją od razu pod pytaniem, niezależnie od źródła; pod „Skąd to wiemy” zwijają się tylko ślady pochodzenia
+// (wątek, mail, komentarz, pliki, linki, fakty) i materiał z innych kroków. Działa też na starych kartkach, agent niczego nie oznacza
+const CHOICE_TYPES = new Set<Block["type"]>(["table", "list", "free", "text"]);
+export const isChoice = (b: Block): boolean => CHOICE_TYPES.has(b.type);
+export function splitDecision(material: Block[]): { choice: Block[]; background: Block[] } {
+  return { choice: material.filter(isChoice), background: material.filter((b) => !isChoice(b)) };
+}
+
 // paczka 19 (wariant A „Wynik na górze, zlecenie pod nim”): zrobiony krok pokazuje pod wynikiem zlecenie, czyli klocki kartki sprzed zamknięcia.
 // Skąd je brać: główna treść obecnej kartki; gdy wynik ją zastąpił (zostały same zmiany w kodzie albo materiał ze źródłem), poprzednia wersja
 // kartki (blocks_prev); gdy i tam nic, opis kroku, z którego karta była składana w czasie pracy (krok bez zapisanej kartki)
