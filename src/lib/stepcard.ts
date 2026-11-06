@@ -480,3 +480,26 @@ export function linkPlan(blocks: Block[] | null | undefined, strong: (string | n
   const keep = (u: string | null | undefined) => { if (!httpU(u)) return false; const n = normUrl(u); if (taken.has(n)) return false; taken.add(n); return true; };
   return { hide: [...S], keep, linkHide: () => [...taken] };
 }
+
+// paczka 51: prośba Piotra w czacie kroku (wiadomość przy kroku bez odpowiedzi) zmienia kartkę od razu: nagłówek mówi, że prośba czeka na agenta
+// albo że agent ją wprowadza (z bieżącą czynnością, gdy mostek ją zgłasza), a szkic sprzed prośby jest nieaktualny i nie da się go zatwierdzić.
+// working: agent wziął wiadomość (seenAt) albo bieg pracuje nad tym krokiem (albo nad zadaniem bez wskazanego kroku)
+export type Redo = { state: "waiting" | "working"; text: string; count: number; at: string; activity: { text: string; detail: string | null; since: string } | null };
+type PendingMsg = { text: string; actions: unknown; createdAt: string; seenAt: string | null };
+type LiveLike = { text: string; detail: string | null; since: string; taskId: string | null; stepId: string | null };
+export function redoOf(pending: PendingMsg[], taskId: string, stepId: string, live: LiveLike | null): Redo | null {
+  const mine = pending.filter((m) => (m.actions as { stepId?: string } | null)?.stepId === stepId).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  if (!mine.length) return null;
+  const here = !!live && live.taskId === taskId && (live.stepId === stepId || !live.stepId);
+  const seen = mine.some((m) => !!m.seenAt);
+  const last = mine[mine.length - 1];
+  const text = last.text.replace(/\s+/g, " ").trim();
+  return {
+    state: here || seen ? "working" : "waiting",
+    text: text.length > 160 ? text.slice(0, 159).trimEnd() + "…" : text,
+    count: mine.length, at: mine[0].createdAt,
+    activity: here && live ? { text: live.text, detail: live.detail, since: live.since } : null,
+  };
+}
+// powód, dla którego szkic sprzed prośby nie dostaje zgody (karta i odmowa w actions.approveStep mówią to samo)
+export const REDO_STALE = "ten szkic jest sprzed Twojej prośby o zmiany. Zatwierdzisz nową wersję, gdy Claude ją przygotuje";
