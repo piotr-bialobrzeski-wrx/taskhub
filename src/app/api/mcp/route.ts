@@ -29,6 +29,7 @@ import { matchProjectName } from "@/lib/project-guess";
 import { MAX_ESCALATION, normalizeLevel } from "@/lib/agent/models";
 import { DUE_KINDS, isIsoDay, Repeat } from "@/lib/due";
 import { groupDayWork } from "@/lib/day-work";
+import { historyText, PAST_HEAD, threadLabel } from "@/lib/agent/history";
 
 // poziom pracy kroku według zasady „Dobór modelu i wysiłku”: od niego mostek dobiera model i wysiłek biegu
 // paczka 32: łańcuch zadań. Zadanie, które powstaje po decyzji Piotra w innym zadaniu albo zaczyna się później, czeka na wcześniejsze (strzałka na głównej kanwie)
@@ -222,7 +223,6 @@ function buildHandler(auth: repo.TokenAuth) {
       const dx = draftsText(t.steps, { send: (s) => sends(s as Step) });
       // kartki niezrobionych kroków: po odpowiedzi Piotra agent je poprawia (set_blocks pełnym zestawem) albo mówi, czemu nie
       const kx = cardText(t.steps);
-      const stepRef = (m: { actions: unknown }) => { const id = (m.actions as { stepId?: string } | null)?.stepId; const s = id ? t.steps.find((x) => x.id === id) : null; return s ? ` przy kroku [${s.id}] „${s.title}”` : ""; };
       const qs = await repo.listQuestions(ownerId, { taskId });
       const qx = qs.length ? "PYTANIA DO PIOTRA (zadane w aplikacji):\n" + qs.map((q) => `- [${q.id}]${q.stepId ? ` krok ${q.stepId}` : ""} ${q.text} → ${q.answer ? `ODPOWIEDŹ: ${q.answer}` : "(czeka na odpowiedź)"}`).join("\n") : "";
       const att = await repo.listAttachments({ taskId });
@@ -230,10 +230,24 @@ function buildHandler(auth: repo.TokenAuth) {
       const usedBy = (id: string) => t.steps.map((st, i) => (repo.stepAttachments(st, att)?.some((x) => x.id === id) ? String(i + 1).padStart(2, "0") : "")).filter(Boolean);
       const ax = att.length ? "ZAŁĄCZNIKI ZADANIA (grafikę albo plik tekstowy pokaże get_attachment; opis zapisz przez describe_attachment; „kroki” = kroki, którym są przypisane: przy pracy nad krokiem oglądaj tylko jego załączniki, a krok bez przypisanych (stary) wszystkie potrzebne):\n" + att.map((a) => { const u = usedBy(a.id); return `- [${a.id}] ${a.kind} „${a.name ?? a.url ?? ""}”${a.mime ? ` (${a.mime})` : ""}${a.caption ? ` · ${a.caption}` : ""}${u.length ? ` · kroki: ${u.join(", ")}` : ""}${a.analysis ? `: ${a.analysis.slice(0, 400)}` : ""}`; }).join("\n") : "";
       // rozmowa w zadaniu: Piotr dopisuje tu wymagania i pytania; NOWE = jeszcze bez odpowiedzi agenta
-      const chat = await repo.listChat(ownerId, taskId, 12);
-      const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy; NOWE [id] = Piotr napisał, nikt nie odpowiedział: zrób, o co prosi, i odpowiedz przez reply_chat z messageIds = [id] tej wiadomości, osobno po każdej załatwionej prośbie; gdy prośba zmienia zakres, najpierw add_steps z before; gdy Piotr wprost zleca zmianę kodu albo prototypu Task Hub, add_steps z cloudFrom = [id] tej wiadomości; gdy prosi o zmianę istniejącego kroku (kto go robi, czy rusza sam, co ma zrobić), zmieniasz go przez update_step (tool, detail, start), a nie tylko opisujesz zmianę):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${m.role === "user" ? stepRef(m) : ""}${m.role === "user" && !m.answeredAt ? ` NOWE [${m.id}]` : ""}: ${capText(m.text)}${whyOf(m) ? ` (powód: ${capText(whyOf(m)!)})` : ""}`).join("\n") : "";
+      // paczka 57, krok 03: cała rozmowa zadania ze wszystkich wątków, każdy wpis z oznaczeniem wątku (podział na wątki jest tylko na ekranie)
+      const chat = await repo.listChat(ownerId, taskId, 20);
+      const thread = (m: { actions: unknown }) => threadLabel((m.actions as { stepId?: string } | null)?.stepId, t.steps);
+      const cx = chat.length ? "ROZMOWA W ZADANIU (ostatnie wpisy ze wszystkich wątków: zadania i kroków; wątki są osobne tylko na ekranie, więc to, co Piotr ustalił w jednym kroku, obowiązuje w całym zadaniu; NOWE [id] = Piotr napisał, nikt nie odpowiedział: zrób, o co prosi, i odpowiedz przez reply_chat z messageIds = [id] tej wiadomości, osobno po każdej załatwionej prośbie; gdy prośba zmienia zakres, najpierw add_steps z before; gdy Piotr wprost zleca zmianę kodu albo prototypu Task Hub, add_steps z cloudFrom = [id] tej wiadomości; gdy prosi o zmianę istniejącego kroku (kto go robi, czy rusza sam, co ma zrobić), zmieniasz go przez update_step (tool, detail, start), a nie tylko opisujesz zmianę):\n" + chat.map((m) => `- ${m.role === "user" ? "Piotr" : "Agent"} (${m.createdAt.slice(0, 16).replace("T", " ")} UTC)${thread(m)}${m.role === "user" && !m.answeredAt ? ` NOWE [${m.id}]` : ""}: ${capText(m.text)}${whyOf(m) ? ` (powód: ${capText(whyOf(m)!)})` : ""}`).join("\n") : "";
+      // paczka 57, krok 03: najświeższe prośby i decyzje Piotra z innych zadań tego projektu; dalej szuka search_history
+      const past = t.projectId ? await repo.searchHistory(ownerId, "", { excludeTaskId: t.id, projectId: t.projectId, limit: 8, days: 60 }) : [];
+      const px = historyText(past, PAST_HEAD);
       await markRun();
-      return text(ctx + (fx ? "\n" + fx : "") + (kx ? "\n" + kx : "") + (dx ? "\n" + dx : "") + (qx ? "\n" + qx : "") + (ax ? "\n" + ax : "") + (cx ? "\n" + cx : ""));
+      return text(ctx + (fx ? "\n" + fx : "") + (kx ? "\n" + kx : "") + (dx ? "\n" + dx : "") + (qx ? "\n" + qx : "") + (ax ? "\n" + ax : "") + (cx ? "\n" + cx : "") + (px ? "\n" + px : ""));
+    });
+
+    // paczka 57, krok 03: wspólna pamięć rozmów między zadaniami
+    server.registerTool("search_history", {
+      title: "Szukaj we wcześniejszych prośbach i decyzjach", description: "Szuka w tym, co Piotr napisał w rozmowach zadań (wszystkie wątki: zadania i kroków) i co wybrał na kartkach kroków decyzji, także w ukończonych zadaniach. Wynik: data, zadanie, numer i nazwa kroku, treść. Użyj, zanim zrobisz zmianę, która może dotyczyć tej samej funkcji, ekranu albo sprawy co wcześniejsza decyzja: gdy nowa prośba kłóci się z nią, powiedz to wprost z nazwą zadania i kroku. query: słowa o sprawie (np. „czat wątek krok”); projectId zawęża do projektu; excludeTaskId pomija bieżące zadanie.",
+      inputSchema: z.object({ query: z.string().min(2).max(200), projectId: z.string().optional(), excludeTaskId: z.string().optional(), limit: z.number().int().min(1).max(40).optional() }),
+    }, async (a) => {
+      const hits = await repo.searchHistory(ownerId, a.query, { projectId: a.projectId ?? null, excludeTaskId: a.excludeTaskId ?? null, limit: a.limit ?? 15 });
+      return text(historyText(hits, `WCZEŚNIEJSZE PROŚBY I DECYZJE PIOTRA („${a.query}”, najtrafniejsze i najświeższe pierwsze):`) || "Nic nie znalazłem. Spróbuj innych słów albo bez projectId.");
     });
 
     server.registerTool("get_rules", {

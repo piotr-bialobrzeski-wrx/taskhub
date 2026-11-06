@@ -7,6 +7,7 @@ import { contextText } from "./context";
 import { Fact, type Task } from "../schema";
 import { draftOf, draftsOf, optionIndex, optionLabel, optionsOf } from "./approval";
 import { matchProjectName } from "@/lib/project-guess";
+import { historyText, PAST_HEAD, threadLabel } from "./history";
 
 const Krok = z.object({
   id: z.string().optional(),
@@ -54,13 +55,17 @@ export type Done = { label: string; taskId?: string; note?: string };   // note:
 
 export async function runChat(text: string, deps: ChatDeps): Promise<{ reply: string; done: Done[]; result: ChatResult }> {
   const [tasks, projects, companies, connections, rules, samples, factPrefs, hist] = await Promise.all([
-    repo.listTasks(deps.ownerId, { all: true, full: deps.taskId }), repo.listProjects(deps.ownerId), repo.listCompanies(deps.ownerId), repo.listConnections(deps.ownerId), repo.listRules(deps.ownerId), repo.listSamples(deps.ownerId), repo.factPreferencesText(deps.ownerId), repo.listChat(deps.ownerId, deps.taskId, 6),
+    repo.listTasks(deps.ownerId, { all: true, full: deps.taskId }), repo.listProjects(deps.ownerId), repo.listCompanies(deps.ownerId), repo.listConnections(deps.ownerId), repo.listRules(deps.ownerId), repo.listSamples(deps.ownerId), repo.factPreferencesText(deps.ownerId), repo.listChat(deps.ownerId, deps.taskId, 10),
   ]);
+  // paczka 57, krok 03: rozmowa ze wszystkich wątków zadania z oznaczeniem wątku i prośby oraz decyzje z innych zadań tego projektu
+  const cur = deps.taskId ? tasks.find((t) => t.id === deps.taskId) ?? null : null;
+  const past = cur?.projectId ? await repo.searchHistory(deps.ownerId, text, { excludeTaskId: cur.id, projectId: cur.projectId, limit: 6 }).then((h) => h.length ? h : repo.searchHistory(deps.ownerId, "", { excludeTaskId: cur.id, projectId: cur.projectId, limit: 6, days: 60 })) : [];
+  const where = (m: { actions: unknown }) => (cur ? threadLabel((m.actions as { stepId?: string } | null)?.stepId, cur.steps) : "");
   const ctx = contextText({ tasks, projects, companies, connections, rules, samples, factPrefs, currentTaskId: deps.taskId });
   const step = deps.stepId ? tasks.find((t) => t.id === deps.taskId)?.steps.find((s) => s.id === deps.stepId) ?? null : null;
   const prompt = `${ctx}
 ${step ? stepContextText(step) + "\n" : ""}
-${hist.length ? "OSTATNIA ROZMOWA W TYM MIEJSCU:\n" + hist.map((m) => `${m.role === "user" ? "Piotr" : "Agent"}: ${m.text.slice(0, 600)}`).join("\n") + "\n\n" : ""}${deps.images?.length ? `Dołączono ${deps.images.length} grafik(i).\n` : ""}WIADOMOŚĆ PIOTRA:
+${hist.length ? `OSTATNIA ROZMOWA W TYM MIEJSCU${cur ? " (wszystkie wątki zadania; wątki są osobne tylko na ekranie)" : ""}:\n` + hist.map((m) => `${m.role === "user" ? "Piotr" : "Agent"}${where(m)}: ${m.text.slice(0, 600)}`).join("\n") + "\n\n" : ""}${past.length ? historyText(past, PAST_HEAD.replace("(ostatnie 60 dni; starsze i z innych projektów znajdzie search_history; ", "(")) + "\n\n" : ""}${deps.images?.length ? `Dołączono ${deps.images.length} grafik(i).\n` : ""}WIADOMOŚĆ PIOTRA:
 ${text}`;
   const result = await deps.ai.json({ system: SYSTEM, prompt, schema: ChatResult, images: deps.images, effort: "medium" });
   const done = await applyActions(result, { ...deps, tasks });
