@@ -960,6 +960,10 @@ table.tb tr.new td { background: var(--accent-soft); }
   .detail > .d-body .cmp:not(.cmp *, .zones.two *, .msg *) { margin-inline: calc((100% - min(var(--wi), var(--cw))) / 2); }
   /* porównanie: kolumny po 660 px, wyśrodkowane; węższy ekran sam układa je jedna pod drugą */
   .detail > .d-body .cmp:not(.msg *) { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 660px)); justify-content: center; }
+  /* paczka 59: porównanie dwóch rzeczy (było / będzie, dwa źródła) dzieli miejsce obok czatu po równo. auto-fit liczył kolumny od 660 px,
+     więc obok otwartego czatu (laptop 13-16 cali, porównanie 840-1290 px) spadało do jednej kolumny. Teraz kolumny zwężają się do 330 px
+     (szerokość porównania i tak kończy się na --cw = 2 × 660), a pod siebie przechodzą dopiero, gdy obok czatu zostaje mniej niż ok. 680 px */
+  .detail > .d-body .cmp:not(.msg *):has(> :nth-child(2):last-child) { grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); }
   /* lepki pasek formatowania pod pływającym nagłówkiem (84 px wcięcia treści, nagłówek kończy się na 62 px) */
   .detail > .d-body .rf-bar { top: -18px; }
   .detail > .d-body .rf-link { top: 23px; }
