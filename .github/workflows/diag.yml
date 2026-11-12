@@ -26,8 +26,8 @@ jobs:
           {
             echo "## Diagnostyka produkcji ($(date -u +%Y-%m-%dT%H:%M:%SZ), ${{ github.event_name }})"
             echo
-            for u in "$B/api/health" "$B/.well-known/oauth-protected-resource/api/mcp" "$B/.well-known/oauth-authorization-server" "$B/login"; do
-              c=$(code "$u"); echo "- GET \`${u#$B}\` → **$c** \`$(head -c 160 body.txt | tr '\n' ' ')\`"
+            for u in "$B/api/health" "$B/api/health?live=1" "$B/.well-known/oauth-protected-resource/api/mcp" "$B/.well-known/oauth-authorization-server" "$B/login"; do
+              c=$(code "$u"); echo "- GET \`${u#$B}\` → **$c** \`$(head -c 320 body.txt | tr '\n' ' ')\`"
             done
             c=$(code -X POST "$B/api/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d "$INIT")
             echo "- POST \`/api/mcp\` bez tokenu → **$c** (oczekiwane 401) \`$(head -c 200 body.txt | tr '\n' ' ')\`"
