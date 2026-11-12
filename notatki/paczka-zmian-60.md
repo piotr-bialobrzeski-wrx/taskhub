@@ -1,33 +1,46 @@
-# Paczka zmian 60: mniej procesora na Vercelu
+# Paczka zmian 60: sygnał w chwili zmiany zamiast odpytywania (procesor na Vercelu)
 
-Status: GOTOWA, NIEWDROŻONA (gałąź claude/project-thread-dvoloh, od main 6844599). Wdrożenie na słowo Piotra.
-Wątek: „Zmniejsz zużycie procesora na Vercelu”.
+Status: GOTOWA, NIEWDROŻONA. Gałąź claude/project-thread-dvoloh (od main 6844599). Wdrożenie na słowo Piotra, po przejściu na Vercel Pro.
+Wątek: „Zmniejsz zużycie procesora na Vercelu”. Aplikacja na Maca 0.1.26.
 
 ## Diagnoza (2026-11-12)
-- Hobby wstrzymał projekt 10.11 (pauza do 10.12): Fluid Active CPU 4 h 5 min / 4 h w 30 dni.
-- Wykres dzienny: równe 3–15 min procesora dziennie od 15.10, bez skoków. Średnio ok. 9–10 min/dzień, a limit Hobby to ok. 8 min/dzień.
-- To nie jest wyciek ani pętla: to stały koszt pytań w tle. 161 tys. wywołań = ok. 5,4 tys. dziennie.
-- Główne źródła z kodu:
-  1. Mostek na Macu pyta /api/bridge/work co 15 s w dzień (60 s w nocy) = ok. 4,3 tys. wywołań dziennie na jednego Maca. Każde pytanie robiło 4 zapisy w bazie i co 5 min pełne przeliczenie listy pracy.
-  2. Otwarta strona Task Hub (okno w aplikacji na Macu, telefon) pyta /api/pulse co 15 s (co 3 s, gdy agent pracuje) i przy zmianie odświeża całą stronę (najcięższe wywołanie) najwyżej co 10 s.
-  3. Wywołania MCP z biegów agenta i automatu (każde buduje serwer z 41 narzędziami).
-- Gałęzie podglądu (claude/project-thread-*) NIE zużywają procesora: podgląd liczy się tylko, gdy ktoś go otworzy.
+- Vercel Hobby wstrzymał projekt 10.11 (pauza do 10.12): Fluid Active CPU 4 h 5 min / 4 h w 30 dni.
+- Wykres dzienny: równe 3–15 min procesora dziennie od 15.10, bez skoków (średnio ok. 10 min/dzień, limit Hobby ok. 8 min/dzień).
+- To stały koszt pytań w tle, nie wyciek. 161 tys. wywołań ≈ 5,4 tys. dziennie:
+  1. mostek na Macu pytał /api/bridge/work co 15 s w dzień (≈4,3 tys./dzień), przy każdym pytaniu 4 zapisy w bazie, co 5 min pełne przeliczenie listy pracy;
+  2. okno Task Hub (w aplikacji na Macu) pytało /api/pulse co 15 s (co 3 s, gdy agent pracuje) i odświeżało całą stronę po zmianie;
+  3. MCP z biegów agenta i automatu.
+- Gałęzie podglądu nie zużywają procesora (podgląd liczy się tylko po otwarciu).
+
+## Dlaczego odpytywanie (lekcja)
+- Mostek skopiowano z Project Hub, gdzie serwer jest lokalny i pytanie nic nie kosztuje. Na Vercelu każde pytanie to wywołanie funkcji.
+- 2026-11-06 (analiza strumieni zdarzeń) Supabase Realtime przegrało z odpytywaniem, bo liczono tylko transfer z Supabase, nie procesor Vercela.
+- Zasada na przyszłość (do dopisania w Task Hub przy wdrożeniu): wszystko, co działa stale w tle, dostaje wyliczenie kosztu na Vercelu i w Supabase; odpytywanie tylko, gdy sygnał w chwili zmiany jest niemożliwy.
 
 ## Zmiany
-1. Mostek pyta co 30 s w dzień (było 15 s), w nocy bez zmian 60 s. Serwer podaje odstęp, więc nie trzeba nowej wersji aplikacji na Maca. „Sprawdź teraz” działa od razu jak dotąd.
-2. Pytanie mostka nie zapisuje w bazie przy każdym wywołaniu: meta i odcisk dostępu tylko przy zmianie (meta co najmniej raz na minutę), sprzątanie zawieszonych biegów raz na minutę.
-3. Pełne przeliczenie listy pracy bez zmian w bazie co 10 min (było 5).
-4. Strona: puls co 30 s (było 15 s), co 5 s gdy agent pracuje (było 3 s); odświeżenie po zmianie w bazie najwyżej co 20 s (było 10 s).
-5. Licznik procesora: każde wywołanie mostka, pulsu, MCP (z nazwą narzędzia) i strony zostawia w Vercel Logs linię „[cpu] trasa ms=…”. Po wdrożeniu widać czarno na białym, co kosztuje najwięcej.
+1. Baza (migracja 0038): wyzwalacz na tasks, steps, zależnościach, chat_messages, questions, time_samples, projects, users, bridge_runs, facts
+   wysyła przez Supabase Realtime (realtime.send, kanał publiczny o losowej tajnej nazwie users.live_topic) sygnał {t: tabela} bez danych.
+   Jeden sygnał na transakcję i tabelę. Bez Realtime albo przy błędzie: nic, zapis działa dalej (testy).
+2. Strona (LivePoll): słucha kanału; po sygnale jedno pytanie /api/pulse (kilka sygnałów naraz = jedno pytanie), odświeżenie jak dotąd.
+   Przy działającym kanale pytanie kontrolne co 2 min (stan Maca). Gdy pytanie kontrolne znajdzie zmianę bez sygnału, strona wraca do starego rytmu (3 s / 15 s).
+3. Mostek (aplikacja 0.1.26, Live.swift): słucha kanału; sygnał budzi go od razu, poza tym pyta co 5 min. Zmiana bez sygnału → wraca do pytania co 15 s.
+   Stara aplikacja (0.1.25) działa jak dotąd.
+4. Pytanie mostka mniej zapisuje: meta i odcisk dostępu tylko przy zmianie, sprzątanie biegów raz na minutę; pełne przeliczenie bez zmian co 10 min (było 5).
+5. Licznik procesora: linie „[cpu] trasa ms=…” w Vercel Logs dla mostka, pulsu, MCP (z nazwą narzędzia) i stron.
+
+## Co Piotr musi zrobić przy wdrożeniu (jeden krok)
+- Supabase → projekt → Project Settings → API Keys → skopiować klucz „Publishable” (albo „anon”).
+- Vercel → taskhub → Settings → Environment Variables → dodać SUPABASE_PUBLISHABLE_KEY = ten klucz → Redeploy.
+- Klucz jest publiczny z założenia; tabele mają RLS bez polityk (migracja 0017), więc nie daje dostępu do danych.
+- Potem: aktualizacja aplikacji na Maca do 0.1.26.
 
 ## Szacunek
-- Wywołania: mostek −50%, puls −50% → ok. 2,5–3 tys. dziennie zamiast 5,4 tys.
-- Procesor: ok. −40% (z ok. 10 do ok. 6 min/dzień), czyli poniżej limitu Hobby. Pewność średnia, liczby da licznik z punktu 5.
-
-## Czego Piotr zauważy
-- Krok zlecony agentowi rusza do 30 s później (było do 15 s).
-- Dymek „Claude pracuje” odświeża się co ok. 20 s zamiast 10 s.
+- Wywołania w tle: z ≈5,4 tys. do kilkuset dziennie (−80–90%); procesor w tle prawie do zera, zostaje praca przy prawdziwych zmianach.
+- Zmiany na stronie i start agenta szybciej niż dziś (sygnał <1 s zamiast do 15 s).
+- Supabase Free: Realtime do 200 połączeń i 2 mln wiadomości/mies.; tu 2–3 połączenia i kilka tys. sygnałów dziennie.
 
 ## Sprawdzenie
-- tsc bez błędów, testy: 449 zielonych (196 pominiętych bez bazy).
-- Po wdrożeniu: Vercel → taskhub → Logs, szukaj „[cpu]”.
+- tsc bez błędów; vitest 649/649 na lokalnym Postgresie (z p60-sygnal: wyzwalacz, jeden sygnał na transakcję, zapis bez Realtime).
+- Budowa aplikacji na Maca: workflow na gałęzi mac-check-p60.
+- Po wdrożeniu: log aplikacji „sygnał: kanał zmian działa”; w Vercel Logs „[cpu]”; Usage → Fluid Active CPU dziennie.
+- Ryzyko: Realtime nie potwierdzone na prawdziwym Supabase (kanał publiczny musi być dozwolony w Realtime Settings). Gdy sygnał nie dochodzi, oba klienty same wracają do odpytywania.
