@@ -955,8 +955,11 @@ table.tb tr.new td { background: var(--accent-soft); }
   .detail > .d-body > .zones.two { max-width: var(--cw); }
   /* paczka 38: tabela albo porównanie w zwiniętej części (Wynik, Skąd, Skąd to wiemy) nie poszerza sekcji, dopóki jej nie rozwiniesz.
      Paczka 42: porównanie poszerza sekcję do --cw, tabela do --ww (gdy są obie, wygrywa tabela, a porównanie zostaje na --cw) */
-  .detail > .d-body > :not(.zones.two):has(.cmp:not(.msg *, details:not([open]) *)) { --wi: var(--cw); max-width: var(--cw); padding-inline: calc((var(--cw) - var(--tw)) / 2); }
-  .detail > .d-body > :not(.zones.two):has(.tbwrap:not(.msg *, details:not([open]) *)) { --wi: var(--ww); max-width: var(--ww); padding-inline: calc((var(--ww) - var(--tw)) / 2); }
+  .detail > .d-body > :where(:not(.zones.two)):has(.cmp:not(.msg *, details:not([open]) *)) { --wi: var(--cw); max-width: var(--cw); padding-inline: calc((var(--cw) - var(--tw)) / 2); }
+  .detail > .d-body > :where(:not(.zones.two)):has(.tbwrap:not(.msg *, details:not([open]) *)) { --wi: var(--ww); max-width: var(--ww); padding-inline: calc((var(--ww) - var(--tw)) / 2); }
+  /* paczka 63: ramka „Teraz” (.now) z porównaniem albo tabelą ma wcięcie --s-5 z obu stron, tak jak jej nagłówek. Reguła ogólna wyżej miała
+     wyższą specyficzność (:not(.zones.two) liczy się jak dwie klasy), więc wygrywała z regułami .now i porównanie stało przy samej krawędzi
+     ramki we wszystkich stanach szkicu; :where() zeruje jej dodatek, a reguły .now niżej wygrywają */
   .detail > .d-body > .now:has(.cmp:not(.msg *, details:not([open]) *)) { --wi: calc(var(--cw) - 2 * var(--s-5)); padding-inline: calc((var(--cw) - var(--tw)) / 2 + var(--s-5)); }
   .detail > .d-body > .now:has(.tbwrap:not(.msg *, details:not([open]) *)) { --wi: calc(var(--ww) - 2 * var(--s-5)); padding-inline: calc((var(--ww) - var(--tw)) / 2 + var(--s-5)); }
   .detail > .d-body .block:has(.tbwrap):not(.cmp *, .zones.two *, .msg *) { margin-inline: calc((100% - var(--wi)) / 2); }
