@@ -28,9 +28,9 @@ async function liveCheck() {
   return { key: kind, url: true, send, ...h };
 }
 
-export async function GET(req: Request) {
+export async function GET(req?: Request) {
   let ok = true;
   try { await sql()`select 1`; } catch (e) { ok = false; console.error("health: baza nie odpowiada:", (e as Error).message); }
-  const live = new URL(req.url).searchParams.get("live") === "1" ? await liveCheck() : undefined;
+  const live = req && new URL(req.url).searchParams.get("live") === "1" ? await liveCheck() : undefined;
   return Response.json(live ? { ok, live } : { ok }, { status: ok ? 200 : 503, headers: { "cache-control": "no-store" } });
 }
