@@ -21,6 +21,10 @@ struct BridgeWork {
     var key: String = ""     // odcisk listy pracy (serwer v2); pusty = nie wiadomo
     var cloud: Int = 0       // kroki kliknięte „Uruchom w chmurze”, do odpalenia (paczka 13)
     var cloudTrigger: String = ""
+    var liveSocket: String = ""   // paczka 60: kanał sygnału w chwili zmiany (pusty = serwer go nie daje, pytamy co pollMs)
+    var liveTopic: String = ""
+    var liveSafeMs: Int = 0       // przy działającym kanale pytamy sami najwyżej co tyle
+    var stamp: String = ""        // skrót odcisku bazy: zmiana bez sygnału = kanał nie działa
 }
 
 @MainActor
@@ -64,7 +68,20 @@ final class Bridge: ObservableObject {
     private let probeEvery: Double = 6 * 3600
     private let stopHold: Double = 10 * 60
 
+    // paczka 60: sygnał z bazy budzi mostek od razu; bez niego mostek pyta co pollMs jak dotąd
+    private lazy var live = LiveSignal { [weak self] table in self?.signal(table) }
+    private var liveBroken = false                   // zmiana w bazie bez sygnału: do końca tej sesji aplikacji pytamy co pollMs
+    private var prevStamp = ""
+    private var prevPoll: Date? = nil
+    private var prevJoined = false
+
     init(store: Store) { self.store = store }
+
+    // sygnał zmiany: gdy mostek czeka, przerwij czekanie i zapytaj od razu (ślad biegu i fakty nie zmieniają listy pracy)
+    private func signal(_ table: String) {
+        if table == "bridge_runs" || table == "facts" { return }
+        if state == .idle && !isRunningNow { sleeper?.cancel() }
+    }
 
     var running: Bool { loopTask != nil }
 
@@ -98,6 +115,7 @@ final class Bridge: ObservableObject {
         loopTask?.cancel()
         loopTask = nil
         sleeper?.cancel()
+        live.stop()
         current?.kill("mostek zatrzymany", wait: true)
         current = nil
         gitSend?.cancel()
@@ -204,6 +222,15 @@ final class Bridge: ObservableObject {
                 pending = w.pending
                 busyBy = w.runBridge
                 if w.pollMs > 0 { wait = Double(w.pollMs) / 1000 }
+                // paczka 60: kanał zmian. Zmiana w bazie, o której nie było sygnału od poprzedniego pytania, znaczy, że sygnał nie dochodzi
+                let now = Date()
+                if prevJoined && !liveBroken && !prevStamp.isEmpty && !w.stamp.isEmpty && w.stamp != prevStamp && (live.lastSignal ?? .distantPast) < (prevPoll ?? now) {
+                    liveBroken = true
+                    Log.write("sygnał: zmiana w Task Hub bez sygnału, wracam do pytania co \(Int(wait)) s")
+                }
+                if !w.liveSocket.isEmpty && !w.liveTopic.isEmpty && !liveBroken { live.ensure(socket: w.liveSocket, topic: w.liveTopic) } else { live.stop() }
+                if live.joined && !liveBroken && w.liveSafeMs > 0 { wait = max(wait, Double(w.liveSafeMs) / 1000) }
+                prevStamp = w.stamp; prevPoll = now; prevJoined = live.joined
                 lastErr = ""
                 if state == .offline { state = .idle }
                 await reportConnections()
@@ -304,8 +331,11 @@ final class Bridge: ObservableObject {
         let sends = (j["sends"] as? Int) ?? 0
         let work = (j["work"] as? Int) ?? max(0, pending - sends)   // serwer bez v2: wszystko to praca
         let cloud = j["cloud"] as? [String: Any]
+        let lv = j["live"] as? [String: Any]
         return BridgeWork(pending: pending, sends: sends, work: work, pollMs: (j["pollMs"] as? Int) ?? 0, runBridge: who, key: (j["key"] as? String) ?? "",
-                          cloud: (cloud?["count"] as? Int) ?? 0, cloudTrigger: (cloud?["trigger"] as? String) ?? "")
+                          cloud: (cloud?["count"] as? Int) ?? 0, cloudTrigger: (cloud?["trigger"] as? String) ?? "",
+                          liveSocket: (lv?["socket"] as? String) ?? "", liveTopic: (lv?["topic"] as? String) ?? "", liveSafeMs: (lv?["safeMs"] as? Int) ?? 0,
+                          stamp: (j["stamp"] as? String) ?? "")
     }
 
     private func touch(_ id: String, note: String?, model: String? = nil) async {

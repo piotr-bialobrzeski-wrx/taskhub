@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import * as repo from "@/lib/repo";
 import { listSendable, workSummary } from "@/lib/agent/work";
 import { cpuLog, cpuStart } from "@/lib/cpu";
+import { liveConfig, realtimeSocket } from "@/lib/live-signal";
 import { BRIDGE_ALIVE_MS, BRIDGE_VERSION, CLOUD_TRIGGER, RING_AGAIN_MIN, RUN_STALE_MIN, authBridge, pollMs, protocolOf } from "@/lib/bridge";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,8 @@ export const dynamic = "force-dynamic";
 // Pełna lista pracy czyta całą bazę zadań z krokami (setki KB), a mostek pyta co 15 s z każdego Maca. Wynik trzymamy w pamięci
 // instancji i liczymy od nowa tylko, gdy zmieni się odcisk bazy (repo.workStamp, jeden mały wiersz) albo minie CACHE_MS
 // (to, co zależy od samego czasu, np. wiadomość wzięta, ale bez odpowiedzi). Zimna instancja = jedno pełne liczenie, jak dotąd.
-const CACHE_MS = 10 * 60_000;   // paczka 60: było 5 min; pełne liczenie to najdroższa część pytania mostka
+const CACHE_MS = 10 * 60_000;
+const LIVE_SAFE_MS = 5 * 60_000;   // paczka 60: przy działającym sygnale mostek pyta sam najwyżej co 5 min (rzeczy zależne od czasu)   // paczka 60: było 5 min; pełne liczenie to najdroższa część pytania mostka
 type Cached = { stamp: string; at: number; work: number; counts: Record<string, number>; key: string; sends: number };
 const cache = new Map<string, Cached>();
 
@@ -61,7 +63,7 @@ export async function GET(req: Request) {
     cpuLog("bridge/work", t0);
     return Response.json({ ok: true, pending: c.work, counts: c.counts, run: st.run, pollMs: pollMs(), version: 1, time: new Date().toISOString() });
   }
-  const [c, st, ring] = await Promise.all([
+  const [c, st, ring, live] = await Promise.all([
     cached(a.ownerId, 2, async () => {
       const tasks = await repo.listTasks(a.ownerId);   // jedno czytanie bazy zadań na obie listy
       const [w, sends] = await Promise.all([workSummary(a.ownerId, { peek: true, audience: "work", tasks }), listSendable(a.ownerId, tasks)]);
@@ -71,6 +73,7 @@ export async function GET(req: Request) {
     }),
     repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS),
     repo.cloudToRing(a.ownerId, RING_AGAIN_MIN),
+    liveConfig(a.ownerId),
   ]);
   // po „Zatrzymaj” w Task Hub mostek nie bierze pracy do końca przerwy (albo do wiadomości Piotra); zatwierdzone szkice wysyła dalej
   const work = st.pause ? 0 : c.work;
@@ -80,5 +83,9 @@ export async function GET(req: Request) {
     run: st.run, pollMs: pollMs(), version: BRIDGE_VERSION, time: new Date().toISOString(),
     // kroki kliknięte „Uruchom w chmurze”: aplikacja (0.1.13) odpala zaplanowane zadanie w chmurze i zgłasza to przez POST /api/bridge/cloud
     ...(ring ? { cloud: { count: ring, trigger: CLOUD_TRIGGER } } : {}),
+    // paczka 60 (aplikacja 0.1.26+): kanał sygnału w chwili zmiany; mostek słucha go i pyta od razu po sygnale, a poza tym co LIVE_SAFE_MS.
+    // stamp: skrót odcisku bazy; gdy zmienił się bez sygnału, aplikacja uznaje sygnał za zepsuty i wraca do pytania co pollMs
+    ...(live ? { live: { socket: realtimeSocket(live.url, live.key), topic: live.topic, safeMs: LIVE_SAFE_MS } } : {}),
+    stamp: createHash("sha256").update(c.stamp).digest("hex").slice(0, 12),
   });
 }

@@ -17,6 +17,7 @@ import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
 import { cpuLog, cpuStart } from "@/lib/cpu";
+import { liveConfig, realtimeSocket } from "@/lib/live-signal";
 import { agentQueue } from "@/lib/agent/work";
 
 export const dynamic = "force-dynamic";
@@ -51,10 +52,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
   // widok „Projekty”: wszystkie żywe zadania (także ukończone) z pozostałym szacunkiem i zmierzonym czasem
   const projTasks: ProjTask[] = live.map((s) => ({ id: s.task.id, title: s.task.title, state: taskStateOf(s.task, all), base: s.score.base, eff: s.score.eff, due: dueOf(s.task.due, { kind: s.task.dueKind, repeat: s.task.repeat }), remain: remainEst(s.task), spent: taskSpent(s.task), projectId: s.task.projectId }));
 
+  const lc = await liveConfig(o.id);   // paczka 60: kanał sygnału w chwili zmiany
+  const sig = lc ? { socket: realtimeSocket(lc.url, lc.key), topic: lc.topic } : null;
   cpuLog("page /", t0);
   return (
     <>
-    <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run || pending.size > 0 || canvasPending.length > 0} refreshAt={archiveAt} />
+    <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run || pending.size > 0 || canvasPending.length > 0} refreshAt={archiveAt} live={sig} />
     <Board
       tasks={onBoard.map((s) => taskTile(s, all, qCount.get(s.task.id) ?? 0, run, pending.get(s.task.id) ?? 0, asked))}
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto, lane: g.lane }))}

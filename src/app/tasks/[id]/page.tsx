@@ -18,6 +18,7 @@ import { draftOf, draftsOf, optionsOf, wasSent } from "@/lib/agent/approval";
 import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
 import { cpuLog, cpuStart } from "@/lib/cpu";
+import { liveConfig, realtimeSocket } from "@/lib/live-signal";
 import { Activity } from "@/components/Activity";
 import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepAsked, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
@@ -211,10 +212,12 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} runId={w.run?.stoppable ? w.run.runId ?? null : null} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} project={cur.project?.name ?? null} prev={prevBlocks.get(s.id) ?? null} />; });
   month?.cells.forEach((c) => { if (c.step) dayCards[c.step.id] = panels[c.step.id]; });
 
+  const lc = await liveConfig(o.id);   // paczka 60: kanał sygnału w chwili zmiany
+  const sig = lc ? { socket: realtimeSocket(lc.url, lc.key), topic: lc.topic } : null;
   cpuLog("page /tasks", t0);
   return (
     <>
-    <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || !!bubble || pending.length > 0 || t.steps.some((s) => s.status === "handoff" || (!!s.cloud && s.cloud.state !== "auto")) || (!!bp && !t.doneAt)} />
+    <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || !!bubble || pending.length > 0 || t.steps.some((s) => s.status === "handoff" || (!!s.cloud && s.cloud.state !== "auto")) || (!!bp && !t.doneAt)} live={sig} />
     <TaskCanvas
       project={cur.project ? { name: cur.project.name, color: projColor(cur.project.color) } : null}
       task={{ id: t.id, title: t.title, base: cur.score.base, eff: cur.score.eff, why: cur.score.why.map((w) => `${w.v > 0 ? "+" : ""}${w.v} ${w.txt}`).join("; "), state: taskStateOf(t, b.tasks), progress: { done: t.steps.filter((s) => s.status === "done").length, all: t.steps.length }, estText: estTextOf(t), activity: taskActivity(t.id, w.run), pending: pending.length }}
