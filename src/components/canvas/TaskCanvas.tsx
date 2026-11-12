@@ -7,7 +7,7 @@ import { GHEAD, GPAD, STEP_SIZE } from "@/lib/canvas/layout";
 import { Icon, LookTag, Lvl, TS_LABEL, ToolChip, plural, type GroupVM, type StepTile, type TaskStateKey, type TileActivity } from "./ui";
 import { waiting, type Queue } from "@/lib/auto";
 import { GroupBar, layoutSnapshot, useUndoLayout } from "./Board";
-import { AddButton, AgentPill, BackPill, MakePill, ViewPill, useView } from "./pills";
+import { AddButton, AgentPill, BackPill, MakePill, ViewPill, useFitBar, useView } from "./pills";
 import type { CodexState, Runner } from "@/lib/agent/runner";
 import { SearchPill } from "./SearchPill";
 import type { SearchItem } from "@/lib/search-core";
@@ -44,6 +44,8 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const { toast, show, run } = useToast();
   const undoL = useUndoLayout(run);
   const { view, onView } = useView("task");
+  const barRef = useRef<HTMLDivElement>(null);
+  useFitBar(barRef);   // paczka 61: za wąsko = same ikony
   const api = useRef<CanvasApi | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [selGroup, setSelGroup] = useState<string | null>(null);
@@ -162,7 +164,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
         </div>
       )}
 
-      <div className="pillbar">
+      <div className="pillbar" ref={barRef}>
         <div className="pl">
           <BackPill onBack={() => router.push("/")}><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="ct">{t.title}</span></BackPill>
           {view === "canvas" ? <div className="zslot" /> : null}
