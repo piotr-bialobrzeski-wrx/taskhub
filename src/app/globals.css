@@ -331,6 +331,12 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 @media (min-width: 1241px) and (max-width: 1600px) { .mkpill .icobtn.mk:not(.laybtn) { width: 32px; padding: 0; gap: 0; font-size: 0; justify-content: center; } }
 /* do 1600 px „Cofnij” po ułożeniu w pigułce powiększenia to sama strzałka (opis w dymku), inaczej pigułki wchodziły pod przełącznik widoków */
 @media (min-width: 861px) and (max-width: 1600px) { .zoom .icobtn.txt.undo { font-size: 0; gap: 0; padding: 0 8px; } }
+/* paczka 61: pasek się nie mieści (pomiar useFitBar w pills.tsx): przyciski z napisem przechodzą na same ikony z nazwą w dymku, pole kliknięcia 32 px */
+.pillbar.compact .mkpill .icobtn.mk { width: 32px; padding: 0; gap: 0; font-size: 0; justify-content: center; }
+.pillbar.compact .mkpill .laychev { display: none; }
+.pillbar.compact .zoom .icobtn.txt.undo { font-size: 0; gap: 0; padding: 0 8px; }
+.pillbar.compact .gpill.center .vl { display: none; }
+.pillbar.compact .gpill.center .seg { min-width: 32px; height: 32px; padding: 0 9px; justify-content: center; }
 .namer.top { right: auto; bottom: auto; }
 .namer { position: fixed; z-index: 12; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(var(--mk-b) + 52px); display: flex; gap: 6px; align-items: center; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5); border-radius: 999px; width: min(420px, calc(100% - 32px)); }
 .namer input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; padding: 6px 0; }
@@ -491,7 +497,10 @@ button.chip:hover, a.chip:hover { background: color-mix(in srgb, var(--accent) 1
 @media (max-width: 640px) { .imgview { padding: 72px 16px 84px; } .imgview .iv-nav { top: auto; bottom: 20px; transform: none; } .imgview .iv-nav.prev { left: calc(50% - 56px); } .imgview .iv-nav.next { right: calc(50% - 56px); } }
 .att-err { font-size: 12px; color: var(--warn); padding: 0 var(--s-4); }
 /* pole wiadomości: zawija się tylko w widocznym obszarze między ikonami, nigdy nie przewija w bok; 2 px z boku na kursor */
-.dock textarea { flex: 1; min-width: 0; width: 0; border: 0; background: transparent; padding: 7px 2px; outline: none; resize: none; line-height: 20px; height: 34px; min-height: 34px; max-height: 168px; overflow-y: auto; }
+/* paczka 61: pole siedzi w zwykłym bloku (.dock-field) na całą jego szerokość, nie jest samo elementem flex; w WebKit (aplikacja na Macu)
+   pole jako element flex z width: 0 nie zawijało długiej linii, tylko ją ucinało */
+.dock-field { flex: 1 1 0; min-width: 0; display: block; }
+.dock textarea { display: block; width: 100%; min-width: 0; border: 0; background: transparent; padding: 7px 2px; outline: none; resize: none; line-height: 20px; height: 34px; min-height: 34px; max-height: 168px; overflow-y: auto; }
 .dock textarea::placeholder { color: var(--sub); }
 .send { width: 34px; height: 34px; border-radius: 999px; border: 0; flex: none; display: grid; place-items: center; background: linear-gradient(180deg, var(--accent-2), var(--accent)); color: var(--accent-text); box-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 45%, transparent); }
 .send:disabled { opacity: .5; cursor: not-allowed; }
@@ -593,7 +602,7 @@ textarea.in, select.in { width: 100%; border: 0; border-radius: var(--r-sm); bac
 textarea.in { min-height: 72px; resize: vertical; line-height: 1.5; }
 textarea.grow { resize: none; overflow: hidden; }   /* rośnie z treścią, bez uchwytu */
 /* pola rosnące z treścią i pole wiadomości: długie słowa i adresy łamią się w polu, bez przewijania w bok (paczka 49) */
-textarea.grow, .dock textarea { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
+textarea.grow, .dock textarea { white-space: pre-wrap; text-wrap-mode: wrap; overflow-wrap: anywhere; word-break: break-word; overflow-x: hidden; }   /* paczka 61: zawijanie podane wprost (WebKit), break-word dla starszego WebKit bez anywhere */
 textarea.in.grow { min-height: 58px; }
 textarea.out.grow { min-height: 80px; }
 .field .pp.boxed { height: 34px; max-width: 100%; }
@@ -1366,7 +1375,8 @@ button.hm-s.ok:hover, button.hm-s.ok:focus-visible { text-decoration: underline;
 }
 /* trzy pozycje w przełączniku: szukajka ustępuje szerszej środkowej pigułce, w węższym oknie przełącznik pokazuje same ikony */
 @media (min-width: 861px) { .pillbar:has(.vp3) .srchw { width: clamp(160px, calc(50vw - 350px), 440px); } }
-@media (min-width: 861px) and (max-width: 1180px) { .gpill.center.vp3 .seg { padding: 6px 10px; } .gpill.center.vp3 .vl { display: none; } .pillbar:has(.vp3) .srchw { width: clamp(160px, calc(50vw - 260px), 440px); } }
+/* paczka 61: napisy przełącznika chowa pomiar paska (klasa compact), nie szerokość okna */
+@media (min-width: 861px) and (max-width: 1180px) { .pillbar:has(.vp3) .srchw { width: clamp(160px, calc(50vw - 260px), 440px); } }
 
 /* ---------- Przegląd zaległości (wariant A „Kawałki i duże przyciski”) ---------- */
 :root { --d-today: #D2553A; --d-tom: #C2693F; --d-week: #2E8A5C; --d-next: #2F7DD1; --d-date: #5A5CE6; --d-later: #8A8CA8; }

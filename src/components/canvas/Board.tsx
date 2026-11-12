@@ -11,7 +11,7 @@ import { msgCount } from "@/lib/auto";
 import type { FeedItem, WorkBubble } from "@/lib/feed";
 import type { AgentQueue } from "@/lib/agent/work";
 import { QueuePanel } from "./Queue";
-import { AddButton, AgentPill, BackPill, BrandButton, MakePill, ViewPill, useView } from "./pills";
+import { AddButton, AgentPill, BackPill, BrandButton, MakePill, ViewPill, useFitBar, useView } from "./pills";
 import type { CodexState, Runner } from "@/lib/agent/runner";
 import { SearchPill } from "./SearchPill";
 import { Draw } from "./Draw";
@@ -110,6 +110,8 @@ export function Board(p: BoardProps) {
   const router = useRouter();
   const { toast, show, run } = useToast();
   const { view, onView } = useView("board");
+  const barRef = useRef<HTMLDivElement>(null);
+  useFitBar(barRef);   // paczka 61: za wąsko = same ikony
   const api = useRef<CanvasApi | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [selGroup, setSelGroup] = useState<string | null>(null);
@@ -295,7 +297,7 @@ export function Board(p: BoardProps) {
           onCompanyRemove={(id) => run(() => removeCompany(id), "Usunięto firmę, jej projekty są teraz prywatne")} />
       ) : null}
 
-      <div className="pillbar">
+      <div className="pillbar" ref={barRef}>
         <div className="pl">
           {off ? <BackPill title={proj ? "Projekty" : "Archiwum"} onBack={showCanvas} /> : (
             <>

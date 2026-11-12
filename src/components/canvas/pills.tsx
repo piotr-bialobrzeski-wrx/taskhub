@@ -1,6 +1,6 @@
 "use client";
 // Pigułki górnego paska wspólne dla wszystkich ekranów: logo-menu, wstecz, Kafelek/Grupa, widok, agent.
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Icon } from "./ui";
@@ -38,12 +38,64 @@ export type View = "canvas" | "list" | "draw" | "review";
 // draw: trzecia pozycja „Losowanie” i czwarta „Przegląd” (przegląd zaległości) tylko na głównej kanwie (paczka 32 i 38); na telefonie pigułka pokazuje same ikony
 export const ViewPill = ({ view, onView, draw }: { view: View; onView: (v: View) => void; draw?: boolean }) => (
   <div className={"gpill glass center" + (draw ? " vp3" : "")} role="tablist" aria-label="Widok">
-    <button className={"seg" + (view === "canvas" ? " on" : "")} role="tab" aria-selected={view === "canvas"} aria-label="Kanwa" onClick={() => onView("canvas")}><Icon k="canvas" size={14} /><span className="vl">Kanwa</span></button>
-    <button className={"seg" + (view === "list" ? " on" : "")} role="tab" aria-selected={view === "list"} aria-label="Lista" onClick={() => onView("list")}><Icon k="list" size={14} /><span className="vl">Lista</span></button>
-    {draw ? <button className={"seg" + (view === "draw" ? " on" : "")} role="tab" aria-selected={view === "draw"} aria-label="Losowanie" onClick={() => onView("draw")}><Icon k="dice" size={14} /><span className="vl">Losowanie</span></button> : null}
-    {draw ? <button className={"seg" + (view === "review" ? " on" : "")} role="tab" aria-selected={view === "review"} aria-label="Przegląd" onClick={() => onView("review")}><Icon k="review" size={14} /><span className="vl">Przegląd</span></button> : null}
+    <button className={"seg" + (view === "canvas" ? " on" : "")} role="tab" aria-selected={view === "canvas"} aria-label="Kanwa" title="Kanwa" onClick={() => onView("canvas")}><Icon k="canvas" size={14} /><span className="vl">Kanwa</span></button>
+    <button className={"seg" + (view === "list" ? " on" : "")} role="tab" aria-selected={view === "list"} aria-label="Lista" title="Lista" onClick={() => onView("list")}><Icon k="list" size={14} /><span className="vl">Lista</span></button>
+    {draw ? <button className={"seg" + (view === "draw" ? " on" : "")} role="tab" aria-selected={view === "draw"} aria-label="Losowanie" title="Losowanie" onClick={() => onView("draw")}><Icon k="dice" size={14} /><span className="vl">Losowanie</span></button> : null}
+    {draw ? <button className={"seg" + (view === "review" ? " on" : "")} role="tab" aria-selected={view === "review"} aria-label="Przegląd" title="Przegląd" onClick={() => onView("review")}><Icon k="review" size={14} /><span className="vl">Przegląd</span></button> : null}
   </div>
 );
+
+// Paczka 61: górny pasek bez nachodzenia. Gdy lewa grupa, środkowy przełącznik widoków i prawa grupa (szukajka, agent) nie mieszczą się
+// z odstępami, pasek dostaje klasę compact: Kafelek, Grupa, Ułóż, Cofnij i pozycje przełącznika pokazują same ikony (nazwa w dymku).
+// Pomiar tylko przy zmianie rozmiaru (ResizeObserver) albo zawartości paska (MutationObserver), bez odpytywania. Za każdym razem
+// sprawdza pełne napisy (klasa zdjęta na chwilę, przed malowaniem ekranu), więc po poszerzeniu okna napisy wracają same.
+// Szukajka najpierw się zwęża (do 160 px), dopiero potem napisy znikają.
+const BAR_GAP = 10;   // odstęp między pigułkami w .pillbar
+const SRCH_MIN = 160, SRCH_MAX = 440;   // szukajka: najwęższa i najszersza
+type BarBox = { leftEnd: number; center: DOMRect | null; rightStart: number; srch: HTMLElement | null };
+function measureBar(bar: HTMLElement): BarBox {
+  const box = (el: Element) => { const r = el.getBoundingClientRect(); return r.width > 0 && getComputedStyle(el).position !== "absolute" ? r : null; };
+  let leftEnd = -Infinity, rightStart = Infinity, after = false, center: DOMRect | null = null, srch: HTMLElement | null = null;
+  for (const el of Array.from(bar.children)) {
+    if (el.classList.contains("sp")) { after = true; continue; }
+    if (el.classList.contains("pl")) { for (const c of Array.from(el.children)) { const r = box(c); if (r) leftEnd = Math.max(leftEnd, r.right); } continue; }
+    if (el.classList.contains("center")) { const r = el.getBoundingClientRect(); if (r.width > 0 && getComputedStyle(el).position === "absolute") center = r; continue; }
+    if (!after) continue;
+    if (el.classList.contains("srchw")) { srch = el as HTMLElement; continue; }   // szukajka ma zmienną szerokość: liczy się miejsce dla niej
+    const r = box(el); if (r) rightStart = Math.min(rightStart, r.left);
+  }
+  return { leftEnd, center, rightStart, srch };
+}
+// miejsce na szukajkę między środkową pigułką (albo lewą grupą) a agentem; null = środkowej pigułki nie ma w tym układzie (telefon)
+function srchSpace(m: BarBox, gap = BAR_GAP): number | null {
+  if (!m.center || !m.srch || !Number.isFinite(m.rightStart)) return null;
+  return m.rightStart - gap - (m.center.right + gap);
+}
+export function barCrowded(m: BarBox, gap = BAR_GAP): boolean {
+  if (!m.center) return m.leftEnd + gap > m.rightStart + 0.5;
+  const space = srchSpace(m, gap);
+  return m.leftEnd + gap > m.center.left + 0.5 || (space !== null ? space < SRCH_MIN : m.center.right + gap > m.rightStart + 0.5);
+}
+function fitBar(bar: HTMLElement) {
+  bar.classList.remove("compact");
+  let m = measureBar(bar);
+  if (barCrowded(m)) { bar.classList.add("compact"); m = measureBar(bar); }
+  // szukajka zajmuje dokładnie wolne miejsce obok przełącznika widoków (160-440 px), więc nie wchodzi pod niego
+  const space = srchSpace(m);
+  if (m.srch) m.srch.style.width = space === null ? "" : Math.round(Math.max(SRCH_MIN, Math.min(SRCH_MAX, space))) + "px";
+}
+export function useFitBar(ref: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const bar = ref.current; if (!bar) return;
+    const check = () => fitBar(bar);
+    const ro = new ResizeObserver(check);
+    const watch = () => { ro.disconnect(); ro.observe(bar); bar.querySelectorAll(":scope > *, :scope > .pl > *, .zslot > *").forEach((el) => ro.observe(el)); };
+    const mo = new MutationObserver(() => { watch(); check(); });
+    mo.observe(bar, { childList: true, subtree: true });
+    watch(); check();
+    return () => { ro.disconnect(); mo.disconnect(); bar.classList.remove("compact"); };
+  }, [ref]);
+}
 
 export function useView(key: string) {
   const [view, setView] = useState<View>("canvas");
