@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import * as repo from "@/lib/repo";
 import { listSendable, workSummary } from "@/lib/agent/work";
+import { cpuLog, cpuStart } from "@/lib/cpu";
 import { BRIDGE_ALIVE_MS, BRIDGE_VERSION, CLOUD_TRIGGER, RING_AGAIN_MIN, RUN_STALE_MIN, authBridge, pollMs, protocolOf } from "@/lib/bridge";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 // Pełna lista pracy czyta całą bazę zadań z krokami (setki KB), a mostek pyta co 15 s z każdego Maca. Wynik trzymamy w pamięci
 // instancji i liczymy od nowa tylko, gdy zmieni się odcisk bazy (repo.workStamp, jeden mały wiersz) albo minie CACHE_MS
 // (to, co zależy od samego czasu, np. wiadomość wzięta, ale bez odpowiedzi). Zimna instancja = jedno pełne liczenie, jak dotąd.
-const CACHE_MS = 5 * 60_000;
+const CACHE_MS = 10 * 60_000;   // paczka 60: było 5 min; pełne liczenie to najdroższa część pytania mostka
 type Cached = { stamp: string; at: number; work: number; counts: Record<string, number>; key: string; sends: number };
 const cache = new Map<string, Cached>();
 
@@ -25,7 +26,16 @@ async function cached(ownerId: string, proto: number, compute: () => Promise<Omi
   return c;
 }
 
+// paczka 60: pytanie mostka zapisywało w bazie przy każdym wywołaniu (puls, meta, odcisk dostępu, sprzątanie biegów).
+// Puls (seen_at) zapisuje już authBridge; resztę robimy tylko, gdy coś się zmieniło albo minęła minuta (pamięć instancji).
+const ONCE_MS = 60_000;
+const lastMeta = new Map<string, { v: string; at: number }>();
+const lastAccess = new Map<string, string>();
+const lastExpire = new Map<string, number>();
+const stale = (m: Map<string, number>, k: string) => { const t = m.get(k) ?? 0; if (Date.now() - t < ONCE_MS) return false; m.set(k, Date.now()); return true; };
+
 export async function GET(req: Request) {
+  const t0 = cpuStart();
   const a = await authBridge(req);
   if (a instanceof Response) return a;
   const q = new URL(req.url).searchParams;
@@ -33,17 +43,22 @@ export async function GET(req: Request) {
   // codex: stan Codex CLI na Macu (ready, auth, missing; aplikacja 0.1.20+), od niego zależy, czy przełącznik GPT kieruje tam pracę
   for (const k of ["host", "runner", "state", "until", "v", "codex"]) { const v = q.get(k); if (v) meta[k] = v.slice(0, 120); }
   if (meta.state && meta.state !== "check" && !meta.until) meta.until = "";   // stary termin po limicie nie zostaje w meta, gdy mostek już go nie zgłasza
-  await repo.bridgeSeen(a.tokenId, meta);
+  const mv = JSON.stringify(meta), pm = lastMeta.get(a.tokenId);
+  if (!pm || pm.v !== mv || Date.now() - pm.at >= ONCE_MS) { await repo.bridgeSeen(a.tokenId, meta); lastMeta.set(a.tokenId, { v: mv, at: Date.now() }); }
   // odcisk folderów i narzędzi z Ustawień aplikacji (0.1.17+): zmiana oddaje do pracy kroki, które agent oddał z braku dostępu (paczka 22)
   const access = q.get("access");
-  if (access && /^[0-9a-f]{1,32}$/.test(access)) await repo.recordBridgeAccess(a.ownerId, (meta.host || "mac").slice(0, 80), access);
-  await repo.expireBridgeRuns(a.ownerId, RUN_STALE_MIN);
+  if (access && /^[0-9a-f]{1,32}$/.test(access)) {
+    const host = (meta.host || "mac").slice(0, 80), ak = `${a.ownerId}|${host}`;
+    if (lastAccess.get(ak) !== access) { await repo.recordBridgeAccess(a.ownerId, host, access); lastAccess.set(ak, access); }
+  }
+  if (stale(lastExpire, a.ownerId)) await repo.expireBridgeRuns(a.ownerId, RUN_STALE_MIN);
   if (protocolOf(q.get("v")) < 2) {
     // v1 bez zmian: zatwierdzone szkice liczą się do pracy, wysyła je ten sam bieg
     const [c, st] = await Promise.all([
       cached(a.ownerId, 1, async () => { const w = await workSummary(a.ownerId, { peek: true }); return { work: w.total, counts: w.counts, key: "", sends: 0 }; }),
       repo.bridgeStatus(a.ownerId, BRIDGE_ALIVE_MS),
     ]);
+    cpuLog("bridge/work", t0);
     return Response.json({ ok: true, pending: c.work, counts: c.counts, run: st.run, pollMs: pollMs(), version: 1, time: new Date().toISOString() });
   }
   const [c, st, ring] = await Promise.all([
@@ -59,6 +74,7 @@ export async function GET(req: Request) {
   ]);
   // po „Zatrzymaj” w Task Hub mostek nie bierze pracy do końca przerwy (albo do wiadomości Piotra); zatwierdzone szkice wysyła dalej
   const work = st.pause ? 0 : c.work;
+  cpuLog("bridge/work", t0);
   return Response.json({
     ok: true, pending: work + c.sends, work, sends: c.sends, key: work ? c.key : "", counts: { ...c.counts, approved: c.sends }, ...(st.pause ? { pause: st.pause } : {}),
     run: st.run, pollMs: pollMs(), version: BRIDGE_VERSION, time: new Date().toISOString(),

@@ -4,6 +4,7 @@ import { LANE_KEYS } from "@/lib/canvas/lanes";
 import { chainLoops } from "@/lib/canvas/vm";
 import { randomUUID } from "node:crypto";
 import { createMcpHandler } from "mcp-handler";
+import { cpuLog, cpuStart } from "@/lib/cpu";
 import { z } from "zod";
 import * as repo from "@/lib/repo";
 import { companyOf, contextText, brief, scoreAll, capText, draftsText, cardText } from "@/lib/agent/context";
@@ -961,6 +962,14 @@ async function authorize(req: Request): Promise<repo.TokenAuth | null> {
 }
 
 async function handle(req: Request): Promise<Response> {
+  const t0 = cpuStart();
+  // paczka 60: w Logs widać, które wywołania MCP (narzędzie) zjadają procesor
+  let what = req.method;
+  if (req.method === "POST") { try { const j = (await req.clone().json()) as { method?: string; params?: { name?: string } }; what = j?.params?.name || j?.method || what; } catch { /* nie JSON */ } }
+  try { return await handleInner(req); } finally { cpuLog("mcp", t0, what); }
+}
+
+async function handleInner(req: Request): Promise<Response> {
   const auth = await authorize(req);
   if (!auth) return new Response(JSON.stringify({ error: "Brak albo zły token. Połącz konektor przez OAuth (aplikacja Claude: Connectors) albo podaj nagłówek Authorization: Bearer th_..." }), { status: 401, headers: { "content-type": "application/json", "www-authenticate": wwwAuthenticate(originOf(req)) } });
   return buildHandler(auth)(req);

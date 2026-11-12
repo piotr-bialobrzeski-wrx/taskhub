@@ -17,6 +17,7 @@ import { BRIDGE_ALIVE_MS, connectorIssue, protocolOf } from "@/lib/bridge";
 import { draftOf, draftsOf, optionsOf, wasSent } from "@/lib/agent/approval";
 import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
+import { cpuLog, cpuStart } from "@/lib/cpu";
 import { Activity } from "@/components/Activity";
 import type { TileActivity } from "@/components/canvas/ui";
 import { fmtDate, fmtTime, stepAsked, stepTile, taskActivity, taskStateOf, taskWaits, estText as estTextOf } from "@/lib/canvas/vm";
@@ -47,6 +48,7 @@ import { answerQuestionForm, restoreBlocksForm, backToTodo, cancelCloudRun, comp
 export const dynamic = "force-dynamic";
 
 export default async function TaskPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ step?: string }> }) {
+  const t0 = cpuStart();   // paczka 60: licznik procesora w Logs (bez rysowania widoku, tylko dane)
   const { id } = await params;
   const { step: focus } = await searchParams;
   const o = await requireOwner();
@@ -209,6 +211,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   t.steps.forEach((s, i) => { panels[s.id] = <StepPanel t={t} s={s} state={stateOf(s)} facts={factsPerStep[i]} attachments={attachments} aiOn={aiOn} rules={b.rules} samples={b.samples} origin={origin} waits={waits.length > 0} companyId={cur.project?.companyId ?? null} company={company} connections={connections} ctx={ctx} ownerName={o.name?.split(" ")[0] || "Ty"} activity={tiles[i].activity} runId={w.run?.stoppable ? w.run.runId ?? null : null} oldMac={protocolOf(bridge.meta.v) < 2} macAlive={bridge.alive} issue={issueOf(s)} model={modelOf(s)} project={cur.project?.name ?? null} prev={prevBlocks.get(s.id) ?? null} />; });
   month?.cells.forEach((c) => { if (c.step) dayCards[c.step.id] = panels[c.step.id]; });
 
+  cpuLog("page /tasks", t0);
   return (
     <>
     <LivePoll taskId={t.id} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!w.run || !!bubble || pending.length > 0 || t.steps.some((s) => s.status === "handoff" || (!!s.cloud && s.cloud.state !== "auto")) || (!!bp && !t.doneAt)} />

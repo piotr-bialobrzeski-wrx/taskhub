@@ -11,7 +11,7 @@ import { PLAIN_LANG, DECISION_MSG, DECISION_RULE, DEST_RULE, DONE_RULE, EST_RULE
 import { MANUAL_MARK } from "./stepcard";
 export { appKey, isGitDraft };
 
-export const BRIDGE_ALIVE_MS = 120_000;   // puls starszy niż 2 min = mostek nieaktywny (odpytuje co 15–60 s)
+export const BRIDGE_ALIVE_MS = 120_000;   // puls starszy niż 2 min = mostek nieaktywny (odpytuje co 30–60 s)
 export const RUN_STALE_MIN = 15;          // bieg bez sygnału przez 15 min wygasa i zwalnia miejsce
 export const RUN_MAX_MIN = 45;            // najdłuższy bieg Claude Code
 export const SEND_MAX_MIN = 10;           // najdłuższy bieg wysyłki (jeden szkic)
@@ -33,11 +33,12 @@ export async function authBridge(req: Request): Promise<BridgeAuth | Response> {
 // v=2 i wyżej w zapytaniu albo w treści: protokół z biegami pracy i wysyłki
 export const protocolOf = (v: unknown): number => { const n = Number(v ?? 1); return Number.isFinite(n) && n >= 2 ? 2 : 1; };
 
-// godzina w Warszawie: w dzień mostek pyta co 15 s, w nocy co minutę (mniej wywołań, i tak nikt nie dodaje zadań)
+// godzina w Warszawie: w dzień mostek pyta co 30 s, w nocy co minutę (mniej wywołań, i tak nikt nie dodaje zadań)
+// paczka 60: było 15 s; każde pytanie to wywołanie funkcji na Vercelu (limit procesora), a „Sprawdź teraz” w aplikacji pyta od razu
 export function warsawHour(now = new Date()): number {
   return Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Warsaw", hour: "numeric", hour12: false }).format(now)) % 24;
 }
-export const pollMs = (now = new Date()) => (warsawHour(now) >= 7 && warsawHour(now) < 23 ? 15_000 : 60_000);
+export const pollMs = (now = new Date()) => (warsawHour(now) >= 7 && warsawHour(now) < 23 ? 30_000 : 60_000);
 
 export const ago = (iso: string | null, now = Date.now()): string => {
   if (!iso) return "nigdy";

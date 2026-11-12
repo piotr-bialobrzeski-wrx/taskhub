@@ -16,6 +16,7 @@ import { ARCHIVE_AFTER_MS, isArchivedDone } from "@/lib/search-core";
 import { BRIDGE_ALIVE_MS } from "@/lib/bridge";
 import { liveActivity, liveKey } from "@/lib/live";
 import { LivePoll } from "@/components/LivePoll";
+import { cpuLog, cpuStart } from "@/lib/cpu";
 import { agentQueue } from "@/lib/agent/work";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ export const dynamic = "force-dynamic";
 const DAY = 864e5;
 
 export default async function Home({ searchParams }: { searchParams: Promise<BoardInitial> }) {
+  const t0 = cpuStart();   // paczka 60: licznik procesora w Logs (bez rysowania widoku, tylko dane)
   const initial = await searchParams;
   const o = await requireOwner();
   const [b, chatLog, groups, questions, bridge, stamp, pending, canvasPending, stepChat] = await Promise.all([bundle(o.id), repo.listChat(o.id, null, 8), repo.listGroups(o.id, null), repo.listQuestions(o.id, { open: true }), repo.bridgeStatus(o.id, BRIDGE_ALIVE_MS), repo.changeStamp(o.id, null), repo.countPendingChat(o.id), repo.listPendingChat(o.id, null), repo.listPendingStepChat(o.id)]);
@@ -49,6 +51,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Boa
   // widok „Projekty”: wszystkie żywe zadania (także ukończone) z pozostałym szacunkiem i zmierzonym czasem
   const projTasks: ProjTask[] = live.map((s) => ({ id: s.task.id, title: s.task.title, state: taskStateOf(s.task, all), base: s.score.base, eff: s.score.eff, due: dueOf(s.task.due, { kind: s.task.dueKind, repeat: s.task.repeat }), remain: remainEst(s.task), spent: taskSpent(s.task), projectId: s.task.projectId }));
 
+  cpuLog("page /", t0);
   return (
     <>
     <LivePoll taskId={null} liveKey={liveKey(stamp, bridge.run, bridge.alive)} active={!!run || pending.size > 0 || canvasPending.length > 0} refreshAt={archiveAt} />

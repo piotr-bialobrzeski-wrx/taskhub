@@ -4,10 +4,11 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
-const FAST = 3000, SLOW = 15000;
+// paczka 60: było 3 s / 15 s i 10 s; każde pytanie i każde odświeżenie to wywołanie funkcji na Vercelu (limit procesora)
+const FAST = 5000, SLOW = 30000;
 // Każde odświeżenie strony czyta z bazy całą listę zadań z krokami (transfer z Supabase). Zmiana w bazie odświeża najwyżej co DB_GAP,
 // a sama notatka biegu („czyta plik”, zmienia się przy każdym narzędziu agenta) najwyżej co RUN_GAP; zaległa zmiana czeka na swoją kolej.
-const DB_GAP = 10_000, RUN_GAP = 60_000;
+const DB_GAP = 20_000, RUN_GAP = 60_000;
 const stampOf = (k: string) => k.split("|")[0];
 
 export function LivePoll({ taskId, liveKey, active, refreshAt = null }: { taskId: string | null; liveKey: string; active: boolean; refreshAt?: number | null }) {
