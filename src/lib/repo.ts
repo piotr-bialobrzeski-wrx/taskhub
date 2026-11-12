@@ -1040,7 +1040,8 @@ const rowToChat = (r: Row): ChatMessage => ({ id: r.id as string, role: r.role a
 // before: kursor (created_at) do wczytywania starszych wpisów w historii rozmowy
 // wątek rozmowy w zadaniu (paczka 57): undefined = cała rozmowa (kontekst agenta), null = wątek samego zadania (wiadomości bez kroku), id = wątek kroku
 export type ChatThread = string | null | undefined;
-const threadSql = (t: ChatThread) => (t === undefined ? sql()`` : t === null ? sql()`and (actions->>'stepId') is null` : sql()`and actions->>'stepId' = ${t}`);
+// paczka 62: echo (kopia odpowiedzi w wątku, z którego była wiadomość Piotra) widać tylko w tym wątku; cała rozmowa (kontekst agenta, dymki) ma oryginał
+const threadSql = (t: ChatThread) => (t === undefined ? sql()`and coalesce(actions->>'echo', '') = ''` : t === null ? sql()`and (actions->>'stepId') is null` : sql()`and actions->>'stepId' = ${t}`);
 export async function listChat(ownerId: string, taskId: string | null, limit = 20, before: string | null = null, thread?: ChatThread): Promise<ChatMessage[]> {
   const cut = before ?? "9999-12-31T00:00:00Z";
   const rows = taskId
@@ -1083,6 +1084,14 @@ export async function chatStepOf(ownerId: string, taskId: string, ids: string[])
   if (!ids.length) return null;
   const rows = await sql()`select distinct actions->>'stepId' as step_id from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and id in ${sql()(ids)}`;
   return rows.length === 1 && rows[0].stepId ? (rows[0].stepId as string) : null;
+}
+// paczka 62: wiadomości pogrupowane po wątku, z którego są (id kroku albo null = wątek zadania)
+export async function chatThreadsOf(ownerId: string, taskId: string, ids: string[]): Promise<Map<string | null, string[]>> {
+  const out = new Map<string | null, string[]>();
+  if (!ids.length) return out;
+  const rows = await sql()`select id, actions->>'stepId' as step_id from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and id in ${sql()(ids)} order by created_at`;
+  for (const r of rows) { const k = (r.stepId as string | null) ?? null; out.set(k, [...(out.get(k) ?? []), r.id as string]); }
+  return out;
 }
 // paczka 57: wątki kroków w rozmowie zadania (skróty w historii widoku zadania): ile wpisów, ostatni wpis, ile wiadomości Piotra czeka; najświeższe pierwsze
 export type ChatThreadInfo = { stepId: string; n: number; lastAt: string; pending: number };

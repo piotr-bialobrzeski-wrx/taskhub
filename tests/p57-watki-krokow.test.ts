@@ -70,4 +70,18 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("osobne wątki rozmowy kroków",
     await call("reply_chat", { taskId: t.id, text: "Dopisałem krok 02.", messageIds: [m3], stepId: b.id });
     expect((await actions.loadChat(t.id, null, b.id)).msgs.map((m) => m.text)).toEqual(["Dopisałem krok 02."]);
   });
+
+  it("paczka 62: odpowiedź zapisana w innym kroku zostawia kopię z przyciskiem w wątku wiadomości", async () => {
+    const t = await repo.createTask(owner, { title: "Echo", steps: [{ title: "Story daty", tool: "manual" }, { title: "Story paska", tool: "manual" }] });
+    const [a, b] = t.steps;
+    const m = await repo.addChat(owner, t.id, "user", "zmień belkę", { stepId: a.id });
+    await call("reply_chat", { taskId: t.id, text: "Dopisałem szkic paska.", messageIds: [m], stepId: b.id });
+    const inA = await actions.loadChat(t.id, null, a.id);
+    expect(inA.msgs.map((x) => x.text)).toEqual(["zmień belkę", "Odpowiedziałem w kroku 02 „Story paska”: Dopisałem szkic paska."]);
+    expect(inA.msgs[1].answers).toEqual([m]);
+    expect(inA.msgs[1].goStep).toBe(b.id);
+    expect((await actions.loadChat(t.id, null, b.id)).msgs.map((x) => x.text)).toEqual(["Dopisałem szkic paska."]);
+    // cała rozmowa (kontekst agenta, dymki) ma tylko oryginał
+    expect((await repo.listChat(owner, t.id, 20)).filter((x) => x.role === "agent").map((x) => x.text)).toEqual(["Dopisałem szkic paska."]);
+  });
 });

@@ -660,7 +660,7 @@ export async function batchSteps(taskId: string, ids: string[], op: { done?: boo
 // historia rozmowy (dok → ikona zegara): strona po 50 wpisów, od najstarszego; before = kursor na starsze.
 // Wiadomość Piotra niesie swój stan (wzięta, odpowiedziano), odpowiedź agenta listę wiadomości, które załatwia; queue = stan kolejki zadania (null, gdy nic nie czeka)
 const CHAT_PAGE = 50;
-export type ChatVM = { id: string; role: "user" | "agent"; text: string; createdAt: string; seenAt: string | null; answeredAt: string | null; answers: string[] | null; stepId: string | null; link: string | null; why: string | null; withdrawn?: boolean };
+export type ChatVM = { id: string; role: "user" | "agent"; text: string; createdAt: string; seenAt: string | null; answeredAt: string | null; answers: string[] | null; stepId: string | null; link: string | null; why: string | null; withdrawn?: boolean; goStep?: string | null };
 // paczka 57: każdy krok ma własny wątek. stepId = id → wątek kroku; null → wątek zadania (wiadomości bez kroku) i skróty do wątków kroków (threads);
 // undefined → cała rozmowa. Kolejka („Czeka na mostek”) liczy tylko wiadomości tego wątku
 export type ChatThreadVM = repo.ChatThreadInfo;
@@ -672,8 +672,8 @@ export async function loadChat(taskId: string | null, before: string | null, ste
     taskId && thread === null && !before ? repo.listChatThreads(o.id, taskId) : Promise.resolve(undefined),
   ]);
   const msgs = rows.map((m) => {
-    const a = (m.actions ?? null) as { answers?: string[]; stepId?: string; link?: string; why?: string; withdrawn?: boolean } | null;
-    return { id: m.id, role: m.role, text: m.text, createdAt: m.createdAt, seenAt: m.seenAt, answeredAt: m.answeredAt, answers: a?.answers ?? null, stepId: a?.stepId ?? null, link: a?.link ?? null, why: typeof a?.why === "string" ? a.why : null, ...(a?.withdrawn ? { withdrawn: true } : {}) };
+    const a = (m.actions ?? null) as { answers?: string[]; stepId?: string; link?: string; why?: string; withdrawn?: boolean; echo?: boolean; goStep?: string | null } | null;
+    return { id: m.id, role: m.role, text: m.text, createdAt: m.createdAt, seenAt: m.seenAt, answeredAt: m.answeredAt, answers: a?.answers ?? null, stepId: a?.stepId ?? null, link: a?.link ?? null, why: typeof a?.why === "string" ? a.why : null, ...(a?.withdrawn ? { withdrawn: true } : {}), ...(a?.echo ? { goStep: a.goStep ?? null } : {}) };
   });
   return { msgs, queue, ...(threads ? { threads } : {}) };
 }

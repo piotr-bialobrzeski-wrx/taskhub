@@ -259,7 +259,7 @@ export function ChatHistory({ taskId, stepId, title, onClose, queue = null, vers
                   <Fragment key={m.id}>
                     {i === 0 || dayOf(m.createdAt) !== dayOf(msgs[i - 1].createdAt) ? <div className="hm-day">{dayLabel(m.createdAt)}</div> : null}
                     <div id={"hm-" + m.id} className={"hm " + m.role + (m.role === "user" && !m.answeredAt ? " q" : "")}>
-                      <div className="hm-b">{m.text}{m.why ? <span className="hm-why">{m.why}</span> : null}</div>
+                      <div className="hm-b">{m.text}{m.why ? <span className="hm-why">{m.why}</span> : null}{m.goStep && onStep && stepName?.(m.goStep) ? <button type="button" className="btn hm-go" onClick={() => onStep(m.goStep!)}>Otwórz krok {stepName(m.goStep)!.label}</button> : null}</div>
                       <span className="hm-t">{m.role === "agent" ? "Claude · " : ""}{timeOf(m.createdAt)}</span>
                       {stateLine(m, msgs, lastPending)}
                     </div>

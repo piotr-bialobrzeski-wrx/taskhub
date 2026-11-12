@@ -741,6 +741,14 @@ function buildHandler(auth: repo.TokenAuth) {
       const touched = runId ? await repo.runSteps(ownerId, runId) : {};
       const steps = t.steps.filter((s) => s.id !== stepId && touched[s.id]).map((s) => s.id).slice(0, 2);
       await repo.addChat(ownerId, t.id, "agent", a.text.trim(), { stepId, link: externalLink(a.link) ?? undefined, answers, ...(steps.length ? { steps } : {}) });
+      // paczka 62: wiadomość Piotra z innego wątku (inny krok albo wątek zadania) dostaje w swoim wątku kopię odpowiedzi z przyciskiem do miejsca odpowiedzi,
+      // żeby pod „Odpowiedź 13:40” była widoczna odpowiedź, a nie pusty wątek
+      for (const [thread, ids] of await repo.chatThreadsOf(ownerId, t.id, answers)) {
+        if ((thread ?? undefined) === stepId) continue;
+        const si = stepId ? t.steps.findIndex((s) => s.id === stepId) : -1;
+        const where = si >= 0 ? `w kroku ${String(si + 1).padStart(2, "0")} „${t.steps[si].title}”` : "w rozmowie zadania";
+        await repo.addChat(ownerId, t.id, "agent", `Odpowiedziałem ${where}: ${a.text.trim()}`, { ...(thread ? { stepId: thread } : {}), answers: ids, echo: true, goStep: si >= 0 ? stepId : null, link: externalLink(a.link) ?? undefined });
+      }
       // ostatni krok gotowy czekał tylko na tę odpowiedź: zadanie kończy się teraz
       const closed = await repo.closeIfDone(ownerId, t.id);
       if (closed) await repo.addChat(ownerId, t.id, "agent", "Wszystkie kroki zrobione, zadanie ukończone.");
