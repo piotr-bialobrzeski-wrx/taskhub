@@ -348,9 +348,9 @@ function DockInner({ placeholder, busyText, atts, err, onFiles, onRemove, onDone
       <div className="dock-row">
         <button className="icobtn" type="button" aria-label="Dodaj plik lub grafikę" title="Dodaj plik lub grafikę (albo wklej Ctrl+V / przeciągnij tutaj)" disabled={pending} onClick={() => pick.current?.click()}><Icon k="clip" size={15} sw={1.7} /></button>
         <input ref={pick} type="file" multiple onChange={(e) => { onFiles([...(e.currentTarget.files ?? [])]); e.currentTarget.value = ""; }} />
-        <textarea ref={ta} name="text" rows={1} placeholder={pending ? busyText : placeholder} aria-label="Wiadomość" disabled={pending} onInput={(e) => { grow(); writeDraft(draftKey, e.currentTarget.value); }}
+        <div className="dock-field"><textarea ref={ta} name="text" rows={1} wrap="soft" placeholder={pending ? busyText : placeholder} aria-label="Wiadomość" disabled={pending} onInput={(e) => { grow(); writeDraft(draftKey, e.currentTarget.value); }}
           onPaste={(e) => { const files = [...e.clipboardData.files]; if (!files.length) return; if (!e.clipboardData.getData("text/plain")) e.preventDefault(); onFiles(files); }}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (canSend()) e.currentTarget.form?.requestSubmit(); } }} />
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (canSend()) e.currentTarget.form?.requestSubmit(); } }} /></div>
         {side
           ? <button className={"icobtn" + (hist ? " on" : "")} type="button" aria-label={hist ? "Schowaj historię" : "Pokaż historię"} title={hist ? "Schowaj historię" : "Pokaż historię"} aria-pressed={hist} onClick={onHistory}><Icon k="history" size={15} sw={1.7} /></button>
           : <button className={"icobtn" + (hist ? " on" : "")} type="button" aria-label={hist ? "Zamknij historię" : "Historia rozmowy"} title={hist ? "Zamknij historię" : "Historia rozmowy"} aria-pressed={hist} onClick={onHistory}><Icon k={hist ? "x" : "history"} size={hist ? 13 : 15} sw={hist ? 2 : 1.7} /></button>}
