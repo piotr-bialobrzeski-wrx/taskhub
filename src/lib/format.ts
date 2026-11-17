@@ -48,6 +48,38 @@ export function unlazy(md: string): string {
   }
   return out.join("\n");
 }
+// paczka 65: ClickUp czyta Markdown linia po linii i każdą pustą linię zamienia w pusty akapit (zrzut „Attendance Issues Details widget”:
+// przerwy przed listą, pod akapitem i przed nagłówkami). Wersja dla ClickUpa nie ma więc pustych linii między blokami: nowa linia to jedna linia niżej,
+// a odstęp między blokami robi sam ClickUp. Pusta linia zostaje tylko tam, gdzie bez niej Markdown dokleiłby następną linię do bloku nad nią
+// (zwykły tekst pod punktem listy, pod cytatem albo pod tabelą; tabela pod akapitem). Kod w ogrodzeniu zostaje bajt w bajt.
+export function clickupMd(md: string): string {
+  const out: string[] = [];
+  type K = "p" | "li" | "quote" | "table" | "h" | "fence" | "indent";
+  let fence: string | null = null, prev: K | null = null, gap = false;
+  const kind = (raw: string): K => {
+    if (/^\s*(`{3,}|~{3,})/.test(raw)) return "fence";
+    if (/^\s*(?:[-*+]|\d+[.)])\s+/.test(raw)) return "li";
+    if (/^\s{0,3}#{1,6}\s/.test(raw)) return "h";
+    if (/^\s{0,3}>/.test(raw)) return "quote";
+    if (/^\s*\|/.test(raw)) return "table";
+    if (/^\s/.test(raw)) return "indent";
+    return "p";
+  };
+  for (const raw of md.replace(/\r/g, "").split("\n")) {
+    if (fence) { out.push(raw); const f = /^\s*(`{3,}|~{3,})/.exec(raw); if (f && f[1][0] === fence[0] && f[1].length >= fence.length) { fence = null; prev = "fence"; } continue; }
+    if (!raw.trim()) { if (prev) gap = true; continue; }
+    const k = kind(raw);
+    // bez pustej linii ta linia dokleiłaby się do bloku wyżej albo zaczęła z nim tabelę
+    const glue = gap && ((k === "p" && (prev === "li" || prev === "quote" || prev === "table")) || (k === "indent" && prev === "table") || (k === "table" && prev !== "table") || (prev === "table" && k !== "table"));
+    if (glue) out.push("");
+    out.push(raw);
+    if (k === "fence") fence = /^\s*(`{3,}|~{3,})/.exec(raw)![1];
+    // wcięta linia pod punktem listy to dalszy ciąg punktu
+    prev = k === "indent" && (prev as K | null) === "li" ? "li" : k;
+    gap = false;
+  }
+  return out.join("\n");
+}
 // do edytora: „<” poza kodem jako „&lt;”, żeby „Array<Item>” czy „<@U123>” nie zniknęły jako HTML
 export const toEditorMd = (md: string) => outsideCode(unlazy(md), (t) => t.replace(/</g, "&lt;"));
 
@@ -144,7 +176,10 @@ export function publishFormat(app: string, md: string): { how: string; text: str
   const md2 = mentionsFor(a, decodeLegacy(md));   // starszy szkic z encjami: agent dostaje wersję ze zwykłymi znakami
   const who = mentionHow(a, md);
   const plus = (how: string) => (who ? `${how} ${who[0].toUpperCase()}${who.slice(1)}.` : how);
-  if (a === "clickup") return { label: "Markdown", how: plus("ClickUp przyjmuje Markdown: opis zadania przez markdown_description (create/update), komentarz w Markdown; nie wklejaj treści do zwykłego pola description."), text: md2 !== md ? md2 : null };
+  if (a === "clickup") {
+    const cu = clickupMd(md2);
+    return { label: "Markdown dla ClickUpa", how: plus("ClickUp przyjmuje Markdown: opis zadania przez markdown_description (create/update), komentarz w Markdown; nie wklejaj treści do zwykłego pola description. ClickUp każdą pustą linię pokazuje jako pusty akapit, więc wysyłaj wersję dla ClickUpa z podziałem linii dokładnie jak w niej: bez dodawania pustych linii między akapitami, listami i nagłówkami."), text: cu !== md ? cu : null };
+  }
   if (a === "slack") return { label: "Markdown", how: plus("Slack (konektor claude.ai Slack) przyjmuje zwykły Markdown: wyślij treść wprost, bez zamiany na mrkdwn; wzmianki <@U…> i kanały <#C…> zostaw, jak są."), text: md2 !== md ? md2 : null };
   if (a === "gmail" || a === "mail" || a === "email" || a === "outlook") return { label: "HTML", how: plus("Mail: htmlBody = wersja HTML poniżej, body = wersja bez znaczników (bez Markdown)."), text: hasMarkdown(md2) || md2 !== md ? `${mdToHtml(mentionsFor(a, md))}\n--- (body, bez znaczników) ---\n${mdToPlain(md2)}` : null };
   // inna aplikacja: druga wersja tylko wtedy, gdy treść ma wzmianki osób
