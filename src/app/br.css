@@ -114,7 +114,17 @@ a { color: var(--text); }
 .node:not(.task):not(.origin).lk.sel { box-shadow: 0 0 0 3px var(--text); }
 .node:not(.task):not(.origin).lk-mine .lk-tag { background: var(--hi-ink); color: var(--hi); }
 /* kafelek zadania na jego kanwie kroków */
-.node.origin { background: var(--text); color: var(--bg); }
+/* paczka 67: kafelek zadania jest odwrócony (ciemny w jasnym trybie, jasny w ciemnym); w środku podmieniamy kolory,
+   bo stare reguły z globals pisały na nim białym tekstem, nieczytelnym na jasnym tle w trybie ciemnym */
+.node.origin { --text: #ECEEF2; --sub: #A9AFBB; --surface: #23272F; --surface-2: #2A2E36; --line: rgba(236,238,242,.16); --bg: #15171C;
+  background: #15171C; color: var(--text); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .node.origin { --text: #15171C; --sub: #565D6B; --surface: #FFFFFF; --surface-2: #E4E7EC; --line: rgba(21,23,28,.14); --bg: #ECEEF2; background: #ECEEF2; } }
+:root[data-theme="dark"] .node.origin { --text: #15171C; --sub: #565D6B; --surface: #FFFFFF; --surface-2: #E4E7EC; --line: rgba(21,23,28,.14); --bg: #ECEEF2; background: #ECEEF2; }
+.node.origin .n-title, .node.origin .act, .node.origin.done .n-title { color: var(--text); }
+.node.origin .n-meta, .node.origin .n-num, .origin .lvl-t, .origin .lvl .boost, .origin .act .act-d, .origin .act .act-m,
+.node.origin .act .act-d, .node.origin .act .act-m { color: var(--sub); }
+.origin .lvl i { background: color-mix(in srgb, var(--text) 25%, transparent); }
+.origin .lvl i.on { background: var(--text); }
 
 /* ---------- kartka kroku: żółta ramka „Do zrobienia” ---------- */
 .detail { background: var(--bg); }
@@ -141,3 +151,11 @@ a { color: var(--text); }
 .lrow.lk { outline: none; background: var(--surface); }
 .lrow.lk-mine { box-shadow: inset 0 0 0 3px var(--hi); }
 .lrow.lk-help { box-shadow: inset 0 0 0 3px var(--danger); }
+
+/* paczka 67: czytelność w trybie ciemnym. Etykiety narzędzi na żółtym kroku biorą ciemny kolor tekstu z żółtego,
+   a zrobione kroki są przygaszone mniej, bo na ciemnym tle znikały */
+.node:not(.task):not(.origin).lk-mine .chip.tool { background: color-mix(in srgb, var(--hi-ink) 10%, transparent); color: color-mix(in srgb, var(--c, var(--hi-ink)) 40%, var(--hi-ink)); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .node:not(.task):not(.origin).lk-done:not(.sel):not(.picked):not(.dragging):not(.dim):not(:hover) { opacity: .85; }
+  :root:not([data-theme="light"]) .node.task.lk-done:not(.sel):not(.picked):not(.dragging):not(:hover) { opacity: .72; }
+}

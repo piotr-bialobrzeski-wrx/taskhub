@@ -140,7 +140,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
           origin={{ cls: "task " + t.state + (t.activity ? " agent" : ""), node: (
             <>
               {/* nagłówek: priorytet i jedna plakietka stanu; wiadomości czekające idą do linii na dole, żeby nic nie wychodziło poza kafelek */}
-              <span className="n-top"><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="st" style={{ marginLeft: "auto", background: "rgba(255,255,255,.2)", color: "#fff" }}>{TS_LABEL[t.state]}</span></span>
+              <span className="n-top"><Lvl base={t.base} eff={t.eff} why={t.why} /><span className="st" style={{ marginLeft: "auto", background: "color-mix(in srgb, var(--text) 14%, transparent)", color: "var(--text)" }}>{TS_LABEL[t.state]}</span></span>
               <span className="n-title" style={{ WebkitLineClamp: 3 }}>{t.title}</span>
               <span className="n-meta">{t.activity ? <Activity text={t.activity.text} detail={null} since={t.activity.since} who="Claude" />
                 : t.pending ? <span title="Twoje wiadomości czekają na odpowiedź agenta">{waiting(t.pending)} · {t.progress.done}/{t.progress.all} kroków</span>

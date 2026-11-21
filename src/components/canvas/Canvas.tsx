@@ -3,7 +3,7 @@
 // Rysuje tylko to, co dostanie; co znaczy kafelek i co robią akcje, decyduje rodzic (Board / TaskCanvas).
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { bounds, centerOf, computePositions, groupAt, LANE_ASPECT, routeEdges, reassign, type DropChange, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
+import { bounds, centerOf, computePositions, groupAt, LANE_ASPECT, routeEdges, ARROW, reassign, type DropChange, type LGroup, type LItem, type Pos, type Size } from "@/lib/canvas/layout";
 import { GCOL, Icon } from "./ui";
 
 export type CanvasItem = LItem & { cls: string; done?: boolean; aria: string };
@@ -420,8 +420,8 @@ export function Canvas(p: CanvasProps) {
           ))}
           <svg aria-hidden="true" width={bb.w} height={bb.h}>
             <defs>
-              <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--edge)" /></marker>
-              <marker id="ah-done" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--accent)" /></marker>
+              <marker id="ah" viewBox="0 0 10 10" refX="0" refY="5" markerUnits="userSpaceOnUse" markerWidth={ARROW} markerHeight={ARROW} orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--edge)" /></marker>
+              <marker id="ah-done" viewBox="0 0 10 10" refX="0" refY="5" markerUnits="userSpaceOnUse" markerWidth={ARROW} markerHeight={ARROW} orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--accent)" /></marker>
             </defs>
             {edges}{temp}
           </svg>

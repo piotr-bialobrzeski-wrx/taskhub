@@ -266,8 +266,10 @@ export function routeEdges(E: EdgeIn[], tiles: Rect[]): string[] {
   E.forEach((e, i) => { outs.set(k(e.a), [...(outs.get(k(e.a)) ?? []), i]); ins.set(k(e.b), [...(ins.get(k(e.b)) ?? []), i]); });
   for (const list of outs.values()) { const e = E[list[0]]; spread(list, (i) => (mids[i].length ? mids[i][0][1] : E[i].b.y + E[i].b.h / 2), e.a.y + (e.ay ?? e.a.h / 2), e.ay != null ? 30 : e.a.h / 2 - 18, ys); }
   for (const list of ins.values()) { const e = E[list[0]]; spread(list, (i) => (mids[i].length ? mids[i][mids[i].length - 1][1] : ys[i]), e.b.y + e.b.h / 2, e.b.h / 2 - 18, ye); }
-  return E.map((e, i) => splineD([[e.a.x + e.a.w, ys[i]], ...mids[i], [e.b.x - 4, ye[i]]]));
+  // linia kończy się na środku podstawy grotu (paczka 67): grot o długości ARROW dorysowuje marker w Canvas.tsx
+  return E.map((e, i) => splineD([[e.a.x + e.a.w, ys[i]], ...mids[i], [e.b.x - 4 - ARROW, ye[i]]]));
 }
+export const ARROW = 12;
 
 // Naturalny układ kroków (paczka 33, decyzja Piotra: wariant C „Wątki w rzędach”), drugie „Ułóż” na kanwie zadania.
 // Kolumna = głębokość jak w siatce. Krok z jednym poprzednikiem, który jest jego pierwszym następcą, idzie dalej w rzędzie poprzednika
