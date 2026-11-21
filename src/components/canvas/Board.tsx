@@ -39,7 +39,7 @@ export function TaskTileView({ t }: { t: TaskTile }) {
   // przy dwóch i więcej plakietkach licznik skraca się do „zrobione/wszystkie”, żeby nic nie było ucięte
   const badges = (t.drafts ? 1 : 0) + (t.handed ? 1 : 0) + (t.questions ? 1 : 0) + (t.pending ? 1 : 0);
   // paczka 39, wersja A: licznik „4/7 kroków” pogrubiony, czas obok drobniej; przy plakietkach (szkice, w Claude, pytania) zostaje samo „4/7”
-  const cnt = !t.progress.all ? <span className="cnt-n">{t.estText}</span>
+  const cnt = !t.progress.all || t.simple ? <span className="cnt-n">{t.estText}</span>
     : <><span className="cnt-n">{t.progress.done}/{t.progress.all}{badges ? "" : " " + plural(t.progress.all, "krok", "kroki", "kroków")}</span>{badges ? null : <small>{t.estText}</small>}</>;
   // paczka 34, wariant C: górna linia = narzędzie, projekt i etykieta stanu w rogu; paczka 39, wersja A: na dole plakietka priorytetu, termin i licznik,
   // pod nimi pasek kroków na całą szerokość
@@ -55,7 +55,7 @@ export function TaskTileView({ t }: { t: TaskTile }) {
         {t.summary ? <span className={"t-sum" + (t.state === "done" ? " done" : "")}>{t.summary}</span> : null}
       </span>
       <span className="t-row">
-        <PrioPill base={t.base} eff={t.eff} why={t.why} />
+        <PrioPill base={t.base} eff={t.eff} why={t.why} tile />
         {t.due ? <DueChip due={t.due} /> : null}
         {t.activity ? (
           <span className="t-rt"><Activity text={t.activity.text} detail={t.activity.detail} since={t.activity.since} who="Claude" /></span>
@@ -69,7 +69,7 @@ export function TaskTileView({ t }: { t: TaskTile }) {
           </span>
         )}
       </span>
-      {t.plan.length ? <span className="t-row"><PlanStrip plan={t.plan} /></span> : null}
+      {t.plan.length && !t.simple && t.plan.length <= 12 ? <span className="t-row"><PlanStrip plan={t.plan} /></span> : null}
     </>
   );
 }
@@ -165,7 +165,7 @@ export function Board(p: BoardProps) {
   const hitIds = useMemo(() => new Set(p.index.filter((it) => it.kind === "task" && matches(it.hay, words)).map((it) => it.id)), [p.index, words]);
   const hits = useMemo(() => (words.length ? p.tasks.filter((t) => hitIds.has(t.id)) : p.tasks), [p.tasks, words, hitIds]);
   // w trakcie szukania pasujące kafelki zostają, reszta blednie
-  const items: CanvasItem[] = useMemo(() => p.tasks.map((t) => ({ id: t.id, dependsOn: t.dependsOn, pos: t.pos, cls: "task lk lk-" + t.look.key + (words.length ? (hitIds.has(t.id) ? " hit" : " dim") : ""), done: t.state === "done", aria: "Otwórz zadanie " + t.title })), [p.tasks, words.length, hitIds]);
+  const items: CanvasItem[] = useMemo(() => p.tasks.map((t) => ({ id: t.id, dependsOn: t.dependsOn, pos: t.pos, cls: "task lk lk-" + t.look.key + (t.look.also ? " lk-and-" + t.look.also.key : "") + (t.simple ? " simple" : "") + " pj-" + (t.project ? Math.abs(t.project.color) % 7 : "none") + (words.length ? (hitIds.has(t.id) ? " hit" : " dim") : ""), done: t.state === "done", aria: "Otwórz zadanie " + t.title })), [p.tasks, words.length, hitIds]);
   const groups: CanvasGroup[] = useMemo(() => p.groups.map((g) => ({ ...g })), [p.groups]);
   const group = selGroup ? p.groups.find((g) => g.id === selGroup) ?? null : null;
   const open = (id: string) => router.push(`/tasks/${id}`);

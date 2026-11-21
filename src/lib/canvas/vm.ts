@@ -3,7 +3,7 @@ import type { Scored } from "../agent/context";
 import { dueLeftH, isComplete, whyText } from "../priority";
 import { agentMinOf, estOf, fmtMin, remainEst, spentMin, taskAgent, taskEst, taskSpent } from "../time";
 import { doneByOf, isOwnerStep, toolLabel, type Step, type Task } from "../schema";
-import { destOf, tileDest, tileDestHref, whoDid } from "../stepcard";
+import { destOf, isSimpleTask, tileDest, tileDestHref, whoDid } from "../stepcard";
 import type { Look, PlanSeg, StepStateKey, StepTile, TaskStateKey, TaskTile } from "@/components/canvas/ui";
 
 export { fmtDate, fmtTime } from "../clock";   // zawsze czas polski (serwer liczy w UTC)
@@ -118,6 +118,7 @@ export function taskTile(s: Scored, all: Task[], questions: number, live: LiveAc
   return {
     look: taskLook(t, state, looks, !!activity, questions),
     plan: planOf(t.steps, looks),
+    simple: isSimpleTask(t),
     draw: drawInfo(t, state, looks, questions),
     activity, pending,
     id: t.id, title: t.title, summary: state === "done" && t.noteSummary ? t.noteSummary : t.summary, state,

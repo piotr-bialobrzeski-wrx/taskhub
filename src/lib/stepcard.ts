@@ -271,6 +271,11 @@ export function timeAskOf(s: Pick<Step, "status" | "tool" | "doneBy" | "spentMan
 export type StepKind = "approval" | "agent" | "decision" | "reading" | "offline";
 export const READ_RE = /^(przeczytaj|przejrzyj|zapoznaj się)(?=\s|$)/i;   // (?=\s|$), nie \b: po „ę” granica słowa nie działa
 type QuestionB = Extract<Block, { type: "question" }>;
+// paczka 66: proste zadanie = jedna czynność Piotra bez szkicu i bez pytań (telefon, zakup, płatność). Pod spodem nadal jeden krok,
+// więc czas, historia i rozmowa działają jak w każdym zadaniu; UI tylko nie pokazuje kanwy kroków. Dwa i więcej kroków = zadanie z krokami.
+export function isSimpleTask(t: Pick<Task, "steps">): boolean {
+  return t.steps.length === 1 && stepKind(t.steps[0]) === "offline";
+}
 export function stepKind(s: Pick<Step, "tool" | "title" | "blocks">): StepKind {
   if (draftOf(s)) return "approval";
   if (!isOwnerStep(s)) return "agent";

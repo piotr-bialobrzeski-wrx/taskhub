@@ -28,7 +28,7 @@ import { ProtoFrame } from "@/components/ProtoFrame";
 import { embedMode, isOwnPreview } from "@/lib/embed";
 import { agentFeed, stepWaits, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
-import { beforeOf, decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitDecision, splitMain, stepKind, targetLink, timeAskOf, whoDid, isProjectStep, projectPrompt, redoOf, type CardState, type Redo } from "@/lib/stepcard";
+import { beforeOf, decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitDecision, splitMain, stepKind, isSimpleTask, targetLink, timeAskOf, whoDid, isProjectStep, projectPrompt, redoOf, type CardState, type Redo } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -227,7 +227,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
       aiOn={aiOn} agent={runnerOf(o.settings)} codex={codexStateOf(bridge.meta)} index={indexFrom(b)}
       feed={feed} work={bubble}
-      focus={focus ?? null} runbar={runbar} runAction={runAction} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} />
+      simple={isSimpleTask(t)} focus={focus ?? null} runbar={runbar} runAction={runAction} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} />
     </>
   );
 }

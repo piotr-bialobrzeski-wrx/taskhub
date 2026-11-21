@@ -60,6 +60,13 @@ export async function chat(fd: FormData) {
   if (goTo) redirect(`/tasks/${goTo}`);
 }
 
+// paczka 66: „Rozpisz na kroki” w prostym zadaniu: prośba do agenta w rozmowie zadania (dopisze kroki; obecna czynność zostaje krokiem 01)
+export async function splitSimple(taskId: string) {
+  const o = await requireOwner();
+  await intake(o.id, { typed: "Rozpisz to zadanie na kroki. Obecna czynność zostaje krokiem 01, z moją notatką i czasem; dopisz kolejne kroki po niej.", files: [], taskId, stepId: null });
+  refresh(taskId);
+}
+
 // ---------- zadania ----------
 export async function createTaskForm(fd: FormData) {
   const o = await requireOwner();

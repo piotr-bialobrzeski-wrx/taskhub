@@ -1,0 +1,143 @@
+/* Paczka 66: styl BR Tasks (prototyp https://claude.ai/artifact/1w2hVpf9AHfA8Xf3QWf4Fs, notatka notatki/2026-11-17-styl-br-tasks-i-proste-zadania.md).
+   Ładowany po globals.css: podmienia tokeny i wygląd kafelków, kartki kroku i przycisków; działanie aplikacji bez zmian.
+   Kolor kafelka = projekt (pastel). Stan mówi obwódka WEWNĄTRZ kafelka (nie zjada odstępu do sąsiada):
+   żółta 5 px = Twoja kolej, czerwona 5 px = potrzebna pomoc, tęczowa = Claude pracuje, bez obwódki = zaplanowane, wyblakły = zrobione.
+   Jeden akcent: żółty zakreślacz (#FFD84D) na tym, co czeka na Piotra, i na głównym przycisku. */
+:root {
+  --bg: #F5F6F8; --glow-1: transparent; --glow-2: transparent; --dot: rgba(21, 23, 28, 0.10);
+  --glass: rgba(255, 255, 255, 0.94); --glass-edge: rgba(255, 255, 255, 0.9); --surface: #FFFFFF; --surface-2: #EEF0F3;
+  --text: #15171C; --sub: #646B79; --line: rgba(21, 23, 28, 0.10); --edge: rgba(21, 23, 28, 0.32);
+  --accent: #15171C; --accent-2: #2A2D35; --accent-text: #FFFFFF; --accent-soft: rgba(21, 23, 28, 0.06); --shadow: rgba(21, 23, 28, 0.10);
+  --danger: #E5321C; --hi: #FFD84D; --hi-ink: #15171C; --hi-soft: #FFF3C4;
+  --lk-mine: #FFD84D; --lk-live: #8B7CFF; --lk-help: #E5321C; --lk-done: #C9CDD6; --seg-plan: transparent;
+  --pr5: #E5321C;
+  /* kolory projektów: pełny (kropka, nazwa) i pastel tła kafelka liczony z niego */
+  --pj-0: #3F63D8; --pj-1: #B9761F; --pj-2: #9A4DBA; --pj-3: #1E8C96; --pj-4: #D04A7A; --pj-5: #2F8F55; --pj-6: #6B7280;
+  --pj-tint: 17%; --pj-ink-mix: 62%;
+  --rainbow: conic-gradient(from var(--a), #FFD84D, #FF9F43, #FF5E8A, #8B7CFF, #43D3C9, #FFD84D);
+  --font: var(--f-body, "Atkinson Hyperlegible"), -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: var(--f-display, "Bricolage Grotesque"), -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121418; --dot: rgba(236, 238, 242, 0.08); --glass: rgba(27, 30, 36, 0.94); --glass-edge: rgba(255, 255, 255, 0.06);
+    --surface: #1B1E24; --surface-2: #23272F; --text: #ECEEF2; --sub: #9AA1AE; --line: rgba(236, 238, 242, 0.10); --edge: rgba(236, 238, 242, 0.32);
+    --accent: #ECEEF2; --accent-2: #DADDE3; --accent-text: #15171C; --accent-soft: rgba(236, 238, 242, 0.08); --shadow: rgba(0, 0, 0, 0.5);
+    --danger: #FF5A45; --hi-soft: #3A3218; --lk-mine: #FFD84D; --lk-live: #8B7CFF; --lk-help: #FF5A45; --lk-done: #3A3F4A; --seg-plan: transparent; --pr5: #FF5A45;
+    --pj-0: #8EA8FF; --pj-1: #E7B26A; --pj-2: #D3A2EA; --pj-3: #7ED3DA; --pj-4: #F29AB9; --pj-5: #8FD6A8; --pj-6: #AEB4BF;
+    --pj-tint: 16%; --pj-ink-mix: 100%;
+  }
+}
+
+/* ---------- pismo ---------- */
+body { font-family: var(--font); font-size: 14px; }
+h1, h2, h3, .n-title, .detail h3, .d-bar .il.ttl, .now-h, .ct, .empty h2 { font-family: var(--font-display); letter-spacing: 0; }
+.n-title { font-weight: 700; }
+.node.task .n-title { font-size: 16px; line-height: 1.2; }
+
+/* ---------- tło, szkło, przyciski ---------- */
+.app { background: var(--bg); }
+.glass { backdrop-filter: blur(16px); box-shadow: 0 6px 20px var(--shadow), 0 0 0 1px var(--line); }
+.btn.primary, .pill.primary, .send { background: var(--hi); color: var(--hi-ink); box-shadow: none; font-weight: 700; }
+.btn.primary:hover, .pill.primary:hover { background: color-mix(in srgb, var(--hi) 88%, #000); }
+.btn, .pill { font-weight: 700; }
+.seg.on { background: var(--accent); color: var(--accent-text); box-shadow: none; }
+.seg.drawb { background: var(--hi); color: var(--hi-ink); font-weight: 700; margin-left: 4px; }
+.seg.drawb.on { background: var(--hi); color: var(--hi-ink); box-shadow: inset 0 0 0 2px var(--hi-ink); }
+a { color: var(--text); }
+.chip.on { box-shadow: inset 0 0 0 1.5px var(--text); }
+.rec-tag { color: #FFD84D; background: #15171C; box-shadow: none; }
+.prio-pill.urgent { text-transform: uppercase; letter-spacing: .04em; background: var(--danger); color: #fff; }
+.st.due.late { background: transparent; color: var(--danger); box-shadow: none; font-weight: 700; }
+
+/* ---------- kanwa: strzałki ---------- */
+.edge { stroke: var(--sub); stroke-width: 2; stroke-dasharray: none; opacity: .7; }
+.edge.done { stroke: var(--sub); stroke-width: 2; opacity: .45; }
+.edge.temp { stroke: var(--text); }
+.edge.start { stroke-dasharray: 2 5; opacity: .5; }
+
+/* ---------- kafelek zadania: kolor projektu ---------- */
+.node { border-radius: 18px; box-shadow: none; }
+.pj-0 { --pc: var(--pj-0); } .pj-1 { --pc: var(--pj-1); } .pj-2 { --pc: var(--pj-2); } .pj-3 { --pc: var(--pj-3); }
+.pj-4 { --pc: var(--pj-4); } .pj-5 { --pc: var(--pj-5); } .pj-6 { --pc: var(--pj-6); } .pj-none { --pc: var(--pj-6); }
+.node.task.lk, .node.task.lk:not(.sel) { background: color-mix(in srgb, var(--pc) var(--pj-tint), var(--surface)); box-shadow: none; }
+.node.task.lk:not(.lk-mine):not(.lk-help) { outline: none; }
+.node.task .n-title { color: color-mix(in srgb, var(--pc) var(--pj-ink-mix), var(--text)); }
+.node.task .proj-tag { --c: color-mix(in srgb, var(--pc) 80%, var(--text)); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; font-size: 10.5px; }
+.node.task .proj-tag::before { display: none; }
+/* stan: obwódka w środku kafelka (outline z ujemnym odsunięciem), grubość dzielona przez powiększenie jak dotąd */
+.node.task.lk.lk-mine, .node.task.lk.lk-help { outline: calc(5px / var(--z, 1)) solid var(--sc); outline-offset: calc(-5px / var(--z, 1)); }
+.node.task.lk-done:not(.sel):not(.picked):not(.dragging):not(:hover) { opacity: .5; }
+.node.task.lk-done .n-title { text-decoration: line-through; text-decoration-thickness: 2px; }
+/* Claude pracuje: tęczowy obracający się obrys w środku kafelka; przy „pomoc · pracuje” tęcza wewnątrz czerwonej */
+.node.lk-live, .node.task.lk-live { box-shadow: none; }
+.node.lk-live::after, .node.task.lk-and-live::after { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: calc(3px / var(--z, 1)); pointer-events: none;
+  background: var(--rainbow); mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; animation: run-light 3s linear infinite; }
+.node.task.lk-and-live::after { inset: calc(5px / var(--z, 1)); border-radius: 13px; }
+@media (prefers-reduced-motion: reduce) { .node.lk-live::after, .node.task.lk-and-live::after { animation: none !important; } }
+.node.lk .n-dot { top: 6px; right: 6px; }
+/* zaznaczenie: czarny pierścień na zewnątrz (jedyna rzecz poza kafelkiem; tylko jeden kafelek naraz, chwilowo) */
+.node.lk.sel, .node.task.lk.sel { box-shadow: 0 0 0 3px var(--text); }
+.node.lk.picked, .node.lk.dragging, .node.lk.hit { box-shadow: 0 0 0 2px var(--text), 0 18px 36px -14px rgba(0,0,0,.4); }
+.node.lk.drop { box-shadow: 0 0 0 3px var(--hi); }
+
+/* etykieta stanu: pigułka w rogu */
+.lk-tag { padding: 2px 8px; border-radius: 999px; color: var(--text); font-weight: 700; line-height: 16px; }
+.lk-tag::before { display: none; }
+.lk-mine .lk-tag { background: var(--hi); color: var(--hi-ink); }
+.lk-help .lk-tag { background: var(--danger); color: #fff; }
+.lk-live .lk-tag { background: var(--text); color: var(--bg); }
+.lk-live .lk-tag::before { display: block; background: var(--hi); box-shadow: none; }
+.lk-plan-ag .lk-tag, .lk-plan-me .lk-tag, .lk-done .lk-tag { padding: 0; background: transparent; color: color-mix(in srgb, var(--text) 70%, transparent); }
+.lk-also { color: inherit; }
+.canvas.far .lk-tag { padding: 2px 12px; }
+
+/* łańcuch kroków: kwadraciki (pełny = zrobione, żółty = Ty teraz, mrugający = Claude teraz, pusty = zaplanowane, czerwony = agent oddał) */
+.tplan { gap: 3px; height: 13px; width: auto; flex: 0 1 auto; min-width: 0; }
+.tplan i { flex: none; width: 13px; height: 13px; min-width: 0; border-radius: 4px; box-sizing: border-box; color: color-mix(in srgb, var(--pc, var(--sub)) 70%, var(--text)); }
+.tplan .ps-plan { background: transparent; box-shadow: inset 0 0 0 2px currentColor; opacity: .55; }
+.tplan .ps-ag.ps-plan { box-shadow: inset 0 0 0 2px currentColor; opacity: .4; }
+.tplan .ps-done { background: currentColor; opacity: .55; }
+.tplan .ps-me.ps-now { background: var(--hi); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hi) 70%, #000); opacity: 1; }
+.tplan .ps-ag.ps-now { background: var(--surface); box-shadow: inset 0 0 0 2px var(--text); opacity: 1; animation: br-blink 1.4s ease-in-out infinite; }
+.tplan .ps-fail { background: var(--danger); box-shadow: none; opacity: 1; }
+@keyframes br-blink { 50% { transform: scale(.72); } }
+@media (prefers-reduced-motion: reduce) { .tplan .ps-ag.ps-now { animation: none; } }
+
+/* ---------- kafelki kroków (kanwa zadania) ---------- */
+.node:not(.task):not(.origin).lk { background: var(--surface); outline: none; box-shadow: inset 0 0 0 1.5px var(--line); border-radius: 16px; }
+.node:not(.task):not(.origin).lk-mine { background: var(--hi); color: var(--hi-ink); box-shadow: none; }
+.node:not(.task):not(.origin).lk-mine .n-meta, .node:not(.task):not(.origin).lk-mine .n-num { color: color-mix(in srgb, var(--hi-ink) 65%, transparent); }
+.node:not(.task):not(.origin).lk-help { box-shadow: inset 0 0 0 5px var(--danger); }
+.node:not(.task):not(.origin).lk-done { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line); }
+.node:not(.task):not(.origin).lk-done .n-title { text-decoration: line-through; font-weight: 500; color: var(--sub); }
+.node:not(.task):not(.origin).lk.sel { box-shadow: 0 0 0 3px var(--text); }
+.node:not(.task):not(.origin).lk-mine .lk-tag { background: var(--hi-ink); color: var(--hi); }
+/* kafelek zadania na jego kanwie kroków */
+.node.origin { background: var(--text); color: var(--bg); }
+
+/* ---------- kartka kroku: żółta ramka „Do zrobienia” ---------- */
+.detail { background: var(--bg); }
+.now { background: var(--hi); color: var(--hi-ink); border-radius: 22px; }
+.now .now-h, .now .now-h small { color: var(--hi-ink); }
+.now .block, .now .note, .now .cmp .block.pub.opt { border-radius: 16px; }
+.now.draft { background: var(--hi); }
+.now.handoff { background: var(--surface); color: var(--text); position: relative; isolation: isolate; }
+.now.handoff::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 3px; background: var(--rainbow); pointer-events: none;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; animation: run-light 3s linear infinite; z-index: -1; }
+.now.handoff .now-h, .now.handoff .now-h small { color: var(--text); }
+.now.done { background: var(--surface-2); color: var(--text); }
+.now.done .now-h, .now.done .now-h small { color: var(--sub); }
+.now.blocked { background: transparent; color: var(--sub); box-shadow: inset 0 0 0 2px var(--line); }
+.now.blocked .now-h, .now.blocked .now-h small { color: var(--sub); }
+.now.sheetc { background: var(--surface); color: var(--text); }
+.now .btn.primary, .now .pill.primary { background: var(--text); color: var(--bg); }
+@media (prefers-reduced-motion: reduce) { .now.handoff::before { animation: none; } }
+
+/* d-bar: przycisk „Rozpisz na kroki” prostego zadania */
+.d-bar .d-split { flex: none; }
+
+/* lista: wiersz z paskiem w kolorze projektu */
+.lrow.lk { outline: none; background: var(--surface); }
+.lrow.lk-mine { box-shadow: inset 0 0 0 3px var(--hi); }
+.lrow.lk-help { box-shadow: inset 0 0 0 3px var(--danger); }

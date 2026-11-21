@@ -18,7 +18,7 @@ import { QueuePanel, StepQueueStatus } from "./Queue";
 import { InlineText } from "@/components/StepFields";
 import { Activity } from "@/components/Activity";
 import { useOwnClock } from "@/components/OwnClock";
-import { addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, openedStep, queueNext, removeStep, saveStepPositions, stopWork, updateGroupAction, withdrawMessages } from "@/app/actions";
+import { splitSimple, addStepQuick, autoLayout, batchSteps, chat, createGroupAction, deleteGroupAction, handoff, linkSteps, openedStep, queueNext, removeStep, saveStepPositions, stopWork, updateGroupAction, withdrawMessages } from "@/app/actions";
 
 export type TaskCanvasProps = {
   project: { name: string; color: string } | null;   // projekt zadania w nagłówku karty kroku (paczka 15, punkt 6)
@@ -35,12 +35,14 @@ export type TaskCanvasProps = {
   taskBar: ReactNode; taskBody: ReactNode; // panel zadania
   panels: Record<string, ReactNode>;       // panele kroków, klucz = id kroku
   questions: ReactNode | null;             // karta pytań agenta
+  simple?: boolean;                        // paczka 66: proste zadanie: od razu kartka jedynego kroku, „Wróć” prowadzi na główną kanwę
 };
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
 export function TaskCanvas(p: TaskCanvasProps) {
   const router = useRouter();
+  const simpleRef = useRef(!!p.simple); simpleRef.current = !!p.simple;
   const { toast, show, run } = useToast();
   const undoL = useUndoLayout(run);
   const { view, onView } = useView("task");
@@ -50,7 +52,9 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [selGroup, setSelGroup] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [panel, setPanel] = useState<string | null>(() => (p.focus && p.steps.some((s) => s.id === p.focus) ? p.focus : null));
+  const [panel, setPanel] = useState<string | null>(() => (p.simple && p.steps[0] ? p.steps[0].id : p.focus && p.steps.some((s) => s.id === p.focus) ? p.focus : null));
+  // proste zadanie nie ma kanwy kroków: zamknięcie kartki wraca na główną kanwę
+  const closePanel = () => { if (p.simple) { router.push("/"); return; } setPanel(null); setSel(new Set()); };
   const [chatOpen, setChatOpen] = useState(false);   // czat po lewej z historią (widok kroku): kolejka przechodzi do jego nagłówka
   const [confirm, setConfirm] = useState(false);
   const [tmenu, setTmenu] = useState<{ id: string | null; x: number; y: number } | null>(null);   // menu kafelka (prawy klik); null = kafelek zadania
@@ -65,7 +69,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
     setPanel((cur) => (cur && cur !== "__task" && !p.steps.some((x) => x.id === cur) ? null : cur));
   }, [p.steps]);
   useEffect(() => {
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { setConfirm(false); setNamer(null); setSel(new Set()); setSelGroup(null); setPanel(null); } };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { setConfirm(false); setNamer(null); setSel(new Set()); setSelGroup(null); if (simpleRef.current) router.push("/"); else setPanel(null); } };
     document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key);
   }, []);
 
@@ -94,7 +98,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const openStep = (id: string) => { setSel(new Set()); setSelGroup(null); setPanel(id); setConfirm(false); seen(id); };
   // pasek panelu kroku: numer, tytuł (edycja klikiem, do 2 linii), stan; narzędzie jest w technikaliach, nie dubluje się tu
   const stepBar = (s: StepTile & { toolName: string }) => (
-    <><span className="n-num">{pad(s.idx)}</span><InlineText taskId={t.id} stepId={s.id} field="title" value={s.title} as="bar" placeholder="Tytuł kroku" />
+    <>{p.simple ? null : <span className="n-num">{pad(s.idx)}</span>}<InlineText taskId={t.id} stepId={s.id} field="title" value={s.title} as="bar" placeholder="Tytuł kroku" />
       {/* paczka 15: bez znaczka stanu (stan mówi kolor kafelka i ramka „Teraz”); obok tytułu tylko projekt */}
       {p.project ? <span className="d-proj" title={`Projekt: ${p.project.name}`}><i className="d" style={{ ["--c" as string]: p.project.color }} /><span>{p.project.name}</span></span> : null}
       <span className="sp" /></>
@@ -103,7 +107,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
   const pullRef = useRef<number | null>(null);
   const onPullDown = (e: React.PointerEvent) => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); pullRef.current = e.clientY; };
   const onPullMove = (e: React.PointerEvent) => { if (pullRef.current != null) setPull(Math.max(0, e.clientY - pullRef.current)); };
-  const endPull = () => { if (pullRef.current == null) return; pullRef.current = null; if (pull > 110) { setPanel(null); setSel(new Set()); } setPull(0); };
+  const endPull = () => { if (pullRef.current == null) return; pullRef.current = null; if (pull > 110) closePanel(); setPull(0); };
   const cur = panel && panel !== "__task" ? byId.get(panel) ?? null : null;
   // zegar czasu Piotra na otwartym kroku jego własnym (narzędzie „Piotr sam”), póki nie jest zrobiony; jeden hak obsługuje panel i szufladę na telefonie
   const asideRef = useRef<HTMLElement>(null);
@@ -216,8 +220,9 @@ export function TaskCanvas(p: TaskCanvasProps) {
           <div className="dhandle" aria-hidden="true" onPointerDown={onPullDown} onPointerMove={onPullMove} onPointerUp={endPull} onPointerCancel={() => { pullRef.current = null; setPull(0); }} />
           {/* lewy górny róg: strzałka wstecz zamyka kartę (jak Esc), obok nazwa zadania albo kroku */}
           <div className="d-bar">
-            <button className="icobtn d-back" type="button" aria-label="Wróć" title="Wróć (Esc)" onClick={() => { setPanel(null); setSel(new Set()); }}><Icon k="back" size={16} sw={1.9} /></button>
+            <button className="icobtn d-back" type="button" aria-label="Wróć" title="Wróć (Esc)" onClick={closePanel}><Icon k="back" size={16} sw={1.9} /></button>
             {panel === "__task" ? p.taskBar : cur ? stepBar(cur) : null}
+            {p.simple && cur ? <button className="icobtn d-split" type="button" aria-label="Rozpisz na kroki" title="Rozpisz na kroki: Claude doda kroki, ta czynność zostanie krokiem 01" onClick={() => run(async () => { await splitSimple(t.id); }, "Claude rozpisze zadanie na kroki")}><Icon k="split" size={16} sw={1.7} /></button> : null}
             {cur ? <MoreMenu label="Więcej" items={[{ label: "Usuń krok", danger: true, confirm: "Usunąć ten krok? Tego nie da się cofnąć.", yes: "Tak, usuń", onPick: () => { const id = cur.id; setPanel(null); setSel(new Set()); run(() => removeStep(t.id, id), "Usunięto krok"); } }]} /> : null}
           </div>
           <div className="d-body" key={panel}>{panel === "__task" ? p.taskBody : p.panels[panel]}</div>
@@ -237,7 +242,7 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {/* paczka 57: każdy krok ma własny wątek rozmowy; w widoku zadania wątek zadania i skróty do wątków kroków */}
       <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} side={!!cur} onSideOpen={setChatOpen}
         head={<QueuePanel variant="head" queue={p.agentQueue} taskId={t.id} onToast={show} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} events={p.feed} onStep={openStep} />} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
-        historyTitle={ctxStep ? `Rozmowa w kroku ${pad(ctxStep.idx)}` : undefined} onStep={openStep}
+        historyTitle={ctxStep ? (p.simple ? "Rozmowa w zadaniu" : `Rozmowa w kroku ${pad(ctxStep.idx)}`) : undefined} onStep={openStep}
         stepName={(id) => { const s = byId.get(id); return s ? { label: pad(s.idx), title: s.title } : null; }}
         queue={ctxGlobal ? null : p.queue} version={`${p.feed.at(-1)?.id ?? ""}|${p.queue?.n ?? 0}|${p.queue?.kind ?? ""}|${p.queue?.activity?.text ?? ""}`}
         placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : "Napisz, co dalej"} />

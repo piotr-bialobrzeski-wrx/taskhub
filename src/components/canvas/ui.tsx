@@ -37,7 +37,8 @@ export function DueChip({ due }: { due: NonNullable<TaskTile["due"]> }) {
 // Odcinek = kto (me Piotr, ag Claude) i stan (plan, now, done) albo fail (agent oddał krok)
 export type PlanSeg = "me-plan" | "ag-plan" | "me-now" | "ag-now" | "me-done" | "ag-done" | "fail";
 export function PlanStrip({ plan }: { plan: PlanSeg[] }) {
-  if (!plan.length) return null;
+  // paczka 66: kwadraciki; przy więcej niż 12 krokach zostaje sam licznik
+  if (!plan.length || plan.length > 12) return null;
   const n = (k: string) => plan.filter((x) => x.endsWith(k)).length;
   const tip = `Kroki: ${n("done")} zrobione, ${n("now")} w toku, ${n("plan")} zaplanowane` + (n("fail") ? `, ${n("fail")} ${n("fail") === 1 ? "nieudany" : "nieudane"}` : "");
   return (
@@ -60,6 +61,7 @@ export type TaskTile = {
   activity: TileActivity | null;
   look: Look;        // obwódka, tło i etykieta: stan najważniejszego kroku (Twoja kolej, Agent oddał, Agent pracuje, Zaplanowane)
   plan: PlanSeg[];   // pasek planu (paczka 34): stan każdego kroku po kolei
+  simple?: boolean;  // paczka 66: proste zadanie (jeden krok Piotra): bez łańcucha kroków, otwiera się od razu na kartce
   draw: { min: number; step: string } | null;   // losowanie (paczka 32): Twój następny krok i ile Twojej pracy zostało; null = nic dla Ciebie
 };
 // co mostek robi teraz na tym kafelku (pasek z kropkami): czynność, szczegół (np. polecenie), od kiedy trwa bieg
@@ -110,6 +112,7 @@ const PATHS: Record<string, string> = {
   menu: '<path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>',
   more: '<path d="M8 3.5h.01M8 8h.01M8 12.5h.01"/>',
   back: '<path d="M10 3 5 8l5 5"/>',
+  split: '<path d="M2 8h4l3.3-4H14M6 8l3.3 4H14M12 2l2 2-2 2M12 10l2 2-2 2"/>',
   logo: '<path d="M3 8h4M9 4h4M9 12h4M7 8l2-4M7 8l2 4"/>',
   x: '<path d="M4 4l8 8M12 4l-8 8"/>',
   repeat: '<path d="M11.5 2.5 13.5 4.5l-2 2"/><path d="M13.5 4.5H5a2.5 2.5 0 0 0-2.5 2.5v.5M4.5 13.5l-2-2 2-2"/><path d="M2.5 11.5H11a2.5 2.5 0 0 0 2.5-2.5v-.5"/>',
@@ -170,18 +173,21 @@ export function Lvl({ base, eff, why, label }: { base: number; eff: number; why?
 
 // plakietka priorytetu na kafelku zadania (paczka 39, wersja A): słowo w kolorze poziomu; Wysoki i Krytyczny pełnym kolorem, niższe delikatnym tłem.
 // Strzałka, gdy pokazany priorytet różni się od ustawionego (dymek mówi dlaczego)
-export function PrioPill({ base, eff, why }: { base: number; eff: number; why?: string }) {
+export function PrioPill({ base, eff, why, tile = false }: { base: number; eff: number; why?: string; tile?: boolean }) {
+  // paczka 66: na kafelku tylko najwyższy priorytet, jako czerwone „PILNE”; reszta poziomów w zadaniu i w Liście
+  if (tile && eff < 5) return null;
   const b = eff - base;
   const tip = b ? `Priorytet ${base}/5, pokazany ${eff}/5: ${why ?? ""}` : `Priorytet ${eff}/5: ${LEVELS[eff]}`;
   return (
-    <span className={"prio-pill" + (eff <= 3 ? " low" : "")} style={{ ["--pc" as string]: `var(--pr${eff})` }} title={tip} aria-label={tip}>
+ <span className={"prio-pill" + (eff <= 3 ? " low" : "") + (tile ? " urgent" : "")} style={{ ["--pc" as string]: `var(--pr${eff})` }} title={tip} aria-label={tip}>
       {b ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d={b > 0 ? "M12 19V5M5 12l7-7 7 7" : "M12 5v14M5 12l7 7 7-7"} /></svg> : null}
-      {LEVELS[eff]}
+      {tile ? "Pilne" : LEVELS[eff]}
     </span>
   );
 }
 
 export const plural = (n: number, a: string, b: string, c: string) => (n === 1 ? a : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? b : c);
-export const GCOL = ["var(--accent)", "var(--p3)", "var(--p2)", "var(--t-clickup)", "var(--p4)"];
+// paczka 66 (styl BR Tasks): siedem kolorów projektu; kafelek bierze z koloru pastelowe tło (--pc), kropki i nazwy pełny kolor
+export const GCOL = ["var(--pj-0)", "var(--pj-1)", "var(--pj-2)", "var(--pj-3)", "var(--pj-4)", "var(--pj-5)", "var(--pj-6)"];
 export const projColor = (color: number) => GCOL[Math.abs(color) % GCOL.length];

@@ -35,13 +35,13 @@ export function AgentPill({ agent, codex, aiOn }: { agent: Runner; codex?: Codex
 }
 
 export type View = "canvas" | "list" | "draw" | "review";
-// draw: trzecia pozycja „Losowanie” i czwarta „Przegląd” (przegląd zaległości) tylko na głównej kanwie (paczka 32 i 38); na telefonie pigułka pokazuje same ikony
+// paczka 66: „Losuj” to żółty przycisk na końcu pigułki (styl BR Tasks); draw: „Przegląd” i „Losuj” (przegląd zaległości) tylko na głównej kanwie (paczka 32 i 38); na telefonie pigułka pokazuje same ikony
 export const ViewPill = ({ view, onView, draw }: { view: View; onView: (v: View) => void; draw?: boolean }) => (
   <div className={"gpill glass center" + (draw ? " vp3" : "")} role="tablist" aria-label="Widok">
     <button className={"seg" + (view === "canvas" ? " on" : "")} role="tab" aria-selected={view === "canvas"} aria-label="Kanwa" title="Kanwa" onClick={() => onView("canvas")}><Icon k="canvas" size={14} /><span className="vl">Kanwa</span></button>
     <button className={"seg" + (view === "list" ? " on" : "")} role="tab" aria-selected={view === "list"} aria-label="Lista" title="Lista" onClick={() => onView("list")}><Icon k="list" size={14} /><span className="vl">Lista</span></button>
-    {draw ? <button className={"seg" + (view === "draw" ? " on" : "")} role="tab" aria-selected={view === "draw"} aria-label="Losowanie" title="Losowanie" onClick={() => onView("draw")}><Icon k="dice" size={14} /><span className="vl">Losowanie</span></button> : null}
     {draw ? <button className={"seg" + (view === "review" ? " on" : "")} role="tab" aria-selected={view === "review"} aria-label="Przegląd" title="Przegląd" onClick={() => onView("review")}><Icon k="review" size={14} /><span className="vl">Przegląd</span></button> : null}
+    {draw ? <button className={"seg drawb" + (view === "draw" ? " on" : "")} role="tab" aria-selected={view === "draw"} aria-label="Losuj" title="Wylosuj coś dla mnie" onClick={() => onView("draw")}><Icon k="dice" size={14} /><span className="vl">Losuj</span></button> : null}
   </div>
 );
 
