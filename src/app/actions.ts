@@ -55,6 +55,15 @@ export async function chat(fd: FormData) {
   const o = await requireOwner();
   const taskId = str(fd, "taskId") || null;
   const stepId = (taskId && str(fd, "stepId")) || null;   // otwarty krok w panelu: domyślny kontekst wiadomości
+  // paczka 68: pole czatu w trybie odpowiedzi na pytanie Claude (jedno pole na ekranie): tekst to odpowiedź na pytanie, nie nowa wiadomość
+  const questionId = (taskId && str(fd, "questionId")) || null;
+  if (questionId && str(fd, "text")) {
+    await repo.answerQuestion(o.id, questionId, str(fd, "text"));
+    const files = uploads(fd);
+    if (files.length) await intake(o.id, { typed: "Załączniki do mojej odpowiedzi na pytanie.", files, taskId, stepId });
+    refresh(taskId);
+    return;
+  }
   const { goTo } = await intake(o.id, { typed: str(fd, "text"), files: uploads(fd), taskId, stepId });
   refresh(taskId);
   if (goTo) redirect(`/tasks/${goTo}`);
@@ -672,22 +681,40 @@ export async function batchSteps(taskId: string, ids: string[], op: { done?: boo
 // historia rozmowy (dok → ikona zegara): strona po 50 wpisów, od najstarszego; before = kursor na starsze.
 // Wiadomość Piotra niesie swój stan (wzięta, odpowiedziano), odpowiedź agenta listę wiadomości, które załatwia; queue = stan kolejki zadania (null, gdy nic nie czeka)
 const CHAT_PAGE = 50;
-export type ChatVM = { id: string; role: "user" | "agent"; text: string; createdAt: string; seenAt: string | null; answeredAt: string | null; answers: string[] | null; stepId: string | null; link: string | null; why: string | null; withdrawn?: boolean; goStep?: string | null };
+// paczka 68: answerIn = odpowiedź leży w innym wątku (krok albo zadanie, godzina); ask = pytanie Claude z odpowiedzią Piotra w historii wątku
+// („q” treść pytania, „a” odpowiedź), czyli rozmowa pokazuje pytania, a nie tylko okno nad kanwą
+export type ChatVM = { id: string; role: "user" | "agent"; text: string; createdAt: string; seenAt: string | null; answeredAt: string | null; answers: string[] | null; stepId: string | null; link: string | null; why: string | null; withdrawn?: boolean; answerIn?: { stepId: string | null; at: string }; ask?: "q" | "a" };
 // paczka 57: każdy krok ma własny wątek. stepId = id → wątek kroku; null → wątek zadania (wiadomości bez kroku) i skróty do wątków kroków (threads);
 // undefined → cała rozmowa. Kolejka („Czeka na mostek”) liczy tylko wiadomości tego wątku
 export type ChatThreadVM = repo.ChatThreadInfo;
 export async function loadChat(taskId: string | null, before: string | null, stepId?: string | null): Promise<{ msgs: ChatVM[]; queue: Queue | null; threads?: ChatThreadVM[] }> {
   const o = await requireOwner();
   const thread = taskId ? stepId : undefined;
-  const [rows, queue, threads] = await Promise.all([
+  const [rows, queue, threads, asked] = await Promise.all([
     repo.listChat(o.id, taskId, CHAT_PAGE, before, thread), taskId ? taskQueue(o.id, taskId, thread) : Promise.resolve(null),
     taskId && thread === null && !before ? repo.listChatThreads(o.id, taskId) : Promise.resolve(undefined),
+    taskId ? repo.listQuestions(o.id, { taskId }) : Promise.resolve([]),
   ]);
-  const msgs = rows.map((m) => {
-    const a = (m.actions ?? null) as { answers?: string[]; stepId?: string; link?: string; why?: string; withdrawn?: boolean; echo?: boolean; goStep?: string | null } | null;
-    return { id: m.id, role: m.role, text: m.text, createdAt: m.createdAt, seenAt: m.seenAt, answeredAt: m.answeredAt, answers: a?.answers ?? null, stepId: a?.stepId ?? null, link: a?.link ?? null, why: typeof a?.why === "string" ? a.why : null, ...(a?.withdrawn ? { withdrawn: true } : {}), ...(a?.echo ? { goStep: a.goStep ?? null } : {}) };
+  const msgs: ChatVM[] = rows.map((m) => {
+    const a = (m.actions ?? null) as { answers?: string[]; stepId?: string; link?: string; why?: string; withdrawn?: boolean } | null;
+    return { id: m.id, role: m.role, text: m.text, createdAt: m.createdAt, seenAt: m.seenAt, answeredAt: m.answeredAt, answers: a?.answers ?? null, stepId: a?.stepId ?? null, link: a?.link ?? null, why: typeof a?.why === "string" ? a.why : null, ...(a?.withdrawn ? { withdrawn: true } : {}) };
   });
-  return { msgs, queue, ...(threads ? { threads } : {}) };
+  // odpowiedź w innym wątku: odnośnik pod dymkiem zamiast kopii
+  const here = new Set(msgs.flatMap((m) => (m.role === "agent" ? m.answers ?? [] : [])));
+  const away = msgs.filter((m) => m.role === "user" && m.answeredAt && !m.withdrawn && !here.has(m.id)).map((m) => m.id);
+  if (taskId && away.length) {
+    const places = await repo.answerPlaces(o.id, taskId, away);
+    for (const m of msgs) { const p = places.get(m.id); if (p && (thread === undefined || p.stepId !== (thread ?? null))) m.answerIn = p; }
+  }
+  // pytania Claude z odpowiedzią: w wątku swojego kroku (bez kroku: w wątku zadania), w zakresie tej strony historii
+  const from = rows.length >= CHAT_PAGE ? rows[0].createdAt : "", to = before ?? "9999";
+  const qs: ChatVM[] = asked.filter((q) => q.answeredAt && q.answer && (thread === undefined || (q.stepId ?? null) === (thread ?? null)) && q.askedAt >= from && q.askedAt < to)
+    .flatMap((q) => [
+      { id: "q-" + q.id, role: "agent" as const, text: q.text, createdAt: q.askedAt, seenAt: null, answeredAt: null, answers: null, stepId: q.stepId, link: null, why: null, ask: "q" as const },
+      { id: "qa-" + q.id, role: "user" as const, text: q.answer!, createdAt: q.answeredAt!, seenAt: q.answeredAt, answeredAt: q.answeredAt, answers: null, stepId: q.stepId, link: null, why: null, ask: "a" as const },
+    ]);
+  const all = qs.length ? [...msgs, ...qs].sort((x, y) => (x.createdAt < y.createdAt ? -1 : x.createdAt > y.createdAt ? 1 : 0)) : msgs;
+  return { msgs: all, queue, ...(threads ? { threads } : {}) };
 }
 // nazwa zadania z nagłówka karty zadania (edycja w miejscu, ten sam komponent co nazwa kroku)
 export async function renameTask(taskId: string, title: string) {

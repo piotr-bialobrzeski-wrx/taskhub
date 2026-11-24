@@ -114,6 +114,7 @@ export function Board(p: BoardProps) {
   useFitBar(barRef);   // paczka 61: za wąsko = same ikony
   const api = useRef<CanvasApi | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [chatOpen, setChatOpen] = useState(false);   // paczka 68: panel rozmowy po lewej z historią: kolejka przechodzi do jego nagłówka
   const [selGroup, setSelGroup] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
@@ -370,9 +371,12 @@ export function Board(p: BoardProps) {
         </div>
       ) : null}
 
-      {off ? null : <AgentFeed items={p.feed} work={p.work ?? null} onWithdraw={() => withdrawMessages(null).then(show)} onQueueNext={(key) => queueNext(key, null).then(show)} queue={<QueuePanel queue={p.agentQueue} onToast={show} onStop={(id) => stopWork(p.agentQueue.now?.taskId ?? "", id).then(show)} events={p.feed} />} />}
+      {off ? null : <AgentFeed items={p.feed} work={p.work ?? null} onWithdraw={() => withdrawMessages(null).then(show)} onQueueNext={(key) => queueNext(key, null).then(show)} queue={chatOpen ? null : <QueuePanel queue={p.agentQueue} onToast={show} onStop={(id) => stopWork(p.agentQueue.now?.taskId ?? "", id).then(show)} events={p.feed} />} />}
 
-      {off ? null : <Dock action={chat} taskId={null} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"} placeholder="Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" />}
+      {/* paczka 68 (wersja A „Rozmowa z boku”): rozmowa w panelu po lewej także na głównej kanwie; kolejka Claude w jego nagłówku */}
+      {off ? null : <Dock action={chat} taskId={null} side onSideOpen={setChatOpen} historyTitle="Rozmowa o wszystkich zadaniach"
+        head={<QueuePanel variant="head" queue={p.agentQueue} onToast={show} onStop={(id) => stopWork(p.agentQueue.now?.taskId ?? "", id).then(show)} events={p.feed} />}
+        busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"} placeholder="Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" />}
       <Toast text={toast} />
     </div>
   );

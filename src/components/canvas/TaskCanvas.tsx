@@ -34,7 +34,8 @@ export type TaskCanvasProps = {
   runAction?: { label: string; anchor: string } | null;   // przycisk w pasku: otwiera panel zadania i rozwija wskazaną sekcję
   taskBar: ReactNode; taskBody: ReactNode; // panel zadania
   panels: Record<string, ReactNode>;       // panele kroków, klucz = id kroku
-  questions: ReactNode | null;             // karta pytań agenta
+  questions: ReactNode | null;             // karta pytania Claude (paczka 68: stoi w panelu rozmowy nad polem)
+  ask?: { id: string; stepId: string | null; label: string | null; title: string } | null;   // to pytanie: którego kroku dotyczy
   simple?: boolean;                        // paczka 66: proste zadanie: od razu kartka jedynego kroku, „Wróć” prowadzi na główną kanwę
 };
 
@@ -115,6 +116,14 @@ export function TaskCanvas(p: TaskCanvasProps) {
   // kontekst wiadomości wynika z widoku i nie zajmuje miejsca nad polem: otwarty krok, inaczej całe zadanie (ogólny kanwas ma własny dok)
   const ctxGlobal = false;
   const ctxStep = cur;
+  // paczka 68 (wersja A „Rozmowa z boku”): pytanie Claude stoi na dole wątku nad jedynym polem, które wtedy na nie odpowiada.
+  // W widoku zadania i w kroku, którego dotyczy: pełna karta; w innym kroku tylko pasek „Claude pyta w kroku …” z przejściem do niego.
+  const ask = p.ask ?? null;
+  const askHere = !!ask && (!cur || !ask.stepId || cur.id === ask.stepId || !!p.simple);
+  const askAway = !!ask && !askHere && !!ask.stepId && byId.has(ask.stepId);
+  const askNode = askHere ? p.questions
+    : askAway ? <div className="askstrip"><span className="ask-n">{ask!.label}</span><span className="ask-t">Claude pyta w kroku {ask!.label} „{ask!.title}”</span><button className="btn" type="button" onClick={() => openStep(ask!.stepId!)}>Przejdź</button></div>
+    : null;
   // wynik szukania: krok tego zadania otwiera się na miejscu (panel + środek kanwy); reszta prowadzi pod swój adres
   const onPick = (it: SearchItem): boolean => {
     if (it.kind !== "step" || it.taskId !== t.id) return false;
@@ -229,7 +238,6 @@ export function TaskCanvas(p: TaskCanvasProps) {
         </aside>
       ) : null}
 
-      {p.questions && !n && !group ? <div className="answer glass" aria-live="polite">{p.questions}</div> : null}
       {/* odpowiedzi agenta (to, co jest w historii rozmowy) w lewym dolnym rogu ekranu */}
       <AgentFeed items={cur ? p.feed.filter((f) => f.stepId === cur.id) : p.feed} work={p.work} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} className={panel ? "withpanel" : ""}
         stepLabel={(id) => (byId.has(id) ? pad(byId.get(id)!.idx) : null)} onStep={openStep}
@@ -240,9 +248,11 @@ export function TaskCanvas(p: TaskCanvasProps) {
       {/* paczka 52: w widoku kroku czat stoi po lewej na całą wysokość obok kartki; widok zadania (kanwa, karta zadania) bez zmian */}
       {/* krok 04: przy otwartym czacie kolejka Claude to licznik w nagłówku czatu, a status tego kroku stoi nad polem (wyżej, w AgentFeed) */}
       {/* paczka 57: każdy krok ma własny wątek rozmowy; w widoku zadania wątek zadania i skróty do wątków kroków */}
-      <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} side={!!cur} onSideOpen={setChatOpen}
+      {/* paczka 68: panel po lewej także na kanwie zadania (pasek na środku znika); pytanie Claude w panelu, bez osobnego okna */}
+      <Dock action={chat} taskId={ctxGlobal ? null : t.id} stepId={ctxStep?.id ?? null} side onSideOpen={setChatOpen}
+        ask={askNode} reply={askHere && ask ? { questionId: ask.id, label: ask.label ? `z kroku ${ask.label}` : "Claude" } : null}
         head={<QueuePanel variant="head" queue={p.agentQueue} taskId={t.id} onToast={show} onStop={(id) => run(async () => show(await stopWork(t.id, id)))} events={p.feed} onStep={openStep} />} busyText={p.aiOn ? "Agent myśli…" : "Zapisuję…"}
-        historyTitle={ctxStep ? (p.simple ? "Rozmowa w zadaniu" : `Rozmowa w kroku ${pad(ctxStep.idx)}`) : undefined} onStep={openStep}
+        historyTitle={ctxStep && !p.simple ? `Rozmowa w kroku ${pad(ctxStep.idx)}` : "Rozmowa w zadaniu"} onStep={openStep}
         stepName={(id) => { const s = byId.get(id); return s ? { label: pad(s.idx), title: s.title } : null; }}
         queue={ctxGlobal ? null : p.queue} version={`${p.feed.at(-1)?.id ?? ""}|${p.queue?.n ?? 0}|${p.queue?.kind ?? ""}|${p.queue?.activity?.text ?? ""}`}
         placeholder={ctxGlobal ? "Co masz na głowie? Wklej maila, wiadomość albo opisz zadanie…" : "Napisz, co dalej"} />

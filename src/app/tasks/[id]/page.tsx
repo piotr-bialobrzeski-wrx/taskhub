@@ -108,23 +108,28 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     : null;
   const runAction = who && who.kind !== "decomposing" && !aiOn ? { label: "Rozpisz teraz", anchor: "rozpisz" } : null;
 
-  // ---------- karta pytań agenta ----------
+  // ---------- pytanie Claude (paczka 68, wersja A „Rozmowa z boku”) ----------
+  // Pytanie stoi w panelu rozmowy, na dole wątku nad polem; jedyne pole na ekranie odpowiada na nie (ask w TaskCanvas).
+  // Na karcie zostają tylko treść, przyciski opcji i odrzucenie; po odpowiedzi pytanie i odpowiedź są w historii wątku swojego kroku.
   const q: Question | undefined = questions[0];
+  const qIdx = q?.stepId ? t.steps.findIndex((s) => s.id === q.stepId) : -1;
+  const ask = q ? { id: q.id, stepId: qIdx >= 0 ? q.stepId : null, label: qIdx >= 0 ? String(qIdx + 1).padStart(2, "0") : null, title: qIdx >= 0 ? t.steps[qIdx].title : t.title } : null;
   const questionsNode = q ? (
-    <>
-      <div className="ans-head">
-        <span className="lbl" style={{ margin: 0 }}>Pytanie od Claude{q.stepId ? ` · ${t.steps.find((s) => s.id === q.stepId)?.title ?? ""}` : ""}{questions.length > 1 ? ` · jeszcze ${questions.length - 1}` : ""}</span>
-        <span className="sp" />
+    <div className="askcard" aria-live="polite">
+      <div className="ask-h">
+        {ask?.label ? <span className="ask-n">{ask.label}</span> : null}
+        <span className="ask-t">Pytanie od Claude{ask?.label ? ` · ${ask.title}` : ""}{questions.length > 1 ? ` · jeszcze ${questions.length - 1}` : ""}</span>
         <form action={dismissQuestion.bind(null, t.id, q.id)}><button className="icobtn" type="submit" aria-label="Odrzuć pytanie" title="Odrzuć pytanie"><Icon k="x" size={12} sw={2} /></button></form>
       </div>
-      <div className="ans-text">{q.text}</div>
-      <form className="stack" action={answerQuestionForm}>
-        <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="questionId" value={q.id} />
-        <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
-        {q.options.length ? <OptionButtons className="actions" options={q.options} recommended={q.recommended} why={q.why} /> : null}
-        <div className="row"><input className="in" name="answer" placeholder={q.options.length ? "Albo odpowiedz własnymi słowami…" : "Twoja odpowiedź…"} /><PendingButton className="btn primary">Odpowiedz</PendingButton></div>
-      </form>
-    </>
+      <div className="ask-b">{q.text}</div>
+      {q.options.length ? (
+        <form className="ask-o" action={answerQuestionForm}>
+          <input type="hidden" name="taskId" value={t.id} /><input type="hidden" name="questionId" value={q.id} />
+          <OptionButtons className="actions" options={q.options} recommended={q.recommended} why={q.why} />
+        </form>
+      ) : null}
+      <div className="ask-f">{q.options.length ? "Wybierz albo odpowiedz w polu pod spodem" : "Odpowiedz w polu pod spodem"}</div>
+    </div>
   ) : null;
 
   // ---------- panel zadania ----------
@@ -227,7 +232,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color, x: g.x, y: g.y, w: g.w, h: g.h, members: g.members, auto: g.auto }))}
       aiOn={aiOn} agent={runnerOf(o.settings)} codex={codexStateOf(bridge.meta)} index={indexFrom(b)}
       feed={feed} work={bubble}
-      simple={isSimpleTask(t)} focus={focus ?? null} runbar={runbar} runAction={runAction} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} />
+      simple={isSimpleTask(t)} focus={focus ?? null} runbar={runbar} runAction={runAction} taskBar={taskBar} taskBody={taskBody} panels={panels} questions={questionsNode} ask={ask} />
     </>
   );
 }
