@@ -1,5 +1,6 @@
 // Jeden renderer dla wszystkich bloków. Nowa aplikacja zewnętrzna nie dodaje tu kodu.
 import type { Block, Fact, Provenance } from "@/lib/schema";
+import { HOWTO_HREF } from "@/lib/schema";
 import { appName, normalizeTool, openLabel, toolLabel } from "@/lib/schema";
 import { answerBlockForm } from "@/app/actions";
 import { Markdown } from "@/lib/markdown";
@@ -209,6 +210,8 @@ export function BlockView({ b, form, index, links: L }: { b: Block; form?: Block
         </div>
       );
     }
+    case "howto":
+      return <Howto b={b} />;
     case "question":
       if (b.answer || !form) {
         return (
@@ -233,6 +236,38 @@ export function BlockView({ b, form, index, links: L }: { b: Block; form?: Block
         </form>
       );
   }
+}
+
+// paczka 68, wariant A „Instrukcja na wierzchu”: cel jednym zdaniem, pod nim numerowane czynności z miejscem, komendą do skopiowania,
+// tym, co powinno się pokazać, i przyciskiem do miejsca. Link do aplikacji na Macu (taskhub://settings, taskhub://terminal) otwiera ją
+// w tym samym oknie; http(s) w nowej karcie; ścieżka Task Hub (/settings) na miejscu. Inny adres (spoza wzorca) zostaje bez przycisku
+export function Howto({ b }: { b: Extract<Block, { type: "howto" }> }) {
+  const btn = (o: { label: string; href: string }) => {
+    const h = o.href.trim();
+    if (!HOWTO_HREF.test(h)) return null;
+    const ext = isHttpUrl(h), app = /^taskhub:/i.test(h);
+    return <a className="btn ico sm" href={h} {...(ext ? { target: "_blank", rel: "noopener" } : {})} title={app ? "Otwiera to miejsce na Macu przez aplikację Task Hub" : h}>{o.label}{ext || app ? <Icon k="ext" size={13} sw={1.6} /> : null}</a>;
+  };
+  return (
+    <div className="block howto">
+      {b.goal ? <p className="howto-goal">{b.goal}</p> : null}
+      <div className="howto-h">{b.title?.trim() || "Co zrobić"}</div>
+      <ol className="howto-list">
+        {b.items.map((it, i) => (
+          <li key={i}>
+            <span className="howto-n" aria-hidden="true">{i + 1}</span>
+            <div className="howto-b">
+              <div className="howto-t">{it.text}</div>
+              {it.where ? <div className="howto-w">{it.where}</div> : null}
+              {it.cmd ? <div className="howto-cmd"><code>{it.cmd}</code><CopyButton text={it.cmd} label="Kopiuj" className="howto-copy" /></div> : null}
+              {it.expect ? <div className="howto-w">Powinno pokazać: <b>{it.expect}</b></div> : null}
+              {it.open ? <div className="howto-x">{btn(it.open)}</div> : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
 }
 
 // Przyciski opcji pytania (paczka 31): zalecana opcja ma przy swoim przycisku oznaczenie „Polecam” i jedno zdanie uzasadnienia,

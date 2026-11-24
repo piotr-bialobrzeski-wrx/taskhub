@@ -177,15 +177,34 @@ export const QuestionBlock = z.object({
   answer: z.string().optional(),
   prev: z.string().optional(),   // poprzednia odpowiedź po „Zmień odpowiedź”: agent widzi, co się zmieniło
 });
+// paczka 68 (zadanie „Jasne instrukcje w krokach Piotra”, wariant A „Instrukcja na wierzchu”): krok, który Piotr robi sam poza Task Hub,
+// ma na wierzchu kartki cel jednym zdaniem i numerowaną instrukcję: co zrobić, gdzie, komenda do skopiowania, czego się spodziewać i przycisk
+// do miejsca. „Zrobione” stoi pod instrukcją. Klocek kładzie krok agenta, od którego krok Piotra zależy (from = id tamtego kroku: link „Z kroku 03”)
+// open.href: http(s), ścieżka w Task Hub (/settings) albo link do aplikacji na Macu: taskhub://settings (Ustawienia), taskhub://terminal (Terminal)
+export const HOWTO_HREF = /^(https?:\/\/[^\s]+|\/(?!\/)[^\s]*|taskhub:\/\/(settings|terminal)\/?)$/i;
+export const HowtoItem = z.object({
+  text: z.string().min(1).max(300),        // czynność, od czasownika: „Zainstaluj Codex CLI”
+  where: z.string().max(400).optional(),   // gdzie i jak, jednym zdaniem: „Terminal; pomiń, gdy …”
+  cmd: z.string().max(2000).optional(),    // komenda albo tekst do wklejenia (przycisk „Kopiuj”)
+  expect: z.string().max(300).optional(),  // co powinno się pokazać
+  open: z.object({ label: z.string().min(1).max(60), href: z.string().max(2000).regex(HOWTO_HREF) }).optional(),   // przycisk do miejsca
+});
+export const HowtoBlock = z.object({
+  type: z.literal("howto"),
+  title: z.string().max(80).optional(),    // domyślnie „Co zrobić”
+  goal: z.string().max(400).optional(),    // cel jednym zdaniem: po co i co ma być na końcu
+  items: z.array(HowtoItem).min(1).max(15),
+  from: z.string().max(80).optional(),     // id kroku, z którego jest instrukcja
+});
 export const Block = z.discriminatedUnion("type", [
-  TextBlock, FactsBlock, ThreadBlock, DraftBlock, ListBlock, MediaBlock, LinkBlock, QuestionBlock, MailBlock, CommentBlock, TableBlock, FreeBlock, ChangesBlock,
+  TextBlock, FactsBlock, ThreadBlock, DraftBlock, ListBlock, MediaBlock, LinkBlock, QuestionBlock, MailBlock, CommentBlock, TableBlock, FreeBlock, ChangesBlock, HowtoBlock,
 ]);
 export type Block = z.infer<typeof Block>;
 export type SheetColumn = z.infer<typeof SheetColumn>;
 export type SheetPart = z.infer<typeof SheetPart>;
 export const Blocks = z.array(Block).max(12);
 // klocki kontekstu (to, na czym Piotr pracuje) kontra odpowiedź (blok draft) i pytanie
-export const CONTEXT_BLOCK_TYPES = new Set(["text", "facts", "thread", "list", "media", "link", "mail", "comment", "table", "free", "changes"]);
+export const CONTEXT_BLOCK_TYPES = new Set(["text", "facts", "thread", "list", "media", "link", "mail", "comment", "table", "free", "changes", "howto"]);
 
 // ---------- rekordy z bazy (kształt używany w aplikacji) ----------
 export const StepStatus = z.enum(["todo", "draft", "done", "handoff"]);

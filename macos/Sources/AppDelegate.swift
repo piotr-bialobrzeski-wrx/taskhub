@@ -92,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Log.write("Task Hub koniec")
     }
 
-    // taskhub://connect?url=…&token=… (z Ustawień Task Hub), taskhub://reload, taskhub://settings
+    // taskhub://connect?url=…&token=… (z Ustawień Task Hub), taskhub://reload, taskhub://settings, taskhub://terminal
     func application(_ application: NSApplication, open urls: [URL]) {
         for u in urls { handle(url: u) }
     }
@@ -104,7 +104,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "reload": web.reload()       // ze strony zastępczej w oknie
         case "settings": showSettings()
         case "add-folder": addFolder(url)
+        case "terminal": openTerminal()   // paczka 68: przycisk „Otwórz Terminal” w instrukcji kroku; komendy Piotr wkleja sam
         default: Log.write("link taskhub://\(url.host ?? "") pominięty")
+        }
+    }
+
+    // taskhub://terminal (paczka 68): otwiera Terminal i nic w nim nie uruchamia (link może przyjść z dowolnej strony, więc bez parametrów)
+    private func openTerminal() {
+        let app = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+        NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration()) { _, err in
+            if let err = err { Log.write("link taskhub://terminal: \(err.localizedDescription)") }
         }
     }
 

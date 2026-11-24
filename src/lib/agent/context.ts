@@ -182,6 +182,7 @@ export function cardText(steps: CardStep[], max = 6000, doneMax = 3000, doneTota
       case "link": return `${h}: ${b.links.map((l) => l.title ?? l.url).join("; ")}`;
       case "media": return `${h}: ${b.items.map((m) => m.caption ?? m.name ?? m.url).join("; ")}`;
       case "changes": return `${h}: ${b.summary ?? ""} (${b.files.length} plików)`;
+      case "howto": return `${h}${b.goal ? `: ${b.goal}` : ""}${b.from ? ` (z kroku ${b.from})` : ""}\n${b.items.map((x, j) => `  ${j + 1}. ${x.text}${x.where ? ` (${x.where})` : ""}${x.cmd ? ` | komenda: ${x.cmd}` : ""}${x.expect ? ` | powinno pokazać: ${x.expect}` : ""}${x.open ? ` | przycisk „${x.open.label}” ${x.open.href}` : ""}`).join("\n")}`;
       default: return h;
     }
   };

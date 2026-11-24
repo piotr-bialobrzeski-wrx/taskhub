@@ -93,6 +93,7 @@ export function stepContextText(s: Task["steps"][number]): string {
       case "draft": { const k = drafts.indexOf(b); return `- SZKIC${multi || b.title?.trim() ? ` „${optionLabel(b, k)}”` : ""} (${b.status}${rejected.includes(b) ? ", niewybrana" : ""}) do ${b.target.app}${b.target.where ? " " + b.target.where : ""}: ${b.subject ? `temat „${b.subject}”, ` : ""}${b.body.slice(0, 1200)}`; }
       case "free": return `- treść${b.meta ? ` [${b.meta}]` : ""}: ${b.markdown.slice(0, 600)}`;
       case "question": return `- pytanie: ${b.text}${b.answer ? ` → ${b.answer}` : ""}`;
+      case "howto": return `- instrukcja${b.goal ? ` (${b.goal.slice(0, 200)})` : ""}: ${b.items.map((x, j) => `${j + 1}. ${x.text}${x.cmd ? ` [${x.cmd.slice(0, 120)}]` : ""}`).join("; ").slice(0, 800)}`;
       default: return null;
     }
   }).filter(Boolean);

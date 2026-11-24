@@ -28,7 +28,7 @@ import { ProtoFrame } from "@/components/ProtoFrame";
 import { embedMode, isOwnPreview } from "@/lib/embed";
 import { agentFeed, stepWaits, workBubble } from "@/lib/feed";
 import { agentQueue } from "@/lib/agent/work";
-import { beforeOf, decisionText, depCardsFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitDecision, splitMain, stepKind, isSimpleTask, targetLink, timeAskOf, whoDid, isProjectStep, projectPrompt, redoOf, type CardState, type Redo } from "@/lib/stepcard";
+import { beforeOf, decisionText, depCardsFor, howtoFor, destOf, doneOrder, hasOrder, foldsFor, hasComparison, kindsOf, nowHeading, openQuestions, pageLinks, prototypeLink, linkPlan, normUrl, folderLink, readingResult, reportLines, splitBlocks, splitDecision, splitMain, stepKind, isSimpleTask, targetLink, timeAskOf, whoDid, isProjectStep, projectPrompt, redoOf, type CardState, type Redo } from "@/lib/stepcard";
 import { PendingButton } from "@/components/Pending";
 import { CopyButton } from "@/components/CopyButton";
 import { TaskCanvas } from "@/components/canvas/TaskCanvas";
@@ -264,7 +264,9 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const { result, material: material0 } = splitBlocks(blocks);
   // paczka 49, punkt 3: obecna treść rzeczy, którą zmienia szkic, stoi w karcie publikacji obok nowej wersji, nie w „Skąd”
   const before = mode ? beforeOf(s) : null;
-  const material = material0.filter((b) => b !== before && !(open as Block[]).includes(b));   // otwarte pytania decyzji stoją w „Teraz”, nie między materiałami
+  // paczka 68, wariant A: instrukcja kroku Piotra stoi w „Teraz”, nad „Zrobione”, nie między materiałami
+  const howtos = !mode ? howtoFor(t.steps, s) : [];
+  const material = material0.filter((b) => b !== before && !(open as Block[]).includes(b) && !(b.type === "howto" && howtos.some((h) => h.block === b)));   // otwarte pytania decyzji stoją w „Teraz”, nie między materiałami
   const form = s.blocks?.length ? { taskId: t.id, stepId: s.id } : undefined;
   const folds = foldsFor(state as CardState, mode, readingResult(s, material), kind === "decision");
   const cmp = hasComparison(material);   // kartka porównania (paczka 10, punkt 1): porównywane elementy u góry na całą szerokość, pod nimi karta publikacji
@@ -345,6 +347,10 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {addFolder ? <div className="note">Claude potrzebuje folderu {addFolder.path} w Ustawieniach aplikacji na Macu ({addFolder.section}). „Dodaj folder” otworzy aplikację i zapyta o zgodę; potem krok ruszy sam.</div> : null}
       {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : cloud?.state === "auto" ? "Ruszy w chmurze sam, gdy skończą się kroki, na które czeka." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
       {open.length && !done ? <BlocksView links={cl} blocks={open} form={form} indexOf={indexOf} /> : null}
+      {howtos.map((h, i) => <div key={"howto" + i} className="stack">
+        <BlocksView blocks={[h.block]} />
+        {h.from ? <span className="howto-from">Instrukcja z kroku <a href={`/tasks/${t.id}?step=${h.from.id}`} title={h.from.title}>{String(h.from.idx).padStart(2, "0")} {shortTitle(h.from.title.replace(/^Zleć w projekcie:\s*/i, ""), 40)}</a></span> : null}
+      </div>)}
       {done && kind === "decision" && decisionText(s) ? <div className="note">{decisionText(s)}</div> : null}
       {pframe}
       {done && result.length ? <BlocksView links={cl} blocks={result} form={form} indexOf={indexOf} /> : null}
@@ -423,7 +429,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
     <div key={d.id} className="zone src"><div className="lbl">Z kroku {String(d.idx).padStart(2, "0")}<span className="n">{d.title}</span></div><BlocksView blocks={d.blocks} /></div>
   ));
   // krok bez żadnej treści od agenta: opis zostaje na wierzchu, inaczej karta byłaby pusta
-  const bare = !material.length && !result.length && !mode && !order.length;
+  const bare = !material.length && !result.length && !mode && !order.length && !howtos.length;
   // krótsza kartka decyzji (paczka 31), paczka 58 wariant C: materiał wyboru (tabele, listy, treści, notatki) stoi rozwinięty zaraz pod pytaniem,
   // a w zwiniętym „Skąd to wiemy” zostaje tylko tło: fakty, wątki, maile, komentarze, pliki, linki i materiał z kroków przed decyzją
   const dec = splitDecision([...split.main, ...split.sources]);

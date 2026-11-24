@@ -8,7 +8,7 @@ import { shortTitle } from "./auto";
 
 export const KIND_LABEL: Record<string, string> = {
   text: "notatka", facts: "fakty", thread: "wątek", list: "lista", media: "pliki", link: "linki", mail: "mail", comment: "komentarz", table: "tabela",
-  free: "treść", question: "pytanie", changes: "zmiany w kodzie", draft: "szkic",
+  free: "treść", question: "pytanie", changes: "zmiany w kodzie", draft: "szkic", howto: "instrukcja",
 };
 
 export type Changes = Extract<Block, { type: "changes" }>;
@@ -28,10 +28,25 @@ export function depCardsFor(steps: Pick<Step, "id" | "title" | "status" | "tool"
   if (s.status === "done" || !isOwnerStep(s)) return [];
   return steps.flatMap((x, i) => {
     if (!s.dependsOn.includes(x.id) || x.status !== "done" || doneByOf(x) !== "agent") return [];
-    const blocks = splitBlocks(x.blocks ?? []).material.filter((b) => b.type !== "question");
+    // instrukcja (paczka 68) idzie na wierzch kartki Piotra (howtoFor), nie do materiału z tamtego kroku
+    const blocks = splitBlocks(x.blocks ?? []).material.filter((b) => b.type !== "question" && b.type !== "howto");
     // same notatki (np. „Test jest w kroku 05”, gdy agent przeniósł wynik według zasady) nie są materiałem: nic do pokazania
     return blocks.some((b) => b.type !== "text") ? [{ id: x.id, idx: i + 1, title: x.title, blocks }] : [];
   });
+}
+
+// paczka 68, wariant A „Instrukcja na wierzchu”: instrukcje do otwartego kroku Piotra. Najpierw te z jego kartki (from = krok, który ją napisał),
+// potem te, które zrobiony krok agenta, od którego zależy, zostawił na własnej kartce (wtedy from = ten krok). Kartka stawia je w „Teraz”,
+// nad „Zrobione”, z linkiem „Instrukcja z kroku NN”
+export type Howto = Extract<Block, { type: "howto" }>;
+export type HowtoAt = { block: Howto; from: { id: string; idx: number; title: string } | null };
+export function howtoFor(steps: Pick<Step, "id" | "title" | "status" | "tool" | "doneBy" | "blocks">[], s: Pick<Step, "id" | "dependsOn" | "status" | "tool" | "blocks">): HowtoAt[] {
+  if (s.status === "done" || !isOwnerStep(s)) return [];
+  const at = (id: string | undefined) => { const i = id ? steps.findIndex((x) => x.id === id) : -1; return i >= 0 && steps[i].id !== s.id ? { id: steps[i].id, idx: i + 1, title: steps[i].title } : null; };
+  const own = (s.blocks ?? []).filter((b): b is Howto => b.type === "howto").map((b) => ({ block: b, from: at(b.from) }));
+  const deps = steps.flatMap((x, i) => !s.dependsOn.includes(x.id) || x.status !== "done" || doneByOf(x) !== "agent" ? []
+    : (x.blocks ?? []).filter((b): b is Howto => b.type === "howto").map((b) => ({ block: b, from: { id: x.id, idx: i + 1, title: x.title } })));
+  return [...own, ...deps];
 }
 
 // paczka 19, punkt 1: kartka decyzji „Zdecyduj …” / „Wybierz …” po prototypie ma przycisk „Otwórz prototyp” z adresem najnowszego podglądu.
