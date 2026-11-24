@@ -159,3 +159,14 @@ a { color: var(--text); }
   :root:not([data-theme="light"]) .node:not(.task):not(.origin).lk-done:not(.sel):not(.picked):not(.dragging):not(.dim):not(:hover) { opacity: .85; }
   :root:not([data-theme="light"]) .node.task.lk-done:not(.sel):not(.picked):not(.dragging):not(:hover) { opacity: .72; }
 }
+/* paczka 68, punkt 3 (zadanie „Uwagi klientki do specyfikacji billingu”, krok 05): w porównaniu „było / będzie” obecna treść stoi w szarej ramce
+   (tej treści nie edytujemy ani nie zatwierdzamy), a nowy szkic zostaje w żółtej ramce kartki „Teraz”, którą Piotr zatwierdza */
+:root { --ro-frame: #C9CDD6; --ro-ink: #4A505C; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ro-frame: #3A3F4A; --ro-ink: #B4BAC6; } }
+:root[data-theme="dark"] { --ro-frame: #3A3F4A; --ro-ink: #B4BAC6; }
+.cmp-side.before { background: var(--ro-frame); padding: 10px 10px 10px; border-radius: 22px; }
+.cmp-side.before > .cmp-lbl { color: var(--ro-ink); padding: 2px 8px 0; }
+.cmp-side.before > .block.srcdoc { border-radius: 16px; }
+.now .cmp-side.after > .cmp-lbl { color: var(--hi-ink); padding-top: 12px; }
+/* w ciemnym motywie treść obecnej wersji dziedziczyła ciemny kolor tekstu żółtej kartki i znikała na ciemnym polu */
+.now .cmp-side.before > .block.srcdoc { color: var(--text); }
