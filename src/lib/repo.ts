@@ -1040,8 +1040,10 @@ const rowToChat = (r: Row): ChatMessage => ({ id: r.id as string, role: r.role a
 // before: kursor (created_at) do wczytywania starszych wpisów w historii rozmowy
 // wątek rozmowy w zadaniu (paczka 57): undefined = cała rozmowa (kontekst agenta), null = wątek samego zadania (wiadomości bez kroku), id = wątek kroku
 export type ChatThread = string | null | undefined;
-// paczka 62: echo (kopia odpowiedzi w wątku, z którego była wiadomość Piotra) widać tylko w tym wątku; cała rozmowa (kontekst agenta, dymki) ma oryginał
-const threadSql = (t: ChatThread) => (t === undefined ? sql()`and coalesce(actions->>'echo', '') = ''` : t === null ? sql()`and (actions->>'stepId') is null` : sql()`and actions->>'stepId' = ${t}`);
+// paczka 68: kopii odpowiedzi z paczki 62 (echo) nie ma już nigdzie; stare kopie w bazie są ukryte we wszystkich wątkach.
+// Wiadomość Piotra, na którą Claude odpowiedział w innym wątku, dostaje pod dymkiem odnośnik do miejsca odpowiedzi (answerPlaces)
+const noEcho = () => sql()`and coalesce(actions->>'echo', '') = ''`;
+const threadSql = (t: ChatThread) => (t === undefined ? noEcho() : t === null ? sql()`${noEcho()} and (actions->>'stepId') is null` : sql()`${noEcho()} and actions->>'stepId' = ${t}`);
 export async function listChat(ownerId: string, taskId: string | null, limit = 20, before: string | null = null, thread?: ChatThread): Promise<ChatMessage[]> {
   const cut = before ?? "9999-12-31T00:00:00Z";
   const rows = taskId
@@ -1085,12 +1087,13 @@ export async function chatStepOf(ownerId: string, taskId: string, ids: string[])
   const rows = await sql()`select distinct actions->>'stepId' as step_id from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and id in ${sql()(ids)}`;
   return rows.length === 1 && rows[0].stepId ? (rows[0].stepId as string) : null;
 }
-// paczka 62: wiadomości pogrupowane po wątku, z którego są (id kroku albo null = wątek zadania)
-export async function chatThreadsOf(ownerId: string, taskId: string, ids: string[]): Promise<Map<string | null, string[]>> {
-  const out = new Map<string | null, string[]>();
+// paczka 68: gdzie leży odpowiedź na wiadomości Piotra (wątek kroku albo zadania, godzina); bez kopii w wątku wiadomości
+export async function answerPlaces(ownerId: string, taskId: string, ids: string[]): Promise<Map<string, { stepId: string | null; at: string }>> {
+  const out = new Map<string, { stepId: string | null; at: string }>();
   if (!ids.length) return out;
-  const rows = await sql()`select id, actions->>'stepId' as step_id from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and id in ${sql()(ids)} order by created_at`;
-  for (const r of rows) { const k = (r.stepId as string | null) ?? null; out.set(k, [...(out.get(k) ?? []), r.id as string]); }
+  const rows = await sql()`select actions->'answers' as answers, actions->>'stepId' as step_id, created_at from chat_messages
+    where owner_id = ${ownerId} and task_id = ${taskId} and role = 'agent' ${noEcho()} and actions->'answers' ?| ${pgArr(ids)}::text[] order by created_at`;
+  for (const r of rows) for (const id of (r.answers as string[]) ?? []) if (ids.includes(id) && !out.has(id)) out.set(id, { stepId: (r.stepId as string | null) ?? null, at: iso(r.createdAt) as string });
   return out;
 }
 // paczka 57: wątki kroków w rozmowie zadania (skróty w historii widoku zadania): ile wpisów, ostatni wpis, ile wiadomości Piotra czeka; najświeższe pierwsze
@@ -1098,7 +1101,7 @@ export type ChatThreadInfo = { stepId: string; n: number; lastAt: string; pendin
 export async function listChatThreads(ownerId: string, taskId: string): Promise<ChatThreadInfo[]> {
   const rows = await sql()`select actions->>'stepId' as step_id, count(*)::int as n, max(created_at) as last_at,
       count(*) filter (where role = 'user' and answered_at is null)::int as pending
-    from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and actions->>'stepId' is not null
+    from chat_messages where owner_id = ${ownerId} and task_id = ${taskId} and actions->>'stepId' is not null ${noEcho()}
     group by 1 order by max(created_at) desc`;
   return rows.map((r) => ({ stepId: r.stepId as string, n: Number(r.n), lastAt: iso(r.lastAt) as string, pending: Number(r.pending) }));
 }

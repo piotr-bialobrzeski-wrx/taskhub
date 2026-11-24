@@ -217,10 +217,16 @@ export function ChatHistory({ taskId, stepId, title, onClose, queue = null, vers
   // odpowiedź na wiadomość Piotra: ta, która ją wymienia w swoich answers, inaczej pierwsza odpowiedź agenta po chwili załatwienia
   const answerOf = (m: Msg, all: Msg[]) => all.find((a) => a.role === "agent" && a.answers?.includes(m.id)) ?? (m.answeredAt ? all.find((a) => a.role === "agent" && a.createdAt >= m.answeredAt!) ?? null : null);
   const stateLine = (m: Msg, all: Msg[], lastPending: string | null) => {
-    if (m.role !== "user") return null;
+    if (m.role !== "user" || m.ask) return null;
     if (m.withdrawn) return <span className="hm-s">Wycofana z kolejki {timeOf(m.answeredAt!)}</span>;
     if (m.answeredAt) {
       const a = answerOf(m, all);
+      // paczka 68: odpowiedź w innym wątku: odnośnik do niej zamiast kopii w tym wątku
+      if (!a && m.answerIn) {
+        const at = m.answerIn, name = at.stepId ? stepName?.(at.stepId) : null;
+        return name && onStep ? <button type="button" className="hm-s ok" onClick={() => onStep(at.stepId!)} title={`Otwórz krok ${name.label} ${name.title}`}>Odpowiedź w kroku {name.label} · {timeOf(at.at)}</button>
+          : <span className="hm-s ok">Odpowiedź {at.stepId ? "w innym kroku" : "w rozmowie zadania"} · {timeOf(at.at)}</span>;
+      }
       return a ? <button type="button" className="hm-s ok" onClick={() => flash(a.id)} title="Pokaż odpowiedź">Odpowiedź {timeOf(a.createdAt)}</button> : <span className="hm-s ok">Odpowiedź {timeOf(m.answeredAt)}</span>;
     }
     if (m.id !== lastPending) return <span className="hm-s wait"><i className="pulse" aria-hidden="true" />w kolejce</span>;
@@ -258,9 +264,10 @@ export function ChatHistory({ taskId, stepId, title, onClose, queue = null, vers
                 {(() => { const pendingIds = msgs.filter((m) => m.role === "user" && !m.answeredAt).map((m) => m.id); const lastPending = pendingIds[pendingIds.length - 1] ?? null; return msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {i === 0 || dayOf(m.createdAt) !== dayOf(msgs[i - 1].createdAt) ? <div className="hm-day">{dayLabel(m.createdAt)}</div> : null}
-                    <div id={"hm-" + m.id} className={"hm " + m.role + (m.role === "user" && !m.answeredAt ? " q" : "")}>
-                      <div className="hm-b">{m.text}{m.why ? <span className="hm-why">{m.why}</span> : null}{m.goStep && onStep && stepName?.(m.goStep) ? <button type="button" className="btn hm-go" onClick={() => onStep(m.goStep!)}>Otwórz krok {stepName(m.goStep)!.label}</button> : null}</div>
-                      <span className="hm-t">{m.role === "agent" ? "Claude · " : ""}{timeOf(m.createdAt)}</span>
+                    <div id={"hm-" + m.id} className={"hm " + m.role + (m.role === "user" && !m.answeredAt ? " q" : "") + (m.ask === "q" ? " ask" : "")}>
+                      {m.ask === "q" ? <span className="hm-ask">Pytanie od Claude</span> : null}
+                      <div className="hm-b">{m.text}{m.why ? <span className="hm-why">{m.why}</span> : null}</div>
+                      <span className="hm-t">{m.role === "agent" ? "Claude · " : m.ask === "a" ? "Twoja odpowiedź · " : ""}{timeOf(m.createdAt)}</span>
                       {stateLine(m, msgs, lastPending)}
                     </div>
                   </Fragment>
@@ -375,7 +382,10 @@ function useWide(): boolean {
 // Prawą krawędź panelu da się przeciągnąć (podwójny klik wraca do 380 px); szerokość i stan pokazany/schowany zapamiętuje przeglądarka.
 // Klasy chat-side / chat-dock i --chat-w trafiają na .app, żeby kartka (.detail) i dymki ustawiły się obok panelu.
 // head (krok 04): licznik kolejki Claude w nagłówku czatu po lewej; onSideOpen mówi stronie, czy panel z historią jest otwarty (wtedy pigułka kolejki z rogu znika)
-export function Dock({ action, taskId, stepId = null, placeholder, busyText, context, historyTitle, queue = null, version = "", side: sideAsked = false, head = null, onSideOpen, stepName, onStep }: { action: (fd: FormData) => Promise<void>; taskId: string | null; stepId?: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string; queue?: Queue | null; version?: string; side?: boolean; head?: ReactNode; onSideOpen?: (open: boolean) => void; stepName?: StepName; onStep?: (id: string) => void }) {
+// paczka 68 (wersja A „Rozmowa z boku”): ask = pytanie Claude na dole wątku, nad polem (albo pasek „Claude pyta w kroku …” w innym kroku);
+// reply = pole odpowiada na to pytanie (napis nad polem, × wraca do zwykłej wiadomości). Jedno pole na ekranie, bez osobnego okna pytania.
+export type DockReply = { questionId: string; label: string };
+export function Dock({ action, taskId, stepId = null, placeholder, busyText, context, historyTitle, queue = null, version = "", side: sideAsked = false, head = null, onSideOpen, stepName, onStep, ask = null, reply = null }: { action: (fd: FormData) => Promise<void>; taskId: string | null; stepId?: string | null; placeholder: string; busyText: string; context?: ReactNode; historyTitle?: string; queue?: Queue | null; version?: string; side?: boolean; head?: ReactNode; onSideOpen?: (open: boolean) => void; stepName?: StepName; onStep?: (id: string) => void; ask?: ReactNode; reply?: DockReply | null }) {
   const form = useRef<HTMLFormElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const wide = useWide();
@@ -442,6 +452,8 @@ export function Dock({ action, taskId, stepId = null, placeholder, busyText, con
   const remove = (key: string) => setAtts((prev) => { prev.filter((a) => a.key === key).forEach((a) => { if (a.preview) URL.revokeObjectURL(a.preview); }); return prev.filter((a) => a.key !== key); });
   const clear = () => setAtts((prev) => { if (!prev.length) return prev; prev.forEach((a) => { if (a.preview) URL.revokeObjectURL(a.preview); }); return []; });
   const sent = useRef<Sent | null>(null);
+  const [replyOff, setReplyOff] = useState<string | null>(null);   // pytanie, przy którym Piotr wrócił do zwykłej wiadomości (×)
+  const rep = reply && replyOff !== reply.questionId ? reply : null;
   const send = async (fd: FormData) => {
     const s = await sendKeepingDraft(action, fd, draftKeyOf(taskId, stepId));
     sent.current = s;
@@ -451,6 +463,7 @@ export function Dock({ action, taskId, stepId = null, placeholder, busyText, con
   return (
     <div ref={wrap} className={"dockwrap" + (side ? " side" + (hist ? " open" : "") : hist ? " hist-on" : "")}>
       {hist ? <ChatHistory taskId={taskId} stepId={taskId ? stepId : undefined} title={historyTitle ?? (taskId ? "Rozmowa w tym zadaniu" : "Rozmowa o wszystkich zadaniach")} onClose={() => setHist(() => false)} queue={queue} version={version} inline={side} head={side ? head : null} stepName={stepName} onStep={onStep} /> : null}
+      {ask ? <div className="dock-ask">{ask}</div> : null}
       {side && hist ? <div className="chat-grip" role="separator" aria-orientation="vertical" aria-label="Szerokość czatu" aria-valuenow={chatW} tabIndex={0} title="Przeciągnij, żeby zmienić szerokość (podwójny klik: 380 px)"
         onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp} onPointerCancel={onGripUp} onDoubleClick={resetW} onKeyDown={onGripKey} /> : null}
       <form ref={form} className={"dock glass" + (over ? " drop" : "")} action={send} autoComplete="off"
@@ -459,7 +472,8 @@ export function Dock({ action, taskId, stepId = null, placeholder, busyText, con
         <input type="hidden" name="taskId" value={taskId ?? ""} /><input type="hidden" name="stepId" value={stepId ?? ""} />
         <input ref={filesIn} type="file" name="files" multiple tabIndex={-1} aria-hidden="true" />
         {context ? <div className="ctxrow">{context}</div> : null}
-        <DockInner placeholder={placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} onFailed={() => setAtts((prev) => [...prev])} hist={hist} onHistory={() => setHist((h) => !h)} draftKey={draftKeyOf(taskId, stepId)} sent={sent} side={side} />
+        {rep ? <div className="ctxrow"><span className="dock-reply"><span>Odpowiedź na pytanie {rep.label}</span><button type="button" aria-label="Pisz zwykłą wiadomość" title="Pisz zwykłą wiadomość" onClick={() => setReplyOff(rep.questionId)}><Icon k="x" size={11} sw={2} /></button></span><input type="hidden" name="questionId" value={rep.questionId} /></div> : null}
+        <DockInner placeholder={rep ? "Twoja odpowiedź…" : placeholder} busyText={busyText} atts={atts} err={err} onFiles={(f) => void addFiles(f)} onRemove={remove} onDone={clear} onFailed={() => setAtts((prev) => [...prev])} hist={hist} onHistory={() => setHist((h) => !h)} draftKey={draftKeyOf(taskId, stepId)} sent={sent} side={side} />
       </form>
     </div>
   );

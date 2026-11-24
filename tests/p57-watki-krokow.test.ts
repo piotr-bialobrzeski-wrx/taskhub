@@ -71,17 +71,34 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("osobne wątki rozmowy kroków",
     expect((await actions.loadChat(t.id, null, b.id)).msgs.map((m) => m.text)).toEqual(["Dopisałem krok 02."]);
   });
 
-  it("paczka 62: odpowiedź zapisana w innym kroku zostawia kopię z przyciskiem w wątku wiadomości", async () => {
+  it("paczka 68: odpowiedź w innym kroku bez kopii; pod wiadomością odnośnik do miejsca odpowiedzi", async () => {
     const t = await repo.createTask(owner, { title: "Echo", steps: [{ title: "Story daty", tool: "manual" }, { title: "Story paska", tool: "manual" }] });
     const [a, b] = t.steps;
     const m = await repo.addChat(owner, t.id, "user", "zmień belkę", { stepId: a.id });
     await call("reply_chat", { taskId: t.id, text: "Dopisałem szkic paska.", messageIds: [m], stepId: b.id });
     const inA = await actions.loadChat(t.id, null, a.id);
-    expect(inA.msgs.map((x) => x.text)).toEqual(["zmień belkę", "Odpowiedziałem w kroku 02 „Story paska”: Dopisałem szkic paska."]);
-    expect(inA.msgs[1].answers).toEqual([m]);
-    expect(inA.msgs[1].goStep).toBe(b.id);
+    expect(inA.msgs.map((x) => x.text)).toEqual(["zmień belkę"]);
+    expect(inA.msgs[0].answerIn?.stepId).toBe(b.id);
     expect((await actions.loadChat(t.id, null, b.id)).msgs.map((x) => x.text)).toEqual(["Dopisałem szkic paska."]);
-    // cała rozmowa (kontekst agenta, dymki) ma tylko oryginał
+    // stare kopie z paczki 62 nie pokazują się w żadnym wątku ani w skrótach
+    await repo.addChat(owner, t.id, "agent", "Odpowiedziałem w kroku 02: stare", { stepId: a.id, answers: [m], echo: true, goStep: b.id });
+    expect((await actions.loadChat(t.id, null, a.id)).msgs.map((x) => x.text)).toEqual(["zmień belkę"]);
+    expect((await actions.loadChat(t.id, null, null)).threads?.find((x) => x.stepId === a.id)?.n).toBe(1);
     expect((await repo.listChat(owner, t.id, 20)).filter((x) => x.role === "agent").map((x) => x.text)).toEqual(["Dopisałem szkic paska."]);
+  });
+
+  it("paczka 68: pytanie Claude z odpowiedzią stoi w wątku swojego kroku; pole czatu odpowiada na pytanie", async () => {
+    const t = await repo.createTask(owner, { title: "Pytania", steps: [{ title: "Zbierz", tool: "manual" }, { title: "Napisz pismo", tool: "claude" }] });
+    const [a, b] = t.steps;
+    const q = await repo.askQuestion(owner, { taskId: t.id, stepId: b.id, text: "Co kupiłeś?" });
+    expect((await actions.loadChat(t.id, null, b.id)).msgs).toEqual([]);   // otwarte pytanie stoi nad polem, nie w historii
+    const fd = new FormData(); fd.set("taskId", t.id); fd.set("stepId", b.id); fd.set("questionId", q.id); fd.set("text", "Torebkę");
+    await actions.chat(fd);
+    const inB = await actions.loadChat(t.id, null, b.id);
+    expect(inB.msgs.map((x) => [x.role, x.ask, x.text])).toEqual([["agent", "q", "Co kupiłeś?"], ["user", "a", "Torebkę"]]);
+    expect((await repo.listQuestions(owner, { taskId: t.id, open: true })).length).toBe(0);
+    expect((await repo.listPendingChat(owner, t.id)).length).toBe(0);   // odpowiedź nie jest nową wiadomością w kolejce
+    expect((await actions.loadChat(t.id, null, a.id)).msgs).toEqual([]);
+    expect((await actions.loadChat(t.id, null, null)).msgs).toEqual([]);
   });
 });
