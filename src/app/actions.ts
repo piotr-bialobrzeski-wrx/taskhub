@@ -19,7 +19,7 @@ import { fmtTime } from "@/lib/clock";
 import { connectorIssue, isGitDraft } from "@/lib/bridge";
 import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, parseSheetRows, shownSig, wasSent, withRows, type Draft, type SheetRows } from "@/lib/agent/approval";
 import { workSummary } from "@/lib/agent/work";
-import { decisionText, destOf, isDeployStep, isProjectStep, openQuestions, REDO_STALE, stepKind, stepsAfterDecision } from "@/lib/stepcard";
+import { decisionText, destOf, isDeployStep, isProjectStep, openQuestions, pickedAnswer, REDO_STALE, stepKind, stepsAfterDecision } from "@/lib/stepcard";
 import { isAppCodeStep, isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
 import { cleanDue, type DueValue } from "@/lib/due";
 
@@ -768,13 +768,17 @@ export async function answerBlockForm(fd: FormData) {
   const o = await requireOwner();
   const taskId = str(fd, "taskId"), stepId = str(fd, "stepId");
   const { task, step } = await stepOf(o.id, taskId, stepId);
-  const answer = str(fd, "answer") || str(fd, "option"); if (!answer) return;
   const index = num(fd, "index", 0), qText = str(fd, "q") || undefined;
   // poprzednia odpowiedź (po „Zmień odpowiedź”) do wiadomości o zmianie; to samo pytanie, które dostanie odpowiedź
   const at = step.blocks?.[index];
   const before = at?.type === "question" && (!qText || at.text === qText) ? at : step.blocks?.find((b) => b.type === "question" && b.text === qText);
   const prev = before?.type === "question" ? before.prev : undefined;
-  const q = await repo.answerBlockQuestion(stepId, index, answer, qText);
+  // paczka 69: lista do zaznaczenia. „Zamknij zaznaczone (N)” niesie zaznaczone pozycje; przycisk „nic” idzie jako zwykła opcja z pustą listą
+  const many = before?.type === "question" && before.pick === "many" ? before : null;
+  const go = many && str(fd, "go") === "pick";
+  const picked = many ? (go ? fd.getAll("pick").map(String).filter((l) => many.options.some((o) => o.label === l)) : []) : undefined;
+  const answer = go && many ? pickedAnswer(many, picked ?? []) : str(fd, "answer") || str(fd, "option"); if (!answer) return;
+  const q = await repo.answerBlockQuestion(stepId, index, answer, qText, picked);
   if (!q) { refresh(taskId); return; }
   const s = (await repo.getTask(o.id, taskId))?.steps.find((x) => x.id === stepId);
   const closes = !!s && s.status !== "done" && stepKind(s) === "decision" && !openQuestions(s).length;

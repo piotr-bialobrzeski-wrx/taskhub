@@ -581,6 +581,29 @@ a.n-dest:hover { text-decoration: underline; }
 /* paczka 31, krótsza kartka decyzji: opis każdej opcji jednym zdaniem przy jej przycisku; „Skąd to wiemy” zwija tło pod pytaniem */
 .opt-note { flex: 1 1 220px; min-width: 0; font-size: 13px; line-height: 1.4; color: var(--sub); }
 .has-rec .opt { padding: 0 10px; margin: 0 -10px; }
+/* paczka 69 (zadanie „Czytelna kartka kroku decyzji”, wersja B „Wybór na liście”): kontekst nad pytaniem, lista do zaznaczenia z przyciskiem,
+   który mówi czynność i liczbę, i podpis kolejnego pytania jako osobnej sprawy */
+.q-ctx { margin: 0 0 var(--s-3); font-size: 14px; line-height: 1.5; color: var(--text); }
+.q-ctx.solo { margin: 0; }
+.block.q .q-ctx { margin-bottom: var(--s-3); }
+.block.q .q-ctx + p { font-weight: 650; }
+.q-next { font-size: 12.5px; color: var(--sub); padding-top: var(--s-2); border-top: 1px solid var(--line); }
+.q-next b { color: var(--text); font-weight: 650; }
+.pick-list { list-style: none; margin: var(--s-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.pick-list li { border-radius: 12px; min-width: 0; }
+.pick-list label { display: flex; align-items: flex-start; gap: var(--s-3); padding: 8px 10px; margin: 0 -10px; border-radius: 12px; cursor: pointer; min-height: 32px; }
+.pick-list label:hover { background: var(--surface); }
+.pick-list li.on label { background: var(--accent-soft); }
+.pick-list input[type="checkbox"] { flex: none; width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--accent); cursor: pointer; }
+.pick-b { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pick-t { font-size: 14px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.pick-n { font-size: 13px; line-height: 1.4; color: var(--sub); }
+.pick-flag { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; color: var(--warn); background: var(--surface); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent); padding: 1px 7px; border-radius: 999px; white-space: nowrap; vertical-align: 1px; }
+.pick-list.ro li { display: flex; align-items: flex-start; gap: var(--s-3); padding: 6px 0; }
+.pick-list.ro li:not(.on) { opacity: .55; }
+.pick-x { flex: none; width: 18px; text-align: center; color: var(--ok); font-weight: 700; }
+.pick-go { display: flex; flex-wrap: wrap; gap: var(--s-3); margin-top: var(--s-4); }
+.pick-why { margin: var(--s-2) 0 0; font-size: 13px; line-height: 1.4; color: var(--sub); }
 .proto-row { display: flex; align-items: center; gap: var(--s-3); margin-top: var(--s-3); padding: 10px 12px; border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); min-width: 0; }
 .proto-row .t { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proto-row .t b { font-weight: 650; }

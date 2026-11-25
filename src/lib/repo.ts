@@ -1605,7 +1605,7 @@ export async function deleteQuestion(ownerId: string, id: string): Promise<void>
 // odpowiedź na blok "question" w panelu kroku (agent wbudowany albo konektor ułożył pytanie w blokach)
 // odpowiedź na pytanie z kartki; zwraca treść pytania (null = nie ma takiego pytania), żeby odpowiedź poszła też do agenta.
 // text: treść pytania z formularza; gdy pod indeksem jest co innego (kartka zmieniła się po wyświetleniu), odpowiedź trafia do pytania o tej treści
-export async function answerBlockQuestion(stepId: string, index: number, answer: string, text?: string): Promise<string | null> {
+export async function answerBlockQuestion(stepId: string, index: number, answer: string, text?: string, picked?: string[]): Promise<string | null> {
   const [r] = await sql()`select blocks from steps where id = ${stepId}`;
   const p = r?.blocks ? Blocks.safeParse(r.blocks) : null; if (!p || !p.success) return null;
   const isQ = (x: Block | undefined): x is Extract<Block, { type: "question" }> => !!x && x.type === "question";
@@ -1613,6 +1613,8 @@ export async function answerBlockQuestion(stepId: string, index: number, answer:
   if (!isQ(b) || (text && b.text !== text)) b = text ? p.data.find((x) => isQ(x) && x.text === text) : undefined;
   if (!isQ(b)) return null;
   b.answer = answer.slice(0, 2000); delete b.prev;
+  // lista do zaznaczenia (paczka 69): zapisują się tylko pozycje, które są na liście
+  if (picked) b.picked = picked.filter((l) => b!.type === "question" && b!.options.some((o) => o.label === l)).slice(0, 30); else delete b.picked;
   await sql()`update steps set blocks = ${sql().json(sanitizeBlocks(p.data) as never)} where id = ${stepId}`;   // treść szkicu bez zmian: zgoda zostaje
   return b.text;
 }

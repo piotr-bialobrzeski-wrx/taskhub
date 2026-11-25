@@ -168,10 +168,25 @@ export const LinkBlock = z.object({
   type: z.literal("link"),
   links: z.array(z.object({ url: z.string(), title: z.string().optional(), source: Provenance.optional() })).max(12),
 });
+// paczka 69 (zadanie „Czytelna kartka kroku decyzji”, wersja B „Wybór na liście”): context = 1-2 zdania nad pytaniem (skąd sprawa, co
+// znaleziono, co się stanie po decyzji); pick many = lista do zaznaczenia (tickety, maile, wpisy): każda pozycja ze zdaniem (note), propozycją
+// zaznaczenia (on) i znacznikiem wątpliwości (flag, np. „niepewne”); przycisk zgody mówi czynność i liczbę („Zamknij zaznaczone (6)”),
+// none = odpowiedź „nic z listy”. Zaznaczone przez Piotra pozycje stoją w picked (tylko jego, jak answer)
+export const QuestionOption = z.object({
+  label: z.string(),
+  note: z.string().optional(),
+  on: z.boolean().optional(),               // pick many: proponuję zaznaczyć
+  flag: z.string().max(30).optional(),      // pick many: krótki znacznik przy pozycji („niepewne”)
+});
 export const QuestionBlock = z.object({
   type: z.literal("question"),
+  context: z.string().max(600).optional(),
   text: z.string(),
-  options: z.array(z.object({ label: z.string(), note: z.string().optional() })).min(2).max(6),
+  pick: z.enum(["one", "many"]).optional(),
+  options: z.array(QuestionOption).min(2).max(30),   // pick one: do 6 przycisków; lista do zaznaczenia: do 30 pozycji
+  submit: z.string().max(60).optional(),    // pick many: czynność na przycisku zgody, bez liczby („Zamknij zaznaczone”)
+  none: z.string().max(60).optional(),      // pick many: odpowiedź bez zaznaczenia („Nie zamykaj nic”)
+  picked: z.array(z.string()).max(30).optional(),
   recommended: z.number().int().min(0).optional(),
   why: z.string().max(300).optional(),   // paczka 31: jedno zdanie, czemu zalecana opcja; stoi przy jej przycisku z „Polecam”
   answer: z.string().optional(),

@@ -337,6 +337,11 @@ export function projectPrompt(t: Pick<Task, "id" | "title" | "steps">, s: Pick<S
     `Zadanie „${t.title}” (${appUrl}/tasks/${t.id}), krok ${n}. Pełną treść, wcześniejsze kroki i decyzje przeczytaj przez get_task. Gdy decyzja Piotra w kroku, na który ten krok czekał, wyklucza tę pracę, zamknij krok przez skip_step z powodem jednym zdaniem. Po skończeniu zamknij ten krok (complete_step) z wynikiem: co zmieniłeś i gdzie to jest.`,
   ].filter(Boolean).join("\n\n");
 }
+// paczka 69: odpowiedź z listy do zaznaczenia jednym zdaniem dla agenta i rozmowy: czynność, liczba i pozycje; bez zaznaczenia = odpowiedź „nic”
+export function pickedAnswer(q: Pick<QuestionB, "submit" | "none">, picked: string[]): string {
+  if (!picked.length) return q.none?.trim() || "Nic z listy";
+  return `${q.submit?.trim() || "Zaznaczone"} (${picked.length}): ${picked.join("; ")}`;
+}
 export const openQuestions = (s: Pick<Step, "blocks">): QuestionB[] => (s.blocks ?? []).filter((b): b is QuestionB => b.type === "question" && !b.answer);
 // wynik kroku-decyzji zapisany w output: jedna odpowiedź wprost, kilka z treścią pytań
 export function decisionText(s: Pick<Step, "blocks">): string {
@@ -350,9 +355,9 @@ export function keepOwnerAnswers(was: Block[] | null | undefined, incoming: Bloc
   const stored = (was ?? []).filter((b): b is QuestionB => b.type === "question");
   return incoming.map((b): Block => {
     if (b.type !== "question") return b;
-    const { answer: _a, prev: _p, ...rest } = b;
+    const { answer: _a, prev: _p, picked: _k, ...rest } = b;
     const m = stored.find((q) => q.text === b.text);
-    return { ...rest, ...(m?.answer ? { answer: m.answer } : {}), ...(m?.prev ? { prev: m.prev } : {}) };
+    return { ...rest, ...(m?.answer ? { answer: m.answer } : {}), ...(m?.prev ? { prev: m.prev } : {}), ...(m?.picked ? { picked: m.picked } : {}) };
   });
 }
 // linia w rozmowie zadania po zamknięciu kroku

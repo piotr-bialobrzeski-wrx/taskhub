@@ -1,15 +1,13 @@
 "use client";
-// Edycja w miejscu: pole kroku zmienia się tam, gdzie je widać (tytuł, szczegóły, narzędzie, szacunek, czas, zgoda, zależności, link), bez osobnego formularza.
+// Edycja w miejscu: pole kroku zmienia się tam, gdzie je widać (tytuł, szczegóły, kto robi, model, zgoda), bez osobnego formularza.
 // Klik otwiera pole, Enter albo zejście z pola zapisuje, Esc cofa. Szczegóły: Ctrl/Cmd+Enter zapisuje (Enter robi nową linię).
 import { useLayoutEffect, useRef, useState, useTransition, type KeyboardEvent } from "react";
-import { doneWithTime, linkSteps, patchStep, setDoneTime } from "@/app/actions";
-import { DueControl, Picker } from "@/components/canvas/widgets";
-import type { DueValue } from "@/lib/due";
-import { dayKey } from "@/lib/clock";
+import { doneWithTime, patchStep, setDoneTime } from "@/app/actions";
+import { Picker } from "@/components/canvas/widgets";
 import { GrowTextarea, refitOnWidth } from "@/components/GrowTextarea";
 import { Icon } from "@/components/canvas/ui";
 import { DECISION_TITLE_RE, isGoogleApp, TOOL_LABELS } from "@/lib/schema";
-import { Q, SPENT_CHIPS, fmtHM, fmtMin, parseSpent } from "@/lib/time";
+import { SPENT_CHIPS, fmtMin, parseSpent } from "@/lib/time";
 
 type Patch = Parameters<typeof patchStep>[2];
 type Field = "title" | "detail" | "link";
@@ -86,40 +84,19 @@ export function ConnectionHead({ taskId, stepId, app, connectionId, connections,
   );
 }
 
-// liczba minut w pigułce takiej jak wybory obok (pióro zamiast strzałki): klik → pole w tym samym miejscu.
-// hm (czas Piotra, paczka 32): pole tekstowe „godziny:minuty” jak przy „Ile to zajęło?” (2:15, 45, 1,5 h), zapis w minutach
-function NumChip({ value, stepBy, min, label, onSave, hm = false }: { value: number; stepBy: number; min: number; label: string; onSave: (v: number) => void; hm?: boolean }) {
-  const [edit, setEdit] = useState(false);
-  const done = (raw: string) => {
-    setEdit(false);
-    const v = hm ? parseSpent(raw) : raw === "" ? null : Number(raw);
-    if (v !== null && Number.isFinite(v) && v !== value) onSave(Math.max(min, v));
-  };
-  const key = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") { e.preventDefault(); done(e.currentTarget.value); } else if (e.key === "Escape") { e.preventDefault(); setEdit(false); } };
-  if (edit) return hm
-    ? <input className="in num" type="text" inputMode="numeric" placeholder="g:mm" defaultValue={value ? fmtHM(value) : ""} aria-label={label + " (godziny:minuty)"} autoFocus onFocus={(e) => e.currentTarget.select()} onBlur={(e) => done(e.currentTarget.value)} onKeyDown={key} />
-    : <input className="in num" type="number" min={min} step={stepBy} defaultValue={value} aria-label={label} autoFocus onFocus={(e) => e.currentTarget.select()} onBlur={(e) => done(e.currentTarget.value)} onKeyDown={key} />;
-  return <button type="button" className="pp boxed num" title={label + ": kliknij, aby zmienić"} onClick={() => setEdit(true)}><span className="pp-t">{fmtMin(value)}</span><Icon k="pen" size={11} sw={1.8} /></button>;
-}
-
 // model kroku agenta: „auto” (poziom kroku → model i wysiłek z Ustawień) albo wybór Piotra; obok, czym zrobił go ostatni bieg
 export type StepModelInfo = { auto: string; pick: string | null; choices: { key: string; label: string }[]; last: string | null };
 
-export function StepMeta({ taskId, step, steps, calText, connections = [], showConnection = true, model = null }: {
+export function StepMeta({ taskId, step, steps, model = null }: {
   taskId: string;
-  step: { id: string; tool: string; own: boolean; agentMin: number; estMin: number; spentMin: number; needsApproval: boolean; dependsOn: string[]; estHint?: string | null; connectionId?: string | null; due?: DueValue };
-  steps: { id: string; title: string; done: boolean }[]; calText?: string | null;
-  connections?: StepConnection[]; showConnection?: boolean;   // wybór połączenia: w technikaliach tylko, gdy nie ma go w karcie publikacji
+  step: { id: string; tool: string; own: boolean; agentMin: number; needsApproval: boolean; dependsOn: string[] };
+  steps: { id: string; title: string; done: boolean; idx: number }[];
   model?: StepModelInfo | null;
 }) {
   const [, start] = useTransition();
   const patch = (p: Patch) => start(() => patchStep(taskId, step.id, p));
   const tools = [...Object.entries(TOOL_LABELS), ...(TOOL_LABELS[step.tool] ? [] : [[step.tool, step.tool] as [string, string]])];
-  const free = steps.filter((x) => !step.dependsOn.includes(x.id));
-  // do wyboru: połączenia tej aplikacji co narzędzie kroku (Slack → konta Slacka), a gdy takich nie ma, wszystkie działające
-  const same = connections.filter((c) => c.app === step.tool || (step.tool === "gmail" && c.app === "gmail"));
-  const conns = (same.length ? same : connections).filter((c) => c.active || c.id === step.connectionId);
-  const cur = connections.find((c) => c.id === step.connectionId) ?? null;
+  const after = steps.filter((x) => step.dependsOn.includes(x.id)).sort((x, y) => x.idx - y.idx);
   return (
     <>
       <div className="time-row">
@@ -127,37 +104,22 @@ export function StepMeta({ taskId, step, steps, calText, connections = [], showC
         <div><div className="lbl">Kto robi</div>
           <Picker cls="boxed" title="Kto robi ten krok: Ty albo agent" trigger={<span className="pp-t">{TOOL_LABELS[step.tool] ?? step.tool}</span>} onPick={(k) => patch({ tool: k })}
             options={tools.map(([k, v]) => ({ key: k, on: k === step.tool, node: <span>{v}</span> }))} /></div>
-        {step.own ? <>
-          <div><div className="lbl">Szacunek{step.estHint ? <span className="hint"> {step.estHint}</span> : null}</div><NumChip value={step.estMin} stepBy={Q} min={Q} label="Szacunek w minutach" onSave={(v) => patch({ estMin: v })} /></div>
-          {/* paczka 56: tylko do odczytu; czas ustawia się przy zamykaniu kroku, pomyłkę poprawia „Zmień” na dole kartki */}
-          <div><div className="lbl">Twój czas</div><span className="pp boxed" title="Ustawia się przy zamykaniu kroku"><span className="pp-t">{step.spentMin ? fmtMin(step.spentMin) : "przy zamykaniu"}</span></span></div>
-        </> : <>
-          <div><div className="lbl">Czas Claude'a</div><span className="pp boxed" title="Liczy się sam: od chwili, gdy Claude zaczął krok, do jego zamknięcia"><span className="pp-t">{step.agentMin ? fmtMin(step.agentMin) : "jeszcze nic"}</span></span></div>
-          {step.spentMin ? <div><div className="lbl">Twój czas</div><span className="pp boxed" title="Twój czas przy zatwierdzeniu"><span className="pp-t">{fmtMin(step.spentMin)}</span></span></div> : null}
-        </>}
-        {step.due ? <div><div className="lbl">Termin</div><DueControl of="kroku" value={step.due} min={dayKey(new Date())} onChange={(v) => patch({ due: v })} /></div> : null}
-        {model ? <div><div className="lbl">Model{model.last ? <span className="hint"> ostatnio: {model.last}</span> : null}</div>
+        {/* paczka 69: czas Claude'a, model i zgoda tylko przy kroku agenta; szacunek, Twój czas, termin i połączenie zniknęły z kartki */}
+        {step.own ? null : <div><div className="lbl">Czas Claude'a</div><span className="pp boxed" title="Liczy się sam: od chwili, gdy Claude zaczął krok, do jego zamknięcia"><span className="pp-t">{step.agentMin ? fmtMin(step.agentMin) : "jeszcze nic"}</span></span></div>}
+        {model && !step.own ? <div><div className="lbl">Model{model.last ? <span className="hint"> ostatnio: {model.last}</span> : null}</div>
           <Picker cls="boxed" title="Którym modelem Claude ma zrobić ten krok: auto dobiera model i wysiłek do poziomu kroku (Ustawienia → Agent)" trigger={<span className="pp-t">{model.pick ? model.choices.find((c) => c.key === model.pick)?.label ?? model.pick : `auto · ${model.auto}`}</span>} onPick={(k) => patch({ modelPick: k || null })}
             options={[{ key: "", on: !model.pick, node: <span>auto · {model.auto}</span> }, ...model.choices.map((c) => ({ key: c.key, on: c.key === model.pick, node: <span>{c.label}</span> }))]} /></div> : null}
         {/* paczka 56: przy kroku Piotra Zgoda nic nie zmienia (agent i tak go nie robi); wraca po oddaniu kroku agentowi */}
         {step.own ? null : <div><div className="lbl">Zgoda</div>
           <Picker cls="boxed" title="Czy krok wysyła coś na zewnątrz i czeka na Twoją zgodę" trigger={<span className="pp-t">{step.needsApproval ? "wymaga zgody" : "bez zgody"}</span>} onPick={(k) => patch({ needsApproval: k === "1" })}
             options={[{ key: "1", on: step.needsApproval, node: <span>wymaga zgody: wysyła coś na zewnątrz</span> }, { key: "0", on: !step.needsApproval, node: <span>bez zgody: Claude robi od razu</span> }]} /></div>}
-        {showConnection && conns.length ? <div><div className="lbl">Połączenie</div>
-          <Picker cls="boxed" title="Którym kontem zrobić ten krok (z rejestru połączeń w ustawieniach)" trigger={<span className="pp-t">{cur ? `${cur.label}${cur.company ? ` · ${cur.company}` : cur.sphere === "private" ? " · prywatne" : ""}` : "agent wybierze"}</span>} onPick={(k) => patch({ connectionId: k || null })}
-            options={[{ key: "", on: !step.connectionId, node: <span>agent wybierze (według firmy zadania)</span> }, ...conns.map((c) => ({ key: c.id, on: c.id === step.connectionId, node: <span>{c.label}{c.account ? ` (${c.account})` : ""}{c.company ? ` · ${c.company}` : c.sphere === "private" ? " · prywatne" : ""}{c.active ? "" : " · nie działa"}</span> }))]} /></div> : null}
       </div>
-      {calText ? <div className="calib">{calText}</div> : null}
-      <div><div className="lbl">Czeka na</div>
+      {/* paczka 69: kroki, po których ten przyszedł, jako linki (bez krzyżyków); zależności zmienia się w rozmowie */}
+      {after.length ? <div><div className="lbl">Po krokach</div>
         <div className="deps">
-          {step.dependsOn.map((d) => { const x = steps.find((s) => s.id === d); return x ? (
-            <button key={d} type="button" className="chip" title="Usuń tę zależność" onClick={() => start(() => linkSteps(taskId, d, step.id, false))}><span className="d" style={{ ["--c" as string]: x.done ? "var(--ok)" : "var(--sub)" }} /><span>{x.title}</span><span className="x">×</span></button>
-          ) : null; })}
-          {!step.dependsOn.length ? <span className="chip ghost">zaczyna od razu</span> : null}
-          {free.length ? <Picker cls="add" title="Dodaj krok, po którym ten ma się zacząć" trigger={<span>+ po kroku</span>} onPick={(k) => start(() => linkSteps(taskId, k, step.id, true))}
-            options={free.map((s) => ({ key: s.id, node: <span>{s.title}</span> }))} /> : null}
+          {after.map((x) => <a key={x.id} className="chip" href={`/tasks/${taskId}?step=${x.id}`} title={x.done ? "Zrobiony" : "Jeszcze nie zrobiony"}><span className="d" style={{ ["--c" as string]: x.done ? "var(--ok)" : "var(--sub)" }} /><span>{String(x.idx).padStart(2, "0")} {x.title}</span></a>)}
         </div>
-      </div>
+      </div> : null}
     </>
   );
 }

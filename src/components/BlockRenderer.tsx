@@ -8,6 +8,7 @@ import { hasMarkdown } from "@/lib/format";
 import { Icon, plural } from "@/components/canvas/ui";
 import { GrowTextarea } from "@/components/GrowTextarea";
 import { CopyButton } from "@/components/CopyButton";
+import { PickList } from "@/components/PickList";
 import { isHttpUrl, isLocalPath, isMediaUrl, safeHref, thumbSrc } from "@/lib/safeurl";
 import { groupBlocks, normUrl } from "@/lib/stepcard";
 import { mentionsToPlain } from "@/lib/mention";
@@ -25,7 +26,11 @@ export const toolColor = (app: string) => TOOL_COLORS[app] ?? "var(--sub)";
 
 // nagłówek klocka kontekstu: kropka aplikacji, nazwa, miejsce (ref), licznik, przycisk „Otwórz w <app>” gdy jest adres (jeden kształt
 // dla wszystkich klocków źródłowych; open = własna etykieta, np. „Otwórz podgląd” dla zmian w kodzie); ten sam dla wątku, maila, komentarza, tabeli i wolnej treści
-export function SrcHead({ s, title, meta, open, hide }: { s?: Provenance; title?: string; meta?: string; open?: string; hide?: string[] }) {
+// paczka 69: „Plik na Macu” tylko przy prawdziwym pliku (ścieżka albo adres); tabela czy lista ułożona przez Claude'a z source.app „file”
+// bez pliku nie dostaje etykiety aplikacji, bo nie pochodzi z żadnej
+export const realSource = (s?: Provenance) => (s && normalizeTool(s.app) === "file" && !s.ref?.trim() && !s.url?.trim() ? undefined : s);
+export function SrcHead({ s: s0, title, meta, open, hide }: { s?: Provenance; title?: string; meta?: string; open?: string; hide?: string[] }) {
+  const s = realSource(s0);
   if (!s && !title && !meta) return null;
   const href = hidden(hide, s?.url) ? undefined : safeHref(s?.url);   // adresy z danych tylko przez safeHref: javascript:, file:, taskhub: zostają bez linku
   return (
@@ -55,7 +60,8 @@ export function SourceDoc({ b, href, hide }: { b: Extract<Block, { type: "free" 
 const SHOW_LAST = 3;   // długi wątek: ostatnie wiadomości od razu, wcześniejsze po rozwinięciu
 
 // chip źródła: jedna linia, długie miejsce (ścieżka pliku, nazwa kanału) ucina się wielokropkiem, pełna treść w dymku
-export function Source({ s }: { s?: Provenance }) {
+export function Source({ s: s0 }: { s?: Provenance }) {
+  const s = realSource(s0);
   if (!s) return null;
   const label = `${toolLabel(s.app)}${s.ref ? ` · ${s.ref}` : ""}`;
   const inner = <><span className="tool-dot" style={{ ["--c" as string]: toolColor(s.app) }} /><span>{label}</span></>;
@@ -213,9 +219,30 @@ export function BlockView({ b, form, index, links: L }: { b: Block; form?: Block
     case "howto":
       return <Howto b={b} />;
     case "question":
+      if (b.pick === "many") {
+        // paczka 69, wersja B: lista do zaznaczenia; po odpowiedzi zostaje lista z ptaszkami przy zaznaczonych pozycjach
+        const ctx = b.context?.trim() ? <p className="q-ctx">{b.context}</p> : null;
+        if (b.answer || !form) {
+          const got = b.answer ? new Set(b.picked ?? []) : new Set(b.options.filter((o) => o.on).map((o) => o.label));
+          return (
+            <div className="block q pick">{ctx}<p>{b.text}</p>
+              <ul className="pick-list ro">{b.options.map((o, i) => <li key={i} className={got.has(o.label) ? "on" : undefined}><span className="pick-x" aria-hidden="true">{got.has(o.label) ? "✓" : ""}</span><span className="pick-b"><span className="pick-t">{o.label}{o.flag ? <span className="pick-flag">{o.flag}</span> : null}</span>{o.note ? <span className="pick-n">{o.note}</span> : null}</span></li>)}</ul>
+              {b.answer ? <p className="sub" style={{ marginTop: 6 }}>Odpowiedź: {b.picked?.length ? `${b.submit?.trim() || "Zaznaczone"} (${b.picked.length})` : b.answer}</p> : <p className="sub" style={{ marginTop: 6 }}>Ptaszki: propozycja zaznaczenia.</p>}
+            </div>
+          );
+        }
+        return (
+          <form className="block q pick" action={answerBlockForm}>
+            <input type="hidden" name="taskId" value={form.taskId} /><input type="hidden" name="stepId" value={form.stepId} /><input type="hidden" name="index" value={index ?? 0} /><input type="hidden" name="q" value={b.text} />
+            {ctx}<p>{b.text}</p>
+            <PickList options={b.options} initial={b.picked ?? null} submit={b.submit} none={b.none} why={b.why} />
+            {L?.proto ? <div className={"q-proto" + (L.proto.on ? " on" : "")}><a className="btn ico" href={L.proto.url} target="_blank" rel="noopener" title={`Prototyp do tego wyboru: ${L.proto.url}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a></div> : null}
+          </form>
+        );
+      }
       if (b.answer || !form) {
         return (
-          <div className="block q"><p>{b.text}</p>
+          <div className="block q">{b.context?.trim() ? <p className="q-ctx">{b.context}</p> : null}<p>{b.text}</p>
             <div className="opts">{b.options.map((o, i) => <span key={i} className={"chip" + (b.answer === o.label ? " on" : "")} title={o.note}>{o.label}{b.answer === o.label ? " ✓" : ""}{b.recommended === i ? <span className="rec-tag">Polecam</span> : null}</span>)}</div>
             {b.answer && !b.options.some((o) => o.label === b.answer) ? <p className="sub" style={{ marginTop: 6 }}>Odpowiedź: {b.answer}</p> : null}
           </div>
@@ -226,6 +253,7 @@ export function BlockView({ b, form, index, links: L }: { b: Block; form?: Block
         <form className="block q" action={answerBlockForm}>
           <input type="hidden" name="taskId" value={form.taskId} /><input type="hidden" name="stepId" value={form.stepId} /><input type="hidden" name="index" value={index ?? 0} /><input type="hidden" name="q" value={b.text} />
           <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
+          {b.context?.trim() ? <p className="q-ctx">{b.context}</p> : null}
           <p>{b.text}</p>
           <OptionButtons options={b.options} recommended={b.recommended} why={b.why} />
           {L?.proto ? <div className={"q-proto" + (L.proto.on ? " on" : "")}><a className="btn ico" href={L.proto.url} target="_blank" rel="noopener" title={`Prototyp do tego wyboru: ${L.proto.url}`}>Otwórz prototyp<Icon k="ext" size={13} sw={1.6} /></a></div> : null}

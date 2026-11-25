@@ -7,7 +7,7 @@ import { bundle } from "@/lib/services";
 import { composeStatic } from "@/lib/agent/compose";
 import { breakdownPrompt, handoffPrompt, claudeUrl } from "@/lib/agent/handoff";
 import { EXTERNAL_TOOLS, isOwnerStep, sphereOf, toolLabel, type Block, type Question, type Step, type Task } from "@/lib/schema";
-import { agentMinOf, calEst, calibrationFor, estOf, fmtMin, remainEst, spentMin, taskAgent, taskSpent, todayISO } from "@/lib/time";
+import { agentMinOf, estOf, fmtMin, remainEst, spentMin, taskAgent, taskSpent, todayISO } from "@/lib/time";
 import { isComplete } from "@/lib/priority";
 import { availableProviders } from "@/lib/ai";
 import { externalLink } from "@/lib/links";
@@ -250,8 +250,6 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   const blocks = (s.blocks?.length ? s.blocks : composeStatic(s.status === "done" ? { ...s, output: "" } : s, facts, mine ?? attachments.filter((a) => a.stepId === s.id))).filter((b) => !(b.type === "text" && !b.title && b.body.trim() === s.detail.trim()));
   // kalibracja tylko dla kroków Piotra (jego szacunki); czas Claude'a liczy się sam
   const own = isOwnerStep(s), agentMin = agentMinOf(s);
-  const cal = own ? calibrationFor(samples, s.tool, "owner") : null;
-  const calOn = !!cal && state !== "done" && Math.abs(cal.k - 1) >= 0.1;
   const ext = EXTERNAL_TOOLS.has(s.tool) || s.tool === "file";   // plik na Macu robi tylko mostek: bez „Przygotuj”
   // jeden zestaw przycisków na rodzaj kroku: krok Claude'a (Przygotuj / Uruchom), decyzja Piotra (odpowiedź na kartce zamyka krok),
   // „Przeczytaj …” (Przeczytane), krok poza aplikacją (Zrobione z pytaniem o czas); szkic ma kartę publikacji
@@ -279,7 +277,7 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // krok „Zleć w projekcie: …” robi wątek projektu Claude w chmurze: nagłówek mówi gdzie, a zamiast „Uruchom” jest polecenie do skopiowania
   // krok z kodem w projekcie Task Hub (paczka 14, punkt 1) też: mostek go nie zrobi, więc zamiast „Przygotuj” / „Uruchom” jest „Uruchom w chmurze”
   const inProject = (kind === "offline" || kind === "agent") && isProjectStep(s, project);
-  const head0 = nowHeading(state as CardState, mode, s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined, draftsOf(s).length, optionsOf(s).chosen?.status === "sent", draftsOf(s).some((x) => !!x.stale));
+  const head0 = nowHeading(state as CardState, mode, t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").length || s.dependsOn.length, waits, mode === "sent" ? destOf(s) : undefined, draftsOf(s).length, optionsOf(s).chosen?.status === "sent", draftsOf(s).some((x) => !!x.stale));
   // paczka 51: prośba Piotra w czacie kroku przejmuje nagłówek „Teraz” (czeka na agenta albo agent ją wprowadza); kartka nie czeka na odświeżenie wyniku
   const redoOn = !!redo && !done && mode !== "sending";
   // „Uruchom w chmurze” (paczka 13, punkt 3): kliknięte czeka, aż mostek na Macu odpali chmurę (queued), potem aż chmura weźmie krok (rung)
@@ -321,8 +319,12 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
   // paczka 58: pod nimi materiał wyboru (tabele, listy, treści), a fakty i źródła zwijają się pod „Skąd to wiemy”
   const shortDecision = kind === "decision" && open.length > 0 && !done && !mode;
   const addFolder = !done ? folderLink(s) : null;   // paczka 22: krok oddany z braku folderu na Macu, przycisk otwiera aplikację Task Hub z pytaniem
-  const deps = s.dependsOn.length;
-  const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? `~${fmtMin(estOf(s))}${spentMin(s) ? ` / ${fmtMin(spentMin(s))}` : ""}` : agentMin ? `Claude ${fmtMin(agentMin)}` : null, own ? null : s.needsApproval ? "wymaga zgody" : "bez zgody", deps && !done ? `czeka na ${deps}` : null].filter(Boolean).join(" · ");
+  const topBrief = kind === "decision" && open.length > 0 && !done && !mode && !open[0].context?.trim() && !!s.detail.trim();
+  const briefUp = topBrief || (kind === "decision" && open.some((q) => !!q.context?.trim()));
+  // paczka 69: kroki, na które ten krok naprawdę jeszcze czeka (z numerem i nazwą); zrobione nie liczą się do „czeka na”
+  const waitingOn = t.steps.filter((x) => s.dependsOn.includes(x.id) && x.status !== "done").map((x) => `krok ${String(t.steps.indexOf(x) + 1).padStart(2, "0")} „${shortTitle(x.title, 50)}”`);
+  // paczka 69: w podpisie tylko kto robi (i model albo czas Claude'a przy kroku agenta); szacunek, czas Piotra i „czeka na N” zniknęły
+  const tech = [toolLabel(s.tool), model && !done ? model.now : null, own ? null : agentMin ? `Claude ${fmtMin(agentMin)}` : null, own ? null : s.needsApproval ? "wymaga zgody" : "bez zgody"].filter(Boolean).join(" · ");
   const took = whoDid(s) === "Ty" ? spentMin(s) : agentMin;
   const meta = done && s.filePath ? `Zapisano na Macu · ${fileName(s.filePath)}` : done ? `${whoDid(s)}${took ? ` · ${fmtMin(took)}` : ""}` : state === "ready" && !mode ? (own ? `Ty · ~${fmtMin(estOf(s))}` : `${toolLabel(s.tool)} · Claude`) : null;
 
@@ -350,8 +352,14 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
       {consent && !mode ? <div className="note">{consent}</div> : null}
       {cloudNote && !mode ? <div className="note">{cloudNote}</div> : null}
       {addFolder ? <div className="note">Claude potrzebuje folderu {addFolder.path} w Ustawieniach aplikacji na Macu ({addFolder.section}). „Dodaj folder” otworzy aplikację i zapyta o zgodę; potem krok ruszy sam.</div> : null}
-      {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : cloud?.state === "auto" ? "Ruszy w chmurze sam, gdy skończą się kroki, na które czeka." : "Ten krok ruszy, gdy skończą się kroki, na które czeka."}</div> : null}
-      {open.length && !done ? <BlocksView links={cl} blocks={open} form={form} indexOf={indexOf} /> : null}
+      {!mode && state === "blocked" ? <div className="note">{waits ? "Całe zadanie czeka, aż skończą się zadania, po których ma ruszyć." : `${cloud?.state === "auto" ? "Ruszy w chmurze sam" : "Ruszy"}, gdy skończ${waitingOn.length > 1 ? "ą" : "y"} się ${waitingOn.length ? waitingOn.join(", ") : "kroki, na które czeka"}.`}</div> : null}
+      {/* paczka 69, wersja B: jedna kartka, jedna sprawa; kolejne pytanie stoi osobno, z podpisem, że to inna sprawa */}
+      {/* paczka 69: kontekst decyzji stoi nad pytaniem; gdy agent go nie dał w pytaniu, jego miejsce zajmuje opis kroku (wtedy znika ze szczegółów) */}
+      {topBrief ? <p className="q-ctx solo">{s.detail.trim()}</p> : null}
+      {open.length && !done ? open.map((q, i) => <div key={"q" + i} className="stack">
+        {i ? <div className="q-next"><b>{i === 1 ? "Drugie pytanie" : `Pytanie ${i + 1}`}</b> · osobno, bo to inna sprawa</div> : null}
+        <BlocksView links={cl} blocks={[q]} form={form} indexOf={indexOf} />
+      </div>) : null}
       {howtos.map((h, i) => <div key={"howto" + i} className="stack">
         <BlocksView blocks={[h.block]} />
         {h.from ? <span className="howto-from">Instrukcja z kroku <a href={`/tasks/${t.id}?step=${h.from.id}`} title={h.from.title}>{String(h.from.idx).padStart(2, "0")} {shortTitle(h.from.title.replace(/^Zleć w projekcie:\s*/i, ""), 40)}</a></span> : null}
@@ -466,13 +474,13 @@ function StepPanel({ t, s, state, facts, attachments, aiOn, rules, samples, orig
         <div className="stack">
           {/* paczka 15, punkt 6: zadanie, projekt i firma tylko tutaj, na dole karty */}
           <div className="pctx"><span className="d" style={{ ["--c" as string]: ctx.color }} /><span>Zadanie <b>{t.title}</b> · {ctx.text}</span></div>
-          {bare ? null : <div className="zone"><div className="lbl">Opis kroku</div>{brief}</div>}
+          {bare || briefUp ? null : <div className="zone"><div className="lbl">Opis kroku</div>{brief}</div>}
+          {/* paczka 69 (zadanie „Czytelna kartka kroku decyzji”): tylko „Kto robi” i kroki, po których ten przyszedł (linki); bez szacunku, Twojego
+              czasu, terminu (jest przy zadaniu), połączenia (wybiera agent) i pola linku (od tego jest rozmowa) */}
           <StepMeta taskId={t.id}
-            step={{ id: s.id, tool: s.tool, own, agentMin, estMin: estOf(s), spentMin: spentMin(s), needsApproval: s.needsApproval, dependsOn: s.dependsOn, estHint: calOn ? `→ ~${fmtMin(calEst(s, samples))}` : null, connectionId: s.connectionId, due: { due: s.due ?? null, kind: s.dueKind ?? "by", repeat: s.repeat ?? null } }}
-            steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title, done: x.status === "done" }))}
-            connections={connections} showConnection model={done ? null : model}
-            calText={calOn && cal ? `Z Twoich czasów (${cal.n} ${plural(cal.n, "krok", "kroki", "kroków")}): takie kroki trwają zwykle ×${String(cal.k).replace(".", ",")}.` : null} />
-          <InlineText taskId={t.id} stepId={s.id} field="link" value={s.link ?? ""} as="small" placeholder="Dodaj link do wyniku (ticket, wydarzenie, mail)…" shown={s.link ? "Link: " + s.link.replace(/^https?:\/\//, "").slice(0, 70) : undefined} />
+            step={{ id: s.id, tool: s.tool, own, agentMin, needsApproval: s.needsApproval, dependsOn: s.dependsOn }}
+            steps={t.steps.filter((x) => x.id !== s.id).map((x) => ({ id: x.id, title: x.title, done: x.status === "done", idx: t.steps.indexOf(x) + 1 }))}
+            model={done ? null : model} />
         </div>
       </details>
       {facts.length ? (
