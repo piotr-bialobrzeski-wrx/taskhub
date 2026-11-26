@@ -30,7 +30,7 @@ import { appKey, approvalSig, approvalValid, coerceAgentDrafts, draftOf, draftsO
 import { matchProjectName } from "@/lib/project-guess";
 import { MAX_ESCALATION, normalizeLevel } from "@/lib/agent/models";
 import { DUE_KINDS, isIsoDay, Repeat } from "@/lib/due";
-import { groupDayWork } from "@/lib/day-work";
+import { dayActivity, groupDayWork } from "@/lib/day-work";
 import { historyText, PAST_HEAD, threadLabel } from "@/lib/agent/history";
 
 // poziom pracy kroku według zasady „Dobór modelu i wysiłku”: od niego mostek dobiera model i wysiłek biegu
@@ -873,12 +873,13 @@ function buildHandler(auth: repo.TokenAuth) {
 
     // paczka 42: praca w Task Hub z jednego dnia jako materiał do wpisów czasu (procedura „Wpisy czasu do Pirxey Time”)
     server.registerTool("day_work", {
-      title: "Praca w Task Hub z dnia", description: "Praca Piotra i Claude'a w Task Hub z jednego dnia (strefa Europe/Warsaw) w zadaniach projektów firm zawodowych: kroki zamknięte tego dnia albo z czasem Piotra zapisanym tego dnia. Pozycje są już połączone: kilka kroków przy tym samym tickecie ClickUp (link kroku albo zadania) to jedna pozycja z sumą minut; bez ticketu jedna pozycja na zadanie. Materiał do wpisów czasu: każdą pozycję dodaj do szkicu dnia jako wiersz (albo dolicz do wiersza tego samego ticketu z kalendarza czy Slacka) z parts = kroki pozycji; zaokrąglenie, projekt, kategorię i tagi dobierz według procedury. date: YYYY-MM-DD; companies: nazwy firm (puste = wszystkie zawodowe).",
+      title: "Praca w Task Hub z dnia", description: "Praca Piotra i Claude'a w Task Hub z jednego dnia (strefa Europe/Warsaw) w zadaniach projektów firm zawodowych: kroki zamknięte tego dnia albo z czasem Piotra zapisanym tego dnia. Zwraca { activity, items }. activity = godzina pierwszej i ostatniej aktywności Piotra w Task Hub tego dnia (first, last: HH:MM, Europe/Warsaw; firstKind/lastKind: message = jego wiadomość albo odpowiedź z kartki, answer = odpowiedź na pytanie, approval = zgoda na szkic, close = krok zamknięty przez niego, time = zapis jego czasu; firstTask/lastTask = zadanie), tylko z zadań firm zawodowych, bez zadań z samymi wpisami czasu; null = brak aktywności. Materiał do startu i końca dnia razem z GitHubem, Slackiem i ClickUpem. items: pozycje są już połączone: kilka kroków przy tym samym tickecie ClickUp (link kroku albo zadania) to jedna pozycja z sumą minut; bez ticketu jedna pozycja na zadanie. Materiał do wpisów czasu: każdą pozycję dodaj do szkicu dnia jako wiersz (albo dolicz do wiersza tego samego ticketu z kalendarza czy Slacka) z parts = kroki pozycji; zaokrąglenie, projekt, kategorię i tagi dobierz według procedury. date: YYYY-MM-DD; companies: nazwy firm (puste = wszystkie zawodowe).",
       inputSchema: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), companies: z.array(z.string().max(60)).max(10).optional() }),
     }, async (a) => {
-      const items = groupDayWork(await repo.dayWork(ownerId, a.date, a.companies ?? []));
-      if (!items.length) return text(`Brak pracy w Task Hub w dniu ${a.date} w zadaniach firm zawodowych${a.companies?.length ? ` (${a.companies.join(", ")})` : ""}.`);
-      return json(items);
+      const [steps, events] = await Promise.all([repo.dayWork(ownerId, a.date, a.companies ?? []), repo.dayActivityEvents(ownerId, a.date, a.companies ?? [])]);
+      const items = groupDayWork(steps), activity = dayActivity(events);
+      if (!items.length && !activity) return text(`Brak pracy w Task Hub w dniu ${a.date} w zadaniach firm zawodowych${a.companies?.length ? ` (${a.companies.join(", ")})` : ""}.`);
+      return json({ date: a.date, activity, items });
     });
 
     server.registerTool("list_connections", {

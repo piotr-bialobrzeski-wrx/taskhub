@@ -29,3 +29,19 @@ export function groupDayWork(steps: DayWorkStep[]): DayWorkItem[] {
   }
   return [...out.values()];
 }
+
+// Paczka 69 (zadanie „Start i koniec pracy we wpisach czasu”, krok 03): godzina pierwszej i ostatniej aktywności Piotra w Task Hub tego dnia
+// (HH:MM, Europe/Warsaw) jako materiał do startu i końca dnia we wpisach czasu. Aktywność = jego wiadomość w zadaniu (także odpowiedź
+// na pytanie z kartki), odpowiedź na pytanie agenta, zgoda na szkic, krok zamknięty przez niego, zapis jego czasu. Liczą się tylko zadania
+// projektów firm zawodowych; zadania z samymi wpisami czasu (kroki-arkusze) nie, bo to rozliczanie pracy, nie praca.
+export type ActivityKind = "message" | "answer" | "approval" | "close" | "time";
+export type ActivityEvent = { kind: ActivityKind; at: string; taskId: string; taskTitle: string };
+export type DayActivity = { first: string; last: string; firstKind: ActivityKind; lastKind: ActivityKind; firstTask: string; lastTask: string; events: number };
+const HHMM = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Warsaw", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+export const warsawHHMM = (iso: string) => HHMM.format(new Date(iso));
+export function dayActivity(events: ActivityEvent[]): DayActivity | null {
+  const ok = events.filter((e) => !Number.isNaN(Date.parse(e.at))).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  if (!ok.length) return null;
+  const f = ok[0], l = ok[ok.length - 1];
+  return { first: warsawHHMM(f.at), last: warsawHHMM(l.at), firstKind: f.kind, lastKind: l.kind, firstTask: f.taskTitle, lastTask: l.taskTitle, events: ok.length };
+}

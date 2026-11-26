@@ -1664,3 +1664,30 @@ export async function dayWork(ownerId: string, day: string, companies: string[] 
       link: (r.link as string) ?? null, taskLinks: (r.taskLinks as string[]) ?? [],
     }));
 }
+
+// paczka 69: zdarzenia Piotra z jednego dnia (strefa Europe/Warsaw) w zadaniach projektów firm zawodowych, do godzin pierwszej i ostatniej
+// aktywności (dayActivity). Pomija zadania z krokami-arkuszami wpisów czasu (zatwierdzanie wpisów to rozliczanie, nie praca).
+export async function dayActivityEvents(ownerId: string, day: string, companies: string[] = []): Promise<import("./day-work").ActivityEvent[]> {
+  const want = companies.map((c) => c.trim().toLowerCase()).filter(Boolean);
+  const rows = await sql()`
+    select e.kind, e.at, e.task_id, t.title as task_title, c.name as company from (
+      select 'message' as kind, created_at as at, task_id from chat_messages where owner_id = ${ownerId} and role = 'user' and task_id is not null
+      union all
+      select 'answer', answered_at, task_id from questions where owner_id = ${ownerId} and answered_at is not null
+      union all
+      select 'approval', (approval->>'at')::timestamptz, task_id from steps where approval->>'by' = 'owner' and approval->>'at' is not null
+      union all
+      select 'close', done_at, task_id from steps where done_by = 'owner' and done_at is not null
+      union all
+      select 'time', spent_at, task_id from steps where spent_sec > 0 and spent_at is not null
+    ) e join tasks t on t.id = e.task_id join projects p on p.id = t.project_id join companies c on c.id = p.company_id
+    where t.owner_id = ${ownerId} and t.deleted_at is null and c.sphere = 'work' and (e.at at time zone 'Europe/Warsaw')::date = ${day}::date
+    order by e.at`;
+  const hit = rows.filter((r) => !want.length || want.includes(String(r.company).toLowerCase()));
+  const ids = [...new Set(hit.map((r) => r.taskId as string))];
+  const sheetTasks = new Set<string>();
+  if (ids.length) for (const s of await sql()`select task_id, blocks from steps where task_id in ${sql()(ids)} and blocks is not null`)
+    if ((Blocks.safeParse(s.blocks).data ?? []).some((b) => b.type === "draft" && b.sheet?.some((c) => c.kind === "date"))) sheetTasks.add(s.taskId as string);
+  return hit.filter((r) => !sheetTasks.has(r.taskId as string))
+    .map((r) => ({ kind: r.kind as import("./day-work").ActivityKind, at: iso(r.at) as string, taskId: r.taskId as string, taskTitle: r.taskTitle as string }));
+}

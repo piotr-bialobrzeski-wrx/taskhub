@@ -142,7 +142,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("day_work w bazie i przez MCP", 
     const rows = await repo.dayWork(owner, "2026-11-02");
     expect(rows.map((r) => r.stepTitle).sort()).toEqual(["Napisz story", "Zatwierdź story"]);
     expect(await repo.dayWork(owner, "2026-11-02", ["Veloza"])).toEqual([]);
-    const out = JSON.parse(await call("day_work", { date: "2026-11-02" }));
+    const out = JSON.parse(await call("day_work", { date: "2026-11-02" })).items;
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ ticket: "869b4k2m1", company: "Pirxey & Widelab", project: "Shiftwow", ownerMin: 25, agentMin: 10 });
     expect(await call("day_work", { date: "2026-11-05" })).toMatch(/Brak pracy w Task Hub w dniu 2026-11-05/);
