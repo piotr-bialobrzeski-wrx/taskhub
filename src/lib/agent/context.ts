@@ -9,6 +9,7 @@ import { laneName, laneOf } from "../canvas/lanes";
 import { draftOf, isExternalApp, isPromptDraft, isSendable, optionLabel, optionsOf, type Approvable } from "./approval";
 import { dayKey, fmtDateTime } from "../clock";
 import { dueText } from "../due";
+import { fmtDuration, spanCheck } from "../sheet-month";
 
 // paczka 37: agent widzi, czy krok w chmurze ruszy sam, czy czeka na „Uruchom w chmurze” (wtedy może go uruchomić przez update_step start)
 const cloudNote = (s: Pick<Step, "tool" | "status" | "cloud">): string => {
@@ -247,6 +248,12 @@ export function draftsText(steps: DraftStep[], opts: { send?: (s: DraftStep) => 
       if (b.columns?.length) lines.push(`- wiersze (${b.columns.join(" | ")}):\n${(b.rows ?? []).map((r) => `  ${r.join(" | ")}`).join("\n")}`);
       // paczka 42: arkusz (np. wpisy czasu): każdy wiersz to osobny element w aplikacji docelowej; rodzaje kolumn mówią, jak czytać komórki
       if (b.columns?.length && b.sheet?.length) lines.push(`- arkusz: każdy wiersz to osobny element do utworzenia w miejscu z linii „dokąd” (${(b.rows ?? []).length} ${(b.rows ?? []).length === 1 ? "wiersz" : "wierszy"}), z wartościami kolumn dokładnie jak w wierszu; kolumny: ${b.columns.map((c, i) => `${c} (${SHEET_KIND_TEXT[b.sheet![i]?.kind ?? "text"]})`).join(", ")}; pusta komórka = pole puste`);
+      // paczka 69: start i koniec dnia (ramy arkusza): zostają w Task Hub, nie idą do aplikacji docelowej; agent widzi, czy wiersze się w nich mieszczą
+      if (b.span) {
+        const c = spanCheck(b.sheet, b.rows, b.span);
+        const warn = [c?.reversed ? "koniec nie jest po starcie" : "", c?.diff ? `suma wierszy ${c.total != null ? fmtDuration(c.total) : "?"} różni się od długości dnia ${fmtDuration(c.len!)}` : "", c?.outside.length ? `wiersze z godziną poza ramami: ${c.outside.map((k) => k + 1).join(", ")}` : ""].filter(Boolean);
+        lines.push(`- start i koniec pracy (tylko w Task Hub, nie wysyłaj): ${b.span.from ?? "brak"}-${b.span.to ?? "brak"}${c?.len != null ? ` (${fmtDuration(c.len)})` : ""}${warn.length ? `; UWAGA: ${warn.join("; ")}` : c?.len != null && c.total != null ? "; suma wierszy zgadza się" : ""}`);
+      }
       if (b.body) {
         lines.push(`- treść w Markdown (dokładnie, między liniami ---):\n---\n${b.body}\n---`);
         // formatowanie: każda aplikacja dostaje swój format, inaczej gwiazdki i krzyżyki lecą dosłownie

@@ -1691,3 +1691,12 @@ a.md-day:hover, button.md-day:hover { box-shadow: 0 0 0 2px var(--accent-soft); 
   .app.chat-side .runbar { left: calc(var(--chat-w, 380px) + (100% - var(--chat-w, 380px)) / 2); max-width: min(640px, calc(100% - var(--chat-w, 380px) - 32px)); }
   .app.chat-side .canvas::before { left: var(--chat-w, 380px); }
 }
+
+/* paczka 69: start i koniec dnia nad arkuszem wpisów (wariant C: suma wpisów równa dniu, godziny w ramach); wiersz poza ramami z czerwonym paskiem */
+.sh-span { display: flex; align-items: center; gap: var(--s-4); flex-wrap: wrap; font-size: 13px; padding-inline: var(--s-3); }
+.sh-spf { display: inline-flex; align-items: center; gap: var(--s-2); }
+.sh-spf .sh-cell { width: 76px; }
+.sh-ok { display: inline-flex; align-items: center; gap: 4px; color: var(--ok); font-weight: 600; }
+.sh-spw { margin: 0; }
+table.tb.sh tr.sh-out td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+table.tb.sh tr.sh-out .sh-cell.num { color: var(--danger); }

@@ -71,6 +71,13 @@ export const SheetColumn = z.object({
 });
 // z czego zebrano wiersz (np. kilka aktywności przy jednym tickecie zsumowane w jeden wpis): znaczek Σ przy czasie pokazuje listę
 export const SheetPart = z.object({ what: z.string().max(300), app: z.string().max(60).optional(), min: z.number().int().min(0).max(1440).optional() });
+// ramy czasu przy arkuszu (np. start i koniec pracy dnia przy wpisach czasu): zostają w Task Hub, nie idą do aplikacji docelowej i nie wchodzą
+// do podpisu zgody; kartka ostrzega, gdy suma czasów wierszy różni się od długości ram albo godzina wiersza wychodzi poza nie
+const CLOCK = /^([01]?\d|2[0-3]):[0-5]\d$/;
+export const DraftSpan = z.object({
+  from: z.string().regex(CLOCK).optional(),
+  to: z.string().regex(CLOCK).optional(),
+});
 export const DraftBlock = z.object({
   type: z.literal("draft"),
   title: z.string().optional(),
@@ -82,6 +89,7 @@ export const DraftBlock = z.object({
   rows: z.array(z.array(z.string().max(2000))).max(100).optional(),
   sheet: z.array(SheetColumn).max(12).optional(),   // rodzaje kolumn (ta sama kolejność co columns): wiersze stają się arkuszem do edycji w miejscu
   parts: z.array(z.array(SheetPart).max(20).nullable()).max(100).optional(),   // przy wierszu (ta sama kolejność co rows): z czego go zebrano
+  span: DraftSpan.optional(),               // start i koniec (HH:MM), w których mieści się praca z wierszy; edytuje Piotr na kartce
   status: z.enum(["proposed", "approved", "sent"]).default("proposed"),
   stale: z.boolean().optional(),           // zakres pracy zmienił się po napisaniu szkicu (nowe kroki przed publikacją); agent przygotuje go od nowa
 });
@@ -217,6 +225,7 @@ export const Block = z.discriminatedUnion("type", [
 export type Block = z.infer<typeof Block>;
 export type SheetColumn = z.infer<typeof SheetColumn>;
 export type SheetPart = z.infer<typeof SheetPart>;
+export type DraftSpan = z.infer<typeof DraftSpan>;
 export const Blocks = z.array(Block).max(12);
 // klocki kontekstu (to, na czym Piotr pracuje) kontra odpowiedź (blok draft) i pytanie
 export const CONTEXT_BLOCK_TYPES = new Set(["text", "facts", "thread", "list", "media", "link", "mail", "comment", "table", "free", "changes", "howto"]);

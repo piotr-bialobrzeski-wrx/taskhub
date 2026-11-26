@@ -144,6 +144,9 @@ export function coerceAgentDrafts(step: Pick<Step, "id" | "blocks">, incoming: B
   return incoming.map((b) => {
     if (b.type !== "draft") return b;
     const rest: Draft = { ...b }; delete rest.stale;
+    // ramy dnia (start i koniec) poprawione przez Piotra zostają, gdy agent przepisze kartkę bez nich
+    const prev = draftsOf(step)[incoming.filter((x) => x.type === "draft").indexOf(b)];
+    if (!rest.span && prev?.span) rest.span = prev.span;
     if (!matched && old && oldSig === approvalSig({ id: step.id, blocks: incoming }, b)) { matched = true; return { ...rest, status: old.status }; }
     return { ...rest, status: "proposed" as const };
   });

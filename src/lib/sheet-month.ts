@@ -19,6 +19,43 @@ export function parseDuration(s: string): number | null {
 export const fmtDuration = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`;
 export const longDuration = (n: number) => { const h = Math.floor(n / 60), m = n % 60; return h && m ? `${h} h ${m} min` : h ? `${h} h` : `${m} min`; };
 
+// godzina z tego, co Piotr wpisze: 9, 930, 9:30, 9.30 → „09:30”; null = to nie godzina
+export function parseClock(s: string): string | null {
+  const v = s.trim().replace(".", ":");
+  const m = /^(\d{1,2})(?::?(\d{2}))?$/.exec(v);
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2] ?? 0);
+  return h < 24 && mi < 60 ? `${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}` : null;
+}
+export const clockMins = (t: string | null | undefined): number | null => { const v = t ? parseClock(t) : null; return v ? Number(v.slice(0, 2)) * 60 + Number(v.slice(3)) : null; };
+
+// ---------- ramy dnia przy arkuszu (zadanie „Start i koniec pracy”, wariant C) ----------
+// span szkicu = start i koniec (HH:MM), w których mieści się cała praca z wierszy. Wariant C: wiersze mają od-do dowolnie (mogą na siebie
+// zachodzić), ale suma czasów trwania równa się długości dnia, a żadna godzina wiersza nie wychodzi poza start i koniec.
+export type SpanCheck = {
+  from: string | null; to: string | null;
+  len: number | null;        // minuty od startu do końca; null, gdy brak którejś godziny albo koniec nie jest po starcie
+  total: number | null;      // suma czasów wierszy; null, gdy arkusz nie ma kolumny czasu trwania
+  diff: number | null;       // total - len (0 = zgadza się)
+  outside: number[];         // indeksy wierszy z godziną poza startem i końcem
+  reversed: boolean;         // koniec nie jest po starcie
+};
+export function spanCheck(sheet: { kind?: string }[] | undefined, rows: string[][] | undefined, span: { from?: string; to?: string } | null | undefined): SpanCheck | null {
+  if (!span) return null;
+  const from = span.from ? parseClock(span.from) : null, to = span.to ? parseClock(span.to) : null;
+  const a = clockMins(from), b = clockMins(to);
+  const reversed = a != null && b != null && b <= a;
+  const len = a != null && b != null && !reversed ? b - a : null;
+  const dur = sheet?.findIndex((c) => c.kind === "duration") ?? -1;
+  const times = (sheet ?? []).map((c, i) => (c.kind === "time" ? i : -1)).filter((i) => i >= 0);
+  const total = dur >= 0 ? (rows ?? []).reduce((s, r) => s + (parseDuration(r[dur] ?? "") ?? 0), 0) : null;
+  const outside: number[] = [];
+  if (len != null) (rows ?? []).forEach((r, k) => {
+    if (times.some((i) => { const m = clockMins(r[i]); return m != null && (m < a! || m > b!); })) outside.push(k);
+  });
+  return { from, to, len, total, diff: len != null && total != null ? total - len : null, outside, reversed };
+}
+
 // ---------- święta w Polsce (dni wolne od pracy) ----------
 const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
 const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d));

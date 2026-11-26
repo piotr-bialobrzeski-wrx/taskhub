@@ -20,7 +20,7 @@ import { Activity } from "@/components/Activity";
 import { CopyButton } from "@/components/CopyButton";
 import { isHttpUrl, isLocalPath, safeHref } from "@/lib/safeurl";
 import type { TileActivity } from "@/components/canvas/ui";
-import { approveStep, backToTodo, markDone, prepare, saveDraftBody, saveDraftRows } from "@/app/actions";
+import { approveStep, backToTodo, markDone, prepare, saveDraftBody, saveDraftRows, saveDraftSpan } from "@/app/actions";
 import { SheetDraft } from "@/components/SheetDraft";
 import { isExternalApp, optionLabel, optionsOf, shownSig, type Draft } from "@/lib/agent/approval";
 
@@ -137,7 +137,8 @@ export function PublishCard({ t, s, mode, aiOn, ownerName, link, connections, co
     </> : null;
     const preview = sheetOn && di ? (
       <SheetDraft key={s.id + sfx} columns={di.columns!} sheet={di.sheet!} rows={di.rows ?? []} parts={di.parts ?? null} editable={sheetEdit} formId={sheetEdit ? formId : undefined}
-        seenRows={sheetEdit ? shownSig(s, di, false, true) : null} onSave={sheetEdit ? saveDraftRows.bind(null, t.id, s.id, i) : undefined} actions={sheetActs} />
+        seenRows={sheetEdit ? shownSig(s, di, false, true) : null} onSave={sheetEdit ? saveDraftRows.bind(null, t.id, s.id, i) : undefined} actions={sheetActs}
+        span={di.span ?? null} onSaveSpan={saveDraftSpan.bind(null, t.id, s.id, i)} />
     ) : isRows && di ? (
       <div className="thread"><div className="msg mine rows"><div className="who">{who}</div><Table columns={di.columns ?? di.rows![0].map((_, k) => `Kolumna ${k + 1}`)} rows={di.rows!} highlightFrom={0} md />{body ? <Markdown text={body} /> : null}</div></div>
     ) : (isPrompt || isCommit) && (di || mode !== "proposed") ? (

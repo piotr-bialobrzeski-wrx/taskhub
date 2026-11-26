@@ -18,6 +18,7 @@ import { shortTitle, type Queue } from "@/lib/auto";
 import { fmtTime } from "@/lib/clock";
 import { connectorIssue, isGitDraft } from "@/lib/bridge";
 import { approveRefusal, draftOf, draftsOf, isExternalApp, isLocalFile, isPromptDraft, parseSheetRows, shownSig, wasSent, withRows, type Draft, type SheetRows } from "@/lib/agent/approval";
+import { parseClock } from "@/lib/sheet-month";
 import { workSummary } from "@/lib/agent/work";
 import { decisionText, destOf, isDeployStep, isProjectStep, openQuestions, pickedAnswer, REDO_STALE, stepKind, stepsAfterDecision } from "@/lib/stepcard";
 import { isAppCodeStep, isOwnerStep, type Connection, type Rule, type Sphere, type Step } from "@/lib/schema";
@@ -359,6 +360,21 @@ export async function saveDraftRows(taskId: string, stepId: string, option: numb
   const d = draftsOf(step)[option] ?? null;
   const r = d?.columns?.length ? parseSheetRows(rowsJson, d.columns.length) : null;
   if (!r || !(await writeDraftRows(stepId, step, r, option))) return false;
+  refresh(taskId);
+  return true;
+}
+// start i koniec dnia przy arkuszu (ramy czasu szkicu): zostają w Task Hub i nie wchodzą do zgody, więc Piotr poprawia je także po zatwierdzeniu
+// i wysyłce wierszy. Pusta godzina kasuje tę stronę ram. Zwraca false, gdy godzina jest nie do odczytania albo szkicu nie ma
+export async function saveDraftSpan(taskId: string, stepId: string, option: number, from: string, to: string): Promise<boolean> {
+  const o = await requireOwner();
+  const { step } = await stepOf(o.id, taskId, stepId);
+  const d = draftsOf(step)[option] ?? null;
+  if (!d?.columns?.length) return false;
+  const f = from.trim() ? parseClock(from) : "", t = to.trim() ? parseClock(to) : "";
+  if (f == null || t == null) return false;
+  const span = { ...(f ? { from: f } : {}), ...(t ? { to: t } : {}) };
+  if (JSON.stringify(span) === JSON.stringify(d.span ?? {})) return true;
+  await repo.updateStep(stepId, { blocks: step.blocks!.map((b) => (b === d ? { ...d, span } : b)) });
   refresh(taskId);
   return true;
 }

@@ -7,9 +7,9 @@
 // nieobowiązkowe w obu naraz (wybór zostaje w przeglądarce).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { SheetColumn, SheetPart } from "@/lib/schema";
+import type { DraftSpan, SheetColumn, SheetPart } from "@/lib/schema";
 import { dayKey } from "@/lib/clock";
-import { fmtDuration, longDuration, parseDuration } from "@/lib/sheet-month";
+import { fmtDuration, longDuration, parseClock, parseDuration, spanCheck } from "@/lib/sheet-month";
 import { Icon } from "@/components/canvas/ui";
 
 type Row = { k: number; c: string[]; p: SheetPart[] | null };
@@ -21,14 +21,8 @@ const MULTI_SEP = ", ";
 export { fmtDuration, longDuration, parseDuration };
 export const splitMulti = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean);
 export const isOn = (v: string) => /^(tak|true|yes|1|on)$/i.test(v.trim());
-// godzina: 9, 930, 9:30, 9.30 → „09:30”
-export function parseTime(s: string): string | null {
-  const v = s.trim().replace(".", ":");
-  const m = /^(\d{1,2})(?::?(\d{2}))?$/.exec(v);
-  if (!m) return null;
-  const h = Number(m[1]), mi = Number(m[2] ?? 0);
-  return h < 24 && mi < 60 ? `${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}` : null;
-}
+// godzina: 9, 930, 9:30, 9.30 → „09:30” (wspólne z ramami dnia w sheet-month)
+export const parseTime = parseClock;
 const minsOf = (t: string) => { const m = /^(\d{2}):(\d{2})$/.exec(t); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 const isoAdd = (iso: string, n: number) => { const d = new Date(iso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const shortDate = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}` : iso);
@@ -130,10 +124,11 @@ function DatePick({ value, onPick }: { value: string; onPick: (iso: string) => v
 }
 
 // ---------- arkusz ----------
-export function SheetDraft({ columns, sheet, rows, parts, editable, formId, seenRows, onSave, cols0, actions }: {
+export function SheetDraft({ columns, sheet, rows, parts, editable, formId, seenRows, onSave, cols0, actions, span, onSaveSpan }: {
   columns: string[]; sheet: SheetColumn[]; rows: string[][]; parts?: (SheetPart[] | null)[] | null;
   editable: boolean; formId?: string; seenRows?: string | null; onSave?: (rowsJson: string) => Promise<boolean>; cols0?: string;
   actions?: ReactNode;   // paczka 44: przyciski zgody w stopce arkusza, po lewej; po prawej liczba wpisów i suma
+  span?: DraftSpan | null; onSaveSpan?: (from: string, to: string) => Promise<boolean>;   // paczka 69: start i koniec dnia nad tabelą
 }) {
   const cols: Col[] = useMemo(() => columns.map((label, i) => ({ i, label, spec: sheet[i] ?? { kind: "text" } })), [columns, sheet]);
   const n = columns.length;
@@ -217,6 +212,50 @@ export function SheetDraft({ columns, sheet, rows, parts, editable, formId, seen
 
   const total = durCol ? list.reduce((a, r) => a + (parseDuration(r.c[durCol.i]) ?? 0), 0) : null;
 
+  // paczka 69 (wariant C „Od-do dowolnie, suma równa dniu”): start i koniec dnia nad tabelą. Wpisy mogą na siebie zachodzić, ale ich suma
+  // równa się czasowi od startu do końca, a żadna godzina wpisu nie wychodzi poza te ramy; inaczej ostrzeżenie (zgody nie blokuje).
+  // Pole widać, gdy agent dał ramy albo arkusz ma kolumnę czasu trwania (dzień wpisów czasu); ramy nie lecą do aplikacji docelowej
+  const showSpan = !!span || (!!durCol && !!onSaveSpan);
+  const [sp, setSp] = useState<{ from: string; to: string }>({ from: span?.from ?? "", to: span?.to ?? "" });
+  const spanSig = JSON.stringify(span ?? null);
+  const [spSaving, setSpSaving] = useState(false);
+  const [spErr, setSpErr] = useState<string | null>(null);
+  useEffect(() => { if (!spSaving) setSp({ from: span?.from ?? "", to: span?.to ?? "" }); }, [spanSig]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const saveSpan = async (side: "from" | "to", raw: string) => {
+    const v = raw.trim() ? parseClock(raw) : "";
+    if (v == null) { setSpErr("Godzinę wpisz jak 9:00 albo 1730."); return; }
+    const next = { ...sp, [side]: v };
+    setSp(next); setSpErr(null);
+    if (!onSaveSpan || (next.from === (span?.from ?? "") && next.to === (span?.to ?? ""))) return;
+    setSpSaving(true);
+    try { if (!(await onSaveSpan(next.from, next.to))) setSpErr("Nie zapisałem godziny. Spróbuj jeszcze raz."); }
+    catch { setSpErr("Nie zapisałem godziny. Sprawdź połączenie i spróbuj jeszcze raz."); }
+    finally { setSpSaving(false); }
+  };
+  const chk = showSpan ? spanCheck(sheet, list.map((r) => r.c), sp) : null;
+  const outRows = new Set((chk?.outside ?? []).map((k) => list[k]?.k));
+  const spanWarn: string[] = [];
+  if (chk?.reversed) spanWarn.push("Koniec pracy musi być po starcie.");
+  if (chk?.diff) spanWarn.push(`Wpisy dają razem ${longDuration(chk.total!)}, a dzień od startu do końca trwa ${longDuration(chk.len!)}: ${chk.diff > 0 ? "o" : "brakuje"} ${longDuration(Math.abs(chk.diff))}${chk.diff > 0 ? " za dużo" : ""}.`);
+  if (chk?.outside.length) spanWarn.push(chk.outside.length === 1 ? "Jeden wpis ma godzinę poza startem i końcem pracy (zaznaczony w tabeli)." : `${chk.outside.length} wpisy mają godziny poza startem i końcem pracy (zaznaczone w tabeli).`);
+  const spanBar = showSpan ? (
+    <div className="sh-span">
+      {(["from", "to"] as const).map((side) => (
+        <label key={side} className="sh-spf">
+          <span className="sub">{side === "from" ? "Start pracy" : "Koniec pracy"}</span>
+          {onSaveSpan ? (
+            <span className="sh-cell inp num"><input key={sp[side] + spanSig} defaultValue={sp[side]} placeholder={side === "from" ? "9:00" : "17:00"} aria-label={side === "from" ? "Start pracy" : "Koniec pracy"}
+              onBlur={(e) => void saveSpan(side, e.currentTarget.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }} /></span>
+          ) : <b className="sh-total">{sp[side] || "brak"}</b>}
+        </label>
+      ))}
+      {chk?.len != null ? <span className="sub">Dzień trwa <b className="sh-total">{longDuration(chk.len)}</b></span> : null}
+      {chk && chk.len != null && chk.diff === 0 && !chk.outside.length ? <span className="sh-ok"><Icon k="check" size={12} sw={2.4} />Wpisy zgadzają się z dniem</span> : null}
+      {spSaving ? <span className="sub">Zapisuję…</span> : null}
+    </div>
+  ) : null;
+
   const cell = (row: number | "q", c: Col, ro: boolean): ReactNode => {
     const v = valOf(row, c.i), quick = row === "q";
     const isEd = edit && edit.row === row && edit.col === c.i;
@@ -282,7 +321,8 @@ export function SheetDraft({ columns, sheet, rows, parts, editable, formId, seen
           <tbody>
             {ro ? null : <tr className="sh-qrow">{vis.map((c) => <td key={c.i}>{cell("q", c, false)}</td>)}<td className="sh-last"><button type="button" className="btn primary sm" onClick={addQuick}><Icon k="plus" size={12} sw={2} />Dodaj</button></td></tr>}
             {body.length ? body.map((r) => (
-              <tr key={r.k} className={fresh === r.k ? "fresh" : undefined}>
+              <tr key={r.k} className={[fresh === r.k ? "fresh" : "", outRows.has(r.k) ? "sh-out" : ""].join(" ").trim() || undefined}
+                title={outRows.has(r.k) ? "Godzina tego wpisu wychodzi poza start i koniec pracy" : undefined}>
                 {vis.map((c) => <td key={c.i}>{cell(r.k, c, ro)}</td>)}
                 {ro ? (last ? <td /> : null) : <td className="sh-last"><button type="button" className="sh-x" title="Usuń wiersz ze szkicu" aria-label="Usuń wiersz ze szkicu" onClick={() => removeRow(r.k)}><Icon k="x" size={12} sw={2} /></button></td>}
               </tr>
@@ -301,6 +341,9 @@ export function SheetDraft({ columns, sheet, rows, parts, editable, formId, seen
 
   return (
     <div className="sheet">
+      {spanBar}
+      {spErr ? <p className="note warn">{spErr}</p> : null}
+      {spanWarn.length ? <p className="note warn sh-spw">{spanWarn.join(" ")}</p> : null}
       {table(list, !editable)}
       {qaErr ? <p className="note warn">{qaErr}</p> : null}
       <div className="sh-foot">
